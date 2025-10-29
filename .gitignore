@@ -1,0 +1,33 @@
+# Build artifacts and generated files
+snobol4-php/configure
+snobol4-php/Makefile
+snobol4-php/Makefile.in
+snobol4-php/aclocal.m4
+snobol4-php/autom4te.cache/
+snobol4-php/build/
+snobol4-php/modules/
+*.so
+*.o
+*.lo
+*.la
+
+# IDE files (PhpStorm)
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.bak
+
+# Vendor and dependencies (if using Composer)
+vendor/
+
+# Other common exclusions
+.env
+node_modules/
