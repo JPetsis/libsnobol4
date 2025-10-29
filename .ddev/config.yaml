@@ -19,6 +19,37 @@ command:
   web:
     command: tail -f /dev/null
 
+hooks:
+  post-start:
+    - exec: |
+        # Create the extension build directory
+        sudo mkdir -p /usr/src/php/ext/snobol
+        # Check if extension source exists
+        if [ -d "/var/www/html/snobol4-php" ]; then
+          # Copy the source files from the mounted directory to a temp location first
+          rm -rf /tmp/snobol_build
+          mkdir -p /tmp/snobol_build
+          cp -r /var/www/html/snobol4-php/* /tmp/snobol_build/
+          # Build the extension if not already built
+          if [ ! -f "/usr/lib/php/20240924/snobol.so" ]; then
+            cd /tmp/snobol_build
+            phpize
+            ./configure
+            make
+            sudo make install
+            # Enable the extension
+            echo "extension=snobol.so" | sudo tee /etc/php/8.4/mods-available/snobol.ini > /dev/null
+            sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini
+            sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini
+            echo "Snobol extension built and installed successfully!"
+          else
+            echo "Snobol extension already exists."
+          fi
+          rm -rf /tmp/snobol_build
+        else
+          echo "Warning: /var/www/html/snobol4-php directory not found"
+        fi
+
 # Key features of DDEV's config.yaml:
 
 # name: <projectname> # Name of the project, automatically provides

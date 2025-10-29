@@ -2,8 +2,3 @@
 ARG BASE_IMAGE
 FROM $BASE_IMAGE
 RUN sudo apt-get update && sudo apt-get install -y build-essential autoconf php-dev
-COPY snobol4-php /usr/src/php/ext/snobol
-RUN cd /usr/src/php/ext/snobol && phpize && ./configure && make && make install
-RUN echo 'extension=snobol.so' > /etc/php/8.4/mods-available/snobol.ini
-RUN ln -s /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini
-RUN ln -s /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini

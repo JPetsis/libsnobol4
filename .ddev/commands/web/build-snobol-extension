@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+# Command: build-snobol-extension
+# Description: Build and install the snobol PHP extension
+# Usage: ddev build-snobol-extension
+
+set -e
+set -u
+
+# Check if the extension needs to be built
+if [ ! -f /usr/src/php/ext/snobol/modules/snobol.so ]; then
+    echo "Building snobol PHP extension..."
+    
+    # Create the extension directory
+    sudo mkdir -p /usr/src/php/ext/snobol
+    
+    # Copy the source from the mounted directory
+    sudo cp -r /var/www/html/snobol4-php/* /usr/src/php/ext/snobol/
+    
+    # Build the extension
+    cd /usr/src/php/ext/snobol
+    phpize
+    ./configure
+    make
+    sudo make install
+    
+    # Enable the extension
+    echo "extension=snobol.so" | sudo tee /etc/php/8.4/mods-available/snobol.ini
+    sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini
+    sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini
+    
+    echo "Snobol extension built and installed successfully!"
+else
+    echo "Snobol extension already exists, skipping build."
+fi
+
+# Restart PHP-FPM to load the extension
+sudo kill -USR2 1 2>/dev/null || echo "Could not restart PHP-FPM, may need to restart container"
