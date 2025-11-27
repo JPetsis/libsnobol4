@@ -163,6 +163,11 @@ The `Snobol\Builder` class provides static methods to construct pattern nodes:
 * `public/` - Example scripts and entry point for the DDEV web container.
 * `.ddev/` - Configuration for the development environment.
 
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the
+process for submitting pull requests.
+
 ## License
 
 [Apache License, Version 2.0](LICENSE)
