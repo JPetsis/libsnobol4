@@ -1,0 +1,168 @@
+# SNOBOL4 for PHP
+
+A high-performance PHP extension that implements [SNOBOL4](https://en.wikipedia.org/wiki/SNOBOL)-style string pattern
+matching. This extension brings the powerful, expressive pattern matching capabilities of SNOBOL4 to modern PHP
+applications, offering a robust alternative to PCRE (Perl Compatible Regular Expressions) for complex string
+manipulation tasks.
+
+## Features
+
+* **Native C Extension:** Built for performance, integrating directly with PHP's core.
+* **Expressive Pattern Building:** Includes a fluent PHP `Builder` class to construct patterns programmatically (
+  AST-based).
+* **Rich Pattern Primitives:**
+    * **Literals:** Exact string matching.
+    * **Concatenation & Alternation:** Combine patterns sequentially or as alternatives.
+    * **Span & Break:** Match runs of characters or scan until a set of characters.
+    * **Any & NotAny:** Match single characters based on sets.
+    * **Arbno:** Match an arbitrary number of repetitions (similar to `*` in regex).
+    * **Len:** Match specific lengths.
+* **Captures & Assignments:**
+    * Capture substrings into registers during matching.
+    * Assign captured values to variables, returned as an associative array upon successful match.
+* **Dynamic Evaluation:** Trigger PHP callbacks during the matching process for complex, logic-driven matching.
+
+## Requirements
+
+* PHP 8.0+ (Developed with PHP 8.4)
+* Standard build tools (`build-essential`, `autoconf`, `php-dev`) for manual compilation.
+
+## Installation
+
+### Using DDEV (Recommended for Development)
+
+This project includes a fully configured [DDEV](https://ddev.com/) environment that automatically builds and installs
+the extension.
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd snobol4-ddev
+   ```
+
+2. **Start the environment:**
+   ```bash
+   ddev start
+   ```
+   *During startup, DDEV will automatically compile the `snobol` extension and configure PHP to use it.*
+
+3. **Verify installation:**
+   ```bash
+   ddev ssh
+   php -m | grep snobol
+   ```
+
+### Manual Compilation
+
+If you are not using DDEV, you can build the extension manually on any Linux/Unix system.
+
+1. **Navigate to the source directory:**
+   ```bash
+   cd snobol4-php
+   ```
+
+2. **Prepare the build environment:**
+   ```bash
+   phpize
+   ```
+
+3. **Configure and build:**
+   ```bash
+   ./configure
+   make
+   sudo make install
+   ```
+
+4. **Enable the extension:**
+   Add the following line to your `php.ini` file:
+   ```ini
+   extension=snobol.so
+   ```
+
+## Usage
+
+### Basic Matching
+
+The extension uses a `Builder` to create a pattern Abstract Syntax Tree (AST), which is then compiled into a `Pattern`
+object.
+
+```php
+<?php
+require_once 'php-src/builder.php';
+
+use Snobol\Builder;
+use Snobol\Pattern;
+
+// Construct a pattern to match "id:" followed by digits
+// Pattern: "id:" . SPAN("0123456789")
+$patternAst = Builder::concat([
+    Builder::lit("id:"),
+    Builder::span("0123456789")
+]);
+
+// Compile the pattern
+$pattern = Pattern::compileFromAst($patternAst);
+
+// Match against a string
+$input = "id:12345";
+if ($pattern->match($input)) {
+    echo "Match found!";
+}
+```
+
+### Capturing Values
+
+You can capture parts of the matched string into "registers" and assign them to variables. The `match()` method returns
+an array of these assignments on success.
+
+```php
+<?php
+use Snobol\Builder;
+use Snobol\Pattern;
+
+// Pattern: ( "id:" SPAN("0-9") @reg0 ) -> assign reg0 to var0
+$patternAst = Builder::concat([
+    Builder::lit("id:"),
+    Builder::cap(0,                  // Capture into register 0
+        Builder::span("0123456789")
+    ),
+    Builder::assign(0, 0)            // Assign register 0 to variable 0 (key "v0")
+]);
+
+$pat = Pattern::compileFromAst($patternAst);
+$result = $pat->match("Item id:555 details...");
+
+if ($result) {
+    // $result will contain: ['v0' => '555']
+    echo "Found ID: " . $result['v0'];
+}
+```
+
+### Pattern Builder API
+
+The `Snobol\Builder` class provides static methods to construct pattern nodes:
+
+| Method | Description |
+| :--- | :--- |
+| `lit(string $s)` | Matches the literal string `$s`. |
+| `concat(array $parts)` | Matches a sequence of patterns. |
+| `alt(array $left, array $right)` | Matches either `$left` OR `$right`. |
+| `span(string $set)` | Matches a run of characters found in `$set`. |
+| `brk(string $set)` | Matches until a character in `$set` is found. |
+| `any()` | Matches any single character. |
+| `notany(string $set)` | Matches any single character NOT in `$set`. |
+| `len(int $n)` | Matches exactly `$n` characters. |
+| `arbno(array $sub)` | Matches arbitrary repetitions of the `$sub` pattern. |
+| `cap(int $reg, array $sub)` | Captures the match of `$sub` into register `$reg`. |
+| `assign(int $var, int $reg)` | Assigns the content of register `$reg` to output variable `$var` (key `v$var`). |
+
+## Project Structure
+
+* `snobol4-php/` - C source code for the PHP extension.
+* `php-src/` - PHP helper classes (Builder).
+* `public/` - Example scripts and entry point for the DDEV web container.
+* `.ddev/` - Configuration for the development environment.
+
+## License
+
+[Apache License, Version 2.0](LICENSE)
