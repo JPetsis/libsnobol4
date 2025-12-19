@@ -26,6 +26,8 @@ manipulation tasks.
 
 * PHP 8.0+ (Developed with PHP 8.4)
 * Standard build tools (`build-essential`, `autoconf`, `php-dev`) for manual compilation.
+* [DDEV](https://ddev.com/) for the recommended containerised dev environment.
+* Composer (for running the PHP test suite via PHPUnit).
 
 ## Installation
 
@@ -44,15 +46,17 @@ the extension.
    ```bash
    ddev start
    ```
-   *During startup, DDEV will automatically compile the `snobol` extension and configure PHP to use it.*
+   During startup, DDEV will:
+    - Build the `snobol` extension in a temporary directory (`/tmp/snobol_build`).
+    - Install it into the PHP extension directory inside the container.
+    - Enable `snobol.so` for both CLI and FPM.
 
 3. **Verify installation:**
    ```bash
-   ddev ssh
-   php -m | grep snobol
+   ddev exec php -m | grep snobol
    ```
 
-### Manual Compilation
+### Manual Compilation (outside DDEV)
 
 If you are not using DDEV, you can build the extension manually on any Linux/Unix system.
 
@@ -88,7 +92,7 @@ object.
 
 ```php
 <?php
-require_once 'php-src/builder.php';
+require_once 'php-src/Builder.php';
 
 use Snobol\Builder;
 use Snobol\Pattern;
@@ -156,12 +160,101 @@ The `Snobol\Builder` class provides static methods to construct pattern nodes:
 | `cap(int $reg, array $sub)` | Captures the match of `$sub` into register `$reg`. |
 | `assign(int $var, int $reg)` | Assigns the content of register `$reg` to output variable `$var` (key `v$var`). |
 
+## Development
+
+### Quick Start with Makefile
+
+The project includes a `Makefile` to streamline development workflows:
+
+```bash
+# Show available targets
+make help
+
+# Build the extension (native or inside DDEV)
+make build
+
+# Run tests (C and PHP)
+make test
+
+# Clean build artifacts
+make clean
+
+# Install and enable the extension
+make install
+```
+
+The Makefile automatically detects whether you're running inside DDEV or in a native environment. When running inside
+DDEV it builds the extension from a temporary directory (`/tmp/snobol_build`) to avoid read-only mounts.
+
+### Developer Tools
+
+The `dev/` directory contains helper scripts:
+
+- **`dev/build_in_ddev.sh`** - Build the extension inside DDEV.
+- **`dev/test_in_ddev.sh`** - Run tests inside DDEV.
+- **`dev/trace_vm.sh`** - Enable/disable VM tracing for debug builds (via `SNOBOL_TRACE=1`).
+- **`dev/run_smoke.sh`** - Run smoke tests against the extension (CLI + web endpoint checks).
+- **`dev/in_ddev.sh`** - Execute arbitrary commands in DDEV or locally.
+
+Example usage:
+
+```bash
+# Enable VM tracing
+./dev/trace_vm.sh on
+
+# Rebuild with tracing
+dev/build_in_ddev.sh
+
+# Run smoke tests
+./dev/run_smoke.sh
+```
+
+### Testing
+
+The project includes two test suites:
+
+**C Tests** (`tests/c/`)
+
+- Minimal test runner for the VM (`snobol_vm.c`).
+- No external dependencies required.
+- Run with:
+
+```bash
+# From the project root
+make test
+
+# Or directly
+cd tests/c
+make test
+```
+
+**PHP Tests** (`tests/php/`)
+
+- PHPUnit-based tests for the `Builder` and `Pattern` API.
+- Requires Composer to install dev dependencies:
+
+```bash
+ddev composer install
+```
+
+- Run with:
+
+```bash
+# From the host
+make test
+
+# Or inside DDEV
+ddev exec vendor/bin/phpunit
+```
+
 ## Project Structure
 
 * `snobol4-php/` - C source code for the PHP extension.
-* `php-src/` - PHP helper classes (Builder).
+* `php-src/` - PHP helper classes (e.g. `Snobol\Builder` in `Builder.php`).
 * `public/` - Example scripts and entry point for the DDEV web container.
-* `.ddev/` - Configuration for the development environment.
+* `tests/` - Test suites (C and PHP).
+* `dev/` - Developer tools and helper scripts.
+* `.ddev/` - Configuration for the development environment (including extension build hook).
 
 ## Contributing
 
