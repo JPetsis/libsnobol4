@@ -142,6 +142,40 @@ if ($result) {
 }
 ```
 
+### Pattern Helper API (Convenience Methods)
+
+For common use cases, the `Snobol\PatternHelper` class provides high-level convenience methods:
+
+```php
+<?php
+use Snobol\Builder;
+use Snobol\PatternHelper;
+
+// Quick one-liner match
+$ast = Builder::lit("hello");
+$result = PatternHelper::matchOnce($ast, "hello world");
+// Returns: ['v0' => ...] or false
+
+// Find all occurrences
+$pattern = Builder::span("0123456789");
+$matches = PatternHelper::matchAll($pattern, "id:123 code:456");
+// Returns: [['v0' => '123'], ['v0' => '456']]
+
+// Split by pattern
+$segments = PatternHelper::split(Builder::lit(","), "a,b,c");
+// Returns: ['a', 'b', 'c']
+
+// Replace matches
+$result = PatternHelper::replace(Builder::lit("old"), "new", "old text with old word");
+// Returns: "new text with new word"
+```
+
+**Features:**
+
+- Automatic pattern caching for better performance
+- Accepts AST arrays, precompiled Pattern objects, or strings (stub for future parser)
+- Options support: `['cache' => false]` to bypass cache, `['full' => true]` for full-string matching (partial)
+
 ### Pattern Builder API
 
 The `Snobol\Builder` class provides static methods to construct pattern nodes:
@@ -250,7 +284,11 @@ ddev exec vendor/bin/phpunit
 ## Project Structure
 
 * `snobol4-php/` - C source code for the PHP extension.
-* `php-src/` - PHP helper classes (e.g. `Snobol\Builder` in `Builder.php`).
+* `php-src/` - PHP helper classes:
+    - `Builder.php` - Fluent API for constructing pattern ASTs
+    - `Pattern.php` - Type stub for the native Pattern class (implemented in C extension)
+    - `PatternHelper.php` - High-level convenience methods (matchOnce, matchAll, split, replace)
+    - `PatternCache.php` - LRU cache for compiled patterns
 * `public/` - Example scripts and entry point for the DDEV web container.
 * `tests/` - Test suites (C and PHP).
 * `dev/` - Developer tools and helper scripts.

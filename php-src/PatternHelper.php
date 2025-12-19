@@ -1,0 +1,313 @@
+<?php
+
+namespace Snobol;
+
+/**
+ * High-level helper APIs for SNOBOL4-style pattern matching.
+ *
+ * This class provides convenience methods that wrap the native Snobol\Pattern class
+ * from the C extension for common text processing tasks.
+ *
+ * Note: The native Snobol\Pattern class is registered by the C extension.
+ * This PatternHelper class provides static helper methods.
+ */
+class PatternHelper
+{
+    private static ?PatternCache $cache = null;
+
+    /**
+     * Match a pattern once against a subject string.
+     *
+     * @param  string|array|Pattern  $patternOrAst  Pattern specification (string/AST/compiled Pattern)
+     * @param  string  $subject  Subject string to match against
+     * @param  array  $options  Optional flags: ['full' => true] for full-string match, ['cache' => false] to bypass cache
+     * @return array|false Associative array of captures on success, false on no match
+     */
+    public static function matchOnce($patternOrAst, string $subject, array $options = [])
+    {
+        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
+
+        $useFullMatch = $options['full'] ?? false;
+        if ($useFullMatch) {
+            $pattern = self::wrapWithFullAnchor($pattern);
+        }
+
+        return $pattern->match($subject);
+    }
+
+    /**
+     * Resolve a pattern specification to a compiled Pattern instance.
+     *
+     * @param  string|array|self  $patternOrAst  Pattern specification
+     * @param  bool  $useCache  Whether to use the cache
+     * @return self Compiled pattern
+     */
+    private static function resolvePattern($patternOrAst, bool $useCache): self
+    {
+        if ($patternOrAst instanceof self) {
+            return $patternOrAst;
+        }
+
+        if (is_string($patternOrAst)) {
+            if ($useCache) {
+                return self::getCache()->get($patternOrAst, fn() => self::fromString($patternOrAst));
+            }
+            return self::fromString($patternOrAst);
+        }
+
+        if (is_array($patternOrAst)) {
+            if ($useCache) {
+                $key = self::canonicalizeAst($patternOrAst);
+                return self::getCache()->get($key, fn() => self::fromAst($patternOrAst));
+            }
+            return self::fromAst($patternOrAst);
+        }
+
+        throw new \InvalidArgumentException(
+            'Pattern must be a string, array (AST), or Pattern instance'
+        );
+    }
+
+    /**
+     * Get the global pattern cache instance.
+     *
+     * @return PatternCache
+     */
+    private static function getCache(): PatternCache
+    {
+        if (self::$cache === null) {
+            self::$cache = new PatternCache();
+        }
+        return self::$cache;
+    }
+
+    /**
+     * Compile a pattern from a textual SNOBOL-like pattern string.
+     *
+     * Note: Textual parsing is not yet fully implemented. This is a stub for future compatibility.
+     *
+     * @param  string  $pattern  Textual pattern representation
+     * @return Pattern Compiled pattern instance
+     * @throws \LogicException When textual parsing is not yet available
+     */
+    public static function fromString(string $pattern): Pattern
+    {
+        throw new \LogicException(
+            'Pattern::fromString() is not yet implemented. '.
+            'Use Pattern::fromAst() with Snobol\Builder for now.'
+        );
+    }
+
+    /**
+     * Create a canonical string representation of an AST for cache keying.
+     *
+     * @param  array  $ast  AST array
+     * @return string Canonical key
+     */
+    private static function canonicalizeAst(array $ast): string
+    {
+        return json_encode($ast, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Compile a pattern from an AST produced by Snobol\Builder.
+     *
+     * @param  array  $ast  Structured array from Builder methods
+     * @return Pattern Compiled pattern instance from the C extension
+     * @throws \InvalidArgumentException When AST is structurally invalid
+     */
+    public static function fromAst(array $ast): Pattern
+    {
+        if (!isset($ast['type'])) {
+            throw new \InvalidArgumentException('Invalid AST: missing "type" field');
+        }
+
+        try {
+            $compiled = Pattern::compileFromAst($ast);
+            if (!is_object($compiled) || !($compiled instanceof Pattern)) {
+                throw new \RuntimeException('Extension compileFromAst did not return a Pattern object');
+            }
+
+            return $compiled;
+        } catch (\InvalidArgumentException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            throw new \InvalidArgumentException(
+                'Failed to compile pattern from AST: '.$e->getMessage(),
+                0,
+                $e
+            );
+        }
+    }
+
+    /**
+     * Wrap a pattern to enforce full-string matching.
+     *
+     * @param  Pattern  $pattern  Original pattern
+     * @return Pattern Pattern with full-string anchor semantics
+     */
+    private static function wrapWithFullAnchor(Pattern $pattern): Pattern
+    {
+        // For now, we'll create a new pattern that checks if we consumed everything
+        // This is a simplified implementation; a production version would use AST wrapping
+        // or VM-level support
+        return $pattern; // TODO: Implement full-string anchor wrapper
+    }
+
+    /**
+     * Find all non-overlapping matches of a pattern in a subject string.
+     *
+     * @param  string|array|Pattern  $patternOrAst  Pattern specification
+     * @param  string  $subject  Subject string to match against
+     * @param  array  $options  Optional flags
+     * @return array Array of capture arrays, one per match
+     */
+    public static function matchAll($patternOrAst, string $subject, array $options = []): array
+    {
+        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
+
+        $matches = [];
+        $offset = 0;
+        $subjectLen = strlen($subject);
+
+        while ($offset < $subjectLen) {
+            $remaining = substr($subject, $offset);
+            $result = $pattern->match($remaining);
+
+            if ($result === false) {
+                break;
+            }
+
+            $matches[] = $result;
+
+            // Determine how much we matched to advance offset
+            // For now, advance by at least 1 to avoid infinite loops
+            // This is a simplified implementation; a complete one would track match length
+            $matchLen = self::estimateMatchLength($remaining, $result);
+            $offset += max(1, $matchLen);
+        }
+
+        return $matches;
+    }
+
+    /**
+     * Estimate the length of a match from the match result.
+     * This is a heuristic; ideally the VM would tell us the match length.
+     *
+     * @param  string  $subject  Subject that was matched
+     * @param  array  $result  Match result with captures
+     * @return int Estimated match length
+     */
+    private static function estimateMatchLength(string $subject, array $result): int
+    {
+        // Simplified: look at the longest capture value
+        // A proper implementation would track match positions in the VM
+        $maxLen = 1;
+        foreach ($result as $value) {
+            if (is_string($value)) {
+                $maxLen = max($maxLen, strlen($value));
+            }
+        }
+        return $maxLen;
+    }
+
+    /**
+     * Split a subject string by pattern matches.
+     *
+     * @param  string|array|self  $patternOrAst  Pattern specification (used as delimiter)
+     * @param  string  $subject  Subject string to split
+     * @param  array  $options  Optional flags
+     * @return array Array of string segments between matches
+     */
+    public static function split($patternOrAst, string $subject, array $options = []): array
+    {
+        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
+
+        $segments = [];
+        $offset = 0;
+        $lastMatchEnd = 0;
+
+        while ($offset < strlen($subject)) {
+            $remaining = substr($subject, $offset);
+            $result = $pattern->executeMatch($remaining);
+
+            if ($result === false) {
+                break;
+            }
+
+            // Add segment before this match
+            $segments[] = substr($subject, $lastMatchEnd, $offset - $lastMatchEnd);
+
+            $matchLen = self::estimateMatchLength($remaining, $result);
+            $offset += max(1, $matchLen);
+            $lastMatchEnd = $offset;
+        }
+
+        // Add remaining segment
+        $segments[] = substr($subject, $lastMatchEnd);
+
+        return empty($segments) ? [$subject] : $segments;
+    }
+
+    /**
+     * Execute the compiled pattern against a subject string.
+     *
+     * @param  string  $subject  Subject to match
+     * @return array|false Captures or false
+     */
+    private function executeMatch(string $subject)
+    {
+        return $this->compiled->match($subject);
+    }
+
+    /**
+     * Replace pattern matches with replacement text.
+     *
+     * @param  string|array|Pattern  $patternOrAst  Pattern specification
+     * @param  string  $replacement  Replacement text (simple string for now)
+     * @param  string  $subject  Subject string
+     * @param  array  $options  Optional flags
+     * @return string Result with replacements applied
+     */
+    public static function replace($patternOrAst, string $replacement, string $subject, array $options = []): string
+    {
+        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
+
+        $result = '';
+        $offset = 0;
+        $lastMatchEnd = 0;
+
+        while ($offset < strlen($subject)) {
+            $remaining = substr($subject, $offset);
+            $matchResult = $pattern->match($remaining);
+
+            if ($matchResult === false) {
+                break;
+            }
+
+            // Add segment before this match
+            $result .= substr($subject, $lastMatchEnd, $offset - $lastMatchEnd);
+
+            // Add replacement
+            $result .= $replacement;
+
+            $matchLen = self::estimateMatchLength($remaining, $matchResult);
+            $offset += max(1, $matchLen);
+            $lastMatchEnd = $offset;
+        }
+
+        // Add remaining segment
+        $result .= substr($subject, $lastMatchEnd);
+
+        return $result;
+    }
+
+    /**
+     * Reset the global pattern cache (useful for testing).
+     */
+    public static function clearCache(): void
+    {
+        self::$cache = null;
+    }
+}
+

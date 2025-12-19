@@ -1,6 +1,6 @@
 <?php
 // Test file for SNOBOL4 PHP extension
-require_once __DIR__ . '/../php-src/builder.php';
+require_once __DIR__.'/../vendor/autoload.php';
 
 use Snobol\Builder;
 use Snobol\Pattern;
