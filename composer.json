@@ -1,0 +1,19 @@
+{
+  "name": "snobol4/snobol4-php",
+  "description": "SNOBOL4 pattern matching for PHP",
+  "type": "project",
+  "require-dev": {
+    "phpunit/phpunit": "^10.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "Snobol\\": "php-src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Snobol\\Tests\\": "tests/php/"
+    }
+  }
+}
+

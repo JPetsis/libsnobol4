@@ -1,0 +1,122 @@
+.PHONY: help build test clean install
+
+# Detect if we're in DDEV
+DDEV := $(shell command -v ddev 2> /dev/null)
+IN_DDEV := $(shell test -d /var/www/html && echo 1 || echo 0)
+
+help:
+	@echo "SNOBOL4 Development Makefile"
+	@echo ""
+	@echo "Available targets:"
+	@echo "  help     - Show this help message"
+	@echo "  build    - Build the C core and PHP extension"
+	@echo "  test     - Run C and PHP unit tests"
+	@echo "  clean    - Remove build artifacts and test binaries"
+	@echo "  install  - Install and enable the snobol extension"
+	@echo ""
+	@echo "Environment detection:"
+ifeq ($(IN_DDEV),1)
+	@echo "  Running inside DDEV container"
+else ifdef DDEV
+	@echo "  DDEV available (use 'ddev exec make <target>')"
+else
+	@echo "  Native environment (no DDEV detected)"
+endif
+
+build:
+ifeq ($(IN_DDEV),1)
+	@echo "Building inside DDEV container..."
+	@rm -rf /tmp/snobol_build
+	@mkdir -p /tmp/snobol_build
+	@cp -r snobol4-php/* /tmp/snobol_build/
+	@cd /tmp/snobol_build && \
+		phpize && \
+		./configure && \
+		$(MAKE)
+	@echo "Extension built successfully in /tmp/snobol_build/"
+	@echo "Run 'make install' to install the extension"
+	@echo "Build complete!"
+else ifdef DDEV
+	@echo "Running build inside DDEV..."
+	@ddev exec make build
+else
+	@echo "Building in native environment..."
+	@cd snobol4-php && \
+		phpize && \
+		./configure && \
+		$(MAKE)
+	@echo "Build complete!"
+endif
+
+test:
+	@echo "Running tests..."
+ifeq ($(IN_DDEV),1)
+	@echo "Running C tests..."
+	@if [ -d tests/c ]; then \
+		cd tests/c && $(MAKE) test || exit 1; \
+	else \
+		echo "No C tests found (tests/c/ does not exist)"; \
+	fi
+	@echo "Running PHP tests..."
+	@if [ -f vendor/bin/phpunit ]; then \
+		vendor/bin/phpunit tests/php || exit 1; \
+	else \
+		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
+	fi
+else ifdef DDEV
+	@echo "Running tests inside DDEV..."
+	@ddev exec make test
+else
+	@echo "Running C tests..."
+	@if [ -d tests/c ]; then \
+		cd tests/c && $(MAKE) test || exit 1; \
+	else \
+		echo "No C tests found (tests/c/ does not exist)"; \
+	fi
+	@echo "Running PHP tests..."
+	@if [ -f vendor/bin/phpunit ]; then \
+		php vendor/bin/phpunit tests/php || exit 1; \
+	else \
+		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
+	fi
+endif
+	@echo "All tests passed!"
+
+clean:
+	@echo "Cleaning build artifacts..."
+ifeq ($(IN_DDEV),1)
+	@rm -rf /tmp/snobol_build
+endif
+	@cd snobol4-php && \
+		if [ -f Makefile ]; then $(MAKE) clean 2>/dev/null || true; fi && \
+		phpize --clean 2>/dev/null || true
+	@rm -rf snobol4-php/.libs snobol4-php/modules snobol4-php/*.lo snobol4-php/*.o
+	@if [ -d tests/c ]; then \
+		cd tests/c && $(MAKE) clean 2>/dev/null || true; \
+	fi
+	@echo "Clean complete!"
+
+install:
+ifeq ($(IN_DDEV),1)
+	@echo "Installing extension inside DDEV..."
+	@if [ -f /tmp/snobol_build/modules/snobol.so ]; then \
+		sudo cp /tmp/snobol_build/modules/snobol.so /usr/lib/php/20240924/; \
+		echo "Enabling extension for CLI and FPM..."; \
+		echo "extension=snobol.so" | sudo tee /etc/php/8.4/mods-available/snobol.ini > /dev/null; \
+		sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini; \
+		sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini; \
+		sudo service php8.4-fpm reload 2>/dev/null || true; \
+		echo "Extension installed and enabled!"; \
+	else \
+		echo "Error: Extension not built. Run 'make build' first."; \
+		exit 1; \
+	fi
+else ifdef DDEV
+	@echo "Installing extension via DDEV..."
+	@ddev exec sudo make install
+else
+	@echo "Installing extension in native environment..."
+	@cd snobol4-php && sudo $(MAKE) install
+	@echo "Extension installed! Add 'extension=snobol.so' to your php.ini to enable."
+endif
+
