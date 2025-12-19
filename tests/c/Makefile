@@ -1,0 +1,40 @@
+# C Test Runner for SNOBOL4
+
+CC = gcc
+# Add defines to map PHP memory functions to standard C functions
+CFLAGS = -std=c2x -Wall -Wextra -I../../snobol4-php -g -O0 -Derealloc=realloc -Defree=free -Demalloc=malloc -Destrndup=strndup
+
+# Test sources
+TEST_SOURCES = test_runner.c test_vm.c
+TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
+TEST_BINARY = test_runner
+
+# SNOBOL4 core sources (relative to snobol4-php/)
+CORE_DIR = ../../snobol4-php
+CORE_SOURCES = snobol_vm.c
+# Build object files in the current directory to avoid read-only errors
+CORE_OBJECTS = $(CORE_SOURCES:.c=.o)
+
+.PHONY: all test clean
+
+all: $(TEST_BINARY)
+
+$(TEST_BINARY): $(TEST_OBJECTS) $(CORE_OBJECTS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+# Rule for test sources
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Rule for core sources
+%.o: $(CORE_DIR)/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+test: $(TEST_BINARY)
+	@echo "Running C tests..."
+	@./$(TEST_BINARY)
+
+clean:
+	rm -f $(TEST_OBJECTS) $(TEST_BINARY)
+	rm -f $(CORE_OBJECTS)
+
