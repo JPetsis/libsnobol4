@@ -205,7 +205,15 @@ static int emit_break(zval *set_str, CodeBuf *c) {
     cb_emit_u8(c, OP_BREAK); cb_emit_u16(c, (uint16_t)setid);
     return 0;
 }
-static int emit_any(CodeBuf *c) { cb_emit_u8(c, OP_ANY); cb_emit_u16(c, 0); return 0; }
+static int emit_any(zval *set_str, CodeBuf *c) {
+    uint16_t setid = 0;
+    if (set_str && Z_TYPE_P(set_str) == IS_STRING) {
+        zend_string *zs = Z_STR_P(set_str);
+        setid = (uint16_t)add_or_get_charclass(ZSTR_VAL(zs), ZSTR_LEN(zs));
+    }
+    cb_emit_u8(c, OP_ANY); cb_emit_u16(c, setid);
+    return 0;
+}
 static int emit_notany(zval *set_str, CodeBuf *c) {
     if (Z_TYPE_P(set_str) != IS_STRING) return -1;
     zend_string *zs = Z_STR_P(set_str);
@@ -275,7 +283,8 @@ static int emit_node(zval *node, CodeBuf *c) {
         return emit_break(set, c);
     }
     if (zend_string_equals_literal(type, "any")) {
-        return emit_any(c);
+        zval *set = zend_hash_str_find(Z_ARRVAL_P(node), "set", sizeof("set")-1);
+        return emit_any(set, c);
     }
     if (zend_string_equals_literal(type, "notany")) {
         zval *set = zend_hash_str_find(Z_ARRVAL_P(node), "set", sizeof("set")-1);

@@ -8,17 +8,18 @@ manipulation tasks.
 ## Features
 
 * **Native C Extension:** Built for performance, integrating directly with PHP's core.
-* **Expressive Pattern Building:** Includes a fluent PHP `Builder` class to construct patterns programmatically (
-  AST-based).
+* **Expressive Pattern Building:**
+    * **Textual Parser:** Write patterns as strings using a familiar SNOBOL-like syntax.
+    * **Builder API:** Construct patterns programmatically using a fluent AST-based builder.
 * **Rich Pattern Primitives:**
-    * **Literals:** Exact string matching.
-    * **Concatenation & Alternation:** Combine patterns sequentially or as alternatives.
-    * **Span & Break:** Match runs of characters or scan until a set of characters.
-    * **Any & NotAny:** Match single characters based on sets.
-    * **Arbno:** Match an arbitrary number of repetitions (similar to `*` in regex).
-    * **Len:** Match specific lengths.
+    * **Literals:** Exact string matching (`'text'`).
+    * **Concatenation & Alternation:** Combine patterns sequentially (`P1 P2`) or as alternatives (`P1 | P2`).
+    * **Span & Break:** Match runs of characters (`SPAN('0-9')`) or scan until a set of characters.
+    * **Any & NotAny:** Match single characters based on sets (`[abc]`, `[^abc]`).
+    * **Arbno:** Match an arbitrary number of repetitions (`P*`).
+    * **Len:** Match specific lengths (`LEN(5)`).
 * **Captures & Assignments:**
-    * Capture substrings into registers during matching.
+    * Capture substrings into registers during matching (`@r1(...)`).
     * Assign captured values to variables, returned as an associative array upon successful match.
 * **Dynamic Evaluation:** Trigger PHP callbacks during the matching process for complex, logic-driven matching.
 
@@ -85,40 +86,55 @@ If you are not using DDEV, you can build the extension manually on any Linux/Uni
 
 ## Usage
 
-### Basic Matching
+### Textual Pattern Parsing
 
-The extension uses a `Builder` to create a pattern Abstract Syntax Tree (AST), which is then compiled into a `Pattern`
-object.
+You can now define patterns using a concise textual syntax, similar to Regex but with SNOBOL semantics.
 
 ```php
 <?php
-require_once 'php-src/Builder.php';
+use Snobol\PatternHelper;
 
-use Snobol\Builder;
-use Snobol\Pattern;
+// Match "id:" followed by digits
+$pattern = PatternHelper::fromString("'id:' SPAN('0-9')");
 
-// Construct a pattern to match "id:" followed by digits
-// Pattern: "id:" . SPAN("0123456789")
-$patternAst = Builder::concat([
-    Builder::lit("id:"),
-    Builder::span("0123456789")
-]);
-
-// Compile the pattern
-$pattern = Pattern::compileFromAst($patternAst);
-
-// Match against a string
-$input = "id:12345";
-if ($pattern->match($input)) {
+if (PatternHelper::matchOnce($pattern, "id:12345")) {
     echo "Match found!";
 }
 ```
+
+**Supported Grammar:**
+
+- **Literals:** `'text'` or `"text"`
+- **Concatenation:** Implicit (space), e.g., `'A' 'B'` matches "AB".
+- **Alternation:** `|`, e.g., `'A' | 'B'`.
+- **Repetition:** `*` (Arbno), `+` (1 or more), `?` (0 or 1). E.g., `'A'*`.
+- **Character Classes:** `[a-z]`, `[^0-9]` (Negation).
+- **Built-ins:** `SPAN('...')`, `BREAK('...')`, `LEN(n)`, `ANY('...')`, `NOTANY('...')`.
+- **Captures:** `@rN(...)` captures content into register `N`.
+- **Grouping:** `(...)` for precedence.
 
 ### Capturing Values
 
 You can capture parts of the matched string into "registers" and assign them to variables. The `match()` method returns
 an array of these assignments on success.
 
+**Using Textual Syntax:**
+
+```php
+<?php
+use Snobol\PatternHelper;
+
+// Capture digits into register 1
+$pat = PatternHelper::fromString("'id:' @r1(SPAN('0-9'))");
+$result = PatternHelper::matchOnce($pat, "id:555");
+
+if ($result) {
+    // Note: VM currently maps register N to variable 'vN'
+    echo "Found ID: " . $result['v1']; // Outputs 555
+}
+```
+
+**Using Builder API:**
 ```php
 <?php
 use Snobol\Builder;
@@ -151,48 +167,51 @@ For common use cases, the `Snobol\PatternHelper` class provides high-level conve
 use Snobol\Builder;
 use Snobol\PatternHelper;
 
-// Quick one-liner match
-$ast = Builder::lit("hello");
-$result = PatternHelper::matchOnce($ast, "hello world");
-// Returns: ['v0' => ...] or false
+// Quick one-liner match using string pattern
+$result = PatternHelper::matchOnce("'hello'", "hello world");
 
 // Find all occurrences
-$pattern = Builder::span("0123456789");
-$matches = PatternHelper::matchAll($pattern, "id:123 code:456");
-// Returns: [['v0' => '123'], ['v0' => '456']]
+$matches = PatternHelper::matchAll("SPAN('0-9')", "id:123 code:456");
+// Returns: [['v0' => '123'], ['v0' => '456']] (if captured) or just matches
 
 // Split by pattern
-$segments = PatternHelper::split(Builder::lit(","), "a,b,c");
+$segments = PatternHelper::split("','", "a,b,c");
 // Returns: ['a', 'b', 'c']
 
 // Replace matches
-$result = PatternHelper::replace(Builder::lit("old"), "new", "old text with old word");
+$result = PatternHelper::replace("'old'", "new", "old text with old word");
 // Returns: "new text with new word"
+
+// Full string match check
+$isFullMatch = PatternHelper::matchOnce("'exact'", "exact", ['full' => true]);
 ```
 
 **Features:**
 
-- Automatic pattern caching for better performance
-- Accepts AST arrays, precompiled Pattern objects, or strings (stub for future parser)
-- Options support: `['cache' => false]` to bypass cache, `['full' => true]` for full-string matching (partial)
+- **Textual Parsing:** Automatically parses string patterns using `Snobol\Parser`.
+- **Automatic Caching:** Compiles and caches patterns for better performance.
+- **Flexible Input:** Accepts string patterns, AST arrays, or precompiled `Pattern` objects.
+- **Options:**
+    - `['cache' => false]` to bypass cache.
+    - `['full' => true]` to enforce full-string matching (fails if trailing characters remain).
 
 ### Pattern Builder API
 
 The `Snobol\Builder` class provides static methods to construct pattern nodes:
 
-| Method | Description |
-| :--- | :--- |
-| `lit(string $s)` | Matches the literal string `$s`. |
-| `concat(array $parts)` | Matches a sequence of patterns. |
-| `alt(array $left, array $right)` | Matches either `$left` OR `$right`. |
-| `span(string $set)` | Matches a run of characters found in `$set`. |
-| `brk(string $set)` | Matches until a character in `$set` is found. |
-| `any()` | Matches any single character. |
-| `notany(string $set)` | Matches any single character NOT in `$set`. |
-| `len(int $n)` | Matches exactly `$n` characters. |
-| `arbno(array $sub)` | Matches arbitrary repetitions of the `$sub` pattern. |
-| `cap(int $reg, array $sub)` | Captures the match of `$sub` into register `$reg`. |
-| `assign(int $var, int $reg)` | Assigns the content of register `$reg` to output variable `$var` (key `v$var`). |
+| Method                           | Description                                                                     |
+|:---------------------------------|:--------------------------------------------------------------------------------|
+| `lit(string $s)`                 | Matches the literal string `$s`.                                                |
+| `concat(array $parts)`           | Matches a sequence of patterns.                                                 |
+| `alt(array $left, array $right)` | Matches either `$left` OR `$right`.                                             |
+| `span(string $set)`              | Matches a run of characters found in `$set`.                                    |
+| `brk(string $set)`               | Matches until a character in `$set` is found.                                   |
+| `any(string $set = null)`        | Matches any single character (optionally from `$set`).                          |
+| `notany(string $set)`            | Matches any single character NOT in `$set`.                                     |
+| `len(int $n)`                    | Matches exactly `$n` characters.                                                |
+| `arbno(array $sub)`              | Matches arbitrary repetitions of the `$sub` pattern.                            |
+| `cap(int $reg, array $sub)`      | Captures the match of `$sub` into register `$reg`.                              |
+| `assign(int $var, int $reg)`     | Assigns the content of register `$reg` to output variable `$var` (key `v$var`). |
 
 ## Development
 
@@ -243,6 +262,30 @@ dev/build_in_ddev.sh
 ./dev/run_smoke.sh
 ```
 
+### Debugging with AddressSanitizer (ASan)
+
+For identifying memory leaks and memory corruption, you can build the extension with ASan:
+
+```bash
+# Build with ASan
+make build-asan
+
+# Install the extension
+make install
+```
+
+**Note:** When the extension is built with ASan, it is NOT enabled globally by default to avoid breaking PHP tools like
+Composer (which would require `LD_PRELOAD` to run).
+
+To use the ASan-built extension:
+
+- **Testing:** `make test` or `make test-asan` will automatically handle the necessary environment variables (
+  `LD_PRELOAD`).
+- **Global Toggle:** Use `make enable` to enable it globally (warning: this will require `LD_PRELOAD` for ALL PHP
+  commands) and `make disable` to disable it.
+- **Composer:** Use `make composer <args>` (e.g., `make composer install`) if you need to run Composer while the ASan
+  extension is enabled.
+
 ### Testing
 
 The project includes two test suites:
@@ -285,10 +328,12 @@ ddev exec vendor/bin/phpunit
 
 * `snobol4-php/` - C source code for the PHP extension.
 * `php-src/` - PHP helper classes:
-    - `Builder.php` - Fluent API for constructing pattern ASTs
-    - `Pattern.php` - Type stub for the native Pattern class (implemented in C extension)
-    - `PatternHelper.php` - High-level convenience methods (matchOnce, matchAll, split, replace)
-    - `PatternCache.php` - LRU cache for compiled patterns
+    - `Parser.php` - Recursive-descent parser for SNOBOL-like pattern strings.
+    - `Lexer.php` - Tokenizer for the parser.
+    - `Builder.php` - Fluent API for constructing pattern ASTs.
+    - `Pattern.php` - Type stub for the native Pattern class (implemented in C extension).
+    - `PatternHelper.php` - High-level convenience methods (matchOnce, matchAll, split, replace).
+    - `PatternCache.php` - LRU cache for compiled patterns.
 * `public/` - Example scripts and entry point for the DDEV web container.
 * `tests/` - Test suites (C and PHP).
 * `dev/` - Developer tools and helper scripts.

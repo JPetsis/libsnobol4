@@ -18,7 +18,12 @@ class Builder {
     public static function brk(string $set) {
         return ['type' => 'break', 'set' => $set];
     }
-    public static function any() {
+
+    public static function any(string $set = null)
+    {
+        if ($set !== null) {
+            return ['type' => 'any', 'set' => $set];
+        }
         return ['type' => 'any'];
     }
     public static function notany(string $set) {

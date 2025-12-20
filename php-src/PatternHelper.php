@@ -27,12 +27,16 @@ class PatternHelper
     {
         $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
 
-        $useFullMatch = $options['full'] ?? false;
-        if ($useFullMatch) {
-            $pattern = self::wrapWithFullAnchor($pattern);
+        $result = $pattern->match($subject);
+
+        if ($result !== false && ($options['full'] ?? false)) {
+            $matchLen = $result['_match_len'] ?? 0;
+            if ($matchLen !== strlen($subject)) {
+                return false;
+            }
         }
 
-        return $pattern->match($subject);
+        return $result;
     }
 
     /**
@@ -92,10 +96,8 @@ class PatternHelper
      */
     public static function fromString(string $pattern): Pattern
     {
-        throw new \LogicException(
-            'Pattern::fromString() is not yet implemented. '.
-            'Use Pattern::fromAst() with Snobol\Builder for now.'
-        );
+        $parser = new Parser($pattern);
+        return self::fromAst($parser->parse());
     }
 
     /**
@@ -140,19 +142,6 @@ class PatternHelper
         }
     }
 
-    /**
-     * Wrap a pattern to enforce full-string matching.
-     *
-     * @param  Pattern  $pattern  Original pattern
-     * @return Pattern Pattern with full-string anchor semantics
-     */
-    private static function wrapWithFullAnchor(Pattern $pattern): Pattern
-    {
-        // For now, we'll create a new pattern that checks if we consumed everything
-        // This is a simplified implementation; a production version would use AST wrapping
-        // or VM-level support
-        return $pattern; // TODO: Implement full-string anchor wrapper
-    }
 
     /**
      * Find all non-overlapping matches of a pattern in a subject string.

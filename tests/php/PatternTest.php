@@ -4,7 +4,6 @@ namespace Snobol\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Snobol\Builder;
-use Snobol\Pattern;
 use Snobol\PatternHelper;
 
 class PatternTest extends TestCase
@@ -62,11 +61,13 @@ class PatternTest extends TestCase
         PatternHelper::fromAst(['invalid' => 'structure']);
     }
 
-    public function testFromStringThrowsLogicException(): void
+    public function testFromStringSuccess(): void
     {
-        $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('not yet implemented');
-        PatternHelper::fromString("literal('test')");
+        $pattern = PatternHelper::fromString("'test'");
+        $this->assertInstanceOf(Pattern::class, $pattern);
+
+        $result = PatternHelper::matchOnce($pattern, "test");
+        $this->assertNotFalse($result);
     }
 
     public function testMatchOnceWithPrecompiledPattern(): void
@@ -171,7 +172,6 @@ class PatternTest extends TestCase
     {
         $ast = Builder::lit("exact");
 
-        // TODO: This test is incomplete - full-string anchor needs proper implementation
         $result = PatternHelper::matchOnce($ast, "exact", ['full' => true]);
 
         // For now, just verify it doesn't crash
@@ -182,13 +182,10 @@ class PatternTest extends TestCase
     {
         $ast = Builder::lit("prefix");
 
-        // TODO: This test is incomplete - full-string anchor needs proper implementation
         // Should fail because "prefix suffix" has trailing characters
         $result = PatternHelper::matchOnce($ast, "prefix suffix", ['full' => true]);
 
-        // Currently this will not behave as expected until full anchor is implemented
-        // Marking this as a known limitation for now
-        $this->markTestIncomplete('Full-string anchor not yet fully implemented');
+        $this->assertFalse($result, "Expected false because match did not consume full string");
     }
 }
 
