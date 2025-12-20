@@ -4,6 +4,7 @@ namespace Snobol\Tests;
 
 use PHPUnit\Framework\TestCase;
 use Snobol\Builder;
+use Snobol\Pattern;
 use Snobol\PatternHelper;
 
 class PatternTest extends TestCase

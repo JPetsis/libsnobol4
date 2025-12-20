@@ -8,8 +8,13 @@ IN_DDEV := $(if $(IS_DDEV_PROJECT),1,0)
 ifeq ($(IN_DDEV),1)
     PHP_EXT_DIR := $(shell php-config --extension-dir 2>/dev/null)
     SNOBOL_SO := $(PHP_EXT_DIR)/snobol.so
-    HAS_ASAN := $(shell if [ -f "$(SNOBOL_SO)" ] && ldd "$(SNOBOL_SO)" | grep -q libasan; then echo 1; else echo 0; fi)
+    HAS_ASAN := $(shell [ -f "$(SNOBOL_SO)" ] && ldd "$(SNOBOL_SO)" | grep -q libasan && echo 1 || echo 0)
     LIBASAN_PATH := $(shell find /usr/lib -name "libasan.so.[0-9]" | head -n 1)
+    
+    # Check if extension is already enabled
+    IS_ENABLED := $(shell php -m 2>/dev/null | grep -q snobol && echo 1 || echo 0)
+    PHP_OPTS := $(if $(filter 0,$(IS_ENABLED)),-d extension=snobol.so)
+    
     ifeq ($(HAS_ASAN),1)
         ASAN_ENV := USE_ZEND_ALLOC=0 ASAN_OPTIONS=detect_leaks=0 LD_PRELOAD=$(LIBASAN_PATH)
     endif
@@ -27,6 +32,9 @@ help:
 	@echo "  test-valgrind - Run PHP tests under Valgrind"
 	@echo "  build-asan - Build extension with AddressSanitizer"
 	@echo "  test-asan - Run tests with AddressSanitizer enabled"
+	@echo "  enable   - Enable the snobol extension globally"
+	@echo "  disable  - Disable the snobol extension globally"
+	@echo "  composer - Run composer with ASan environment if needed (e.g., make composer install)"
 	@echo ""
 	@echo "Environment detection:"
 ifeq ($(IN_DDEV),1)
@@ -78,7 +86,7 @@ ifeq ($(IN_DDEV),1)
 	fi
 	@echo "Running PHP tests..."
 	@if [ -f vendor/bin/phpunit ]; then \
-		$(ASAN_ENV) vendor/bin/phpunit tests/php || exit 1; \
+		$(ASAN_ENV) php $(PHP_OPTS) vendor/bin/phpunit tests/php || exit 1; \
 	else \
 		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
 	fi
@@ -119,15 +127,26 @@ install:
 ifeq ($(IN_DDEV),1)
 	@echo "Installing extension inside DDEV..."
 	@if [ -f /tmp/snobol_build/modules/snobol.so ]; then \
-		sudo cp /tmp/snobol_build/modules/snobol.so /usr/lib/php/20240924/; \
-		echo "Enabling extension for CLI and FPM..."; \
+		sudo cp /tmp/snobol_build/modules/snobol.so $(PHP_EXT_DIR)/; \
+		echo "Creating snobol.ini..."; \
 		echo "extension=snobol.so" | sudo tee /etc/php/8.4/mods-available/snobol.ini > /dev/null; \
-		sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini; \
-		sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini; \
-		sudo service php8.4-fpm reload 2>/dev/null || true; \
-		echo "Extension installed and enabled!"; \
+		NEW_HAS_ASAN=$$(ldd /tmp/snobol_build/modules/snobol.so | grep -q libasan && echo 1 || echo 0); \
+		if [ "$$NEW_HAS_ASAN" = "1" ]; then \
+			echo "WARNING: ASan-instrumented extension detected."; \
+			echo "To avoid breaking PHP/Composer, the extension will NOT be enabled globally."; \
+			echo "Use 'make enable' to enable it (caution: requires LD_PRELOAD for all PHP calls)."; \
+			echo "Use 'make test' or 'make test-asan' which handle LD_PRELOAD automatically."; \
+			sudo rm -f /etc/php/8.4/cli/conf.d/20-snobol.ini; \
+			sudo rm -f /etc/php/8.4/fpm/conf.d/20-snobol.ini; \
+		else \
+			echo "Enabling extension for CLI and FPM..."; \
+			sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini; \
+			sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini; \
+			sudo service php8.4-fpm reload 2>/dev/null || true; \
+			echo "Extension installed and enabled!"; \
+		fi \
 	else \
-		echo "Error: Extension not built. Run 'make build' first."; \
+		echo "Error: Extension not built. Run 'make build' or 'make build-asan' first."; \
 		exit 1; \
 	fi
 else ifdef DDEV
@@ -139,13 +158,52 @@ else
 	@echo "Extension installed! Add 'extension=snobol.so' to your php.ini to enable."
 endif
 
+enable:
+ifeq ($(IN_DDEV),1)
+	@echo "Enabling snobol extension..."
+	@sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini
+	@sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini
+	@sudo service php8.4-fpm reload 2>/dev/null || true
+	@echo "Extension enabled. NOTE: If this is an ASan build, PHP commands will now require LD_PRELOAD."
+else ifdef DDEV
+	@ddev exec sudo make enable
+else
+	@echo "Please enable the extension in your php.ini manually."
+endif
+
+disable:
+ifeq ($(IN_DDEV),1)
+	@echo "Disabling snobol extension..."
+	@sudo rm -f /etc/php/8.4/cli/conf.d/20-snobol.ini
+	@sudo rm -f /etc/php/8.4/fpm/conf.d/20-snobol.ini
+	@sudo service php8.4-fpm reload 2>/dev/null || true
+	@echo "Extension disabled."
+else ifdef DDEV
+	@ddev exec sudo make disable
+else
+	@echo "Please disable the extension in your php.ini manually."
+endif
+
+composer:
+ifeq ($(IN_DDEV),1)
+	@$(ASAN_ENV) composer $(filter-out $@,$(MAKECMDGOALS))
+else ifdef DDEV
+	@ddev exec $(ASAN_ENV) composer $(filter-out $@,$(MAKECMDGOALS))
+else
+	@composer $(filter-out $@,$(MAKECMDGOALS))
+endif
+
+# To allow passing arguments to composer target
+%:
+	@:
+
 test-valgrind:
 ifeq ($(IN_DDEV),1)
-	@./dev/valgrind_phpunit.sh
+	@$(ASAN_ENV) ./dev/valgrind_phpunit.sh $(PHP_OPTS)
 else ifdef DDEV
 	@ddev exec make test-valgrind
 else
-	@./dev/valgrind_phpunit.sh
+	@./dev/valgrind_phpunit.sh $(PHP_OPTS)
 endif
 
 build-asan:

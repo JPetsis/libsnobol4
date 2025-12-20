@@ -32,11 +32,37 @@ echo "Running PHPUnit under Valgrind..."
 export USE_ZEND_ALLOC=0
 export ZEND_DONT_UNLOAD_MODULES=1
 
+# Check if extension is already loaded or passed in arguments
+EXTENSION_LOADED=0
+if php -m | grep -q snobol; then
+    EXTENSION_LOADED=1
+fi
+
+for arg in "$@"; do
+    if [[ "$arg" == *"extension=snobol.so"* ]]; then
+        EXTENSION_LOADED=1
+    fi
+done
+
+EXTRA_PHP_OPTS=""
+if [ $EXTENSION_LOADED -eq 0 ]; then
+    EXTRA_PHP_OPTS="-d extension=snobol.so"
+fi
+
+# Detect if the extension is built with ASan
+SNOBOL_SO=$(php-config --extension-dir 2>/dev/null)/snobol.so
+if [ -f "$SNOBOL_SO" ] && ldd "$SNOBOL_SO" | grep -q libasan; then
+    echo "Error: The snobol extension is built with AddressSanitizer (ASan)."
+    echo "Valgrind and ASan are incompatible and cannot be run together."
+    echo "Please rebuild the extension without ASan using 'make build' before running Valgrind."
+    exit 1
+fi
+
 valgrind --tool=memcheck \
          --error-exitcode=1 \
          --leak-check=full \
          --show-leak-kinds=definite,indirect \
          --suppressions="$SCRIPT_DIR/valgrind.supp" \
          --num-callers=30 \
-         php vendor/bin/phpunit
+         php $EXTRA_PHP_OPTS "$@" vendor/bin/phpunit
 
