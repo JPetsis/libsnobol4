@@ -4,6 +4,17 @@
 DDEV := $(shell command -v ddev 2> /dev/null)
 IN_DDEV := $(if $(IS_DDEV_PROJECT),1,0)
 
+# ASan detection for PHP extension
+ifeq ($(IN_DDEV),1)
+    PHP_EXT_DIR := $(shell php-config --extension-dir 2>/dev/null)
+    SNOBOL_SO := $(PHP_EXT_DIR)/snobol.so
+    HAS_ASAN := $(shell if [ -f "$(SNOBOL_SO)" ] && ldd "$(SNOBOL_SO)" | grep -q libasan; then echo 1; else echo 0; fi)
+    LIBASAN_PATH := $(shell find /usr/lib -name "libasan.so.[0-9]" | head -n 1)
+    ifeq ($(HAS_ASAN),1)
+        ASAN_ENV := USE_ZEND_ALLOC=0 ASAN_OPTIONS=detect_leaks=0 LD_PRELOAD=$(LIBASAN_PATH)
+    endif
+endif
+
 help:
 	@echo "SNOBOL4 Development Makefile"
 	@echo ""
@@ -67,7 +78,7 @@ ifeq ($(IN_DDEV),1)
 	fi
 	@echo "Running PHP tests..."
 	@if [ -f vendor/bin/phpunit ]; then \
-		vendor/bin/phpunit tests/php || exit 1; \
+		$(ASAN_ENV) vendor/bin/phpunit tests/php || exit 1; \
 	else \
 		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
 	fi
@@ -161,13 +172,14 @@ endif
 test-asan:
 ifeq ($(IN_DDEV),1)
 	@echo "Running tests with ASan..."
-	@export USE_ZEND_ALLOC=0 && \
-	 export ASAN_OPTIONS=detect_leaks=0 && \
-	 export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libasan.so.8 && \
-	 $(MAKE) test
+	@if [ -z "$(LIBASAN_PATH)" ]; then \
+		echo "Error: libasan.so not found. Make sure gcc is installed."; \
+		exit 1; \
+	fi
+	@USE_ZEND_ALLOC=0 ASAN_OPTIONS=detect_leaks=0 LD_PRELOAD=$(LIBASAN_PATH) $(MAKE) test
 else ifdef DDEV
 	@ddev exec make test-asan
 else
 	@echo "Running tests with ASan..."
-	@export USE_ZEND_ALLOC=0 && $(MAKE) test
+	@USE_ZEND_ALLOC=0 $(MAKE) test
 endif
