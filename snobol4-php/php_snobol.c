@@ -4,9 +4,39 @@
 
 #include "php.h"
 #include "php_snobol.h"
-#include "snobol_pattern.c" /* include to simplify build ordering: snobol_pattern.c depends on php API */
-#include "snobol_vm.c"
-#include "snobol_compiler.c"
+
+#include <stdio.h>
+#include <time.h>
+#include <stdarg.h>
+
+static inline void snobol_log_impl(const char *file, int line, const char *fmt, ...) {
+    FILE *f = fopen("/var/www/html/snobol_debug.log", "a");
+    if (f) {
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+        char ts[32];
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
+        fprintf(f, "[%s] [%s:%d] ", ts, file, line);
+        va_list args;
+        va_start(args, fmt);
+        vfprintf(f, fmt, args);
+        va_end(args);
+        fprintf(f, "\n");
+        fflush(f);
+        fclose(f);
+    }
+}
+#define SNOBOL_LOG(fmt, ...) snobol_log_impl(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
+
+/* Extern declaration from snobol_pattern.c */
+void snobol_pattern_minit(void);
+
+PHP_MINIT_FUNCTION(snobol) {
+    SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): START");
+    snobol_pattern_minit();
+    SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): DONE");
+    return SUCCESS;
+}
 
 zend_module_entry snobol_module_entry = {
     STANDARD_MODULE_HEADER,
@@ -17,10 +47,10 @@ zend_module_entry snobol_module_entry = {
     NULL,
     NULL,
     NULL,
-    NO_VERSION_YET,
+    PHP_SNOBOL_VERSION,
     STANDARD_MODULE_PROPERTIES
 };
 
+#ifdef COMPILE_DL_SNOBOL
 ZEND_GET_MODULE(snobol)
-
-/* We implement PHP_MINIT inside snobol_pattern.c */
+#endif

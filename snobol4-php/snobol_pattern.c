@@ -2,49 +2,71 @@
 #include "zend_exceptions.h"
 #include "snobol_compiler.h"
 #include "snobol_vm.h"
+#include "php_snobol.h"
 
-/* declare class entry */
-zend_class_entry *snobol_pattern_ce;
+#include <stdio.h>
+#include <time.h>
+#include <stdarg.h>
 
+static inline void snobol_log_impl(const char *file, int line, const char *fmt, ...) {
+    FILE *f = fopen("/var/www/html/snobol_debug.log", "a");
+    if (f) {
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+        char ts[32];
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
+        fprintf(f, "[%s] [%s:%d] ", ts, file, line); 
+        va_list args;
+        va_start(args, fmt);
+        vfprintf(f, fmt, args);
+        va_end(args);
+        fprintf(f, "\n");
+        fflush(f);
+        fclose(f);
+    }
+}
+#define SNOBOL_LOG(fmt, ...) snobol_log_impl(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
+
+/* Standard PHP Custom Object Pattern: zend_object at the END */
 typedef struct {
     uint8_t *bc;
     size_t bc_len;
-    zval eval_callbacks;
     zend_object std;
 } snobol_pattern_t;
+
+extern zend_class_entry *snobol_pattern_ce;
+static zend_object_handlers snobol_pattern_object_handlers;
 
 static inline snobol_pattern_t* php_snobol_fetch(zend_object *obj) {
     return (snobol_pattern_t *)((char *)(obj) - XtOffsetOf(snobol_pattern_t, std));
 }
 
-static zend_object *snobol_pattern_create(zend_class_entry *ce) {
-    snobol_pattern_t *intern = ecalloc(1, sizeof(snobol_pattern_t) + zend_object_properties_size(ce));
-    intern->bc = NULL;
-    intern->bc_len = 0;
-    ZVAL_UNDEF(&intern->eval_callbacks);
-    zend_object_std_init(&intern->std, ce);
-    object_properties_init(&intern->std, ce);
-    return &intern->std;
-}
-
 static void snobol_pattern_free(zend_object *object) {
     snobol_pattern_t *intern = php_snobol_fetch(object);
+    SNOBOL_LOG("snobol_pattern_free: intern=%p, bc=%p", (void*)intern, (void*)intern->bc);
+    
     if (intern->bc) {
         compiler_free(intern->bc);
         intern->bc = NULL;
     }
-    if (!Z_ISUNDEF(intern->eval_callbacks)) {
-        zval_ptr_dtor(&intern->eval_callbacks);
-    }
+    
     zend_object_std_dtor(object);
+    SNOBOL_LOG("snobol_pattern_free: done");
 }
 
-/* forward method declarations */
-PHP_METHOD(Snobol_Pattern, __construct);
-PHP_METHOD(Snobol_Pattern, __destruct);
-PHP_METHOD(Snobol_Pattern, compileFromAst);
-PHP_METHOD(Snobol_Pattern, match);
-PHP_METHOD(Snobol_Pattern, setEvalCallbacks);
+static zend_object *snobol_pattern_create(zend_class_entry *ce) {
+    snobol_pattern_t *intern = zend_object_alloc(sizeof(snobol_pattern_t), ce);
+    SNOBOL_LOG("snobol_pattern_create: intern=%p", (void*)intern);
+    
+    intern->bc = NULL;
+    intern->bc_len = 0;
+    
+    zend_object_std_init(&intern->std, ce);
+    object_properties_init(&intern->std, ce);
+    intern->std.handlers = &snobol_pattern_object_handlers;
+    
+    return &intern->std;
+}
 
 /* argument info */
 ZEND_BEGIN_ARG_INFO_EX(ai_compileFromAst, 0, 0, 1)
@@ -59,42 +81,8 @@ ZEND_BEGIN_ARG_INFO_EX(ai_setEval, 0, 0, 1)
     ZEND_ARG_ARRAY_INFO(0, callbacks, 0)
 ZEND_END_ARG_INFO()
 
-static const zend_function_entry snobol_pattern_methods[] = {
-    PHP_ME(Snobol_Pattern, compileFromAst, ai_compileFromAst, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
-    PHP_ME(Snobol_Pattern, match, ai_match, ZEND_ACC_PUBLIC)
-    PHP_ME(Snobol_Pattern, setEvalCallbacks, ai_setEval, ZEND_ACC_PUBLIC)
-    PHP_FE_END
-};
+/* PHP Methods */
 
-/* module init */
-PHP_MINIT_FUNCTION(snobol) {
-    zend_class_entry ce;
-    INIT_CLASS_ENTRY(ce, "Snobol\\Pattern", snobol_pattern_methods);
-    snobol_pattern_ce = zend_register_internal_class(&ce);
-    snobol_pattern_ce->create_object = snobol_pattern_create;
-
-    /* Declare properties to avoid deprecation warnings */
-    zend_declare_property_long(snobol_pattern_ce, "_bc_ptr", sizeof("_bc_ptr")-1, 0, ZEND_ACC_PRIVATE);
-    zend_declare_property_long(snobol_pattern_ce, "_bc_len", sizeof("_bc_len")-1, 0, ZEND_ACC_PRIVATE);
-    zend_declare_property_null(snobol_pattern_ce, "_callbacks", sizeof("_callbacks")-1, ZEND_ACC_PRIVATE);
-
-    return SUCCESS;
-}
-
-/* Destructor */
-PHP_METHOD(Snobol_Pattern, __destruct) {
-    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
-    if (intern->bc) {
-        compiler_free(intern->bc);
-        intern->bc = NULL;
-    }
-    if (!Z_ISUNDEF(intern->eval_callbacks)) {
-        zval_ptr_dtor(&intern->eval_callbacks);
-        ZVAL_UNDEF(&intern->eval_callbacks);
-    }
-}
-
-/* compiles AST (PHP zval array) to bytecode and returns Pattern object */
 PHP_METHOD(Snobol_Pattern, compileFromAst) {
     zval *ast;
     ZEND_PARSE_PARAMETERS_START(1,1)
@@ -104,113 +92,100 @@ PHP_METHOD(Snobol_Pattern, compileFromAst) {
     uint8_t *bc = NULL;
     size_t bc_len = 0;
 
+    SNOBOL_LOG("Snobol_Pattern::compileFromAst: START");
+
     if (compile_ast_to_bytecode(ast, &bc, &bc_len) != 0) {
+        SNOBOL_LOG("Snobol_Pattern::compileFromAst: compilation FAILED");
         zend_throw_exception(zend_ce_exception, "Failed to compile AST", 0);
         RETURN_NULL();
     }
 
-    if (!bc || bc_len == 0) {
-        zend_throw_exception(zend_ce_exception, "Compilation produced empty bytecode", 0);
-        RETURN_NULL();
-    }
-
     if (object_init_ex(return_value, snobol_pattern_ce) != SUCCESS) {
+        SNOBOL_LOG("Snobol_Pattern::compileFromAst: object_init_ex FAILED");
         if (bc) compiler_free(bc);
-        zend_throw_exception(zend_ce_exception, "Failed to create Pattern object", 0);
         RETURN_NULL();
     }
 
-    zend_update_property_long(snobol_pattern_ce, Z_OBJ_P(return_value), "_bc_ptr", sizeof("_bc_ptr")-1, (zend_long)(uintptr_t)bc);
-    zend_update_property_long(snobol_pattern_ce, Z_OBJ_P(return_value), "_bc_len", sizeof("_bc_len")-1, (zend_long)bc_len);
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(return_value));
+    intern->bc = bc;
+    intern->bc_len = bc_len;
+    
+    SNOBOL_LOG("Snobol_Pattern::compileFromAst: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
 }
 
-/* Helper to call PHP callback from C; used by VM eval_fn */
-typedef struct {
-    zval callbacks; /* array */
-} EvalBridge;
-
-static bool eval_bridge_fn(int fn_id, const char *s, size_t start, size_t end, void *udata) {
-    EvalBridge *eb = (EvalBridge *)udata;
-    if (Z_ISUNDEF(eb->callbacks) || Z_TYPE(eb->callbacks) != IS_ARRAY) return true;
-    zval *cb = zend_hash_index_find(Z_ARRVAL(eb->callbacks), (zend_ulong)fn_id);
-    if (!cb || Z_TYPE_P(cb) != IS_ARRAY) {
-        /* Alternatively allow string/closure */
-        zval *cb_any = zend_hash_index_find(Z_ARRVAL(eb->callbacks), (zend_ulong)fn_id);
-        if (!cb_any) return true;
-    }
-    /* cb may be callable; call it with the captured string */
-    zval retval;
-    zval params[1];
-    ZVAL_STRINGL(&params[0], s + start, end - start);
-    if (call_user_function(NULL, NULL, cb, &retval, 1, params) == SUCCESS) {
-        bool ok = zend_is_true(&retval);
-        zval_ptr_dtor(&retval);
-        zval_ptr_dtor(&params[0]);
-        return ok;
-    } else {
-        zval_ptr_dtor(&params[0]);
-        return true;
-    }
-}
-
-/* match method */
 PHP_METHOD(Snobol_Pattern, match) {
     zend_string *input;
     ZEND_PARSE_PARAMETERS_START(1,1)
         Z_PARAM_STR(input)
     ZEND_PARSE_PARAMETERS_END();
 
-    /* Get bc from properties */
-    zval *bc_ptr_zv = zend_read_property(snobol_pattern_ce, Z_OBJ_P(ZEND_THIS), "_bc_ptr", sizeof("_bc_ptr")-1, 1, NULL);
-    zval *bc_len_zv = zend_read_property(snobol_pattern_ce, Z_OBJ_P(ZEND_THIS), "_bc_len", sizeof("_bc_len")-1, 1, NULL);
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    SNOBOL_LOG("Snobol_Pattern::match: START, intern=%p, bc=%p, input_len=%zu", (void*)intern, (void*)intern->bc, ZSTR_LEN(input));
 
-    if (!bc_ptr_zv || Z_TYPE_P(bc_ptr_zv) != IS_LONG || Z_LVAL_P(bc_ptr_zv) == 0) {
+    if (!intern->bc || intern->bc_len == 0) {
+        SNOBOL_LOG("Snobol_Pattern::match: ABORT, no bytecode");
         zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
         RETURN_FALSE;
     }
 
-    uint8_t *bc = (uint8_t *)(uintptr_t)Z_LVAL_P(bc_ptr_zv);
-    size_t bc_len = (size_t)Z_LVAL_P(bc_len_zv);
-
     VM vm;
-    memset(&vm, 0, sizeof(vm));
-    vm.bc = bc;
-    vm.bc_len = bc_len;
+    memset(&vm, 0, sizeof(VM));
+    vm.bc = intern->bc;
+    vm.bc_len = intern->bc_len;
     vm.s = ZSTR_VAL(input);
     vm.len = ZSTR_LEN(input);
-    vm.eval_fn = NULL;
-    vm.eval_udata = NULL;
 
-    bool ok = vm_exec(&vm);
+    bool ok = vm_exec(&vm); 
+    
+    SNOBOL_LOG("Snobol_Pattern::match: VM returned %d, pos=%zu, var_count=%zu", (int)ok, vm.pos, vm.var_count);
 
     if (!ok) {
         RETURN_FALSE;
     }
 
-    /* build associative array of var captures */
     array_init(return_value);
     for (size_t i = 0; i < vm.var_count; ++i) {
         size_t a = vm.var_start[i];
         size_t b = vm.var_end[i];
         char key[32];
         snprintf(key, sizeof(key), "v%u", (unsigned)i);
+        
+        SNOBOL_LOG("  Capture %s: range [%zu, %zu]", key, a, b);
 
         if (b >= a && b <= vm.len) {
-            zend_string *slice = zend_string_init(vm.s + a, b - a, 0);
-            add_assoc_str(return_value, key, slice);
+            add_assoc_stringl(return_value, key, vm.s + a, b - a);
         } else {
             add_assoc_null(return_value, key);
         }
     }
+    add_assoc_long(return_value, "_match_len", (zend_long)vm.pos);
+    SNOBOL_LOG("Snobol_Pattern::match: DONE");
 }
 
-/* setEvalCallbacks(array $callbacks) - store a PHP array of callables into the object */
 PHP_METHOD(Snobol_Pattern, setEvalCallbacks) {
-    zval *arr;
-    ZEND_PARSE_PARAMETERS_START(1,1)
-        Z_PARAM_ARRAY(arr)
-    ZEND_PARSE_PARAMETERS_END();
-
-    zend_update_property(snobol_pattern_ce, Z_OBJ_P(ZEND_THIS), "_callbacks", sizeof("_callbacks")-1, arr);
+    SNOBOL_LOG("Snobol_Pattern::setEvalCallbacks: CALLED");
     RETURN_TRUE;
+}
+
+static const zend_function_entry snobol_pattern_methods[] = {
+    PHP_ME(Snobol_Pattern, compileFromAst, ai_compileFromAst, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_Pattern, match, ai_match, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, setEvalCallbacks, ai_setEval, ZEND_ACC_PUBLIC)
+    PHP_FE_END
+};
+
+zend_class_entry *snobol_pattern_ce;
+
+void snobol_pattern_minit(void) {
+    SNOBOL_LOG("snobol_pattern_minit: START");
+    zend_class_entry ce;
+    
+    memcpy(&snobol_pattern_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
+    snobol_pattern_object_handlers.offset = XtOffsetOf(snobol_pattern_t, std);
+    snobol_pattern_object_handlers.free_obj = snobol_pattern_free;
+
+    INIT_CLASS_ENTRY(ce, "Snobol\\Pattern", snobol_pattern_methods);
+    snobol_pattern_ce = zend_register_internal_class(&ce);
+    snobol_pattern_ce->create_object = snobol_pattern_create;
+    SNOBOL_LOG("snobol_pattern_minit: DONE");
 }

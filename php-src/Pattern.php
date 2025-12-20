@@ -24,8 +24,7 @@ class Pattern
      */
     private function __construct()
     {
-        // Native implementation in C extension
-        throw new \LogicException('This is a stub - the C extension provides the actual implementation');
+        // Native implementation provided by C extension
     }
 
     /**

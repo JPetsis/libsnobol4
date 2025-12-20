@@ -42,9 +42,9 @@ class PatternHelper
      * @param  bool  $useCache  Whether to use the cache
      * @return self Compiled pattern
      */
-    private static function resolvePattern($patternOrAst, bool $useCache): self
+    private static function resolvePattern($patternOrAst, bool $useCache): Pattern
     {
-        if ($patternOrAst instanceof self) {
+        if ($patternOrAst instanceof Pattern) {
             return $patternOrAst;
         }
 
@@ -170,20 +170,35 @@ class PatternHelper
         $offset = 0;
         $subjectLen = strlen($subject);
 
-        while ($offset < $subjectLen) {
+        // Manual scan because Pattern::match is anchored
+        while ($offset <= $subjectLen) { // Allow matching empty string at end
             $remaining = substr($subject, $offset);
             $result = $pattern->match($remaining);
 
             if ($result === false) {
-                break;
+                // No match at current offset, advance by 1
+                $offset++;
+                continue;
             }
 
-            $matches[] = $result;
+            // If match returned boolean true, use estimate
+            if ($result === true) {
+                $matchLen = self::estimateMatchLength($remaining, []);
+                $matches[] = []; // Placeholder
+            } else {
+                // Clean up metadata
+                $matchLen = 0;
+                if (isset($result['_match_len'])) {
+                    $matchLen = $result['_match_len'];
+                    unset($result['_match_len']);
+                } else {
+                    // Fallback estimate if metadata not available
+                    $matchLen = self::estimateMatchLength($remaining, $result);
+                }
+                $matches[] = $result;
+            }
 
-            // Determine how much we matched to advance offset
-            // For now, advance by at least 1 to avoid infinite loops
-            // This is a simplified implementation; a complete one would track match length
-            $matchLen = self::estimateMatchLength($remaining, $result);
+            // Advance by match length (min 1 to avoid infinite loop on empty match)
             $offset += max(1, $matchLen);
         }
 
@@ -202,7 +217,7 @@ class PatternHelper
     {
         // Simplified: look at the longest capture value
         // A proper implementation would track match positions in the VM
-        $maxLen = 1;
+        $maxLen = 0; // Default to 0, let caller handle min 1 if needed
         foreach ($result as $value) {
             if (is_string($value)) {
                 $maxLen = max($maxLen, strlen($value));
@@ -226,19 +241,33 @@ class PatternHelper
         $segments = [];
         $offset = 0;
         $lastMatchEnd = 0;
+        $subjectLen = strlen($subject);
 
-        while ($offset < strlen($subject)) {
+        while ($offset <= $subjectLen) {
             $remaining = substr($subject, $offset);
-            $result = $pattern->executeMatch($remaining);
+            $result = $pattern->match($remaining);
 
             if ($result === false) {
-                break;
+                $offset++;
+                continue;
             }
 
+            // Match found at $offset
             // Add segment before this match
             $segments[] = substr($subject, $lastMatchEnd, $offset - $lastMatchEnd);
 
-            $matchLen = self::estimateMatchLength($remaining, $result);
+            $matchLen = 0;
+            if ($result === true) {
+                $matchLen = self::estimateMatchLength($remaining, []);
+            } else {
+                if (isset($result['_match_len'])) {
+                    $matchLen = $result['_match_len'];
+                    unset($result['_match_len']);
+                } else {
+                    $matchLen = self::estimateMatchLength($remaining, $result);
+                }
+            }
+
             $offset += max(1, $matchLen);
             $lastMatchEnd = $offset;
         }
@@ -246,19 +275,9 @@ class PatternHelper
         // Add remaining segment
         $segments[] = substr($subject, $lastMatchEnd);
 
-        return empty($segments) ? [$subject] : $segments;
+        return $segments;
     }
 
-    /**
-     * Execute the compiled pattern against a subject string.
-     *
-     * @param  string  $subject  Subject to match
-     * @return array|false Captures or false
-     */
-    private function executeMatch(string $subject)
-    {
-        return $this->compiled->match($subject);
-    }
 
     /**
      * Replace pattern matches with replacement text.
@@ -282,7 +301,8 @@ class PatternHelper
             $matchResult = $pattern->match($remaining);
 
             if ($matchResult === false) {
-                break;
+                $offset++;
+                continue;
             }
 
             // Add segment before this match
@@ -291,7 +311,16 @@ class PatternHelper
             // Add replacement
             $result .= $replacement;
 
-            $matchLen = self::estimateMatchLength($remaining, $matchResult);
+            $matchLen = 0;
+            if ($matchResult === true) {
+                $matchLen = self::estimateMatchLength($remaining, []);
+            } elseif (isset($matchResult['_match_len'])) {
+                $matchLen = $matchResult['_match_len'];
+                unset($matchResult['_match_len']);
+            } else {
+                $matchLen = self::estimateMatchLength($remaining, $matchResult);
+            }
+
             $offset += max(1, $matchLen);
             $lastMatchEnd = $offset;
         }

@@ -1,46 +1,56 @@
+#ifndef STANDALONE_BUILD
+#include "php.h"
+#endif
+
 #include "snobol_vm.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
+#include <stdarg.h>
 
-/* helpers to read u32/u16/u8 from bc */
-static inline uint32_t read_u32(const uint8_t *bc, size_t *ip) {
-    uint32_t v = (bc[*ip] << 24) | (bc[*ip+1] << 16) | (bc[*ip+2] << 8) | bc[*ip+3];
+static inline void snobol_log_impl(const char *file, int line, const char *fmt, ...) {
+    FILE *f = fopen("/var/www/html/snobol_debug.log", "a");
+    if (f) {
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+        char ts[32];
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
+        fprintf(f, "[%s] [%s:%d] ", ts, file, line);
+        va_list args;
+        va_start(args, fmt);
+        vfprintf(f, fmt, args);
+        va_end(args);
+        fprintf(f, "\n");
+        fflush(f);
+        fclose(f);
+    }
+}
+#define SNOBOL_LOG(fmt, ...) snobol_log_impl(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
+
+/* helpers to read u32/u16/u8 from bc with bounds checking */
+static inline uint32_t read_u32(const uint8_t *bc, size_t bc_len, size_t *ip) {
+    if (*ip + 4 > bc_len) { *ip = bc_len; return 0; }
+    uint32_t v = ((uint32_t)bc[*ip] << 24) | ((uint32_t)bc[*ip+1] << 16) | ((uint32_t)bc[*ip+2] << 8) | (uint32_t)bc[*ip+3];
     *ip += 4;
     return v;
 }
-static inline uint16_t read_u16(const uint8_t *bc, size_t *ip) {
-    uint16_t v = (bc[*ip] << 8) | bc[*ip+1];
+static inline uint16_t read_u16(const uint8_t *bc, size_t bc_len, size_t *ip) {
+    if (*ip + 2 > bc_len) { *ip = bc_len; return 0; }
+    uint16_t v = ((uint16_t)bc[*ip] << 8) | ((uint16_t)bc[*ip+1]);
     *ip += 2;
     return v;
 }
-static inline uint8_t read_u8(const uint8_t *bc, size_t *ip) {
+static inline uint8_t read_u8(const uint8_t *bc, size_t bc_len, size_t *ip) {
+    if (*ip + 1 > bc_len) { *ip = bc_len; return 0; }
     uint8_t v = bc[(*ip)++];
     return v;
 }
 
-/* A minimal ASCII charclass: for this package we support ASCII 0-127 via bitmap.
-   For simplicity we store charclass tables in the bytecode blob externally (compiler provides set ids).
-   In this implementation we'll assume 1..N charclasses and the vm will request the compiler to provide
-   membership via a function pointer later. For now, we support only ASCII and simple sets handled by the compiler.
-   To keep things contained, we will store charclass bitmaps just after bytecode (compiler packs them and sets
-   bc_len appropriately). We'll provide a helper that given set_id returns pointer to 16-byte bitmap (128 bits).
-*/
-
-#define CHARCLASS_BITMAP_BYTES 16 /* 128 bits / 8 */
-
 static const uint8_t *get_bitmap(const VM *vm, uint16_t set_id) {
-    /* Simple encoding: after bc_len header, compiler appends (1-based) charclass bitmaps
-       But vm only sees bc pointer and bc_len; compiler ensures that charclass bitmaps are at the end. */
-    /* Layout enforced by compiler: bc contains: code bytes followed by a 4-byte count N, then N * 16 bytes of bitmaps.
-       To find them, we read the 4 bytes located just before vm->bc_len - N*16 - 4; but bc_len is known only in caller.
-       For simplicity, we assume compiler placed a 4-byte charclass_count at vm->bc + vm->bc_len - 4 - (N * 16)
-       and then bitmaps start right after that header. */
-
-    /* We'll decode: read last 4 bytes as uint32_t count, then compute offset */
     size_t tail_ip = vm->bc_len;
     if (tail_ip < 4) return NULL;
-    uint32_t count = (vm->bc[tail_ip-4] << 24) | (vm->bc[tail_ip-3] << 16) | (vm->bc[tail_ip-2] << 8) | vm->bc[tail_ip-1];
+    uint32_t count = ((uint32_t)vm->bc[tail_ip-4] << 24) | ((uint32_t)vm->bc[tail_ip-3] << 16) | ((uint32_t)vm->bc[tail_ip-2] << 8) | (uint32_t)vm->bc[tail_ip-1];
     size_t bitmaps_len = (size_t)count * CHARCLASS_BITMAP_BYTES;
     if (tail_ip < 4 + bitmaps_len) return NULL;
     size_t bitmaps_offset = tail_ip - 4 - bitmaps_len;
@@ -55,7 +65,6 @@ static inline bool bitmap_contains(const uint8_t *bm, unsigned char ch) {
     return (bm[idx] >> bit) & 1;
 }
 
-/* UTF-8 next codepoint: returns bytes consumed (1..4) and updates pos; returns 0 if at end/invalid */
 static inline int utf8_peek_next(const char *s, size_t len, size_t pos, uint32_t *out_cp, int *out_bytes) {
     if (pos >= len) return 0;
     unsigned char c = (unsigned char)s[pos];
@@ -81,93 +90,127 @@ static inline int utf8_peek_next(const char *s, size_t len, size_t pos, uint32_t
     return 0;
 }
 
-/* choice push/pop */
+#define MAX_CHOICES 128
+
 void vm_push_choice(VM *vm, size_t ip, size_t pos) {
-    if (vm->choices_top == vm->choices_cap) {
-        size_t new_cap = vm->choices_cap ? vm->choices_cap * 2 : 256;
-        vm->choices = erealloc(vm->choices, new_cap * sizeof(*vm->choices));
-        vm->choices_cap = new_cap;
-    }
+    if (!vm->choices || vm->choices_top >= MAX_CHOICES) return;
     struct choice *c = &vm->choices[vm->choices_top++];
     c->ip = ip;
     c->pos = pos;
-    /* snapshot captures and var_count */
-    memcpy(c->cap_start_snapshot, vm->cap_start, sizeof(vm->cap_start));
-    memcpy(c->cap_end_snapshot, vm->cap_end, sizeof(vm->cap_end));
+    memcpy(c->cap_start_snapshot, vm->cap_start, sizeof(size_t) * MAX_CAPS);
+    memcpy(c->cap_end_snapshot, vm->cap_end, sizeof(size_t) * MAX_CAPS);
     c->var_count_snapshot = vm->var_count;
+    SNOBOL_LOG("vm_push_choice: top=%zu, ip=%zu, pos=%zu", vm->choices_top, ip, pos);
 }
 
 bool vm_pop_choice(VM *vm) {
-    if (vm->choices_top == 0) return false;
+    if (!vm->choices || vm->choices_top == 0) return false;
     vm->choices_top--;
     struct choice *c = &vm->choices[vm->choices_top];
     vm->ip = c->ip;
     vm->pos = c->pos;
-    memcpy(vm->cap_start, c->cap_start_snapshot, sizeof(vm->cap_start));
-    memcpy(vm->cap_end, c->cap_end_snapshot, sizeof(vm->cap_end));
+    memcpy(vm->cap_start, c->cap_start_snapshot, sizeof(size_t) * MAX_CAPS);
+    memcpy(vm->cap_end, c->cap_end_snapshot, sizeof(size_t) * MAX_CAPS);
     vm->var_count = c->var_count_snapshot;
+    SNOBOL_LOG("vm_pop_choice: top=%zu, ip=%zu, pos=%zu", vm->choices_top, vm->ip, vm->pos);
     return true;
 }
 
-/* execute VM */
 bool vm_exec(VM *vm) {
     vm->ip = 0;
     vm->pos = 0;
-    vm->choices = NULL;
-    vm->choices_cap = 0;
+#ifdef STANDALONE_BUILD
+    vm->choices = malloc(MAX_CHOICES * sizeof(struct choice));
+#else
+    vm->choices = emalloc(MAX_CHOICES * sizeof(struct choice));
+#endif
+    if (!vm->choices) {
+        SNOBOL_LOG("vm_exec: FAILED to allocate choices");
+        return false;
+    }
     vm->choices_top = 0;
+    SNOBOL_LOG("vm_exec: START, choices=%p", (void*)vm->choices);
 
     while (1) {
         if (vm->ip >= vm->bc_len) {
-            /* no more instructions => fail */
             if (!vm_pop_choice(vm)) {
-                if (vm->choices) efree(vm->choices);
+                if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                    free(vm->choices); 
+#else
+                    efree(vm->choices);
+#endif
+                    vm->choices = NULL; 
+                }
+                SNOBOL_LOG("vm_exec: FAIL (end of bytecode)");
                 return false;
             }
             continue;
         }
+        
+        size_t current_ip = vm->ip;
         uint8_t op = vm->bc[vm->ip++];
+        
+        /* SNOBOL_LOG("  TRACE ip=%zu, op=%u, pos=%zu", current_ip, (unsigned)op, vm->pos); */
 
         switch (op) {
             case OP_ACCEPT:
-                if (vm->choices) efree(vm->choices);
+                if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                    free(vm->choices); 
+#else
+                    efree(vm->choices);
+#endif
+                    vm->choices = NULL; 
+                }
+                SNOBOL_LOG("vm_exec: SUCCESS (OP_ACCEPT)");
                 return true;
 
             case OP_FAIL:
                 if (!vm_pop_choice(vm)) {
-                    if (vm->choices) efree(vm->choices);
+                    if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                        free(vm->choices); 
+#else
+                        efree(vm->choices);
+#endif
+                        vm->choices = NULL; 
+                    }
+                    SNOBOL_LOG("vm_exec: FAIL (OP_FAIL)");
                     return false;
                 }
                 break;
 
             case OP_JMP: {
-                uint32_t tgt = read_u32(vm->bc, &vm->ip);
+                uint32_t tgt = read_u32(vm->bc, vm->bc_len, &vm->ip);
                 vm->ip = (size_t)tgt;
                 break;
             }
 
             case OP_SPLIT: {
-                uint32_t a = read_u32(vm->bc, &vm->ip);
-                uint32_t b = read_u32(vm->bc, &vm->ip);
-                /* push continuation to b, continue at a */
+                uint32_t a = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                uint32_t b = read_u32(vm->bc, vm->bc_len, &vm->ip);
                 vm_push_choice(vm, (size_t)b, vm->pos);
                 vm->ip = (size_t)a;
                 break;
             }
 
             case OP_LIT: {
-                uint32_t off = read_u32(vm->bc, &vm->ip);
-                uint32_t len = read_u32(vm->bc, &vm->ip);
-
-                /* Skip past the inline literal data */
+                uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
                 vm->ip += len;
-
-                if (len <= vm->len - vm->pos &&
-                    memcmp(vm->s + vm->pos, vm->bc + off, len) == 0) {
+                if (len <= vm->len - vm->pos && memcmp(vm->s + vm->pos, vm->bc + off, len) == 0) {
                     vm->pos += len;
                 } else {
                     if (!vm_pop_choice(vm)) {
-                        if (vm->choices) efree(vm->choices);
+                        if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                            free(vm->choices); 
+#else
+                            efree(vm->choices);
+#endif
+                            vm->choices = NULL; 
+                        }
                         return false;
                     }
                 }
@@ -175,40 +218,70 @@ bool vm_exec(VM *vm) {
             }
 
             case OP_ANY: {
-                uint16_t set_id = read_u16(vm->bc, &vm->ip);
+                uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint32_t cp; int bytes;
                 if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) {
                     if (!vm_pop_choice(vm)) {
-                        if (vm->choices) efree(vm->choices);
+                        if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                            free(vm->choices); 
+#else
+                            efree(vm->choices);
+#endif
+                            vm->choices = NULL; 
+                        }
                         return false;
                     }
                 } else {
-                    /* Only support ASCII membership via bitmaps for fast path.
-                       If cp>127, treat as match (ANY means any codepoint) */
-                    if (cp <= 127) {
+                    if (set_id == 0) {
+                        vm->pos += bytes;
+                    } else if (cp <= 127) {
                         const uint8_t *bm = get_bitmap(vm, set_id);
                         if (bm && bitmap_contains(bm, (unsigned char)cp)) {
                             vm->pos += bytes;
                         } else {
                             if (!vm_pop_choice(vm)) {
-                                if (vm->choices) efree(vm->choices);
+                                if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                                    free(vm->choices); 
+#else
+                                    efree(vm->choices);
+#endif
+                                    vm->choices = NULL; 
+                                }
                                 return false;
                             }
                         }
                     } else {
-                        /* ANY: accept any codepoint */
-                        vm->pos += bytes;
+                        if (!vm_pop_choice(vm)) {
+                            if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                                free(vm->choices); 
+#else
+                                efree(vm->choices);
+#endif
+                                vm->choices = NULL; 
+                            }
+                            return false;
+                        }
                     }
                 }
                 break;
             }
 
             case OP_NOTANY: {
-                uint16_t set_id = read_u16(vm->bc, &vm->ip);
+                uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint32_t cp; int bytes;
                 if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) {
                     if (!vm_pop_choice(vm)) {
-                        if (vm->choices) efree(vm->choices);
+                        if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                            free(vm->choices); 
+#else
+                            efree(vm->choices);
+#endif
+                            vm->choices = NULL; 
+                        }
                         return false;
                     }
                 } else {
@@ -216,7 +289,14 @@ bool vm_exec(VM *vm) {
                         const uint8_t *bm = get_bitmap(vm, set_id);
                         if (bm && bitmap_contains(bm, (unsigned char)cp)) {
                             if (!vm_pop_choice(vm)) {
-                                if (vm->choices) efree(vm->choices);
+                                if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                                    free(vm->choices); 
+#else
+                                    efree(vm->choices);
+#endif
+                                    vm->choices = NULL; 
+                                }
                                 return false;
                             }
                         } else {
@@ -230,33 +310,45 @@ bool vm_exec(VM *vm) {
             }
 
             case OP_SPAN: {
-                uint16_t set_id = read_u16(vm->bc, &vm->ip);
-                /* require at least 1 char from set */
+                uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint32_t cp; int bytes;
                 if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) {
                     if (!vm_pop_choice(vm)) {
-                        if (vm->choices) efree(vm->choices);
+                        if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                            free(vm->choices); 
+#else
+                            efree(vm->choices);
+#endif
+                            vm->choices = NULL; 
+                        }
                         return false;
                     }
                     break;
                 }
+                const uint8_t *bm = get_bitmap(vm, set_id);
                 if (cp <= 127) {
-                    const uint8_t *bm = get_bitmap(vm, set_id);
                     if (!bm || !bitmap_contains(bm, (unsigned char)cp)) {
                         if (!vm_pop_choice(vm)) {
-                            if (vm->choices) efree(vm->choices);
+                            if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                                free(vm->choices); 
+#else
+                                efree(vm->choices);
+#endif
+                                vm->choices = NULL; 
+                            }
                             return false;
                         }
                         break;
                     }
                 }
                 vm->pos += bytes;
-                /* consume more greedily */
                 while (1) {
                     if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) break;
                     if (cp <= 127) {
-                        const uint8_t *bm = get_bitmap(vm, set_id);
-                        if (!bm || !bitmap_contains(bm, (unsigned char)cp)) break;
+                        const uint8_t *bm2 = get_bitmap(vm, set_id);
+                        if (!bm2 || !bitmap_contains(bm2, (unsigned char)cp)) break;
                     }
                     vm->pos += bytes;
                 }
@@ -264,46 +356,51 @@ bool vm_exec(VM *vm) {
             }
 
             case OP_BREAK: {
-                uint16_t set_id = read_u16(vm->bc, &vm->ip);
+                uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint32_t cp; int bytes;
+                const uint8_t *bm = get_bitmap(vm, set_id);
                 while (1) {
                     if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) break;
                     if (cp <= 127) {
-                        const uint8_t *bm = get_bitmap(vm, set_id);
-                        if (bm && bitmap_contains(bm, (unsigned char)cp)) {
-                            break; /* stop BEFORE this char (do not consume) */
-                        }
+                        if (bm && bitmap_contains(bm, (unsigned char)cp)) break;
                     }
-                    vm->pos += bytes; /* consume */
+                    vm->pos += bytes;
                 }
                 break;
             }
 
             case OP_CAP_START: {
-                uint8_t r = read_u8(vm->bc, &vm->ip);
-                if (r < MAX_CAPS) vm->cap_start[r] = vm->pos;
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                if (r < MAX_CAPS) {
+                    vm->cap_start[r] = vm->pos;
+                    SNOBOL_LOG("OP_CAP_START r=%u, pos=%zu", r, vm->pos);
+                }
                 break;
             }
 
             case OP_CAP_END: {
-                uint8_t r = read_u8(vm->bc, &vm->ip);
-                if (r < MAX_CAPS) vm->cap_end[r] = vm->pos;
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                if (r < MAX_CAPS) {
+                    vm->cap_end[r] = vm->pos;
+                    SNOBOL_LOG("OP_CAP_END r=%u, pos=%zu", r, vm->pos);
+                }
                 break;
             }
 
             case OP_ASSIGN: {
-                uint16_t var = read_u16(vm->bc, &vm->ip);
-                uint8_t r = read_u8(vm->bc, &vm->ip);
+                uint16_t var = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 if (var < MAX_VARS && r < MAX_CAPS) {
-                    if (var >= vm->var_count) vm->var_count = var + 1;
+                    if (var >= vm->var_count) vm->var_count = (size_t)var + 1;
                     vm->var_start[var] = vm->cap_start[r];
                     vm->var_end[var] = vm->cap_end[r];
+                    SNOBOL_LOG("OP_ASSIGN var=%u, r=%u, [%zu, %zu]", var, r, vm->var_start[var], vm->var_end[var]);
                 }
                 break;
             }
 
             case OP_LEN: {
-                uint32_t n = read_u32(vm->bc, &vm->ip);
+                uint32_t n = read_u32(vm->bc, vm->bc_len, &vm->ip);
                 size_t p = vm->pos;
                 uint32_t i;
                 for (i = 0; i < n; ++i) {
@@ -313,7 +410,14 @@ bool vm_exec(VM *vm) {
                 }
                 if (i != n) {
                     if (!vm_pop_choice(vm)) {
-                        if (vm->choices) efree(vm->choices);
+                        if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                            free(vm->choices); 
+#else
+                            efree(vm->choices);
+#endif
+                            vm->choices = NULL; 
+                        }
                         return false;
                     }
                 } else {
@@ -323,38 +427,64 @@ bool vm_exec(VM *vm) {
             }
 
             case OP_EVAL: {
-                uint16_t fn = read_u16(vm->bc, &vm->ip);
-                uint8_t r = read_u8(vm->bc, &vm->ip);
+                uint16_t fn = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 if (r >= MAX_CAPS) {
                     if (!vm_pop_choice(vm)) {
-                        if (vm->choices) efree(vm->choices);
+                        if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                                free(vm->choices); 
+#else
+                                efree(vm->choices);
+#endif
+                            vm->choices = NULL; 
+                        }
                         return false;
                     }
                     break;
                 }
                 size_t a = vm->cap_start[r];
                 size_t b = vm->cap_end[r];
-                bool ok = true;
-                if (vm->eval_fn) ok = vm->eval_fn((int)fn, vm->s, a, b, vm->eval_udata);
-                if (!ok) {
-                    if (!vm_pop_choice(vm)) {
-                        if (vm->choices) efree(vm->choices);
-                        return false;
+                if (vm->eval_fn) {
+                    if (!vm->eval_fn((int)fn, vm->s, a, b, vm->eval_udata)) {
+                        if (!vm_pop_choice(vm)) {
+                            if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                                free(vm->choices); 
+#else
+                                efree(vm->choices);
+#endif
+                                vm->choices = NULL; 
+                            }
+                            return false;
+                        }
                     }
                 }
                 break;
             }
 
             default:
-                /* unknown op */
                 if (!vm_pop_choice(vm)) {
-                    if (vm->choices) efree(vm->choices);
+                    if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                        free(vm->choices); 
+#else
+                        efree(vm->choices);
+#endif
+                        vm->choices = NULL; 
+                    }
                     return false;
                 }
                 break;
         }
     }
-    /* unreachable */
-    if (vm->choices) efree(vm->choices);
+    if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+        free(vm->choices); 
+#else
+        efree(vm->choices);
+#endif
+        vm->choices = NULL; 
+    }
     return false;
 }

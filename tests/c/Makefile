@@ -2,7 +2,9 @@
 
 CC = gcc
 # Add defines to map PHP memory functions to standard C functions
-CFLAGS = -std=c2x -Wall -Wextra -I../../snobol4-php -g -O0 -Derealloc=realloc -Defree=free -Demalloc=malloc -Destrndup=strndup
+CFLAGS = -std=c2x -Wall -Wextra -I$(SRC_DIR) -g -O0 \
+         -Derealloc=realloc -Defree=free -Demalloc=malloc -Destrndup=strndup \
+         -DSTANDALONE_BUILD
 
 # Test sources
 TEST_SOURCES = test_runner.c test_vm.c

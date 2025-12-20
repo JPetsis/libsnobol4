@@ -95,21 +95,19 @@ de ./dev/build_in_ddev.sh
 
 ### Making Changes to C Code
 
-If you modify files in `snobol4-php/`, rebuild the extension:
+If you modify files in `snobol4-php/`, rebuild and **reinstall** the extension:
 
 ```bash
-# Preferred: use Makefile
+# Preferred: use Makefile from host
 make build
-
-# Or explicitly inside DDEV
-./dev/build_in_ddev.sh
+make install
+ddev restart  # Crucial to clear PHP process-level caching
 ```
 
-Under the hood, the DDEV hook and `make build` will:
-
-- Copy `snobol4-php/` to `/tmp/snobol_build` in the web container.
-- Run `phpize`, `./configure`, `make`.
-- Install `snobol.so` into the PHP extension directory.
+**Crucial Note on Reloading:** Simply running `make build` updates the binary in a temporary directory. You **must** run
+`make install` to copy it to the PHP extension directory and `ddev restart` to ensure that both the CLI and FPM
+processes reload the new shared object. Failing to restart can lead to "stale code" bugs where your changes appear to
+have no effect.
 
 ### Running Tests
 
@@ -159,6 +157,30 @@ In addition to automated tests, you can experiment using the example scripts und
 
 ddev exec php public/test.php
 ```
+
+## Technical Guidelines
+
+### Memory Management
+
+This is a PHP extension; memory management is critical to prevent `zend_mm_heap corrupted` errors.
+
+- **Use Zend Allocators:** For all memory that will be associated with PHP objects or returned to PHP, you **must** use
+  `emalloc`, `efree`, `erealloc`, and `estrndup`. These allocators are tracked by PHP's memory manager.
+- **Avoid standard `malloc`/`free`:** Only use standard C allocators for internal, short-lived buffers that are
+  completely invisible to the Zend engine and are guaranteed to be freed before returning control to PHP.
+- **Object Lifecycle:** Ensure that any bytecode or internal buffers associated with a `Snobol\Pattern` object are
+  correctly freed in the `free_obj` handler.
+
+### Debugging & Logging
+
+The extension includes a built-in logging mechanism for development:
+
+- **Logging Macro:** Use `SNOBOL_LOG("format", ...)` in C code. It automatically includes the filename and line number.
+- **Log Location:** Logs are written to `/var/www/html/snobol_debug.log` inside the container.
+- **Real-time Tracing:** You can watch the logs while running tests:
+  ```bash
+  ddev exec tail -f /var/www/html/snobol_debug.log
+  ```
 
 ## Coding Standards
 

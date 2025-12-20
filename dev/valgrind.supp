@@ -1,0 +1,17 @@
+{
+   php_core_leaks
+   Memcheck:Leak
+   match-leak-kinds: all
+   obj:*/php*
+}
+{
+   php_core_cond
+   Memcheck:Cond
+   obj:*/php*
+}
+{
+   php_core_value8
+   Memcheck:Value8
+   obj:*/php*
+}
+

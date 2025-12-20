@@ -1,8 +1,8 @@
-.PHONY: help build test clean install
+.PHONY: help build test clean install test-valgrind build-asan test-asan
 
 # Detect if we're in DDEV
 DDEV := $(shell command -v ddev 2> /dev/null)
-IN_DDEV := $(shell test -d /var/www/html && echo 1 || echo 0)
+IN_DDEV := $(if $(IS_DDEV_PROJECT),1,0)
 
 help:
 	@echo "SNOBOL4 Development Makefile"
@@ -13,6 +13,9 @@ help:
 	@echo "  test     - Run C and PHP unit tests"
 	@echo "  clean    - Remove build artifacts and test binaries"
 	@echo "  install  - Install and enable the snobol extension"
+	@echo "  test-valgrind - Run PHP tests under Valgrind"
+	@echo "  build-asan - Build extension with AddressSanitizer"
+	@echo "  test-asan - Run tests with AddressSanitizer enabled"
 	@echo ""
 	@echo "Environment detection:"
 ifeq ($(IN_DDEV),1)
@@ -28,10 +31,10 @@ ifeq ($(IN_DDEV),1)
 	@echo "Building inside DDEV container..."
 	@rm -rf /tmp/snobol_build
 	@mkdir -p /tmp/snobol_build
-	@cp -r snobol4-php/* /tmp/snobol_build/
+	@cp -rf /var/www/html/snobol4-php/. /tmp/snobol_build/
 	@cd /tmp/snobol_build && \
 		phpize && \
-		./configure && \
+		./configure --enable-snobol && \
 		$(MAKE)
 	@echo "Extension built successfully in /tmp/snobol_build/"
 	@echo "Run 'make install' to install the extension"
@@ -41,9 +44,14 @@ else ifdef DDEV
 	@ddev exec make build
 else
 	@echo "Building in native environment..."
+	@echo "Installing valgrind for native builds..."
+	@sudo apt-get update && sudo apt-get install -y valgrind || \
+		yum install -y valgrind || \
+		brew install valgrind || \
+		echo "Warning: Could not install valgrind automatically. Please install manually."
 	@cd snobol4-php && \
 		phpize && \
-		./configure && \
+		./configure --enable-snobol && \
 		$(MAKE)
 	@echo "Build complete!"
 endif
@@ -120,3 +128,46 @@ else
 	@echo "Extension installed! Add 'extension=snobol.so' to your php.ini to enable."
 endif
 
+test-valgrind:
+ifeq ($(IN_DDEV),1)
+	@./dev/valgrind_phpunit.sh
+else ifdef DDEV
+	@ddev exec make test-valgrind
+else
+	@./dev/valgrind_phpunit.sh
+endif
+
+build-asan:
+ifeq ($(IN_DDEV),1)
+	@echo "Building with ASan inside DDEV..."
+	@rm -rf /tmp/snobol_build
+	@mkdir -p /tmp/snobol_build
+	@cp -rf /var/www/html/snobol4-php/. /tmp/snobol_build/
+	@cd /tmp/snobol_build && \
+		phpize && \
+		./configure --enable-snobol CFLAGS="-fsanitize=address -fno-omit-frame-pointer -g" LDFLAGS="-fsanitize=address" && \
+		$(MAKE)
+	@echo "ASan build complete. Run 'make install' to install."
+else ifdef DDEV
+	@ddev exec make build-asan
+else
+	@echo "Building with ASan natively..."
+	@cd snobol4-php && \
+		phpize && \
+		./configure --enable-snobol CFLAGS="-fsanitize=address -fno-omit-frame-pointer -g" LDFLAGS="-fsanitize=address" && \
+		$(MAKE)
+endif
+
+test-asan:
+ifeq ($(IN_DDEV),1)
+	@echo "Running tests with ASan..."
+	@export USE_ZEND_ALLOC=0 && \
+	 export ASAN_OPTIONS=detect_leaks=0 && \
+	 export LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libasan.so.8 && \
+	 $(MAKE) test
+else ifdef DDEV
+	@ddev exec make test-asan
+else
+	@echo "Running tests with ASan..."
+	@export USE_ZEND_ALLOC=0 && $(MAKE) test
+endif

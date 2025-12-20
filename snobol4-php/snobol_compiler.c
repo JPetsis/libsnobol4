@@ -1,8 +1,40 @@
 #include "snobol_vm.h"      /* MUST come before snobol_compiler.h to get CHARCLASS_BITMAP_BYTES */
 #include "snobol_compiler.h"
+
+#ifndef STANDALONE_BUILD
 #include "php.h"
+#endif
+
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <time.h>
+#include <stdarg.h>
+
+static inline void snobol_log_impl(const char *file, int line, const char *fmt, ...) {
+    FILE *f = fopen("/var/www/html/snobol_debug.log", "a");
+    if (f) {
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+        char ts[32];
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
+        fprintf(f, "[%s] [%s:%d] ", ts, file, line);
+        va_list args;
+        va_start(args, fmt);
+        vfprintf(f, fmt, args);
+        va_end(args);
+        fprintf(f, "\n");
+        fflush(f);
+        fclose(f);
+    }
+}
+#define SNOBOL_LOG(fmt, ...) snobol_log_impl(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
+
+#ifdef STANDALONE_BUILD
+#define emalloc malloc
+#define efree free
+#define erealloc realloc
+#endif
 
 /* Minimal dynamic code buffer */
 typedef struct {
@@ -89,6 +121,7 @@ static int emit_lit_bytes(CodeBuf *c, const char *s, size_t len) {
     return 0;
 }
 
+#ifndef STANDALONE_BUILD
 /* Forward */
 static int emit_node(zval *node, CodeBuf *c);
 
@@ -104,8 +137,7 @@ static int emit_concat(zval *parts, CodeBuf *c) {
             break;
         }
     } ZEND_HASH_FOREACH_END();
-    if (result != 0) return result;
-    return 0;
+    return result;
 }
 
 /* alt */
@@ -162,7 +194,6 @@ static int emit_arbno(zval *sub, CodeBuf *c) {
 static int emit_span(zval *set_str, CodeBuf *c) {
     if (!set_str || Z_TYPE_P(set_str) != IS_STRING) return -1;
     zend_string *zs = Z_STR_P(set_str);
-    if (!zs) return -1;
     int setid = add_or_get_charclass(ZSTR_VAL(zs), ZSTR_LEN(zs));
     cb_emit_u8(c, OP_SPAN); cb_emit_u16(c, (uint16_t)setid);
     return 0;
@@ -186,7 +217,6 @@ static int emit_notany(zval *set_str, CodeBuf *c) {
 /* cap/assign/len/eval */
 static int emit_cap(zval *reg_zv, zval *sub, CodeBuf *c) {
     if (!reg_zv || Z_TYPE_P(reg_zv) != IS_LONG) return -1;
-    if (!sub) return -1;
     long reg = Z_LVAL_P(reg_zv);
     cb_emit_u8(c, OP_CAP_START); cb_emit_u8(c, (uint8_t)reg);
     if (emit_node(sub, c) != 0) return -1;
@@ -194,8 +224,7 @@ static int emit_cap(zval *reg_zv, zval *sub, CodeBuf *c) {
     return 0;
 }
 static int emit_assign(zval *var_zv, zval *reg_zv, CodeBuf *c) {
-    if (Z_TYPE_P(var_zv) != IS_LONG) return -1;
-    if (Z_TYPE_P(reg_zv) != IS_LONG) return -1;
+    if (Z_TYPE_P(var_zv) != IS_LONG || Z_TYPE_P(reg_zv) != IS_LONG) return -1;
     long var = Z_LVAL_P(var_zv);
     long reg = Z_LVAL_P(reg_zv);
     cb_emit_u8(c, OP_ASSIGN); cb_emit_u16(c, (uint16_t)var); cb_emit_u8(c, (uint8_t)reg);
@@ -215,7 +244,6 @@ static int emit_eval(zval *fn_zv, zval *reg_zv, CodeBuf *c) {
     return 0;
 }
 
-/* emit_node */
 static int emit_node(zval *node, CodeBuf *c) {
     if (Z_TYPE_P(node) != IS_ARRAY) return -1;
     zval *type_zv = zend_hash_str_find(Z_ARRVAL_P(node), "type", sizeof("type")-1);
@@ -240,7 +268,6 @@ static int emit_node(zval *node, CodeBuf *c) {
     }
     if (zend_string_equals_literal(type, "span")) {
         zval *set = zend_hash_str_find(Z_ARRVAL_P(node), "set", sizeof("set")-1);
-        if (!set) return -1;
         return emit_span(set, c);
     }
     if (zend_string_equals_literal(type, "break")) {
@@ -261,7 +288,6 @@ static int emit_node(zval *node, CodeBuf *c) {
     if (zend_string_equals_literal(type, "cap")) {
         zval *reg = zend_hash_str_find(Z_ARRVAL_P(node), "reg", sizeof("reg")-1);
         zval *sub = zend_hash_str_find(Z_ARRVAL_P(node), "sub", sizeof("sub")-1);
-        if (!reg || !sub) return -1;
         return emit_cap(reg, sub, c);
     }
     if (zend_string_equals_literal(type, "assign")) {
@@ -282,37 +308,53 @@ static int emit_node(zval *node, CodeBuf *c) {
 }
 
 int compile_ast_to_bytecode(zval *ast, uint8_t **out_bc, size_t *out_len) {
-    /* Clean up any previous compilation state */
+    SNOBOL_LOG("compile_ast_to_bytecode START");
     free_charclass_list();
-
     CodeBuf cb;
     cb_init(&cb);
-
     if (emit_node(ast, &cb) != 0) {
+        SNOBOL_LOG("compile_ast_to_bytecode FAILED at emit_node");
         cb_free(&cb);
         free_charclass_list();
         return -1;
     }
-
     cb_emit_u8(&cb, OP_ACCEPT);
+    
+    CCEntry *rev = NULL;
+    for (CCEntry *it = charclass_head; it != NULL; ) {
+        CCEntry *next = it->next;
+        it->next = rev;
+        rev = it;
+        it = next;
+    }
+    charclass_head = rev;
 
-    /* append charclass bitmaps (head is LIFO) */
     for (CCEntry *it = charclass_head; it != NULL; it = it->next) {
         cb_emit_bytes(&cb, it->bitmap, CHARCLASS_BITMAP_BYTES);
     }
-    /* append count (u32) */
     cb_emit_u32(&cb, charclass_count);
 
     uint8_t *out = emalloc(cb.len);
+    if (!out) {
+        SNOBOL_LOG("compile_ast_to_bytecode FAILED to emalloc final bc");
+        cb_free(&cb); 
+        return -1; 
+    }
     memcpy(out, cb.buf, cb.len);
     *out_bc = out;
     *out_len = cb.len;
+
+    SNOBOL_LOG("compile_ast_to_bytecode SUCCESS, bc=%p, len=%zu", (void*)out, cb.len);
 
     cb_free(&cb);
     free_charclass_list();
     return 0;
 }
+#endif
 
 void compiler_free(uint8_t *bc) {
-    if (bc) efree(bc);
+    if (bc) {
+        SNOBOL_LOG("compiler_free bc=%p", (void*)bc);
+        efree(bc);
+    }
 }
