@@ -25,7 +25,17 @@ typedef enum {
     OP_ASSIGN,    // var u16, reg u8
     OP_LEN,       // n u32 (match exactly n codepoints)
     OP_EVAL,      // fn u16, reg u8 (call back to PHP)
+    OP_ANCHOR,    // type u8 (0=start, 1=end)
+    OP_REPEAT_INIT, // loop_id u8, min u32, max u32, skip_target u32
+    OP_REPEAT_STEP, // loop_id u8, jmp_target u32
+    OP_EMIT_LIT,    // offset u32, len u32
+    OP_EMIT_REF,    // reg u8
 } OpCode;
+
+#define MAX_LOOPS 16
+
+/* Callback for emission */
+typedef void (*emit_cb)(const char *data, size_t len, void *udata);
 
 typedef struct {
     const uint8_t *bc;
@@ -46,6 +56,15 @@ typedef struct {
     size_t var_end[MAX_VARS];
     size_t var_count;
 
+    // loop counters
+    uint32_t counters[MAX_LOOPS];
+    uint32_t loop_min[MAX_LOOPS];
+    uint32_t loop_max[MAX_LOOPS];
+
+    // emit callback
+    emit_cb emit_fn;
+    void *emit_udata;
+
     // choice stack for backtracking
     struct choice {
         size_t ip;
@@ -55,6 +74,7 @@ typedef struct {
         size_t cap_start_snapshot[MAX_CAPS];
         size_t cap_end_snapshot[MAX_CAPS];
         size_t var_count_snapshot;
+        uint32_t counters_snapshot[MAX_LOOPS];
     } *choices;
     size_t choices_cap;
     size_t choices_top;

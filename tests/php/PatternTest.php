@@ -188,6 +188,89 @@ class PatternTest extends TestCase
 
         $this->assertFalse($result, "Expected false because match did not consume full string");
     }
+
+    public function testStartAnchor(): void
+    {
+        $ast = Builder::concat([Builder::anchor('start'), Builder::lit('hello')]);
+
+        $this->assertNotFalse(PatternHelper::matchOnce($ast, "hello world"));
+        $this->assertFalse(PatternHelper::matchOnce($ast, " hello world"));
+    }
+
+    public function testEndAnchor(): void
+    {
+        $ast = Builder::concat([Builder::lit('world'), Builder::anchor('end')]);
+
+        $this->assertNotFalse(PatternHelper::matchOnce($ast, "world"));
+        $this->assertFalse(PatternHelper::matchOnce($ast, "world "));
+    }
+
+    public function testBoundedRepetitionFixed(): void
+    {
+        // repeat 'a' exactly 3 times
+        $ast = Builder::repeat(Builder::lit('a'), 3, 3);
+        $result = PatternHelper::matchOnce($ast, "aaaaa");
+
+        $this->assertIsArray($result);
+        $this->assertEquals(3, $result['_match_len']);
+    }
+
+    public function testBoundedRepetitionRange(): void
+    {
+        // repeat 'a' 1 to 3 times (greedy)
+        $ast = Builder::repeat(Builder::lit('a'), 1, 3);
+
+        $result = PatternHelper::matchOnce($ast, "aaaaa");
+        $this->assertIsArray($result);
+        $this->assertEquals(3, $result['_match_len']);
+
+        $result2 = PatternHelper::matchOnce($ast, "a");
+        $this->assertIsArray($result2);
+        $this->assertEquals(1, $result2['_match_len']);
+
+        $this->assertFalse(PatternHelper::matchOnce($ast, "b"));
+    }
+
+    public function testBoundedRepetitionMinOnly(): void
+    {
+        // repeat 'a' at least 2 times
+        $ast = Builder::repeat(Builder::lit('a'), 2);
+
+        $this->assertFalse(PatternHelper::matchOnce($ast, "a"));
+
+        $result = PatternHelper::matchOnce($ast, "aaa");
+        $this->assertIsArray($result);
+        $this->assertEquals(3, $result['_match_len']);
+    }
+
+    public function testEmitLiteral(): void
+    {
+        $ast = Builder::concat([
+            Builder::lit('h'),
+            Builder::emit('H'),
+            Builder::lit('e'),
+            Builder::emit('E')
+        ]);
+
+        $result = PatternHelper::matchOnce($ast, "hello");
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('_output', $result);
+        $this->assertEquals("HE", $result['_output']);
+    }
+
+    public function testEmitRef(): void
+    {
+        $ast = Builder::concat([
+            Builder::cap(1, Builder::lit('hel')),
+            Builder::emitRef(1),
+            Builder::lit('lo')
+        ]);
+
+        $result = PatternHelper::matchOnce($ast, "hello");
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('_output', $result);
+        $this->assertEquals("hel", $result['_output']);
+    }
 }
 
 

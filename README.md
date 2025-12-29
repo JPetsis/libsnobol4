@@ -16,12 +16,14 @@ manipulation tasks.
     * **Concatenation & Alternation:** Combine patterns sequentially (`P1 P2`) or as alternatives (`P1 | P2`).
     * **Span & Break:** Match runs of characters (`SPAN('0-9')`) or scan until a set of characters.
     * **Any & NotAny:** Match single characters based on sets (`[abc]`, `[^abc]`).
-    * **Arbno:** Match an arbitrary number of repetitions (`P*`).
+  * **Arbno & Bounded Repetition:** Match arbitrary (`P*`) or fixed/ranged repetitions (`repeat(P, min, max)`).
+  * **Anchors:** Start-of-string (`^`) and end-of-string (`$`) anchors.
     * **Len:** Match specific lengths (`LEN(5)`).
 * **Captures & Assignments:**
     * Capture substrings into registers during matching (`@r1(...)`).
     * Assign captured values to variables, returned as an associative array upon successful match.
-* **Dynamic Evaluation:** Trigger PHP callbacks during the matching process for complex, logic-driven matching.
+* **Replacement & Emission:**
+    * Emit literals or captured references to an output buffer during matching for stream-based replacements.
 
 ## Requirements
 
@@ -158,6 +160,32 @@ if ($result) {
 }
 ```
 
+### Replacement & Emission
+
+You can build an output string during the matching process using `emit` operations. The `match()` method returns this
+accumulated text in the `_output` key.
+
+```php
+<?php
+use Snobol\Builder;
+use Snobol\Pattern;
+
+$patternAst = Builder::concat([
+    Builder::lit("hello "),
+    Builder::cap(1, Builder::span("a-z")),
+    Builder::emit("HELLO "),
+    Builder::emitRef(1)
+]);
+
+$pat = Pattern::compileFromAst($patternAst);
+$result = $pat->match("hello world");
+
+if ($result) {
+    // $result['_output'] will contain "HELLO world"
+    echo "Generated output: " . $result['_output'];
+}
+```
+
 ### Pattern Helper API (Convenience Methods)
 
 For common use cases, the `Snobol\PatternHelper` class provides high-level convenience methods:
@@ -199,19 +227,23 @@ $isFullMatch = PatternHelper::matchOnce("'exact'", "exact", ['full' => true]);
 
 The `Snobol\Builder` class provides static methods to construct pattern nodes:
 
-| Method                           | Description                                                                     |
-|:---------------------------------|:--------------------------------------------------------------------------------|
-| `lit(string $s)`                 | Matches the literal string `$s`.                                                |
-| `concat(array $parts)`           | Matches a sequence of patterns.                                                 |
-| `alt(array $left, array $right)` | Matches either `$left` OR `$right`.                                             |
-| `span(string $set)`              | Matches a run of characters found in `$set`.                                    |
-| `brk(string $set)`               | Matches until a character in `$set` is found.                                   |
-| `any(string $set = null)`        | Matches any single character (optionally from `$set`).                          |
-| `notany(string $set)`            | Matches any single character NOT in `$set`.                                     |
-| `len(int $n)`                    | Matches exactly `$n` characters.                                                |
-| `arbno(array $sub)`              | Matches arbitrary repetitions of the `$sub` pattern.                            |
-| `cap(int $reg, array $sub)`      | Captures the match of `$sub` into register `$reg`.                              |
-| `assign(int $var, int $reg)`     | Assigns the content of register `$reg` to output variable `$var` (key `v$var`). |
+| Method                                        | Description                                                                     |
+|:----------------------------------------------|:--------------------------------------------------------------------------------|
+| `lit(string $s)`                              | Matches the literal string `$s`.                                                |
+| `concat(array $parts)`                        | Matches a sequence of patterns.                                                 |
+| `alt(array $left, array $right)`              | Matches either `$left` OR `$right`.                                             |
+| `span(string $set)`                           | Matches a run of characters found in `$set`.                                    |
+| `brk(string $set)`                            | Matches until a character in `$set` is found.                                   |
+| `any(string $set = null)`                     | Matches any single character (optionally from `$set`).                          |
+| `notany(string $set)`                         | Matches any single character NOT in `$set`.                                     |
+| `len(int $n)`                                 | Matches exactly `$n` characters.                                                |
+| `arbno(array $sub)`                           | Matches arbitrary repetitions of the `$sub` pattern.                            |
+| `repeat(array $sub, int $min, int $max = -1)` | Matches `$sub` repeated between `$min` and `$max` times.                        |
+| `anchor(string $type)`                        | Anchors match to `'start'` or `'end'` of string.                                |
+| `cap(int $reg, array $sub)`                   | Captures the match of `$sub` into register `$reg`.                              |
+| `assign(int $var, int $reg)`                  | Assigns the content of register `$reg` to output variable `$var` (key `v$var`). |
+| `emit(string $text)`                          | Appends literal text to the `_output` buffer on match.                          |
+| `emitRef(int $reg)`                           | Appends content of register `$reg` to the `_output` buffer on match.            |
 
 ## Development
 

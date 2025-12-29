@@ -113,6 +113,24 @@ PHP_METHOD(Snobol_Pattern, compileFromAst) {
     SNOBOL_LOG("Snobol_Pattern::compileFromAst: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
 }
 
+typedef struct {
+    char *buf;
+    size_t len;
+    size_t cap;
+} EmitBuf;
+
+static void php_snobol_emit_cb(const char *data, size_t len, void *udata) {
+    EmitBuf *eb = (EmitBuf *)udata;
+    if (eb->len + len > eb->cap) {
+        size_t new_cap = eb->cap ? eb->cap * 2 : 1024;
+        while (eb->len + len > new_cap) new_cap *= 2;
+        eb->buf = erealloc(eb->buf, new_cap);
+        eb->cap = new_cap;
+    }
+    memcpy(eb->buf + eb->len, data, len);
+    eb->len += len;
+}
+
 PHP_METHOD(Snobol_Pattern, match) {
     zend_string *input;
     ZEND_PARSE_PARAMETERS_START(1,1)
@@ -128,18 +146,23 @@ PHP_METHOD(Snobol_Pattern, match) {
         RETURN_FALSE;
     }
 
+    EmitBuf eb = {NULL, 0, 0};
+
     VM vm;
     memset(&vm, 0, sizeof(VM));
     vm.bc = intern->bc;
     vm.bc_len = intern->bc_len;
     vm.s = ZSTR_VAL(input);
     vm.len = ZSTR_LEN(input);
+    vm.emit_fn = php_snobol_emit_cb;
+    vm.emit_udata = &eb;
 
     bool ok = vm_exec(&vm); 
     
     SNOBOL_LOG("Snobol_Pattern::match: VM returned %d, pos=%zu, var_count=%zu", (int)ok, vm.pos, vm.var_count);
 
     if (!ok) {
+        if (eb.buf) efree(eb.buf);
         RETURN_FALSE;
     }
 
@@ -159,6 +182,14 @@ PHP_METHOD(Snobol_Pattern, match) {
         }
     }
     add_assoc_long(return_value, "_match_len", (zend_long)vm.pos);
+    
+    if (eb.buf) {
+        add_assoc_stringl(return_value, "_output", eb.buf, eb.len);
+        efree(eb.buf);
+    } else {
+        add_assoc_string(return_value, "_output", "");
+    }
+
     SNOBOL_LOG("Snobol_Pattern::match: DONE");
 }
 

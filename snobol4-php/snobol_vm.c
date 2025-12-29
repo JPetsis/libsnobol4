@@ -100,6 +100,7 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
     memcpy(c->cap_start_snapshot, vm->cap_start, sizeof(size_t) * MAX_CAPS);
     memcpy(c->cap_end_snapshot, vm->cap_end, sizeof(size_t) * MAX_CAPS);
     c->var_count_snapshot = vm->var_count;
+    memcpy(c->counters_snapshot, vm->counters, sizeof(uint32_t) * MAX_LOOPS);
     SNOBOL_LOG("vm_push_choice: top=%zu, ip=%zu, pos=%zu", vm->choices_top, ip, pos);
 }
 
@@ -112,6 +113,7 @@ bool vm_pop_choice(VM *vm) {
     memcpy(vm->cap_start, c->cap_start_snapshot, sizeof(size_t) * MAX_CAPS);
     memcpy(vm->cap_end, c->cap_end_snapshot, sizeof(size_t) * MAX_CAPS);
     vm->var_count = c->var_count_snapshot;
+    memcpy(vm->counters, c->counters_snapshot, sizeof(uint32_t) * MAX_LOOPS);
     SNOBOL_LOG("vm_pop_choice: top=%zu, ip=%zu, pos=%zu", vm->choices_top, vm->ip, vm->pos);
     return true;
 }
@@ -119,6 +121,7 @@ bool vm_pop_choice(VM *vm) {
 bool vm_exec(VM *vm) {
     vm->ip = 0;
     vm->pos = 0;
+    memset(vm->counters, 0, sizeof(vm->counters));
 #ifdef STANDALONE_BUILD
     vm->choices = malloc(MAX_CHOICES * sizeof(struct choice));
 #else
@@ -458,6 +461,95 @@ bool vm_exec(VM *vm) {
                             }
                             return false;
                         }
+                    }
+                }
+                break;
+            }
+
+            case OP_ANCHOR: {
+                uint8_t type = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                bool ok = false;
+                if (type == 0) { // start
+                    if (vm->pos == 0) ok = true;
+                } else if (type == 1) { // end
+                    if (vm->pos == vm->len) ok = true;
+                }
+                if (!ok) {
+                    if (!vm_pop_choice(vm)) {
+                        if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+                            free(vm->choices); 
+#else
+                            efree(vm->choices);
+#endif
+                            vm->choices = NULL; 
+                        }
+                        return false;
+                    }
+                }
+                break;
+            }
+
+            case OP_REPEAT_INIT: {
+                uint8_t loop_id = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint32_t min = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                uint32_t max = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                uint32_t skip = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                if (loop_id < MAX_LOOPS) {
+                    vm->counters[loop_id] = 0;
+                    vm->loop_min[loop_id] = min;
+                    vm->loop_max[loop_id] = max;
+                    SNOBOL_LOG("OP_REPEAT_INIT id=%u, min=%u, max=%u, skip=%u", loop_id, min, max, skip);
+                    if (min == 0) {
+                        // Greedy: try body first, but can skip.
+                        vm_push_choice(vm, (size_t)skip, vm->pos);
+                    }
+                }
+                break;
+            }
+
+            case OP_REPEAT_STEP: {
+                uint8_t loop_id = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint32_t target = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                if (loop_id < MAX_LOOPS) {
+                    vm->counters[loop_id]++;
+                    uint32_t count = vm->counters[loop_id];
+                    uint32_t min = vm->loop_min[loop_id];
+                    uint32_t max = vm->loop_max[loop_id];
+                    SNOBOL_LOG("OP_REPEAT_STEP id=%u, count=%u, min=%u, max=%u", loop_id, count, min, max);
+                    
+                    if (count < min) {
+                        // MUST repeat
+                        vm->ip = (size_t)target;
+                    } else if (max == (uint32_t)-1 || count < max) {
+                        // CAN repeat (greedy)
+                        vm_push_choice(vm, vm->ip, vm->pos);
+                        vm->ip = (size_t)target;
+                    } else {
+                        // MUST stop
+                        // continue (vm->ip is after STEP)
+                    }
+                }
+                break;
+            }
+
+            case OP_EMIT_LIT: {
+                uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                vm->ip += len;
+                if (vm->emit_fn) {
+                    vm->emit_fn((const char *)vm->bc + off, (size_t)len, vm->emit_udata);
+                }
+                break;
+            }
+
+            case OP_EMIT_REF: {
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                if (r < MAX_CAPS && vm->emit_fn) {
+                    size_t start = vm->cap_start[r];
+                    size_t end = vm->cap_end[r];
+                    if (end >= start && end <= vm->len) {
+                        vm->emit_fn(vm->s + start, end - start, vm->emit_udata);
                     }
                 }
                 break;

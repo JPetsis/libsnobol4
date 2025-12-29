@@ -75,6 +75,7 @@ typedef struct cc_entry {
 } CCEntry;
 static CCEntry *charclass_head = NULL;
 static uint32_t charclass_count = 0;
+static uint8_t next_loop_id = 0;
 
 static void free_charclass_list(void) {
     CCEntry *e = charclass_head;
@@ -252,6 +253,67 @@ static int emit_eval(zval *fn_zv, zval *reg_zv, CodeBuf *c) {
     return 0;
 }
 
+static int emit_anchor(zval *type_zv, CodeBuf *c) {
+    if (!type_zv || Z_TYPE_P(type_zv) != IS_STRING) return -1;
+    uint8_t t = 0;
+    if (zend_string_equals_literal(Z_STR_P(type_zv), "start")) t = 0;
+    else if (zend_string_equals_literal(Z_STR_P(type_zv), "end")) t = 1;
+    else return -1;
+    cb_emit_u8(c, OP_ANCHOR); cb_emit_u8(c, t);
+    return 0;
+}
+
+static int emit_repeat(zval *sub, zval *min_zv, zval *max_zv, CodeBuf *c) {
+    if (next_loop_id >= MAX_LOOPS) return -1;
+    uint8_t loop_id = next_loop_id++;
+    uint32_t min = (uint32_t)Z_LVAL_P(min_zv);
+    uint32_t max = (uint32_t)Z_LVAL_P(max_zv);
+
+    size_t init_pos = cb_pos(c);
+    cb_emit_u8(c, OP_REPEAT_INIT);
+    cb_emit_u8(c, loop_id);
+    cb_emit_u32(c, min);
+    cb_emit_u32(c, max);
+    size_t skip_target_off = cb_pos(c);
+    cb_emit_u32(c, 0); // placeholder for skip_target
+
+    size_t body_start = cb_pos(c);
+    if (emit_node(sub, c) != 0) return -1;
+
+    cb_emit_u8(c, OP_REPEAT_STEP);
+    cb_emit_u8(c, loop_id);
+    cb_emit_u32(c, (uint32_t)body_start);
+
+    size_t done_pos = cb_pos(c);
+    // Fill skip_target
+    uint32_t v_done = (uint32_t)done_pos;
+    c->buf[skip_target_off+0] = (v_done >> 24) & 0xff;
+    c->buf[skip_target_off+1] = (v_done >> 16) & 0xff;
+    c->buf[skip_target_off+2] = (v_done >> 8) & 0xff;
+    c->buf[skip_target_off+3] = v_done & 0xff;
+
+    return 0;
+}
+
+static int emit_emit(zval *node, CodeBuf *c) {
+    zval *text = zend_hash_str_find(Z_ARRVAL_P(node), "text", sizeof("text")-1);
+    zval *reg = zend_hash_str_find(Z_ARRVAL_P(node), "reg", sizeof("reg")-1);
+    if (text && Z_TYPE_P(text) == IS_STRING) {
+        zend_string *zs = Z_STR_P(text);
+        size_t off_of_payload = cb_pos(c) + 1 + 4 + 4;
+        cb_emit_u8(c, OP_EMIT_LIT);
+        cb_emit_u32(c, (uint32_t)off_of_payload);
+        cb_emit_u32(c, (uint32_t)ZSTR_LEN(zs));
+        cb_emit_bytes(c, (const uint8_t*)ZSTR_VAL(zs), ZSTR_LEN(zs));
+        return 0;
+    } else if (reg && Z_TYPE_P(reg) == IS_LONG) {
+        cb_emit_u8(c, OP_EMIT_REF);
+        cb_emit_u8(c, (uint8_t)Z_LVAL_P(reg));
+        return 0;
+    }
+    return -1;
+}
+
 static int emit_node(zval *node, CodeBuf *c) {
     if (Z_TYPE_P(node) != IS_ARRAY) return -1;
     zval *type_zv = zend_hash_str_find(Z_ARRVAL_P(node), "type", sizeof("type")-1);
@@ -313,12 +375,27 @@ static int emit_node(zval *node, CodeBuf *c) {
         zval *reg = zend_hash_str_find(Z_ARRVAL_P(node), "reg", sizeof("reg")-1);
         return emit_eval(fn, reg, c);
     }
+    if (zend_string_equals_literal(type, "anchor")) {
+        zval *atype = zend_hash_str_find(Z_ARRVAL_P(node), "atype", sizeof("atype")-1);
+        return emit_anchor(atype, c);
+    }
+    if (zend_string_equals_literal(type, "repeat")) {
+        zval *sub = zend_hash_str_find(Z_ARRVAL_P(node), "sub", sizeof("sub")-1);
+        zval *min = zend_hash_str_find(Z_ARRVAL_P(node), "min", sizeof("min")-1);
+        zval *max = zend_hash_str_find(Z_ARRVAL_P(node), "max", sizeof("max")-1);
+        if (!sub || !min || !max) return -1;
+        return emit_repeat(sub, min, max, c);
+    }
+    if (zend_string_equals_literal(type, "emit")) {
+        return emit_emit(node, c);
+    }
     return -1;
 }
 
 int compile_ast_to_bytecode(zval *ast, uint8_t **out_bc, size_t *out_len) {
     SNOBOL_LOG("compile_ast_to_bytecode START");
     free_charclass_list();
+    next_loop_id = 0;
     CodeBuf cb;
     cb_init(&cb);
     if (emit_node(ast, &cb) != 0) {

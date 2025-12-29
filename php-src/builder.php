@@ -44,4 +44,24 @@ class Builder {
     public static function eval(int $fn, int $reg) {
         return ['type' => 'eval', 'fn' => $fn, 'reg' => $reg];
     }
+
+    public static function anchor(string $type)
+    {
+        return ['type' => 'anchor', 'atype' => $type];
+    }
+
+    public static function repeat(array $sub, int $min, int $max = -1)
+    {
+        return ['type' => 'repeat', 'sub' => $sub, 'min' => $min, 'max' => $max];
+    }
+
+    public static function emit(string $text)
+    {
+        return ['type' => 'emit', 'text' => $text];
+    }
+
+    public static function emitRef(int $reg)
+    {
+        return ['type' => 'emit', 'reg' => $reg];
+    }
 }
