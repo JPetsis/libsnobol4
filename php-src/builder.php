@@ -9,8 +9,12 @@ class Builder {
     public static function concat(array $parts) {
         return ['type' => 'concat', 'parts' => $parts];
     }
-    public static function alt(array $left, array $right) {
-        return ['type' => 'alt', 'left' => $left, 'right' => $right];
+
+    public static function alt($left, $right)
+    {
+        $l = is_array($left) ? $left : self::lit((string) $left);
+        $r = is_array($right) ? $right : self::lit((string) $right);
+        return ['type' => 'alt', 'left' => $l, 'right' => $r];
     }
     public static function span(string $set) {
         return ['type' => 'span', 'set' => $set];
@@ -19,7 +23,7 @@ class Builder {
         return ['type' => 'break', 'set' => $set];
     }
 
-    public static function any(string $set = null)
+    public static function any(?string $set = null)
     {
         if ($set !== null) {
             return ['type' => 'any', 'set' => $set];

@@ -28,11 +28,19 @@ typedef enum {
     OP_ANCHOR,    // type u8 (0=start, 1=end)
     OP_REPEAT_INIT, // loop_id u8, min u32, max u32, skip_target u32
     OP_REPEAT_STEP, // loop_id u8, jmp_target u32
-    OP_EMIT_LIT,    // offset u32, len u32
-    OP_EMIT_REF,    // reg u8
+    OP_EMIT_LITERAL, // offset u32, len u32 (Renamed from OP_EMIT_LIT)
+    OP_EMIT_CAPTURE, // reg u8 (Renamed from OP_EMIT_REF)
+    OP_EMIT_EXPR,    // reg u8, expr_type u8 (New: for .upper(), .length() etc)
 } OpCode;
 
 #define MAX_LOOPS 16
+
+/* Generic dynamic buffer */
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} snobol_buf;
 
 /* Callback for emission */
 typedef void (*emit_cb)(const char *data, size_t len, void *udata);
@@ -61,6 +69,9 @@ typedef struct {
     uint32_t loop_min[MAX_LOOPS];
     uint32_t loop_max[MAX_LOOPS];
 
+    // output buffer
+    snobol_buf *out;
+
     // emit callback
     emit_cb emit_fn;
     void *emit_udata;
@@ -86,6 +97,13 @@ typedef struct {
 
 /* VM entry */
 bool vm_exec(VM *vm);
+bool vm_run(VM *vm);
+
+/* Buffer management */
+void snobol_buf_init(snobol_buf *b);
+void snobol_buf_append(snobol_buf *b, const char *data, size_t len);
+void snobol_buf_clear(snobol_buf *b);
+void snobol_buf_free(snobol_buf *b);
 
 /* helpers */
 void vm_push_choice(VM *vm, size_t ip, size_t pos);

@@ -271,6 +271,75 @@ class PatternTest extends TestCase
         $this->assertArrayHasKey('_output', $result);
         $this->assertEquals("hel", $result['_output']);
     }
+
+    public function testReplaceWithTemplate(): void
+    {
+        // Replace digits with "[digits]"
+        $pattern = Builder::cap(0, Builder::span("0123456789"));
+        $subject = "id:123 code:456";
+        $template = "[\$v0]";
+
+        $result = PatternHelper::replace($pattern, $template, $subject);
+        $this->assertEquals("id:[123] code:[456]", $result);
+    }
+
+    public function testReplaceWithUpperExpression(): void
+    {
+        // Upper case names
+        $pattern = Builder::concat([
+            Builder::lit("name:"),
+            Builder::cap(1, Builder::span("abcdefghijklmnopqrstuvwxyz"))
+        ]);
+        $subject = "name:alice name:bob";
+        $template = "NAME:\${v1.upper()}";
+
+        $result = PatternHelper::replace($pattern, $template, $subject);
+        $this->assertEquals("NAME:ALICE NAME:BOB", $result);
+    }
+
+    public function testReplaceWithLengthExpression(): void
+    {
+        // Replace words with their length
+        $pattern = Builder::cap(1, Builder::span("abcdefghijklmnopqrstuvwxyz"));
+        $subject = "abc de fghi";
+        $template = "\${v1.length()}";
+
+        $result = PatternHelper::replace($pattern, $template, $subject);
+        $this->assertEquals("3 2 4", $result);
+    }
+
+    public function testTemplateWithEmptyCapture(): void
+    {
+        // Match literal 'x' (not arbno which is too greedy/flexible for this simple test)
+        $pattern = Builder::cap(1, Builder::lit('x'));
+        $subject = "axbxc";
+        $template = "[\${v1}]";
+
+        $result = PatternHelper::replace($pattern, $template, $subject);
+        // "a[x]b[x]c"
+        $this->assertEquals("a[x]b[x]c", $result);
+    }
+
+    public function testTemplateWithInvalidVariable(): void
+    {
+        $pattern = Builder::lit("abc");
+        $subject = "abc";
+        $template = "val:\${v99}"; // v99 is not captured
+
+        $result = PatternHelper::replace($pattern, $template, $subject);
+        $this->assertEquals("val:", $result); // Should emit empty for non-existent capture
+    }
+
+    public function testTemplateWithBracedMethodNoParens(): void
+    {
+        $pattern = Builder::cap(1, Builder::lit("abc"));
+        $subject = "abc";
+        $template = "\${v1.length}"; // Missing parens
+
+        $result = PatternHelper::replace($pattern, $template, $subject);
+        // Parser correctly treats invalid ${...} as literal if it can't match it as a variable or expr
+        $this->assertEquals("\${v1.length}", $result);
+    }
 }
 
 

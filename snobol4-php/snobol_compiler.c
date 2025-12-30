@@ -301,13 +301,13 @@ static int emit_emit(zval *node, CodeBuf *c) {
     if (text && Z_TYPE_P(text) == IS_STRING) {
         zend_string *zs = Z_STR_P(text);
         size_t off_of_payload = cb_pos(c) + 1 + 4 + 4;
-        cb_emit_u8(c, OP_EMIT_LIT);
+        cb_emit_u8(c, OP_EMIT_LITERAL);
         cb_emit_u32(c, (uint32_t)off_of_payload);
         cb_emit_u32(c, (uint32_t)ZSTR_LEN(zs));
         cb_emit_bytes(c, (const uint8_t*)ZSTR_VAL(zs), ZSTR_LEN(zs));
         return 0;
     } else if (reg && Z_TYPE_P(reg) == IS_LONG) {
-        cb_emit_u8(c, OP_EMIT_REF);
+        cb_emit_u8(c, OP_EMIT_CAPTURE);
         cb_emit_u8(c, (uint8_t)Z_LVAL_P(reg));
         return 0;
     }
@@ -434,6 +434,102 @@ int compile_ast_to_bytecode(zval *ast, uint8_t **out_bc, size_t *out_len) {
 
     cb_free(&cb);
     free_charclass_list();
+    return 0;
+}
+
+int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, size_t *out_len) {
+    SNOBOL_LOG("compile_template_to_bytecode START: tpl='%.*s'", (int)len, tpl);
+    CodeBuf cb;
+    cb_init(&cb);
+
+    size_t i = 0;
+    while (i < len) {
+        if (tpl[i] == '$') {
+            size_t start_of_dollar = i;
+            i++;
+            if (i >= len) {
+                cb_emit_u8(&cb, OP_EMIT_LITERAL);
+                size_t off = cb_pos(&cb) + 4 + 4;
+                cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
+                break;
+            }
+            
+            bool braced = (tpl[i] == '{');
+            if (braced) i++;
+
+            if (i < len && tpl[i] == 'v') {
+                i++;
+                uint8_t reg = 0;
+                bool has_digits = false;
+                while (i < len && tpl[i] >= '0' && tpl[i] <= '9') {
+                    reg = reg * 10 + (tpl[i] - '0');
+                    i++;
+                    has_digits = true;
+                }
+                
+                if (!has_digits) {
+                    i = start_of_dollar + 1;
+                    cb_emit_u8(&cb, OP_EMIT_LITERAL);
+                    size_t off = cb_pos(&cb) + 4 + 4;
+                    cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
+                    continue;
+                }
+
+                uint8_t expr_type = 0;
+                if (braced) {
+                    if (i < len && tpl[i] == '.') {
+                        i++;
+                        if (len - i >= 7 && memcmp(tpl + i, "upper()", 7) == 0) {
+                            expr_type = 1; i += 7;
+                        } else if (len - i >= 8 && memcmp(tpl + i, "length()", 8) == 0) {
+                            expr_type = 2; i += 8;
+                        }
+                    }
+                    if (i < len && tpl[i] == '}') {
+                        i++;
+                        if (expr_type == 0) {
+                            cb_emit_u8(&cb, OP_EMIT_CAPTURE); cb_emit_u8(&cb, reg);
+                        } else {
+                            cb_emit_u8(&cb, OP_EMIT_EXPR); cb_emit_u8(&cb, reg); cb_emit_u8(&cb, expr_type);
+                        }
+                    } else {
+                        i = start_of_dollar + 1;
+                        cb_emit_u8(&cb, OP_EMIT_LITERAL);
+                        size_t off = cb_pos(&cb) + 4 + 4;
+                        cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
+                    }
+                } else {
+                    cb_emit_u8(&cb, OP_EMIT_CAPTURE); cb_emit_u8(&cb, reg);
+                }
+            } else {
+                i = start_of_dollar + 1;
+                cb_emit_u8(&cb, OP_EMIT_LITERAL);
+                size_t off = cb_pos(&cb) + 4 + 4;
+                cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
+            }
+        } else {
+            // scan literal segment
+            size_t start = i;
+            while (i < len && tpl[i] != '$') i++;
+            size_t seglen = i - start;
+            cb_emit_u8(&cb, OP_EMIT_LITERAL);
+            size_t off = cb_pos(&cb) + 4 + 4;
+            cb_emit_u32(&cb, (uint32_t)off);
+            cb_emit_u32(&cb, (uint32_t)seglen);
+            cb_emit_bytes(&cb, (const uint8_t*)tpl + start, seglen);
+        }
+    }
+
+    cb_emit_u8(&cb, OP_ACCEPT);
+
+    uint8_t *out = emalloc(cb.len);
+    if (!out) { cb_free(&cb); return -1; }
+    memcpy(out, cb.buf, cb.len);
+    *out_bc = out;
+    *out_len = cb.len;
+
+    cb_free(&cb);
+    SNOBOL_LOG("compile_template_to_bytecode SUCCESS, len=%zu", *out_len);
     return 0;
 }
 #endif

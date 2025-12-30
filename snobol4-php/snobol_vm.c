@@ -118,21 +118,62 @@ bool vm_pop_choice(VM *vm) {
     return true;
 }
 
-bool vm_exec(VM *vm) {
-    vm->ip = 0;
-    vm->pos = 0;
-    memset(vm->counters, 0, sizeof(vm->counters));
+void snobol_buf_init(snobol_buf *b) {
+    b->cap = 1024;
+#ifdef STANDALONE_BUILD
+    b->data = malloc(b->cap);
+#else
+    b->data = emalloc(b->cap);
+#endif
+    b->len = 0;
+}
+
+void snobol_buf_append(snobol_buf *b, const char *data, size_t len) {
+    if (len == 0) return;
+    if (b->len + len >= b->cap) {
+        size_t newcap = b->cap ? b->cap * 2 : 1024;
+        while (b->len + len >= newcap) newcap *= 2;
+#ifdef STANDALONE_BUILD
+        b->data = realloc(b->data, newcap);
+#else
+        b->data = erealloc(b->data, newcap);
+#endif
+        b->cap = newcap;
+    }
+    memcpy(b->data + b->len, data, len);
+    b->len += len;
+    b->data[b->len] = '\0'; // keep it null terminated for convenience
+}
+
+void snobol_buf_clear(snobol_buf *b) {
+    b->len = 0;
+    if (b->data) b->data[0] = '\0';
+}
+
+void snobol_buf_free(snobol_buf *b) {
+    if (b->data) {
+#ifdef STANDALONE_BUILD
+        free(b->data);
+#else
+        efree(b->data);
+#endif
+        b->data = NULL;
+    }
+    b->len = b->cap = 0;
+}
+
+bool vm_run(VM *vm) {
 #ifdef STANDALONE_BUILD
     vm->choices = malloc(MAX_CHOICES * sizeof(struct choice));
 #else
     vm->choices = emalloc(MAX_CHOICES * sizeof(struct choice));
 #endif
     if (!vm->choices) {
-        SNOBOL_LOG("vm_exec: FAILED to allocate choices");
+        SNOBOL_LOG("vm_run: FAILED to allocate choices");
         return false;
     }
     vm->choices_top = 0;
-    SNOBOL_LOG("vm_exec: START, choices=%p", (void*)vm->choices);
+    SNOBOL_LOG("vm_run: START, choices=%p, ip=%zu, pos=%zu", (void*)vm->choices, vm->ip, vm->pos);
 
     while (1) {
         if (vm->ip >= vm->bc_len) {
@@ -145,7 +186,7 @@ bool vm_exec(VM *vm) {
 #endif
                     vm->choices = NULL; 
                 }
-                SNOBOL_LOG("vm_exec: FAIL (end of bytecode)");
+                SNOBOL_LOG("vm_run: FAIL (end of bytecode)");
                 return false;
             }
             continue;
@@ -166,7 +207,7 @@ bool vm_exec(VM *vm) {
 #endif
                     vm->choices = NULL; 
                 }
-                SNOBOL_LOG("vm_exec: SUCCESS (OP_ACCEPT)");
+                SNOBOL_LOG("vm_run: SUCCESS (OP_ACCEPT)");
                 return true;
 
             case OP_FAIL:
@@ -179,7 +220,7 @@ bool vm_exec(VM *vm) {
 #endif
                         vm->choices = NULL; 
                     }
-                    SNOBOL_LOG("vm_exec: FAIL (OP_FAIL)");
+                    SNOBOL_LOG("vm_run: FAIL (OP_FAIL)");
                     return false;
                 }
                 break;
@@ -533,23 +574,74 @@ bool vm_exec(VM *vm) {
                 break;
             }
 
-            case OP_EMIT_LIT: {
+            case OP_EMIT_LITERAL: {
                 uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip);
                 uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
                 vm->ip += len;
+                if (vm->out) {
+                    snobol_buf_append(vm->out, (const char *)vm->bc + off, (size_t)len);
+                }
                 if (vm->emit_fn) {
                     vm->emit_fn((const char *)vm->bc + off, (size_t)len, vm->emit_udata);
                 }
                 break;
             }
 
-            case OP_EMIT_REF: {
+            case OP_EMIT_CAPTURE: {
                 uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
-                if (r < MAX_CAPS && vm->emit_fn) {
+                if (r < MAX_CAPS) {
                     size_t start = vm->cap_start[r];
                     size_t end = vm->cap_end[r];
                     if (end >= start && end <= vm->len) {
-                        vm->emit_fn(vm->s + start, end - start, vm->emit_udata);
+                        if (vm->out) {
+                            snobol_buf_append(vm->out, vm->s + start, end - start);
+                        }
+                        if (vm->emit_fn) {
+                            vm->emit_fn(vm->s + start, end - start, vm->emit_udata);
+                        }
+                    }
+                }
+                break;
+            }
+
+            case OP_EMIT_EXPR: {
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t expr_type = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                if (r < MAX_CAPS) {
+                    size_t start = vm->cap_start[r];
+                    size_t end = vm->cap_end[r];
+                    if (end >= start && end <= vm->len) {
+                        const char *data = vm->s + start;
+                        size_t len = end - start;
+                        
+                        if (expr_type == 1) { // .upper()
+#ifdef STANDALONE_BUILD
+                            char *tmp = malloc(len + 1);
+#else
+                            char *tmp = emalloc(len + 1);
+#endif
+                            for (size_t i = 0; i < len; ++i) {
+                                char c = data[i];
+                                if (c >= 'a' && c <= 'z') tmp[i] = c - ('a' - 'A');
+                                else tmp[i] = c;
+                            }
+                            if (vm->out) snobol_buf_append(vm->out, tmp, len);
+                            if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
+#ifdef STANDALONE_BUILD
+                            free(tmp);
+#else
+                            efree(tmp);
+#endif
+                        } else if (expr_type == 2) { // .length()
+                            char tmp[32];
+                            int n = snprintf(tmp, sizeof(tmp), "%zu", len);
+                            if (vm->out) snobol_buf_append(vm->out, tmp, (size_t)n);
+                            if (vm->emit_fn) vm->emit_fn(tmp, (size_t)n, vm->emit_udata);
+                        } else {
+                            // default: just emit
+                            if (vm->out) snobol_buf_append(vm->out, data, len);
+                            if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata);
+                        }
                     }
                 }
                 break;
@@ -579,4 +671,11 @@ bool vm_exec(VM *vm) {
         vm->choices = NULL; 
     }
     return false;
+}
+
+bool vm_exec(VM *vm) {
+    vm->ip = 0;
+    vm->pos = 0;
+    memset(vm->counters, 0, sizeof(vm->counters));
+    return vm_run(vm);
 }

@@ -77,6 +77,11 @@ ZEND_BEGIN_ARG_INFO_EX(ai_match, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, input, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(ai_subst, 0, 0, 2)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, template, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(ai_setEval, 0, 0, 1)
     ZEND_ARG_ARRAY_INFO(0, callbacks, 0)
 ZEND_END_ARG_INFO()
@@ -193,6 +198,82 @@ PHP_METHOD(Snobol_Pattern, match) {
     SNOBOL_LOG("Snobol_Pattern::match: DONE");
 }
 
+PHP_METHOD(Snobol_Pattern, subst) {
+    zend_string *subject, *template;
+    ZEND_PARSE_PARAMETERS_START(2,2)
+        Z_PARAM_STR(subject)
+        Z_PARAM_STR(template)
+    ZEND_PARSE_PARAMETERS_END();
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    if (!intern->bc || intern->bc_len == 0) {
+        zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
+        RETURN_FALSE;
+    }
+
+    uint8_t *tpl_bc = NULL;
+    size_t tpl_bc_len = 0;
+    if (compile_template_to_bytecode(ZSTR_VAL(template), ZSTR_LEN(template), &tpl_bc, &tpl_bc_len) != 0) {
+        zend_throw_exception(zend_ce_exception, "Failed to compile template", 0);
+        RETURN_FALSE;
+    }
+
+    snobol_buf out;
+    snobol_buf_init(&out);
+
+    size_t offset = 0;
+    size_t subject_len = ZSTR_LEN(subject);
+    const char *subject_val = ZSTR_VAL(subject);
+    size_t last_match_end = 0;
+
+    while (offset <= subject_len) {
+        VM vm;
+        memset(&vm, 0, sizeof(VM));
+        vm.bc = intern->bc;
+        vm.bc_len = intern->bc_len;
+        vm.s = subject_val + offset;
+        vm.len = subject_len - offset;
+
+        if (vm_exec(&vm)) {
+            // Match found at offset.
+            // 1. Append prefix (before this match)
+            snobol_buf_append(&out, subject_val + last_match_end, offset - last_match_end);
+
+            // 2. Run template BC to append replacement
+            // Template BC needs access to captures from VM.
+            // We can reuse VM state, just change BC.
+            vm.bc = tpl_bc;
+            vm.bc_len = tpl_bc_len;
+            vm.ip = 0;
+            vm.out = &out;
+            vm_run(&vm); // This will execute template ops and append to out.
+
+            // 3. Advance
+            size_t match_len = vm.pos;
+            if (match_len == 0) match_len = 1; // avoid infinite loop
+            
+            offset += match_len;
+            last_match_end = offset;
+            
+            // Allow matching at the very end (empty string) only once
+            if (offset > subject_len) break;
+        } else {
+            // No match at current offset
+            offset++;
+        }
+    }
+
+    // Append remainder
+    if (last_match_end < subject_len) {
+        snobol_buf_append(&out, subject_val + last_match_end, subject_len - last_match_end);
+    }
+
+    if (tpl_bc) compiler_free(tpl_bc);
+
+    RETVAL_STRINGL(out.data, out.len);
+    snobol_buf_free(&out);
+}
+
 PHP_METHOD(Snobol_Pattern, setEvalCallbacks) {
     SNOBOL_LOG("Snobol_Pattern::setEvalCallbacks: CALLED");
     RETURN_TRUE;
@@ -201,6 +282,7 @@ PHP_METHOD(Snobol_Pattern, setEvalCallbacks) {
 static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, compileFromAst, ai_compileFromAst, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
     PHP_ME(Snobol_Pattern, match, ai_match, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, subst, ai_subst, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, setEvalCallbacks, ai_setEval, ZEND_ACC_PUBLIC)
     PHP_FE_END
 };

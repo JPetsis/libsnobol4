@@ -281,6 +281,11 @@ class PatternHelper
     {
         $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
 
+        // Detect if template syntax is used ($v0, ${v1}, etc.)
+        if (strpos($replacement, '$') !== false) {
+            return $pattern->subst($subject, $replacement);
+        }
+
         $result = '';
         $offset = 0;
         $lastMatchEnd = 0;

@@ -76,5 +76,18 @@ class Pattern
         // Native implementation in C extension
         throw new \LogicException('This is a stub - the C extension provides the actual implementation');
     }
+
+    /**
+     * Perform streaming substitution using a template string.
+     *
+     * @param  string  $subject
+     * @param  string  $template
+     * @return string
+     */
+    public function subst(string $subject, string $template): string
+    {
+        // Native implementation in C extension
+        throw new \LogicException('This is a stub - the C extension provides the actual implementation');
+    }
 }
 
