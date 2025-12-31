@@ -24,7 +24,7 @@
 
 #include "php.h"
 
-int compile_ast_to_bytecode(zval *ast, uint8_t **out_bc, size_t *out_len);
+int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *out_len);
 int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, size_t *out_len);
 
 /* helper to free bc */

@@ -47,47 +47,54 @@ static inline uint8_t read_u8(const uint8_t *bc, size_t bc_len, size_t *ip) {
     return v;
 }
 
-static const uint8_t *get_bitmap(const VM *vm, uint16_t set_id) {
+static const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count, uint16_t *out_case) {
+    if (set_id == 0) return NULL;
     size_t tail_ip = vm->bc_len;
     if (tail_ip < 4) return NULL;
-    uint32_t count = ((uint32_t)vm->bc[tail_ip-4] << 24) | ((uint32_t)vm->bc[tail_ip-3] << 16) | ((uint32_t)vm->bc[tail_ip-2] << 8) | (uint32_t)vm->bc[tail_ip-1];
-    size_t bitmaps_len = (size_t)count * CHARCLASS_BITMAP_BYTES;
-    if (tail_ip < 4 + bitmaps_len) return NULL;
-    size_t bitmaps_offset = tail_ip - 4 - bitmaps_len;
-    if (set_id == 0 || set_id > count) return NULL;
-    return vm->bc + bitmaps_offset + (size_t)(set_id - 1) * CHARCLASS_BITMAP_BYTES;
+    
+    uint32_t class_count = ((uint32_t)vm->bc[tail_ip-4] << 24) | 
+                           ((uint32_t)vm->bc[tail_ip-3] << 16) | 
+                           ((uint32_t)vm->bc[tail_ip-2] << 8) | 
+                           (uint32_t)vm->bc[tail_ip-1];
+    
+    if (set_id > class_count) return NULL;
+    
+    size_t table_size = (size_t)class_count * 4;
+    if (tail_ip < 4 + table_size) return NULL;
+    size_t table_start = tail_ip - 4 - table_size;
+    
+    size_t offset_pos = table_start + (size_t)(set_id - 1) * 4;
+    uint32_t offset = ((uint32_t)vm->bc[offset_pos+0] << 24) | ((uint32_t)vm->bc[offset_pos+1] << 16) |
+                      ((uint32_t)vm->bc[offset_pos+2] << 8) | (uint32_t)vm->bc[offset_pos+3];
+                      
+    if (offset >= vm->bc_len) return NULL;
+    
+    size_t ip = (size_t)offset;
+    *out_count = read_u16(vm->bc, vm->bc_len, &ip);
+    *out_case = read_u16(vm->bc, vm->bc_len, &ip);
+    
+    return vm->bc + ip;
 }
 
-static inline bool bitmap_contains(const uint8_t *bm, unsigned char ch) {
-    if (ch > 127) return false;
-    unsigned idx = (unsigned)ch >> 3;
-    unsigned bit = (unsigned)ch & 7;
-    return (bm[idx] >> bit) & 1;
-}
-
-static inline int utf8_peek_next(const char *s, size_t len, size_t pos, uint32_t *out_cp, int *out_bytes) {
-    if (pos >= len) return 0;
-    unsigned char c = (unsigned char)s[pos];
-    if (c < 0x80) {
-        *out_cp = c; *out_bytes = 1; return 1;
+static bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp) {
+    size_t lo = 0, hi = count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        size_t offset = mid * 8;
+        uint32_t start = ((uint32_t)ranges_ptr[offset+0] << 24) | ((uint32_t)ranges_ptr[offset+1] << 16) |
+                         ((uint32_t)ranges_ptr[offset+2] << 8) | (uint32_t)ranges_ptr[offset+3];
+        uint32_t end   = ((uint32_t)ranges_ptr[offset+4] << 24) | ((uint32_t)ranges_ptr[offset+5] << 16) |
+                         ((uint32_t)ranges_ptr[offset+6] << 8) | (uint32_t)ranges_ptr[offset+7];
+        
+        if (cp < start) {
+            hi = mid;
+        } else if (cp > end) {
+            lo = mid + 1;
+        } else {
+            return true;
+        }
     }
-    if ((c & 0xE0) == 0xC0) {
-        if (pos + 1 >= len) return 0;
-        *out_cp = ((c & 0x1F) << 6) | ((unsigned char)s[pos+1] & 0x3F);
-        *out_bytes = 2; return 1;
-    }
-    if ((c & 0xF0) == 0xE0) {
-        if (pos + 2 >= len) return 0;
-        *out_cp = ((c & 0x0F) << 12) | (((unsigned char)s[pos+1] & 0x3F) << 6) | ((unsigned char)s[pos+2] & 0x3F);
-        *out_bytes = 3; return 1;
-    }
-    if ((c & 0xF8) == 0xF0) {
-        if (pos + 3 >= len) return 0;
-        *out_cp = ((c & 0x07) << 18) | (((unsigned char)s[pos+1] & 0x3F) << 12) |
-                  (((unsigned char)s[pos+2] & 0x3F) << 6) | ((unsigned char)s[pos+3] & 0x3F);
-        *out_bytes = 4; return 1;
-    }
-    return 0;
+    return false;
 }
 
 #define MAX_CHOICES 128
@@ -279,9 +286,10 @@ bool vm_run(VM *vm) {
                 } else {
                     if (set_id == 0) {
                         vm->pos += bytes;
-                    } else if (cp <= 127) {
-                        const uint8_t *bm = get_bitmap(vm, set_id);
-                        if (bm && bitmap_contains(bm, (unsigned char)cp)) {
+                    } else {
+                        uint16_t count, ci;
+                        const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
+                        if (ranges && range_contains(ranges, count, cp)) {
                             vm->pos += bytes;
                         } else {
                             if (!vm_pop_choice(vm)) {
@@ -295,18 +303,6 @@ bool vm_run(VM *vm) {
                                 }
                                 return false;
                             }
-                        }
-                    } else {
-                        if (!vm_pop_choice(vm)) {
-                            if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                                free(vm->choices); 
-#else
-                                efree(vm->choices);
-#endif
-                                vm->choices = NULL; 
-                            }
-                            return false;
                         }
                     }
                 }
@@ -329,22 +325,19 @@ bool vm_run(VM *vm) {
                         return false;
                     }
                 } else {
-                    if (cp <= 127) {
-                        const uint8_t *bm = get_bitmap(vm, set_id);
-                        if (bm && bitmap_contains(bm, (unsigned char)cp)) {
-                            if (!vm_pop_choice(vm)) {
-                                if (vm->choices) { 
+                    uint16_t count, ci;
+                    const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
+                    if (ranges && range_contains(ranges, count, cp)) {
+                        if (!vm_pop_choice(vm)) {
+                            if (vm->choices) { 
 #ifdef STANDALONE_BUILD
-                                    free(vm->choices); 
+                                free(vm->choices); 
 #else
-                                    efree(vm->choices);
+                                efree(vm->choices);
 #endif
-                                    vm->choices = NULL; 
-                                }
-                                return false;
+                                vm->choices = NULL; 
                             }
-                        } else {
-                            vm->pos += bytes;
+                            return false;
                         }
                     } else {
                         vm->pos += bytes;
@@ -370,30 +363,26 @@ bool vm_run(VM *vm) {
                     }
                     break;
                 }
-                const uint8_t *bm = get_bitmap(vm, set_id);
-                if (cp <= 127) {
-                    if (!bm || !bitmap_contains(bm, (unsigned char)cp)) {
-                        if (!vm_pop_choice(vm)) {
-                            if (vm->choices) { 
+                uint16_t count, ci;
+                const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
+                if (!ranges || !range_contains(ranges, count, cp)) {
+                    if (!vm_pop_choice(vm)) {
+                        if (vm->choices) { 
 #ifdef STANDALONE_BUILD
-                                free(vm->choices); 
+                            free(vm->choices); 
 #else
-                                efree(vm->choices);
+                            efree(vm->choices);
 #endif
-                                vm->choices = NULL; 
-                            }
-                            return false;
+                            vm->choices = NULL; 
                         }
-                        break;
+                        return false;
                     }
+                    break;
                 }
                 vm->pos += bytes;
                 while (1) {
                     if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) break;
-                    if (cp <= 127) {
-                        const uint8_t *bm2 = get_bitmap(vm, set_id);
-                        if (!bm2 || !bitmap_contains(bm2, (unsigned char)cp)) break;
-                    }
+                    if (!range_contains(ranges, count, cp)) break;
                     vm->pos += bytes;
                 }
                 break;
@@ -402,12 +391,11 @@ bool vm_run(VM *vm) {
             case OP_BREAK: {
                 uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint32_t cp; int bytes;
-                const uint8_t *bm = get_bitmap(vm, set_id);
+                uint16_t count, ci;
+                const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
                 while (1) {
                     if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) break;
-                    if (cp <= 127) {
-                        if (bm && bitmap_contains(bm, (unsigned char)cp)) break;
-                    }
+                    if (ranges && range_contains(ranges, count, cp)) break;
                     vm->pos += bytes;
                 }
                 break;

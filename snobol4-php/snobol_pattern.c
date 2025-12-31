@@ -71,6 +71,7 @@ static zend_object *snobol_pattern_create(zend_class_entry *ce) {
 /* argument info */
 ZEND_BEGIN_ARG_INFO_EX(ai_compileFromAst, 0, 0, 1)
     ZEND_ARG_ARRAY_INFO(0, ast, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_match, 0, 0, 1)
@@ -90,8 +91,11 @@ ZEND_END_ARG_INFO()
 
 PHP_METHOD(Snobol_Pattern, compileFromAst) {
     zval *ast;
-    ZEND_PARSE_PARAMETERS_START(1,1)
+    zval *options = NULL;
+    ZEND_PARSE_PARAMETERS_START(1,2)
         Z_PARAM_ARRAY(ast)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_OR_NULL(options)
     ZEND_PARSE_PARAMETERS_END();
 
     uint8_t *bc = NULL;
@@ -99,7 +103,7 @@ PHP_METHOD(Snobol_Pattern, compileFromAst) {
 
     SNOBOL_LOG("Snobol_Pattern::compileFromAst: START");
 
-    if (compile_ast_to_bytecode(ast, &bc, &bc_len) != 0) {
+    if (compile_ast_to_bytecode(ast, options, &bc, &bc_len) != 0) {
         SNOBOL_LOG("Snobol_Pattern::compileFromAst: compilation FAILED");
         zend_throw_exception(zend_ce_exception, "Failed to compile AST", 0);
         RETURN_NULL();

@@ -7,7 +7,36 @@
 
 #define MAX_CAPS 64
 #define MAX_VARS 64
-#define CHARCLASS_BITMAP_BYTES 16 /* 128 bits / 8 for character class bitmaps */
+
+typedef struct cp_range {
+    uint32_t start;  // Start codepoint (inclusive)
+    uint32_t end;    // End codepoint (inclusive)
+} CpRange;
+
+static inline int utf8_peek_next(const char *s, size_t len, size_t pos, uint32_t *out_cp, int *out_bytes) {
+    if (pos >= len) return 0;
+    unsigned char c = (unsigned char)s[pos];
+    if (c < 0x80) {
+        *out_cp = c; *out_bytes = 1; return 1;
+    }
+    if ((c & 0xE0) == 0xC0) {
+        if (pos + 1 >= len) return 0;
+        *out_cp = ((c & 0x1F) << 6) | ((unsigned char)s[pos+1] & 0x3F);
+        *out_bytes = 2; return 1;
+    }
+    if ((c & 0xF0) == 0xE0) {
+        if (pos + 2 >= len) return 0;
+        *out_cp = ((c & 0x0F) << 12) | (((unsigned char)s[pos+1] & 0x3F) << 6) | ((unsigned char)s[pos+2] & 0x3F);
+        *out_bytes = 3; return 1;
+    }
+    if ((c & 0xF8) == 0xF0) {
+        if (pos + 3 >= len) return 0;
+        *out_cp = ((c & 0x07) << 18) | (((unsigned char)s[pos+1] & 0x3F) << 12) |
+                  (((unsigned char)s[pos+2] & 0x3F) << 6) | ((unsigned char)s[pos+3] & 0x3F);
+        *out_bytes = 4; return 1;
+    }
+    return 0;
+}
 
 /* Bytecode opcodes */
 typedef enum {

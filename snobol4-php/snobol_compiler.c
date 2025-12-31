@@ -70,42 +70,106 @@ static void cb_emit_bytes(CodeBuf *c, const uint8_t *b, size_t n) { if (n==0) re
 
 /* Charclass table handling */
 typedef struct cc_entry {
-    uint8_t bitmap[CHARCLASS_BITMAP_BYTES];
+    CpRange *ranges;
+    uint16_t range_count;
+    uint16_t range_cap;
+    uint16_t case_insensitive;
     struct cc_entry *next;
 } CCEntry;
 static CCEntry *charclass_head = NULL;
 static uint32_t charclass_count = 0;
 static uint8_t next_loop_id = 0;
+static bool compiler_case_insensitive = false;
 
 static void free_charclass_list(void) {
     CCEntry *e = charclass_head;
     while (e) {
         CCEntry *next = e->next;
+        if (e->ranges) efree(e->ranges);
         efree(e);
         e = next;
     }
     charclass_head = NULL;
     charclass_count = 0;
+    compiler_case_insensitive = false;
+}
+
+static void add_range(CCEntry *e, uint32_t start, uint32_t end) {
+    if (e->range_count == e->range_cap) {
+        e->range_cap = e->range_cap ? e->range_cap * 2 : 4;
+        e->ranges = erealloc(e->ranges, e->range_cap * sizeof(CpRange));
+    }
+    e->ranges[e->range_count].start = start;
+    e->ranges[e->range_count].end = end;
+    e->range_count++;
+}
+
+static int compare_ranges(const void *a, const void *b) {
+    const CpRange *ra = (const CpRange*)a;
+    const CpRange *rb = (const CpRange*)b;
+    if (ra->start < rb->start) return -1;
+    if (ra->start > rb->start) return 1;
+    return 0;
+}
+
+static void normalize_ranges(CCEntry *e) {
+    if (e->range_count == 0) return;
+    qsort(e->ranges, e->range_count, sizeof(CpRange), compare_ranges);
+    
+    size_t write = 0;
+    for (size_t read = 1; read < e->range_count; ++read) {
+        if (e->ranges[read].start <= e->ranges[write].end + 1) {
+            if (e->ranges[read].end > e->ranges[write].end) {
+                e->ranges[write].end = e->ranges[read].end;
+            }
+        } else {
+            write++;
+            e->ranges[write] = e->ranges[read];
+        }
+    }
+    e->range_count = (uint16_t)(write + 1);
 }
 
 static int add_or_get_charclass(const char *s, size_t len) {
-    uint8_t bm[CHARCLASS_BITMAP_BYTES];
-    memset(bm, 0, CHARCLASS_BITMAP_BYTES);
-    for (size_t i = 0; i < len; ++i) {
-        unsigned char ch = (unsigned char)s[i];
-        if (ch > 127) continue;
-        unsigned idx = ch >> 3;
-        unsigned bit = ch & 7;
-        bm[idx] |= (1 << bit);
+    CCEntry *ne = emalloc(sizeof(*ne));
+    memset(ne, 0, sizeof(*ne));
+    ne->case_insensitive = compiler_case_insensitive ? 1 : 0;
+    
+    size_t pos = 0;
+    while (pos < len) {
+        uint32_t cp; int bytes;
+        if (!utf8_peek_next(s, len, pos, &cp, &bytes)) break;
+        add_range(ne, cp, cp);
+        
+        if (compiler_case_insensitive) {
+            if (cp >= 'A' && cp <= 'Z') {
+                add_range(ne, cp + 32, cp + 32);
+            } else if (cp >= 'a' && cp <= 'z') {
+                add_range(ne, cp - 32, cp - 32);
+            } else if (cp >= 0xC0 && cp <= 0xDE && cp != 0xD7) {
+                 add_range(ne, cp + 0x20, cp + 0x20);
+            } else if (cp >= 0xE0 && cp <= 0xFE && cp != 0xF7) {
+                 add_range(ne, cp - 0x20, cp - 0x20);
+            }
+        }
+        
+        pos += bytes;
     }
+    normalize_ranges(ne);
+    
     CCEntry *e = charclass_head;
     int id = 1;
     while (e) {
-        if (memcmp(e->bitmap, bm, CHARCLASS_BITMAP_BYTES) == 0) return id;
+        if (e->range_count == ne->range_count &&
+            e->case_insensitive == ne->case_insensitive &&
+            memcmp(e->ranges, ne->ranges, e->range_count * sizeof(CpRange)) == 0) {
+            if (ne->ranges) efree(ne->ranges);
+            efree(ne);
+            return id;
+        }
         id++; e = e->next;
     }
-    CCEntry *ne = emalloc(sizeof(*ne));
-    memcpy(ne->bitmap, bm, CHARCLASS_BITMAP_BYTES);
+    
     ne->next = charclass_head;
     charclass_head = ne;
     charclass_count++;
@@ -392,10 +456,19 @@ static int emit_node(zval *node, CodeBuf *c) {
     return -1;
 }
 
-int compile_ast_to_bytecode(zval *ast, uint8_t **out_bc, size_t *out_len) {
+int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *out_len) {
     SNOBOL_LOG("compile_ast_to_bytecode START");
     free_charclass_list();
     next_loop_id = 0;
+    compiler_case_insensitive = false;
+    
+    if (options && Z_TYPE_P(options) == IS_ARRAY) {
+        zval *ci = zend_hash_str_find(Z_ARRVAL_P(options), "caseInsensitive", sizeof("caseInsensitive")-1);
+        if (ci && (Z_TYPE_P(ci) == IS_TRUE || (Z_TYPE_P(ci) == IS_LONG && Z_LVAL_P(ci)))) {
+            compiler_case_insensitive = true;
+        }
+    }
+
     CodeBuf cb;
     cb_init(&cb);
     if (emit_node(ast, &cb) != 0) {
@@ -415,9 +488,25 @@ int compile_ast_to_bytecode(zval *ast, uint8_t **out_bc, size_t *out_len) {
     }
     charclass_head = rev;
 
+    size_t *offsets = charclass_count > 0 ? emalloc(charclass_count * sizeof(size_t)) : NULL;
+    int idx = 0;
     for (CCEntry *it = charclass_head; it != NULL; it = it->next) {
-        cb_emit_bytes(&cb, it->bitmap, CHARCLASS_BITMAP_BYTES);
+        if (offsets) offsets[idx++] = cb_pos(&cb);
+        cb_emit_u16(&cb, it->range_count);
+        cb_emit_u16(&cb, it->case_insensitive);
+        for (size_t i = 0; i < it->range_count; ++i) {
+            cb_emit_u32(&cb, it->ranges[i].start);
+            cb_emit_u32(&cb, it->ranges[i].end);
+        }
     }
+    
+    if (offsets) {
+        for (uint32_t i = 0; i < charclass_count; ++i) {
+            cb_emit_u32(&cb, (uint32_t)offsets[i]);
+        }
+        efree(offsets);
+    }
+
     cb_emit_u32(&cb, charclass_count);
 
     uint8_t *out = emalloc(cb.len);

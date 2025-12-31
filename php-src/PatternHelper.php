@@ -20,12 +20,12 @@ class PatternHelper
      *
      * @param  string|array|Pattern  $patternOrAst  Pattern specification (string/AST/compiled Pattern)
      * @param  string  $subject  Subject string to match against
-     * @param  array  $options  Optional flags: ['full' => true] for full-string match, ['cache' => false] to bypass cache
+     * @param  array  $options  Optional flags: ['full' => true, 'cache' => bool, 'caseInsensitive' => bool]
      * @return array|false Associative array of captures on success, false on no match
      */
     public static function matchOnce($patternOrAst, string $subject, array $options = [])
     {
-        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
+        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true, $options);
 
         $result = $pattern->match($subject);
 
@@ -44,27 +44,33 @@ class PatternHelper
      *
      * @param  string|array|self  $patternOrAst  Pattern specification
      * @param  bool  $useCache  Whether to use the cache
-     * @return self Compiled pattern
+     * @param  array  $options  Compilation options
+     * @return Pattern Compiled pattern
      */
-    private static function resolvePattern($patternOrAst, bool $useCache): Pattern
+    private static function resolvePattern($patternOrAst, bool $useCache, array $options = []): Pattern
     {
         if ($patternOrAst instanceof Pattern) {
             return $patternOrAst;
         }
 
+        $compileOptions = array_intersect_key($options, ['caseInsensitive' => 1]);
+
         if (is_string($patternOrAst)) {
             if ($useCache) {
-                return self::getCache()->get($patternOrAst, fn() => self::fromString($patternOrAst));
+                // Strings don't easily support caseInsensitive unless we bake it into string or options
+                // For now, if options provided, mix into key
+                $key = $patternOrAst.($compileOptions ? json_encode($compileOptions) : '');
+                return self::getCache()->get($key, fn() => self::fromString($patternOrAst, $compileOptions));
             }
-            return self::fromString($patternOrAst);
+            return self::fromString($patternOrAst, $compileOptions);
         }
 
         if (is_array($patternOrAst)) {
             if ($useCache) {
-                $key = self::canonicalizeAst($patternOrAst);
-                return self::getCache()->get($key, fn() => self::fromAst($patternOrAst));
+                $key = self::canonicalizeAst($patternOrAst).($compileOptions ? json_encode($compileOptions) : '');
+                return self::getCache()->get($key, fn() => self::fromAst($patternOrAst, $compileOptions));
             }
-            return self::fromAst($patternOrAst);
+            return self::fromAst($patternOrAst, $compileOptions);
         }
 
         throw new \InvalidArgumentException(
@@ -91,13 +97,14 @@ class PatternHelper
      * Note: Textual parsing is not yet fully implemented. This is a stub for future compatibility.
      *
      * @param  string  $pattern  Textual pattern representation
+     * @param  array  $options  Compilation options
      * @return Pattern Compiled pattern instance
      * @throws \LogicException When textual parsing is not yet available
      */
-    public static function fromString(string $pattern): Pattern
+    public static function fromString(string $pattern, array $options = []): Pattern
     {
         $parser = new Parser($pattern);
-        return self::fromAst($parser->parse());
+        return self::fromAst($parser->parse(), $options);
     }
 
     /**
@@ -115,17 +122,18 @@ class PatternHelper
      * Compile a pattern from an AST produced by Snobol\Builder.
      *
      * @param  array  $ast  Structured array from Builder methods
+     * @param  array  $options  Compilation options
      * @return Pattern Compiled pattern instance from the C extension
      * @throws \InvalidArgumentException When AST is structurally invalid
      */
-    public static function fromAst(array $ast): Pattern
+    public static function fromAst(array $ast, array $options = []): Pattern
     {
         if (!isset($ast['type'])) {
             throw new \InvalidArgumentException('Invalid AST: missing "type" field');
         }
 
         try {
-            $compiled = Pattern::compileFromAst($ast);
+            $compiled = Pattern::compileFromAst($ast, $options);
             if (!is_object($compiled) || !($compiled instanceof Pattern)) {
                 throw new \RuntimeException('Extension compileFromAst did not return a Pattern object');
             }
@@ -153,7 +161,7 @@ class PatternHelper
      */
     public static function matchAll($patternOrAst, string $subject, array $options = []): array
     {
-        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
+        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true, $options);
 
         $matches = [];
         $offset = 0;
@@ -170,22 +178,16 @@ class PatternHelper
                 continue;
             }
 
-            // If match returned boolean true, use estimate
-            if ($result === true) {
-                $matchLen = self::estimateMatchLength($remaining, []);
-                $matches[] = []; // Placeholder
+            // Clean up metadata
+            $matchLen = 0;
+            if (isset($result['_match_len'])) {
+                $matchLen = $result['_match_len'];
+                unset($result['_match_len']);
             } else {
-                // Clean up metadata
-                $matchLen = 0;
-                if (isset($result['_match_len'])) {
-                    $matchLen = $result['_match_len'];
-                    unset($result['_match_len']);
-                } else {
-                    // Fallback estimate if metadata not available
-                    $matchLen = self::estimateMatchLength($remaining, $result);
-                }
-                $matches[] = $result;
+                // Fallback estimate if metadata not available
+                $matchLen = self::estimateMatchLength($remaining, $result);
             }
+            $matches[] = $result;
 
             // Advance by match length (min 1 to avoid infinite loop on empty match)
             $offset += max(1, $matchLen);
@@ -225,7 +227,7 @@ class PatternHelper
      */
     public static function split($patternOrAst, string $subject, array $options = []): array
     {
-        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
+        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true, $options);
 
         $segments = [];
         $offset = 0;
@@ -246,15 +248,11 @@ class PatternHelper
             $segments[] = substr($subject, $lastMatchEnd, $offset - $lastMatchEnd);
 
             $matchLen = 0;
-            if ($result === true) {
-                $matchLen = self::estimateMatchLength($remaining, []);
+            if (isset($result['_match_len'])) {
+                $matchLen = $result['_match_len'];
+                unset($result['_match_len']);
             } else {
-                if (isset($result['_match_len'])) {
-                    $matchLen = $result['_match_len'];
-                    unset($result['_match_len']);
-                } else {
-                    $matchLen = self::estimateMatchLength($remaining, $result);
-                }
+                $matchLen = self::estimateMatchLength($remaining, $result);
             }
 
             $offset += max(1, $matchLen);
@@ -279,7 +277,7 @@ class PatternHelper
      */
     public static function replace($patternOrAst, string $replacement, string $subject, array $options = []): string
     {
-        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true);
+        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true, $options);
 
         // Detect if template syntax is used ($v0, ${v1}, etc.)
         if (strpos($replacement, '$') !== false) {
@@ -306,9 +304,7 @@ class PatternHelper
             $result .= $replacement;
 
             $matchLen = 0;
-            if ($matchResult === true) {
-                $matchLen = self::estimateMatchLength($remaining, []);
-            } elseif (isset($matchResult['_match_len'])) {
+            if (isset($matchResult['_match_len'])) {
                 $matchLen = $matchResult['_match_len'];
                 unset($matchResult['_match_len']);
             } else {

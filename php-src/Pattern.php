@@ -34,14 +34,14 @@ class Pattern
      * of a pattern into a Pattern object with internal bytecode.
      *
      * @param  array  $ast  Pattern AST from Builder methods
+     * @param  array|null  $options  Optional compilation options (e.g. ['caseInsensitive' => true])
      * @return Pattern Compiled pattern object
      * @throws \Exception When AST compilation fails
      */
-    public static function compileFromAst(array $ast): Pattern
+    public static function compileFromAst(array $ast, ?array $options = null): Pattern
     {
         // Native implementation in C extension
-        // This method is never actually called - the C extension provides the real implementation
-        throw new \LogicException('This is a stub - the C extension provides the actual implementation');
+        return new self();
     }
 
     /**
@@ -59,7 +59,7 @@ class Pattern
     public function match(string $subject)
     {
         // Native implementation in C extension
-        throw new \LogicException('This is a stub - the C extension provides the actual implementation');
+        return false;
     }
 
     /**
@@ -74,7 +74,6 @@ class Pattern
     public function setEvalCallbacks(array $callbacks): void
     {
         // Native implementation in C extension
-        throw new \LogicException('This is a stub - the C extension provides the actual implementation');
     }
 
     /**
@@ -87,7 +86,7 @@ class Pattern
     public function subst(string $subject, string $template): string
     {
         // Native implementation in C extension
-        throw new \LogicException('This is a stub - the C extension provides the actual implementation');
+        return "";
     }
 }
 
