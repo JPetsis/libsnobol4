@@ -1,6 +1,4 @@
 services:
   web:
-    volumes:
-      - ../snobol4-php:/var/www/html/snobol4-php:ro
     healthcheck:
       test: ["CMD", "true"]
