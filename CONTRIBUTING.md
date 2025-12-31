@@ -206,8 +206,6 @@ The extension includes a built-in logging mechanism for development:
 3. Commit your changes with clear, descriptive messages.
 4. Push to your fork and submit a Pull Request (PR).
 5. Ensure your PR description clearly explains the changes, their motivation, and any testing performed.
-6. For non‑trivial behavior or architectural changes, consider adding an OpenSpec change under `openspec/changes/` and
-   reference it from the PR.
 
 ## License
 
