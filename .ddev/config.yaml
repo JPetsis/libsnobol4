@@ -13,37 +13,36 @@ use_dns_when_possible: true
 composer_version: "2"
 web_environment: []
 corepack_enable: false
-
 hooks:
   post-start:
     - exec: |
-            set -euo pipefail
-            
-            # Build and enable the snobol extension on container start.
-            # We build in /tmp because the project mount may be read-only or slow.
-            if [ ! -d "/var/www/html/snobol4-php" ]; then
-              echo "Warning: /var/www/html/snobol4-php directory not found"
-              exit 0
-            fi
-            
-            sudo rm -rf /tmp/snobol_build
-          mkdir -p /tmp/snobol_build
-          cp -r /var/www/html/snobol4-php/* /tmp/snobol_build/
-            
-            cd /tmp/snobol_build
-            make clean >/dev/null 2>&1 || true
-            phpize
-            ./configure --enable-snobol
-            make -j"$(nproc)"
-            sudo make install
-            
-            # Enable the extension
-            echo "extension=snobol.so" | sudo tee /etc/php/8.4/mods-available/snobol.ini > /dev/null
-            sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini
-            sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini
-            
-            # Cleanup
-            sudo rm -rf /tmp/snobol_build
+        set -euo pipefail
+
+        # Build and enable the snobol extension on container start.
+        # We build in /tmp because the project mount may be read-only or slow.
+        if [ ! -d "/var/www/html/snobol4-php" ]; then
+          echo "Warning: /var/www/html/snobol4-php directory not found"
+          exit 0
+        fi
+
+        sudo rm -rf /tmp/snobol_build
+        mkdir -p /tmp/snobol_build
+        cp -r /var/www/html/snobol4-php/* /tmp/snobol_build/
+
+        cd /tmp/snobol_build
+        make clean >/dev/null 2>&1 || true
+        phpize
+        ./configure --enable-snobol
+        make -j"$(nproc)"
+        sudo make install
+
+        # Enable the extension
+        echo "extension=snobol.so" | sudo tee /etc/php/8.4/mods-available/snobol.ini > /dev/null
+        sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini
+        sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini
+
+        # Cleanup
+        sudo rm -rf /tmp/snobol_build
 
 # Key features of DDEV's config.yaml:
 
