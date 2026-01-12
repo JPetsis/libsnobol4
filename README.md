@@ -253,33 +253,43 @@ The `Snobol\Builder` class provides static methods to construct pattern nodes:
 
 ## Performance
 
-The extension is designed for high-performance string processing. Recent benchmarks show that the native
-`Snobol\Pattern::subst()` method significantly outperforms manual PHP-level replacement loops.
+The extension is designed for high-performance string processing. Benchmarks are included under `public/`.
+
+**Important:** If you see suspicious results (e.g. `New C subst: 0.0000s` or empty output), it almost always means the
+native extension failed to load and you are running against PHP-only stubs. Verify with `php -m | grep snobol` inside
+DDEV, and ensure `ddev restart` succeeds after rebuilding.
 
 ### Character Class Performance
 
-The engine uses an optimized O(log n) binary search for character classes, ensuring that Unicode-aware matching remains
-highly efficient.
+Character classes are stored as Unicode ranges (`CpRange`) but use an ASCII fast-path (a cached 256-bit bitmap) for
+O(1) matching of codepoints `< 256`.
 
-You can run the included character class benchmark to verify performance on your system:
+Run:
 
 ```bash
-ddev exec php public/benchmark_charclass.php
+ddev exec php public/benchmark_charclass.php 1000000
 ```
 
-Typical results (M1/M2/M3 chips):
+Typical results inside DDEV (PHP 8.4, Apple Silicon host):
 
-- **ASCII Span:** ~140,000 ops/sec
-- **Unicode Span:** ~140,000 ops/sec (negligible overhead vs ASCII)
+- **ASCII SPAN (Dense):** ~145k ops/sec
+- **Unicode SPAN (Mixed):** ~115k ops/sec
 
 ### Substitution Benchmark
 
 Comparing a PHP-level match-and-concatenate loop with the native streaming C-level substitution:
 
-- **Task:** Replacing words in a 120KB string using `${v1.upper()}`.
-- **PHP Loop:** ~1.12s
-- **Native `subst()`:** ~0.58s
-- **Speedup:** **~1.9x**
+Run:
+
+```bash
+ddev exec php public/benchmark_subst.php
+```
+
+Typical results:
+
+- **PHP Loop:** ~0.9s
+- **Native `subst()`:** ~0.05s
+- **Speedup:** ~19x
 
 The native implementation minimizes data copying between PHP and C and avoids the overhead of returning match result
 arrays to PHP for every replacement.

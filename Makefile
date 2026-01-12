@@ -85,6 +85,8 @@ ifeq ($(IN_DDEV),1)
 		echo "No C tests found (tests/c/ does not exist)"; \
 	fi
 	@echo "Running PHP tests..."
+	@echo "Checking PHP extension snobol..."
+	@$(ASAN_ENV) php $(PHP_OPTS) -m | grep snobol || echo "WARNING: snobol extension not found in php -m"
 	@if [ -f vendor/bin/phpunit ]; then \
 		$(ASAN_ENV) php $(PHP_OPTS) vendor/bin/phpunit tests/php || exit 1; \
 	else \

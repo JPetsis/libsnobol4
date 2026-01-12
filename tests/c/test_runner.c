@@ -33,6 +33,8 @@ void test_assert(bool condition, const char *message) {
 
 /* Forward declarations for test suites */
 void test_vm_suite(void);
+void test_backtracking_suite(void);
+int test_stress_backtracking_main(void);
 
 int main(void) {
     printf("SNOBOL4 C Core Test Runner\n");
@@ -40,6 +42,17 @@ int main(void) {
 
     /* Run test suites */
     test_vm_suite();
+    test_backtracking_suite();
+
+    printf("\n=== Stress Tests ===\n");
+    {
+        int rc = test_stress_backtracking_main();
+        if (rc == 0) {
+            test_ctx.passed++;
+        } else {
+            test_ctx.failed++;
+        }
+    }
 
     /* Summary */
     printf("\n===========================\n");
@@ -48,3 +61,5 @@ int main(void) {
     return test_ctx.failed > 0 ? 1 : 0;
 }
 
+// NOTE: In DEBUG_BACKTRACK mode we intentionally allow stderr output so we can
+// see VM state dumps when diagnosing backtracking.

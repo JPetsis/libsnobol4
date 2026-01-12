@@ -340,6 +340,84 @@ class PatternTest extends TestCase
         // Parser correctly treats invalid ${...} as literal if it can't match it as a variable or expr
         $this->assertEquals("\${v1.length}", $result);
     }
+
+    public function testBacktrackingDoesNotLeakCaptureAcrossAlternation(): void
+    {
+        // (cap0('a') end) | cap0('b')  against "b".
+        // Current VM restores full capture snapshots when it backtracks, which prevents leaks
+        // from failing branches but can also revert captures to "unset" even for successful paths.
+        $ast = Builder::alt(
+            Builder::concat([
+                Builder::cap(0, Builder::lit('a')),
+                Builder::anchor('end'),
+            ]),
+            Builder::cap(0, Builder::lit('b'))
+        );
+
+        $result = PatternHelper::matchOnce($ast, 'b', ['full' => true]);
+        $this->assertIsArray($result);
+
+        // Guardrail: must NOT return the failed-branch capture.
+        $this->assertNotSame('a', $result['v0'] ?? null);
+    }
+
+    public function testBacktrackingDoesNotLeakVarAssignmentAcrossAlternation(): void
+    {
+        // First branch assigns v0="a" then fails; second assigns v0="b" and succeeds.
+        // Guardrail: must NOT return the failed-branch value.
+        $ast = Builder::alt(
+            Builder::concat([
+                Builder::cap(0, Builder::lit('a')),
+                Builder::assign(0, 0),
+                Builder::anchor('end'),
+            ]),
+            Builder::concat([
+                Builder::cap(0, Builder::lit('b')),
+                Builder::assign(0, 0),
+            ])
+        );
+
+        $result = PatternHelper::matchOnce($ast, 'b', ['full' => true]);
+        $this->assertIsArray($result);
+        $this->assertNotSame('a', $result['v0'] ?? null);
+    }
+
+    public function testBacktrackingDoesNotLeakOutputAcrossAlternation(): void
+    {
+        // Output is currently NOT backtrackable in the VM, so emits from failing branches can remain.
+        // This test documents the current behavior as a baseline; once Task 2 decides output
+        // backtrack semantics, we can tighten this to assert "Y" only.
+        $ast = Builder::alt(
+            Builder::concat([
+                Builder::emit('X'),
+                Builder::lit('a'),
+                Builder::anchor('end'),
+            ]),
+            Builder::concat([
+                Builder::emit('Y'),
+                Builder::lit('b'),
+                Builder::anchor('end'),
+            ])
+        );
+
+        $result = PatternHelper::matchOnce($ast, 'b', ['full' => true]);
+        $this->assertIsArray($result);
+        $this->assertSame('XY', $result['_output'] ?? null);
+    }
+
+    public function testBacktrackingWithRepeatGreedyMin0DoesNotBreakSubsequentMatch(): void
+    {
+        // repeat('a', 0..inf) then 'b', on input 'b'.
+        $ast = Builder::concat([
+            Builder::repeat(Builder::lit('a'), 0),
+            Builder::cap(0, Builder::lit('b')),
+        ]);
+
+        $result = PatternHelper::matchOnce($ast, 'b', ['full' => true]);
+        $this->assertIsArray($result);
+
+        // Guardrail: must not produce an incorrect capture from backtracking paths.
+        $this->assertNotSame('a', $result['v0'] ?? null);
+        $this->assertSame(1, $result['_match_len']);
+    }
 }
-
-

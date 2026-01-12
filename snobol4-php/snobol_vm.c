@@ -199,7 +199,6 @@ bool vm_run(VM *vm) {
             continue;
         }
         
-        size_t current_ip = vm->ip;
         uint8_t op = vm->bc[vm->ip++];
         
         /* SNOBOL_LOG("  TRACE ip=%zu, op=%u, pos=%zu", current_ip, (unsigned)op, vm->pos); */
@@ -249,7 +248,7 @@ bool vm_run(VM *vm) {
             case OP_LIT: {
                 uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip);
                 uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
-                vm->ip += len;
+                if (off == vm->ip) vm->ip += len;
                 if (len <= vm->len - vm->pos && memcmp(vm->s + vm->pos, vm->bc + off, len) == 0) {
                     vm->pos += len;
                 } else {
@@ -565,7 +564,7 @@ bool vm_run(VM *vm) {
             case OP_EMIT_LITERAL: {
                 uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip);
                 uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
-                vm->ip += len;
+                if (off == vm->ip) vm->ip += len;
                 if (vm->out) {
                     snobol_buf_append(vm->out, (const char *)vm->bc + off, (size_t)len);
                 }
