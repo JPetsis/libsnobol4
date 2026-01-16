@@ -98,6 +98,10 @@ typedef struct {
     uint32_t loop_min[MAX_LOOPS];
     uint32_t loop_max[MAX_LOOPS];
 
+    // optimization: track which captures/counters are actually used
+    uint8_t max_cap_used;      // highest capture index used + 1 (0 = none used)
+    uint8_t max_counter_used;  // highest counter index used + 1 (0 = none used)
+
     // output buffer
     snobol_buf *out;
 

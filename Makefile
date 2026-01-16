@@ -1,4 +1,4 @@
-.PHONY: help build test clean install test-valgrind build-asan test-asan
+.PHONY: help build test clean install test-valgrind build-asan test-asan bench
 
 # Detect if we're in DDEV
 DDEV := $(shell command -v ddev 2> /dev/null)
@@ -32,6 +32,7 @@ help:
 	@echo "  test-valgrind - Run PHP tests under Valgrind"
 	@echo "  build-asan - Build extension with AddressSanitizer"
 	@echo "  test-asan - Run tests with AddressSanitizer enabled"
+	@echo "  bench    - Run benchmark suite"
 	@echo "  enable   - Enable the snobol extension globally"
 	@echo "  disable  - Disable the snobol extension globally"
 	@echo "  composer - Run composer with ASan environment if needed (e.g., make composer install)"
@@ -243,3 +244,24 @@ else
 	@echo "Running tests with ASan..."
 	@USE_ZEND_ALLOC=0 $(MAKE) test
 endif
+
+bench:
+	@echo "Running benchmark suite..."
+ifeq ($(IN_DDEV),1)
+	@echo "Running benchmarks inside DDEV..."
+	@$(ASAN_ENV) php $(PHP_OPTS) bench/tokenize.php
+	@$(ASAN_ENV) php $(PHP_OPTS) bench/replace.php
+	@$(ASAN_ENV) php $(PHP_OPTS) bench/dates.php
+	@$(ASAN_ENV) php $(PHP_OPTS) bench/backtracking.php
+	@echo "Benchmarks complete! Results written to bench/results_*.json"
+else ifdef DDEV
+	@ddev exec make bench
+else
+	@echo "Running benchmarks..."
+	@php bench/tokenize.php
+	@php bench/replace.php
+	@php bench/dates.php
+	@php bench/backtracking.php
+	@echo "Benchmarks complete! Results written to bench/results_*.json"
+endif
+

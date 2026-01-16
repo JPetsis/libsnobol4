@@ -171,6 +171,7 @@ This is a PHP extension; memory management is critical to prevent `zend_mm_heap 
 - **Object Lifecycle:** Ensure that any bytecode or internal buffers associated with a `Snobol\Pattern` object are
   correctly freed in the `free_obj` handler.
 
+<!-- DEBUG LOGGING DISABLED
 ### Debugging & Logging
 
 The extension includes a built-in logging mechanism for development:
@@ -181,6 +182,7 @@ The extension includes a built-in logging mechanism for development:
   ```bash
   ddev exec tail -f /var/www/html/snobol_debug.log
   ```
+-->
 
 ## Coding Standards
 

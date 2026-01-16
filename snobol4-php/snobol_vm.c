@@ -9,6 +9,7 @@
 #include <time.h>
 #include <stdarg.h>
 
+/* DEBUG LOGGING DISABLED
 static inline void snobol_log_impl(const char *file, int line, const char *fmt, ...) {
     FILE *f = fopen("/var/www/html/snobol_debug.log", "a");
     if (f) {
@@ -26,7 +27,9 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
         fclose(f);
     }
 }
-#define SNOBOL_LOG(fmt, ...) snobol_log_impl(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
+*/
+/* No-op macro to disable logging */
+#define SNOBOL_LOG(fmt, ...) ((void)0)
 
 /* helpers to read u32/u16/u8 from bc with bounds checking */
 static inline uint32_t read_u32(const uint8_t *bc, size_t bc_len, size_t *ip) {
@@ -104,11 +107,24 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
     struct choice *c = &vm->choices[vm->choices_top++];
     c->ip = ip;
     c->pos = pos;
-    memcpy(c->cap_start_snapshot, vm->cap_start, sizeof(size_t) * MAX_CAPS);
-    memcpy(c->cap_end_snapshot, vm->cap_end, sizeof(size_t) * MAX_CAPS);
     c->var_count_snapshot = vm->var_count;
-    memcpy(c->counters_snapshot, vm->counters, sizeof(uint32_t) * MAX_LOOPS);
-    SNOBOL_LOG("vm_push_choice: top=%zu, ip=%zu, pos=%zu", vm->choices_top, ip, pos);
+
+    // Only copy captures that are actually used
+    // If max_cap_used is 0, we don't copy anything (no captures in use)
+    size_t caps_to_copy = vm->max_cap_used;
+    if (caps_to_copy > 0) {
+        memcpy(c->cap_start_snapshot, vm->cap_start, caps_to_copy * sizeof(size_t));
+        memcpy(c->cap_end_snapshot, vm->cap_end, caps_to_copy * sizeof(size_t));
+    }
+
+    // Only copy counters that are actually used
+    size_t counters_to_copy = vm->max_counter_used;
+    if (counters_to_copy > 0) {
+        memcpy(c->counters_snapshot, vm->counters, counters_to_copy * sizeof(uint32_t));
+    }
+
+    SNOBOL_LOG("vm_push_choice: top=%zu, ip=%zu, pos=%zu, caps=%zu, counters=%zu",
+               vm->choices_top, ip, pos, caps_to_copy, counters_to_copy);
 }
 
 bool vm_pop_choice(VM *vm) {
@@ -117,10 +133,21 @@ bool vm_pop_choice(VM *vm) {
     struct choice *c = &vm->choices[vm->choices_top];
     vm->ip = c->ip;
     vm->pos = c->pos;
-    memcpy(vm->cap_start, c->cap_start_snapshot, sizeof(size_t) * MAX_CAPS);
-    memcpy(vm->cap_end, c->cap_end_snapshot, sizeof(size_t) * MAX_CAPS);
+
+    // Only restore captures that are actually used
+    if (vm->max_cap_used > 0) {
+        size_t cap_bytes = vm->max_cap_used * sizeof(size_t);
+        memcpy(vm->cap_start, c->cap_start_snapshot, cap_bytes);
+        memcpy(vm->cap_end, c->cap_end_snapshot, cap_bytes);
+    }
+
     vm->var_count = c->var_count_snapshot;
-    memcpy(vm->counters, c->counters_snapshot, sizeof(uint32_t) * MAX_LOOPS);
+
+    // Only restore counters that are actually used
+    if (vm->max_counter_used > 0) {
+        memcpy(vm->counters, c->counters_snapshot, vm->max_counter_used * sizeof(uint32_t));
+    }
+
     SNOBOL_LOG("vm_pop_choice: top=%zu, ip=%zu, pos=%zu", vm->choices_top, vm->ip, vm->pos);
     return true;
 }
@@ -404,6 +431,7 @@ bool vm_run(VM *vm) {
                 uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 if (r < MAX_CAPS) {
                     vm->cap_start[r] = vm->pos;
+                    if (r >= vm->max_cap_used) vm->max_cap_used = r + 1;
                     SNOBOL_LOG("OP_CAP_START r=%u, pos=%zu", r, vm->pos);
                 }
                 break;
@@ -413,6 +441,7 @@ bool vm_run(VM *vm) {
                 uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 if (r < MAX_CAPS) {
                     vm->cap_end[r] = vm->pos;
+                    if (r >= vm->max_cap_used) vm->max_cap_used = r + 1;
                     SNOBOL_LOG("OP_CAP_END r=%u, pos=%zu", r, vm->pos);
                 }
                 break;
@@ -527,6 +556,8 @@ bool vm_run(VM *vm) {
                     vm->counters[loop_id] = 0;
                     vm->loop_min[loop_id] = min;
                     vm->loop_max[loop_id] = max;
+                    // Track the highest counter index used (loop_id is 0-based, so +1 for count)
+                    if (loop_id + 1 > vm->max_counter_used) vm->max_counter_used = loop_id + 1;
                     SNOBOL_LOG("OP_REPEAT_INIT id=%u, min=%u, max=%u, skip=%u", loop_id, min, max, skip);
                     if (min == 0) {
                         // Greedy: try body first, but can skip.
@@ -663,6 +694,8 @@ bool vm_run(VM *vm) {
 bool vm_exec(VM *vm) {
     vm->ip = 0;
     vm->pos = 0;
+    vm->max_cap_used = 0;
+    vm->max_counter_used = 0;
     memset(vm->counters, 0, sizeof(vm->counters));
     return vm_run(vm);
 }

@@ -11,6 +11,7 @@
 #include <time.h>
 #include <stdarg.h>
 
+/* DEBUG LOGGING DISABLED
 static inline void snobol_log_impl(const char *file, int line, const char *fmt, ...) {
     FILE *f = fopen("/var/www/html/snobol_debug.log", "a");
     if (f) {
@@ -28,7 +29,9 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
         fclose(f);
     }
 }
-#define SNOBOL_LOG(fmt, ...) snobol_log_impl(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
+*/
+/* No-op macro to disable logging */
+#define SNOBOL_LOG(fmt, ...) ((void)0)
 
 #ifdef STANDALONE_BUILD
 #define emalloc malloc

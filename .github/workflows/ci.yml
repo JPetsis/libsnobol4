@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (PHP ${{ matrix.php-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: [ '8.2', '8.3', '8.4', '8.5' ]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: json
+          tools: composer
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential php${{ matrix.php-version }}-dev autoconf
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Build C extension
+        working-directory: snobol4-php
+        run: |
+          phpize
+          ./configure --enable-snobol
+          make
+          sudo make install
+
+      - name: Enable extension
+        run: |
+          echo "extension=snobol.so" | sudo tee -a /etc/php/${{ matrix.php-version }}/cli/php.ini
+          php -m | grep snobol
+
+      - name: Run C tests
+        working-directory: tests/c
+        run: make test
+        continue-on-error: true
+
+      - name: Run PHP tests
+        run: php vendor/bin/phpunit tests/php
+
+      - name: Verify extension loaded
+        run: php -r "if (!extension_loaded('snobol')) exit(1);"

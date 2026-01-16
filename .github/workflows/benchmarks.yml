@@ -1,0 +1,78 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      php-version:
+        description: 'PHP version to use'
+        required: false
+        default: '8.3'
+  schedule:
+    # Run benchmarks weekly on Monday at 02:00 UTC
+    - cron: '0 2 * * 1'
+
+jobs:
+  benchmarks:
+    name: Run Benchmarks (PHP ${{ github.event.inputs.php-version || '8.3' }})
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ github.event.inputs.php-version || '8.3' }}
+          extensions: json
+          tools: composer
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential php${{ github.event.inputs.php-version || '8.3' }}-dev autoconf
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Build C extension
+        working-directory: snobol4-php
+        run: |
+          phpize
+          ./configure --enable-snobol
+          make
+          sudo make install
+
+      - name: Enable extension
+        run: |
+          echo "extension=snobol.so" | sudo tee -a /etc/php/${{ github.event.inputs.php-version || '8.3' }}/cli/php.ini
+          php -m | grep snobol
+
+      - name: Run tokenization benchmarks
+        run: php bench/tokenize.php
+
+      - name: Run replace/removal benchmarks
+        run: php bench/replace.php
+
+      - name: Run date matching benchmarks
+        run: php bench/dates.php
+
+      - name: Run backtracking benchmarks
+        run: php bench/backtracking.php
+
+      - name: Generate summary
+        run: |
+          echo "## Benchmark Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**PHP Version:** ${{ github.event.inputs.php-version || '8.3' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Benchmark results have been uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-php-${{ github.event.inputs.php-version || '8.3' }}
+          path: |
+            bench/results_*.json
+          retention-days: 90

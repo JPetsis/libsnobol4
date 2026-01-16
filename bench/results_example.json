@@ -1,0 +1,58 @@
+[
+  {
+    "scenario": "tokenize_comma",
+    "impl": "snobol",
+    "warmupIterations": 10,
+    "iterations": 500,
+    "durationNs": 45231789,
+    "durationMs": 45.231789,
+    "opsPerSec": 11054.32,
+    "inputBytes": 5890,
+    "phpVersion": "8.3.0",
+    "os": "Linux",
+    "timestamp": "2026-01-16T12:00:00+00:00",
+    "extensionVersion": "0.1.0"
+  },
+  {
+    "scenario": "tokenize_comma",
+    "impl": "pcre",
+    "warmupIterations": 10,
+    "iterations": 500,
+    "durationNs": 32145678,
+    "durationMs": 32.145678,
+    "opsPerSec": 15553.42,
+    "inputBytes": 5890,
+    "phpVersion": "8.3.0",
+    "os": "Linux",
+    "timestamp": "2026-01-16T12:00:01+00:00",
+    "extensionVersion": "0.1.0"
+  },
+  {
+    "scenario": "replace_vowels",
+    "impl": "snobol",
+    "warmupIterations": 10,
+    "iterations": 200,
+    "durationNs": 78654321,
+    "durationMs": 78.654321,
+    "opsPerSec": 2542.68,
+    "inputBytes": 4500,
+    "phpVersion": "8.3.0",
+    "os": "Linux",
+    "timestamp": "2026-01-16T12:00:02+00:00",
+    "extensionVersion": "0.1.0"
+  },
+  {
+    "scenario": "replace_vowels",
+    "impl": "pcre",
+    "warmupIterations": 10,
+    "iterations": 200,
+    "durationNs": 56789012,
+    "durationMs": 56.789012,
+    "opsPerSec": 3521.14,
+    "inputBytes": 4500,
+    "phpVersion": "8.3.0",
+    "os": "Linux",
+    "timestamp": "2026-01-16T12:00:03+00:00",
+    "extensionVersion": "0.1.0"
+  }
+]
