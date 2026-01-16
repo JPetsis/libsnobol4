@@ -45,16 +45,16 @@ jobs:
 
       - name: Enable extension
         run: |
-          # Try to find the correct ini directory
-          SCAN_DIR=$(php -r "echo ini_get('cfg_file_path') ?: php_ini_scanned_dir();")
-          if [ -z "$SCAN_DIR" ] || [ "$SCAN_DIR" = "false" ]; then
-            INI_FILE=$(php -r "echo php_ini_loaded_file();")
-            INI_DIR=$(dirname "$INI_FILE")
-            echo "Using main ini directory: $INI_DIR"
-            echo "extension=snobol.so" | sudo tee -a "$INI_FILE"
-          else
+          # Get the additional ini directory where we can add our extension config
+          SCAN_DIR=$(php -r "echo php_ini_scanned_dir();")
+          if [ -n "$SCAN_DIR" ] && [ "$SCAN_DIR" != "false" ] && [ -d "$SCAN_DIR" ]; then
             echo "Using scanned directory: $SCAN_DIR"
             echo "extension=snobol.so" | sudo tee "$SCAN_DIR/99-snobol.ini"
+          else
+            # Fallback: append to main php.ini
+            INI_FILE=$(php -r "echo php_ini_loaded_file();")
+            echo "Using main ini file: $INI_FILE"
+            echo "extension=snobol.so" | sudo tee -a "$INI_FILE"
           fi
           # Verify extension loaded
           php -m | grep snobol || (echo "Extension not loaded!" && exit 1)
