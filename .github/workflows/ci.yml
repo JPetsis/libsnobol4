@@ -33,7 +33,22 @@ jobs:
           sudo apt-get install -y build-essential php${{ matrix.php-version }}-dev autoconf
 
       - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          composer dump-autoload -o
+
+      - name: "Quick sanity check: repo files"
+        run: |
+          ls -la
+          ls -la php-src | head -50
+          test -f php-src/Builder.php
+          php -r "echo 'PWD=' . getcwd() . PHP_EOL;"
+
+      - name: Debug Composer autoload mapping (Snobol\\)
+        run: |
+          php -r "require 'vendor/autoload.php'; echo 'autoload-required' . PHP_EOL;"
+          php -r "require 'vendor/autoload.php'; var_export(require 'vendor/composer/autoload_psr4.php');" | head -200
+          php -r "require 'vendor/autoload.php'; var_dump(class_exists('Snobol\\\\Builder'));"
 
       - name: Build C extension
         working-directory: snobol4-php
@@ -48,20 +63,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Determine where to drop an ini file.
-          # NOTE: php_ini_scanned_dir() is NOT available in some PHP builds (we observed this locally),
-          # so we only rely on env + php_ini_loaded_file().
-
           LOADED_INI=$(php -r 'echo php_ini_loaded_file() ?: "";')
           echo "Loaded php.ini: ${LOADED_INI:-<none>}"
 
-          # Prefer PHP_INI_SCAN_DIR if present (used by many PHP distros, including setup-php action).
           if [ -n "${PHP_INI_SCAN_DIR:-}" ] && [ -d "$PHP_INI_SCAN_DIR" ]; then
             INI_DIR="$PHP_INI_SCAN_DIR"
             echo "Using PHP_INI_SCAN_DIR: $INI_DIR"
             echo "extension=snobol.so" | sudo tee "$INI_DIR/99-snobol.ini" > /dev/null
           else
-            # Try common conf.d next to loaded ini
             if [ -n "$LOADED_INI" ]; then
               BASE_DIR=$(dirname "$LOADED_INI")
               if [ -d "$BASE_DIR/conf.d" ]; then
