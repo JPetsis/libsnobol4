@@ -45,8 +45,32 @@ jobs:
 
       - name: Enable extension
         run: |
-          echo "extension=snobol.so" | sudo tee -a /etc/php/${{ matrix.php-version }}/cli/php.ini
-          php -m | grep snobol
+          # Try to find the correct ini directory
+          SCAN_DIR=$(php -r "echo ini_get('cfg_file_path') ?: php_ini_scanned_dir();")
+          if [ -z "$SCAN_DIR" ] || [ "$SCAN_DIR" = "false" ]; then
+            INI_FILE=$(php -r "echo php_ini_loaded_file();")
+            INI_DIR=$(dirname "$INI_FILE")
+            echo "Using main ini directory: $INI_DIR"
+            echo "extension=snobol.so" | sudo tee -a "$INI_FILE"
+          else
+            echo "Using scanned directory: $SCAN_DIR"
+            echo "extension=snobol.so" | sudo tee "$SCAN_DIR/99-snobol.ini"
+          fi
+          # Verify extension loaded
+          php -m | grep snobol || (echo "Extension not loaded!" && exit 1)
+          php -r "if (!extension_loaded('snobol')) { echo 'Extension not loaded!\n'; exit(1); } else { echo 'Extension loaded successfully\n'; }"
+
+      - name: Regenerate autoloader
+        run: composer dump-autoload
+
+      - name: Verify setup
+        run: |
+          echo "=== PHP Info ==="
+          php -v
+          echo "=== Loaded Extensions ==="
+          php -m
+          echo "=== Composer Autoload Check ==="
+          php -r "require 'vendor/autoload.php'; var_dump(class_exists('Snobol\\Builder'));"
 
       - name: Run C tests
         working-directory: tests/c
