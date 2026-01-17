@@ -121,7 +121,7 @@ $harness->bench(
 // Subject: Many 'a's with no 'b' - causes exponential backtracking
 // Note: SEVERELY reduced to avoid timeout (exponential complexity)
 // ------------------------------------------------------------------------
-$nestedSize = 20; // Reduced from 20 to avoid timeout
+$nestedSize = 25; // Increased to test optimization (was 3)
 $nested = Builder::concat([
     Builder::arbno(Builder::arbno(Builder::lit('a'))),
     Builder::lit('b'),
@@ -136,7 +136,7 @@ $harness->bench(
         $result = $patternNested->match($subjectNested);
     },
     $warmup,
-    50, // Reduced from 50 due to exponential cost
+    50, // Increased to 50
     strlen($subjectNested)
 );
 
@@ -152,7 +152,7 @@ $harness->bench(
         $result = @preg_match($pcreNestedPattern, $subjectNested); // @ to suppress backtrack limit warnings
     },
     $warmup,
-    50, // Reduced to match SNOBOL iterations
+    50, // Increased to 50
     strlen($subjectNested)
 );
 

@@ -239,6 +239,39 @@ static int emit_alt(zval *left, zval *right, CodeBuf *c) {
 
 /* arbno (zero or more) */
 static int emit_arbno(zval *sub, CodeBuf *c) {
+    // Optimization: Unwrap nested ARBNOs.
+    // ARBNO(ARBNO(x)) is logically equivalent to ARBNO(x) for matching purposes
+    // (matches sequence of x's), but implementation-wise ARBNO(ARBNO(x)) creates
+    // exponential backtracking paths.
+    // We loop peeling off ARBNO layers.
+    while (sub && Z_TYPE_P(sub) == IS_ARRAY) {
+        zval *type_zv = zend_hash_str_find(Z_ARRVAL_P(sub), "type", sizeof("type")-1);
+        if (!type_zv || Z_TYPE_P(type_zv) != IS_STRING) break;
+        zend_string *type = Z_STR_P(type_zv);
+        
+        if (zend_string_equals_literal(type, "arbno")) {
+            zval *inner = zend_hash_str_find(Z_ARRVAL_P(sub), "sub", sizeof("sub")-1);
+            if (inner) {
+                sub = inner;
+                continue;
+            }
+        } else if (zend_string_equals_literal(type, "repeat")) {
+            // Check for repeat(x, 0, -1) which is ARBNO
+            zval *min = zend_hash_str_find(Z_ARRVAL_P(sub), "min", sizeof("min")-1);
+            zval *max = zend_hash_str_find(Z_ARRVAL_P(sub), "max", sizeof("max")-1);
+            if (min && max && Z_TYPE_P(min) == IS_LONG && Z_TYPE_P(max) == IS_LONG) {
+                if (Z_LVAL_P(min) == 0 && Z_LVAL_P(max) == -1) {
+                    zval *inner = zend_hash_str_find(Z_ARRVAL_P(sub), "sub", sizeof("sub")-1);
+                    if (inner) {
+                        sub = inner;
+                        continue;
+                    }
+                }
+            }
+        }
+        break;
+    }
+
     if (next_loop_id >= MAX_LOOPS) return -1;
     uint8_t loop_id = next_loop_id++;
     uint32_t min = 0;
@@ -347,6 +380,36 @@ static int emit_repeat(zval *sub, zval *min_zv, zval *max_zv, CodeBuf *c) {
     uint8_t loop_id = next_loop_id++;
     uint32_t min = (uint32_t)Z_LVAL_P(min_zv);
     uint32_t max = (uint32_t)Z_LVAL_P(max_zv);
+
+    // Flatten logic for repeat(0, -1) same as ARBNO
+    if (min == 0 && max == (uint32_t)-1) {
+        while (sub && Z_TYPE_P(sub) == IS_ARRAY) {
+            zval *type_zv = zend_hash_str_find(Z_ARRVAL_P(sub), "type", sizeof("type")-1);
+            if (!type_zv || Z_TYPE_P(type_zv) != IS_STRING) break;
+            zend_string *type = Z_STR_P(type_zv);
+            
+            if (zend_string_equals_literal(type, "arbno")) {
+                zval *inner = zend_hash_str_find(Z_ARRVAL_P(sub), "sub", sizeof("sub")-1);
+                if (inner) {
+                    sub = inner;
+                    continue;
+                }
+            } else if (zend_string_equals_literal(type, "repeat")) {
+                zval *imin = zend_hash_str_find(Z_ARRVAL_P(sub), "min", sizeof("min")-1);
+                zval *imax = zend_hash_str_find(Z_ARRVAL_P(sub), "max", sizeof("max")-1);
+                if (imin && imax && Z_TYPE_P(imin) == IS_LONG && Z_TYPE_P(imax) == IS_LONG) {
+                    if (Z_LVAL_P(imin) == 0 && Z_LVAL_P(imax) == -1) {
+                        zval *inner = zend_hash_str_find(Z_ARRVAL_P(sub), "sub", sizeof("sub")-1);
+                        if (inner) {
+                            sub = inner;
+                            continue;
+                        }
+                    }
+                }
+            }
+            break;
+        }
+    }
 
     size_t init_pos = cb_pos(c);
     cb_emit_u8(c, OP_REPEAT_INIT);
