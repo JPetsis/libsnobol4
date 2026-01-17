@@ -19,8 +19,8 @@ The benchmark suite serves to:
 - Some SNOBOL operations (especially backtracking and captures) won't map 1:1 to PCRE semantics. Comparisons use the "
   closest reasonable" PCRE implementation.
 - Benchmarks can be **noisy**. Run multiple times and look for trends, not absolute numbers.
-- **Known performance issues**: The SNOBOL VM currently has significant performance gaps vs PCRE (10,000x+ slower on
-  some workloads). This is a known limitation being actively investigated.
+- **Known performance issues**: The SNOBOL VM generally has overhead compared to PCRE's JIT. While catastrophic
+  backtracking has been resolved, raw throughput for simple patterns is currently ~50-100x slower than PCRE.
 - **Timeout protection**: Each benchmark has a 30-second timeout. If a scenario times out, it will be marked as "
   TIMEOUT" in results.
 
