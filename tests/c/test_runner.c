@@ -34,6 +34,7 @@ void test_assert(bool condition, const char *message) {
 /* Forward declarations for test suites */
 void test_vm_suite(void);
 void test_backtracking_suite(void);
+void test_catastrophic_suite(void);
 int test_stress_backtracking_main(void);
 
 int main(void) {
@@ -43,6 +44,7 @@ int main(void) {
     /* Run test suites */
     test_vm_suite();
     test_backtracking_suite();
+    test_catastrophic_suite();
 
     printf("\n=== Stress Tests ===\n");
     {

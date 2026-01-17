@@ -102,10 +102,13 @@ static bool run_deep_alt_failure(size_t depth) {
 
     bool ok = vm_exec(&vm);
 
+    printf("DEBUG: vm_exec returned %d\n", ok);
     free(bc);
+    printf("DEBUG: freed bc\n");
     free(split_a_pos);
     free(split_b_pos);
     free(lit_ip);
+    printf("DEBUG: freed arrays\n");
 
     return ok;
 }

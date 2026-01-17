@@ -97,6 +97,7 @@ typedef struct {
     uint32_t counters[MAX_LOOPS];
     uint32_t loop_min[MAX_LOOPS];
     uint32_t loop_max[MAX_LOOPS];
+    size_t loop_last_pos[MAX_LOOPS];
 
     // optimization: track which captures/counters are actually used
     uint8_t max_cap_used;      // highest capture index used + 1 (0 = none used)
@@ -119,6 +120,7 @@ typedef struct {
         size_t cap_end_snapshot[MAX_CAPS];
         size_t var_count_snapshot;
         uint32_t counters_snapshot[MAX_LOOPS];
+        size_t loop_last_pos_snapshot[MAX_LOOPS];
     } *choices;
     size_t choices_cap;
     size_t choices_top;
@@ -126,6 +128,15 @@ typedef struct {
     // callback for EVAL: returns true if ok, false to cause fail
     bool (*eval_fn)(int fn_id, const char *s, size_t start, size_t end, void *udata);
     void *eval_udata;
+
+#ifdef SNOBOL_PROFILE
+    struct {
+        uint64_t dispatch_count;
+        uint64_t push_count;
+        uint64_t pop_count;
+        size_t max_depth;
+    } profile;
+#endif
 } VM;
 
 /* VM entry */

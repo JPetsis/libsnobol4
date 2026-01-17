@@ -239,21 +239,33 @@ static int emit_alt(zval *left, zval *right, CodeBuf *c) {
 
 /* arbno (zero or more) */
 static int emit_arbno(zval *sub, CodeBuf *c) {
-    size_t loop_start = cb_pos(c);
-    cb_emit_u8(c, OP_SPLIT);
-    size_t where_body = cb_pos(c); cb_emit_u32(c, 0);
-    size_t where_done = cb_pos(c); cb_emit_u32(c, 0);
+    if (next_loop_id >= MAX_LOOPS) return -1;
+    uint8_t loop_id = next_loop_id++;
+    uint32_t min = 0;
+    uint32_t max = (uint32_t)-1;
+
+    size_t init_pos = cb_pos(c);
+    cb_emit_u8(c, OP_REPEAT_INIT);
+    cb_emit_u8(c, loop_id);
+    cb_emit_u32(c, min);
+    cb_emit_u32(c, max);
+    size_t skip_target_off = cb_pos(c);
+    cb_emit_u32(c, 0); // placeholder for skip_target
 
     size_t body_start = cb_pos(c);
     if (emit_node(sub, c) != 0) return -1;
-    cb_emit_u8(c, OP_JMP);
-    cb_emit_u32(c, (uint32_t)loop_start);
 
-    size_t done = cb_pos(c);
-    uint32_t v_body = (uint32_t)body_start;
-    c->buf[where_body+0] = (v_body >> 24) & 0xff; c->buf[where_body+1] = (v_body >> 16) & 0xff; c->buf[where_body+2] = (v_body >> 8) & 0xff; c->buf[where_body+3] = v_body & 0xff;
-    uint32_t v_done = (uint32_t)done;
-    c->buf[where_done+0] = (v_done >> 24) & 0xff; c->buf[where_done+1] = (v_done >> 16) & 0xff; c->buf[where_done+2] = (v_done >> 8) & 0xff; c->buf[where_done+3] = v_done & 0xff;
+    cb_emit_u8(c, OP_REPEAT_STEP);
+    cb_emit_u8(c, loop_id);
+    cb_emit_u32(c, (uint32_t)body_start);
+
+    size_t done_pos = cb_pos(c);
+    // Fill skip_target
+    uint32_t v_done = (uint32_t)done_pos;
+    c->buf[skip_target_off+0] = (v_done >> 24) & 0xff;
+    c->buf[skip_target_off+1] = (v_done >> 16) & 0xff;
+    c->buf[skip_target_off+2] = (v_done >> 8) & 0xff;
+    c->buf[skip_target_off+3] = v_done & 0xff;
 
     return 0;
 }

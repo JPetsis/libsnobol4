@@ -147,6 +147,36 @@ They exercise the `Snobol\Builder` and `Snobol\Pattern` API.
    ddev exec vendor/bin/phpunit
    ```
 
+### Benchmarking
+
+The project includes a suite of benchmark scripts in `bench/` to measure performance.
+
+```bash
+# Run all benchmarks
+ddev exec make bench
+```
+
+Results are saved to `bench/results_*.json`.
+
+### Performance Profiling
+
+To diagnose performance issues or optimized hotspots, you can build the extension with internal VM profiling enabled.
+
+1. **Rebuild with profiling:**
+   ```bash
+   ddev exec "cd snobol4-php && phpize && ./configure --enable-snobol --enable-snobol-profile && make && sudo make install"
+   ddev restart
+   ```
+
+2. **Run your script/test:**
+   The VM will print statistics to `stderr` after each execution:
+   ```text
+   [SNOBOL PROFILE] dispatch=12345 push=500 pop=500 max_depth=12
+   ```
+
+3. **Disable profiling:**
+   Rebuild without the flag to restore maximum performance.
+
 ### Manual Testing / Examples
 
 In addition to automated tests, you can experiment using the example scripts under `public/` while DDEV is running:

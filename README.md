@@ -8,6 +8,9 @@ manipulation tasks.
 ## Features
 
 * **Native C Extension:** Built for performance, integrating directly with PHP's core.
+* **Robust Backtracking Engine:**
+    * **Catastrophic Backtracking Protection:** Detects and prevents infinite loops in nested zero-width matches.
+    * **Deep Recursion:** Dynamically growable choice stack handles deeply nested patterns without crashing.
 * **Expressive Pattern Building:**
     * **Textual Parser:** Write patterns as strings using a familiar SNOBOL-like syntax.
     * **Builder API:** Construct patterns programmatically using a fluent AST-based builder.
@@ -80,6 +83,10 @@ If you are not using DDEV, you can build the extension manually on any Linux/Uni
    ./configure
    make
    sudo make install
+   ```
+   *Optional:* To enable internal VM profiling (for debugging performance), use:
+   ```bash
+   ./configure --enable-snobol-profile
    ```
 
 4. **Enable the extension:**

@@ -4,10 +4,10 @@ CC = gcc
 # Add defines to map PHP memory functions to standard C functions
 CFLAGS = -std=c11 -Wall -Wextra -I$(CORE_DIR) -g -O0 \
          -Derealloc=realloc -Defree=free -Demalloc=malloc -Destrndup=strndup \
-         -DSTANDALONE_BUILD
+         -DSTANDALONE_BUILD -DSNOBOL_PROFILE
 
 # Test sources
-TEST_SOURCES = test_runner.c test_vm.c test_backtracking.c test_stress_backtracking.c
+TEST_SOURCES = test_runner.c test_vm.c test_backtracking.c test_stress_backtracking.c test_catastrophic.c
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_BINARY = test_runner
 

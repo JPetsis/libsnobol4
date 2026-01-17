@@ -79,6 +79,37 @@ static const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *ou
     return vm->bc + ip;
 }
 
+static bool ranges_to_ascii_bitmap(const uint8_t *ranges_ptr, size_t count, uint64_t map[2]) {
+    map[0] = map[1] = 0;
+    for (size_t i = 0; i < count; ++i) {
+        size_t offset = i * 8;
+        uint32_t start = ((uint32_t)ranges_ptr[offset+0] << 24) | ((uint32_t)ranges_ptr[offset+1] << 16) |
+                         ((uint32_t)ranges_ptr[offset+2] << 8) | (uint32_t)ranges_ptr[offset+3];
+        uint32_t end   = ((uint32_t)ranges_ptr[offset+4] << 24) | ((uint32_t)ranges_ptr[offset+5] << 16) |
+                         ((uint32_t)ranges_ptr[offset+6] << 8) | (uint32_t)ranges_ptr[offset+7];
+        
+        if (start > 127) return false; // Non-ASCII
+        if (end > 127) end = 127;      // Clamp to ASCII (though if start < 128 and end > 127, it's mixed, but we can just optimize the ASCII part? No, safe to reject)
+        
+        // Actually, if a range spans out of ASCII, we cannot use ASCII-only fast path for NEGATED logic (NOTANY) safely, 
+        // but for ANY/SPAN/BREAK we might? 
+        // Safer: strictly ASCII sets only.
+        if (end > 127) return false;
+
+        for (uint32_t c = start; c <= end; ++c) {
+            if (c < 64) map[0] |= (1ULL << c);
+            else map[1] |= (1ULL << (c - 64));
+        }
+    }
+    return true;
+}
+
+static inline bool bitmap_test(const uint64_t map[2], uint8_t c) {
+    if (c > 127) return false;
+    if (c < 64) return (map[0] & (1ULL << c)) != 0;
+    return (map[1] & (1ULL << (c - 64))) != 0;
+}
+
 static bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp) {
     size_t lo = 0, hi = count;
     while (lo < hi) {
@@ -103,7 +134,24 @@ static bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp)
 #define MAX_CHOICES 128
 
 void vm_push_choice(VM *vm, size_t ip, size_t pos) {
-    if (!vm->choices || vm->choices_top >= MAX_CHOICES) return;
+    if (!vm->choices) return;
+    if (vm->choices_top >= vm->choices_cap) {
+        size_t new_cap = vm->choices_cap ? vm->choices_cap * 2 : MAX_CHOICES;
+        // Safety limit: don't grow beyond 10M to avoid total OOM freeze
+        if (new_cap > 10000000) {
+             SNOBOL_LOG("vm_push_choice: Hard limit reached (%zu)", new_cap);
+             return;
+        }
+#ifdef STANDALONE_BUILD
+        struct choice *new_choices = realloc(vm->choices, new_cap * sizeof(struct choice));
+#else
+        struct choice *new_choices = erealloc(vm->choices, new_cap * sizeof(struct choice));
+#endif
+        if (!new_choices) return;
+        vm->choices = new_choices;
+        vm->choices_cap = new_cap;
+    }
+
     struct choice *c = &vm->choices[vm->choices_top++];
     c->ip = ip;
     c->pos = pos;
@@ -121,14 +169,24 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
     size_t counters_to_copy = vm->max_counter_used;
     if (counters_to_copy > 0) {
         memcpy(c->counters_snapshot, vm->counters, counters_to_copy * sizeof(uint32_t));
+        memcpy(c->loop_last_pos_snapshot, vm->loop_last_pos, counters_to_copy * sizeof(size_t));
     }
 
     SNOBOL_LOG("vm_push_choice: top=%zu, ip=%zu, pos=%zu, caps=%zu, counters=%zu",
                vm->choices_top, ip, pos, caps_to_copy, counters_to_copy);
+#ifdef SNOBOL_PROFILE
+    vm->profile.push_count++;
+    if (vm->choices_top > vm->profile.max_depth) {
+        vm->profile.max_depth = vm->choices_top;
+    }
+#endif
 }
 
 bool vm_pop_choice(VM *vm) {
     if (!vm->choices || vm->choices_top == 0) return false;
+#ifdef SNOBOL_PROFILE
+    vm->profile.pop_count++;
+#endif
     vm->choices_top--;
     struct choice *c = &vm->choices[vm->choices_top];
     vm->ip = c->ip;
@@ -146,6 +204,7 @@ bool vm_pop_choice(VM *vm) {
     // Only restore counters that are actually used
     if (vm->max_counter_used > 0) {
         memcpy(vm->counters, c->counters_snapshot, vm->max_counter_used * sizeof(uint32_t));
+        memcpy(vm->loop_last_pos, c->loop_last_pos_snapshot, vm->max_counter_used * sizeof(size_t));
     }
 
     SNOBOL_LOG("vm_pop_choice: top=%zu, ip=%zu, pos=%zu", vm->choices_top, vm->ip, vm->pos);
@@ -197,32 +256,26 @@ void snobol_buf_free(snobol_buf *b) {
 }
 
 bool vm_run(VM *vm) {
+    size_t initial_cap = MAX_CHOICES;
 #ifdef STANDALONE_BUILD
-    vm->choices = malloc(MAX_CHOICES * sizeof(struct choice));
+    vm->choices = malloc(initial_cap * sizeof(struct choice));
 #else
-    vm->choices = emalloc(MAX_CHOICES * sizeof(struct choice));
+    vm->choices = emalloc(initial_cap * sizeof(struct choice));
 #endif
     if (!vm->choices) {
         SNOBOL_LOG("vm_run: FAILED to allocate choices");
         return false;
     }
+    vm->choices_cap = initial_cap;
     vm->choices_top = 0;
     SNOBOL_LOG("vm_run: START, choices=%p, ip=%zu, pos=%zu", (void*)vm->choices, vm->ip, vm->pos);
 
     while (1) {
-        if (vm->ip >= vm->bc_len) {
-            if (!vm_pop_choice(vm)) {
-                if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                    free(vm->choices); 
-#else
-                    efree(vm->choices);
+#ifdef SNOBOL_PROFILE
+        vm->profile.dispatch_count++;
 #endif
-                    vm->choices = NULL; 
-                }
-                SNOBOL_LOG("vm_run: FAIL (end of bytecode)");
-                return false;
-            }
+        if (vm->ip >= vm->bc_len) {
+            if (!vm_pop_choice(vm)) goto fail_ret;
             continue;
         }
         
@@ -244,18 +297,7 @@ bool vm_run(VM *vm) {
                 return true;
 
             case OP_FAIL:
-                if (!vm_pop_choice(vm)) {
-                    if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                        free(vm->choices); 
-#else
-                        efree(vm->choices);
-#endif
-                        vm->choices = NULL; 
-                    }
-                    SNOBOL_LOG("vm_run: FAIL (OP_FAIL)");
-                    return false;
-                }
+                if (!vm_pop_choice(vm)) goto fail_ret;
                 break;
 
             case OP_JMP: {
@@ -279,55 +321,41 @@ bool vm_run(VM *vm) {
                 if (len <= vm->len - vm->pos && memcmp(vm->s + vm->pos, vm->bc + off, len) == 0) {
                     vm->pos += len;
                 } else {
-                    if (!vm_pop_choice(vm)) {
-                        if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                            free(vm->choices); 
-#else
-                            efree(vm->choices);
-#endif
-                            vm->choices = NULL; 
-                        }
-                        return false;
-                    }
+                    if (!vm_pop_choice(vm)) goto fail_ret;
                 }
                 break;
             }
 
             case OP_ANY: {
                 uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
-                uint32_t cp; int bytes;
-                if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) {
-                    if (!vm_pop_choice(vm)) {
-                        if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                            free(vm->choices); 
-#else
-                            efree(vm->choices);
-#endif
-                            vm->choices = NULL; 
+                uint16_t count, ci;
+                const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
+                uint64_t ascii_map[2];
+                bool is_ascii = ranges && ranges_to_ascii_bitmap(ranges, count, ascii_map);
+
+                if (is_ascii) {
+                    if (vm->pos < vm->len) {
+                        uint8_t c = (uint8_t)vm->s[vm->pos];
+                        if (bitmap_test(ascii_map, c)) {
+                             vm->pos++;
+                        } else {
+                            if (!vm_pop_choice(vm)) goto fail_ret;
                         }
-                        return false;
+                    } else {
+                        if (!vm_pop_choice(vm)) goto fail_ret;
                     }
                 } else {
-                    if (set_id == 0) {
-                        vm->pos += bytes;
+                    uint32_t cp; int bytes;
+                    if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) {
+                        if (!vm_pop_choice(vm)) goto fail_ret;
                     } else {
-                        uint16_t count, ci;
-                        const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
-                        if (ranges && range_contains(ranges, count, cp)) {
+                        if (set_id == 0) {
                             vm->pos += bytes;
                         } else {
-                            if (!vm_pop_choice(vm)) {
-                                if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                                    free(vm->choices); 
-#else
-                                    efree(vm->choices);
-#endif
-                                    vm->choices = NULL; 
-                                }
-                                return false;
+                            if (ranges && range_contains(ranges, count, cp)) {
+                                vm->pos += bytes;
+                            } else {
+                                if (!vm_pop_choice(vm)) goto fail_ret;
                             }
                         }
                     }
@@ -337,36 +365,34 @@ bool vm_run(VM *vm) {
 
             case OP_NOTANY: {
                 uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
-                uint32_t cp; int bytes;
-                if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) {
-                    if (!vm_pop_choice(vm)) {
-                        if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                            free(vm->choices); 
-#else
-                            efree(vm->choices);
-#endif
-                            vm->choices = NULL; 
-                        }
-                        return false;
-                    }
-                } else {
-                    uint16_t count, ci;
-                    const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
-                    if (ranges && range_contains(ranges, count, cp)) {
-                        if (!vm_pop_choice(vm)) {
-                            if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                                free(vm->choices); 
-#else
-                                efree(vm->choices);
-#endif
-                                vm->choices = NULL; 
-                            }
-                            return false;
+                uint16_t count, ci;
+                const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
+                uint64_t ascii_map[2];
+                bool is_ascii = ranges && ranges_to_ascii_bitmap(ranges, count, ascii_map);
+
+                if (is_ascii) {
+                    if (vm->pos < vm->len) {
+                        uint8_t c = (uint8_t)vm->s[vm->pos];
+                        if (bitmap_test(ascii_map, c)) {
+                            // Found in set -> Fail
+                            if (!vm_pop_choice(vm)) goto fail_ret;
+                        } else {
+                            // Not in set -> match
+                            vm->pos++;
                         }
                     } else {
-                        vm->pos += bytes;
+                        if (!vm_pop_choice(vm)) goto fail_ret;
+                    }
+                } else {
+                    uint32_t cp; int bytes;
+                    if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) {
+                        if (!vm_pop_choice(vm)) goto fail_ret;
+                    } else {
+                        if (ranges && range_contains(ranges, count, cp)) {
+                            if (!vm_pop_choice(vm)) goto fail_ret;
+                        } else {
+                            vm->pos += bytes;
+                        }
                     }
                 }
                 break;
@@ -374,55 +400,60 @@ bool vm_run(VM *vm) {
 
             case OP_SPAN: {
                 uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
-                uint32_t cp; int bytes;
-                if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) {
-                    if (!vm_pop_choice(vm)) {
-                        if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                            free(vm->choices); 
-#else
-                            efree(vm->choices);
-#endif
-                            vm->choices = NULL; 
-                        }
-                        return false;
-                    }
-                    break;
-                }
                 uint16_t count, ci;
                 const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
-                if (!ranges || !range_contains(ranges, count, cp)) {
-                    if (!vm_pop_choice(vm)) {
-                        if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                            free(vm->choices); 
-#else
-                            efree(vm->choices);
-#endif
-                            vm->choices = NULL; 
+                uint64_t ascii_map[2];
+                bool is_ascii = ranges && ranges_to_ascii_bitmap(ranges, count, ascii_map);
+
+                if (is_ascii) {
+                    if (vm->pos < vm->len && bitmap_test(ascii_map, (uint8_t)vm->s[vm->pos])) {
+                        vm->pos++;
+                        while (vm->pos < vm->len && bitmap_test(ascii_map, (uint8_t)vm->s[vm->pos])) {
+                            vm->pos++;
                         }
-                        return false;
+                    } else {
+                        if (!vm_pop_choice(vm)) goto fail_ret;
                     }
-                    break;
-                }
-                vm->pos += bytes;
-                while (1) {
-                    if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) break;
-                    if (!range_contains(ranges, count, cp)) break;
+                } else {
+                    uint32_t cp; int bytes;
+                    if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) {
+                        if (!vm_pop_choice(vm)) goto fail_ret;
+                        break;
+                    }
+                    if (!ranges || !range_contains(ranges, count, cp)) {
+                        if (!vm_pop_choice(vm)) goto fail_ret;
+                        break;
+                    }
                     vm->pos += bytes;
+                    while (1) {
+                        if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) break;
+                        if (!range_contains(ranges, count, cp)) break;
+                        vm->pos += bytes;
+                    }
                 }
                 break;
             }
 
             case OP_BREAK: {
                 uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
-                uint32_t cp; int bytes;
                 uint16_t count, ci;
                 const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
-                while (1) {
-                    if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) break;
-                    if (ranges && range_contains(ranges, count, cp)) break;
-                    vm->pos += bytes;
+                uint64_t ascii_map[2];
+                bool is_ascii = ranges && ranges_to_ascii_bitmap(ranges, count, ascii_map);
+
+                if (is_ascii) {
+                    while (vm->pos < vm->len) {
+                        uint8_t c = (uint8_t)vm->s[vm->pos];
+                        if (bitmap_test(ascii_map, c)) break;
+                        vm->pos++;
+                    }
+                } else {
+                    uint32_t cp; int bytes;
+                    while (1) {
+                        if (!utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes)) break;
+                        if (ranges && range_contains(ranges, count, cp)) break;
+                        vm->pos += bytes;
+                    }
                 }
                 break;
             }
@@ -469,17 +500,7 @@ bool vm_run(VM *vm) {
                     p += bytes;
                 }
                 if (i != n) {
-                    if (!vm_pop_choice(vm)) {
-                        if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                            free(vm->choices); 
-#else
-                            efree(vm->choices);
-#endif
-                            vm->choices = NULL; 
-                        }
-                        return false;
-                    }
+                    if (!vm_pop_choice(vm)) goto fail_ret;
                 } else {
                     vm->pos = p;
                 }
@@ -490,34 +511,14 @@ bool vm_run(VM *vm) {
                 uint16_t fn = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 if (r >= MAX_CAPS) {
-                    if (!vm_pop_choice(vm)) {
-                        if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                                free(vm->choices); 
-#else
-                                efree(vm->choices);
-#endif
-                            vm->choices = NULL; 
-                        }
-                        return false;
-                    }
+                    if (!vm_pop_choice(vm)) goto fail_ret;
                     break;
                 }
                 size_t a = vm->cap_start[r];
                 size_t b = vm->cap_end[r];
                 if (vm->eval_fn) {
                     if (!vm->eval_fn((int)fn, vm->s, a, b, vm->eval_udata)) {
-                        if (!vm_pop_choice(vm)) {
-                            if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                                free(vm->choices); 
-#else
-                                efree(vm->choices);
-#endif
-                                vm->choices = NULL; 
-                            }
-                            return false;
-                        }
+                        if (!vm_pop_choice(vm)) goto fail_ret;
                     }
                 }
                 break;
@@ -532,17 +533,7 @@ bool vm_run(VM *vm) {
                     if (vm->pos == vm->len) ok = true;
                 }
                 if (!ok) {
-                    if (!vm_pop_choice(vm)) {
-                        if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                            free(vm->choices); 
-#else
-                            efree(vm->choices);
-#endif
-                            vm->choices = NULL; 
-                        }
-                        return false;
-                    }
+                    if (!vm_pop_choice(vm)) goto fail_ret;
                 }
                 break;
             }
@@ -556,6 +547,7 @@ bool vm_run(VM *vm) {
                     vm->counters[loop_id] = 0;
                     vm->loop_min[loop_id] = min;
                     vm->loop_max[loop_id] = max;
+                    vm->loop_last_pos[loop_id] = vm->pos;
                     // Track the highest counter index used (loop_id is 0-based, so +1 for count)
                     if (loop_id + 1 > vm->max_counter_used) vm->max_counter_used = loop_id + 1;
                     SNOBOL_LOG("OP_REPEAT_INIT id=%u, min=%u, max=%u, skip=%u", loop_id, min, max, skip);
@@ -579,11 +571,18 @@ bool vm_run(VM *vm) {
                     
                     if (count < min) {
                         // MUST repeat
+                        vm->loop_last_pos[loop_id] = vm->pos;
                         vm->ip = (size_t)target;
                     } else if (max == (uint32_t)-1 || count < max) {
-                        // CAN repeat (greedy)
-                        vm_push_choice(vm, vm->ip, vm->pos);
-                        vm->ip = (size_t)target;
+                        // Check for infinite loop on empty match
+                        if (max == (uint32_t)-1 && vm->pos == vm->loop_last_pos[loop_id]) {
+                            // Matched empty string in unbounded repeat -> STOP repeating
+                        } else {
+                            // CAN repeat (greedy)
+                            vm_push_choice(vm, vm->ip, vm->pos);
+                            vm->loop_last_pos[loop_id] = vm->pos;
+                            vm->ip = (size_t)target;
+                        }
                     } else {
                         // MUST stop
                         // continue (vm->ip is after STEP)
@@ -666,17 +665,7 @@ bool vm_run(VM *vm) {
             }
 
             default:
-                if (!vm_pop_choice(vm)) {
-                    if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                        free(vm->choices); 
-#else
-                        efree(vm->choices);
-#endif
-                        vm->choices = NULL; 
-                    }
-                    return false;
-                }
+                if (!vm_pop_choice(vm)) goto fail_ret;
                 break;
         }
     }
@@ -689,6 +678,18 @@ bool vm_run(VM *vm) {
         vm->choices = NULL; 
     }
     return false;
+
+fail_ret:
+    if (vm->choices) { 
+#ifdef STANDALONE_BUILD
+        free(vm->choices); 
+#else
+        efree(vm->choices);
+#endif
+        vm->choices = NULL; 
+    }
+    SNOBOL_LOG("vm_run: FAIL");
+    return false;
 }
 
 bool vm_exec(VM *vm) {
@@ -697,5 +698,16 @@ bool vm_exec(VM *vm) {
     vm->max_cap_used = 0;
     vm->max_counter_used = 0;
     memset(vm->counters, 0, sizeof(vm->counters));
-    return vm_run(vm);
+#ifdef SNOBOL_PROFILE
+    memset(&vm->profile, 0, sizeof(vm->profile));
+#endif
+    bool res = vm_run(vm);
+#ifdef SNOBOL_PROFILE
+    fprintf(stderr, "[SNOBOL PROFILE] dispatch=%llu push=%llu pop=%llu max_depth=%zu\n",
+            (unsigned long long)vm->profile.dispatch_count,
+            (unsigned long long)vm->profile.push_count,
+            (unsigned long long)vm->profile.pop_count,
+            vm->profile.max_depth);
+#endif
+    return res;
 }
