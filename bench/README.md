@@ -31,6 +31,7 @@ The benchmark suite serves to:
 - PHP 8.0 or newer
 - The `snobol` extension must be loaded (`php -m | grep snobol`)
 - Composer dependencies installed (`composer install`)
+- **Optional**: Build with `--enable-snobol-profile` to see internal VM stats (dispatch counts, stack depth).
 
 ### Run All Benchmarks
 
