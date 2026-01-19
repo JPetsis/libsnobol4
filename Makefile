@@ -33,6 +33,7 @@ help:
 	@echo "  build-asan - Build extension with AddressSanitizer"
 	@echo "  test-asan - Run tests with AddressSanitizer enabled"
 	@echo "  bench    - Run benchmark suite"
+	@echo "  build-jit - Build with micro-JIT enabled"
 	@echo "  enable   - Enable the snobol extension globally"
 	@echo "  disable  - Disable the snobol extension globally"
 	@echo "  composer - Run composer with ASan environment if needed (e.g., make composer install)"
@@ -124,6 +125,8 @@ endif
 	@if [ -d tests/c ]; then \
 		cd tests/c && $(MAKE) clean 2>/dev/null || true; \
 	fi
+	@echo "Cleaning benchmark result JSONs..."
+	@find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' -delete 2>/dev/null || true
 	@echo "Clean complete!"
 
 install:
@@ -263,5 +266,26 @@ else
 	@php bench/dates.php
 	@php bench/backtracking.php
 	@echo "Benchmarks complete! Results written to bench/results_*.json"
+endif
+
+build-jit:
+ifeq ($(IN_DDEV),1)
+	@echo "Building with JIT inside DDEV..."
+	@rm -rf /tmp/snobol_build
+	@mkdir -p /tmp/snobol_build
+	@cp -rf /var/www/html/snobol4-php/. /tmp/snobol_build/
+	@cd /tmp/snobol_build && \
+		phpize && \
+		./configure --enable-snobol --enable-snobol-jit && \
+		$(MAKE)
+	@echo "JIT build complete. Run 'make install' to install."
+else ifdef DDEV
+	@ddev exec make build-jit
+else
+	@echo "Building with JIT natively..."
+	@cd snobol4-php && \
+		phpize && \
+		./configure --enable-snobol --enable-snobol-jit && \
+		$(MAKE)
 endif
 

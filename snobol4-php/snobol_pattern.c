@@ -1,8 +1,8 @@
 #include "php.h"
+#include "php_snobol.h"
 #include "zend_exceptions.h"
 #include "snobol_compiler.h"
 #include "snobol_vm.h"
-#include "php_snobol.h"
 
 #include <stdio.h>
 #include <time.h>
@@ -34,6 +34,12 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
 typedef struct {
     uint8_t *bc;
     size_t bc_len;
+#ifdef SNOBOL_JIT
+    uint64_t *ip_counts;
+    uint64_t *op_counts;
+    void **traces; // Array of JIT entry points indexed by IP
+    bool jit_enabled;
+#endif
     zend_object std;
 } snobol_pattern_t;
 
@@ -47,11 +53,58 @@ static inline snobol_pattern_t* php_snobol_fetch(zend_object *obj) {
 static void snobol_pattern_free(zend_object *object) {
     snobol_pattern_t *intern = php_snobol_fetch(object);
     SNOBOL_LOG("snobol_pattern_free: intern=%p, bc=%p", (void*)intern, (void*)intern->bc);
+#ifdef SNOBOL_JIT
+    fprintf(stderr, "DEBUG: free called, ip_counts=%p\n", (void*)intern->ip_counts);
+#endif
     
     if (intern->bc) {
         compiler_free(intern->bc);
         intern->bc = NULL;
     }
+
+#ifdef SNOBOL_JIT
+    if (intern->ip_counts) {
+        // Find top 5 hot IPs
+        struct { size_t ip; uint64_t count; } top[5] = {0};
+        for (size_t i = 0; i < intern->bc_len; ++i) {
+            if (intern->ip_counts[i] > top[4].count) {
+                top[4].ip = i;
+                top[4].count = intern->ip_counts[i];
+                for (int j = 4; j > 0; --j) {
+                    if (top[j].count > top[j-1].count) {
+                        size_t tmp_ip = top[j-1].ip;
+                        uint64_t tmp_count = top[j-1].count;
+                        top[j-1].ip = top[j].ip;
+                        top[j-1].count = top[j].count;
+                        top[j].ip = tmp_ip;
+                        top[j].count = tmp_count;
+                    } else break;
+                }
+            }
+        }
+        
+        if (top[0].count > 0) {
+            fprintf(stderr, "[SNOBOL JIT] Hot IPs:");
+            for (int i = 0; i < 5; ++i) {
+                if (top[i].count > 0) {
+                    fprintf(stderr, " %zu(%llu)", top[i].ip, (unsigned long long)top[i].count);
+                }
+            }
+            fprintf(stderr, "\n");
+        }
+
+        efree(intern->ip_counts);
+        intern->ip_counts = NULL;
+    }
+    if (intern->op_counts) {
+        efree(intern->op_counts);
+        intern->op_counts = NULL;
+    }
+    if (intern->traces) {
+        efree(intern->traces);
+        intern->traces = NULL;
+    }
+#endif
     
     zend_object_std_dtor(object);
     SNOBOL_LOG("snobol_pattern_free: done");
@@ -63,6 +116,12 @@ static zend_object *snobol_pattern_create(zend_class_entry *ce) {
     
     intern->bc = NULL;
     intern->bc_len = 0;
+#ifdef SNOBOL_JIT
+    intern->ip_counts = NULL;
+    intern->op_counts = NULL;
+    intern->traces = NULL;
+    intern->jit_enabled = true;
+#endif
     
     zend_object_std_init(&intern->std, ce);
     object_properties_init(&intern->std, ce);
@@ -88,6 +147,10 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_setEval, 0, 0, 1)
     ZEND_ARG_ARRAY_INFO(0, callbacks, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_setJit, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, enabled, _IS_BOOL, 0)
 ZEND_END_ARG_INFO()
 
 /* PHP Methods */
@@ -121,6 +184,14 @@ PHP_METHOD(Snobol_Pattern, compileFromAst) {
     snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(return_value));
     intern->bc = bc;
     intern->bc_len = bc_len;
+
+#ifdef SNOBOL_JIT
+    if (bc_len > 0) {
+        intern->ip_counts = ecalloc(bc_len, sizeof(uint64_t));
+        intern->op_counts = ecalloc(256, sizeof(uint64_t));
+        intern->traces = ecalloc(bc_len, sizeof(void*));
+    }
+#endif
     
     SNOBOL_LOG("Snobol_Pattern::compileFromAst: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
 }
@@ -168,6 +239,13 @@ PHP_METHOD(Snobol_Pattern, match) {
     vm.len = ZSTR_LEN(input);
     vm.emit_fn = php_snobol_emit_cb;
     vm.emit_udata = &eb;
+
+#ifdef SNOBOL_JIT
+    vm.jit.ip_counts = intern->ip_counts;
+    vm.jit.op_counts = intern->op_counts;
+    vm.jit.traces = intern->traces;
+    vm.jit.enabled = intern->jit_enabled;
+#endif
 
     bool ok = vm_exec(&vm); 
     
@@ -241,6 +319,17 @@ PHP_METHOD(Snobol_Pattern, subst) {
         vm.s = subject_val + offset;
         vm.len = subject_len - offset;
 
+#ifdef SNOBOL_JIT
+        // IMPORTANT: subst() creates many short-lived VMs while scanning through the subject.
+        // Sharing the per-pattern JIT counters/trace cache across these temporary VMs can lead
+        // to stale trace pointers being executed after memory was freed/reused.
+        // For safety, keep JIT disabled for these per-offset scan VMs.
+        vm.jit.ip_counts = NULL;
+        vm.jit.op_counts = NULL;
+        vm.jit.traces = NULL;
+        vm.jit.enabled = false;
+#endif
+
         if (vm_exec(&vm)) {
             // Match found at offset.
             // 1. Append prefix (before this match)
@@ -286,11 +375,42 @@ PHP_METHOD(Snobol_Pattern, setEvalCallbacks) {
     RETURN_TRUE;
 }
 
+PHP_METHOD(Snobol_Pattern, setJit) {
+    bool enabled;
+    ZEND_PARSE_PARAMETERS_START(1,1)
+        Z_PARAM_BOOL(enabled)
+    ZEND_PARSE_PARAMETERS_END();
+
+#ifdef SNOBOL_JIT
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    intern->jit_enabled = enabled;
+#endif
+    RETURN_TRUE;
+}
+
+PHP_MINFO_FUNCTION(snobol) {
+    php_info_print_table_start();
+    php_info_print_table_header(2, "snobol support", "enabled");
+    php_info_print_table_row(2, "version", PHP_SNOBOL_VERSION);
+#ifdef SNOBOL_JIT
+    php_info_print_table_row(2, "micro-JIT", "enabled");
+#else
+    php_info_print_table_row(2, "micro-JIT", "disabled");
+#endif
+#ifdef SNOBOL_PROFILE
+    php_info_print_table_row(2, "profiling", "enabled");
+#else
+    php_info_print_table_row(2, "profiling", "disabled");
+#endif
+    php_info_print_table_end();
+}
+
 static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, compileFromAst, ai_compileFromAst, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
     PHP_ME(Snobol_Pattern, match, ai_match, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, subst, ai_subst, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, setEvalCallbacks, ai_setEval, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, setJit, ai_setJit, ZEND_ACC_PUBLIC)
     PHP_FE_END
 };
 

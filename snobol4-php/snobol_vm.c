@@ -1,8 +1,13 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #ifndef STANDALONE_BUILD
 #include "php.h"
 #endif
 
 #include "snobol_vm.h"
+#include "snobol_jit.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -31,26 +36,7 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
 /* No-op macro to disable logging */
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
-/* helpers to read u32/u16/u8 from bc with bounds checking */
-static inline uint32_t read_u32(const uint8_t *bc, size_t bc_len, size_t *ip) {
-    if (*ip + 4 > bc_len) { *ip = bc_len; return 0; }
-    uint32_t v = ((uint32_t)bc[*ip] << 24) | ((uint32_t)bc[*ip+1] << 16) | ((uint32_t)bc[*ip+2] << 8) | (uint32_t)bc[*ip+3];
-    *ip += 4;
-    return v;
-}
-static inline uint16_t read_u16(const uint8_t *bc, size_t bc_len, size_t *ip) {
-    if (*ip + 2 > bc_len) { *ip = bc_len; return 0; }
-    uint16_t v = ((uint16_t)bc[*ip] << 8) | ((uint16_t)bc[*ip+1]);
-    *ip += 2;
-    return v;
-}
-static inline uint8_t read_u8(const uint8_t *bc, size_t bc_len, size_t *ip) {
-    if (*ip + 1 > bc_len) { *ip = bc_len; return 0; }
-    uint8_t v = bc[(*ip)++];
-    return v;
-}
-
-static const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count, uint16_t *out_case) {
+const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count, uint16_t *out_case) {
     if (set_id == 0) return NULL;
     size_t tail_ip = vm->bc_len;
     if (tail_ip < 4) return NULL;
@@ -79,7 +65,7 @@ static const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *ou
     return vm->bc + ip;
 }
 
-static bool ranges_to_ascii_bitmap(const uint8_t *ranges_ptr, size_t count, uint64_t map[2]) {
+bool ranges_to_ascii_bitmap(const uint8_t *ranges_ptr, size_t count, uint64_t map[2]) {
     map[0] = map[1] = 0;
     for (size_t i = 0; i < count; ++i) {
         size_t offset = i * 8;
@@ -104,13 +90,7 @@ static bool ranges_to_ascii_bitmap(const uint8_t *ranges_ptr, size_t count, uint
     return true;
 }
 
-static inline bool bitmap_test(const uint64_t map[2], uint8_t c) {
-    if (c > 127) return false;
-    if (c < 64) return (map[0] & (1ULL << c)) != 0;
-    return (map[1] & (1ULL << (c - 64))) != 0;
-}
-
-static bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp) {
+bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp) {
     size_t lo = 0, hi = count;
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
@@ -278,8 +258,30 @@ bool vm_run(VM *vm) {
             if (!vm_pop_choice(vm)) goto fail_ret;
             continue;
         }
-        
+
+        size_t current_ip = vm->ip;
+
+#ifdef SNOBOL_JIT
+        if (vm->jit.enabled && vm->jit.traces && vm->jit.traces[current_ip]) {
+            jit_trace_fn fn = (jit_trace_fn)vm->jit.traces[current_ip];
+            fn(vm);
+            if (vm->ip != current_ip) continue; 
+        }
+
+        if (vm->jit.ip_counts && current_ip < vm->bc_len) {
+            uint64_t count = ++vm->jit.ip_counts[current_ip];
+            if (count == 50 && vm->jit.traces && vm->jit.traces[current_ip] == NULL) {
+                 vm->jit.traces[current_ip] = (void*)snobol_jit_compile(vm, current_ip);
+                 // If successful, we could execute it now, but simpler to wait for next iter
+            }
+        }
+#endif
+
         uint8_t op = vm->bc[vm->ip++];
+
+#ifdef SNOBOL_JIT
+        if (vm->jit.op_counts) vm->jit.op_counts[op]++;
+#endif
         
         /* SNOBOL_LOG("  TRACE ip=%zu, op=%u, pos=%zu", current_ip, (unsigned)op, vm->pos); */
 
@@ -701,7 +703,12 @@ bool vm_exec(VM *vm) {
 #ifdef SNOBOL_PROFILE
     memset(&vm->profile, 0, sizeof(vm->profile));
 #endif
+    
+    // Counters are allocated/managed by the caller (Pattern object)
+    // We just use them if present.
+
     bool res = vm_run(vm);
+
 #ifdef SNOBOL_PROFILE
     fprintf(stderr, "[SNOBOL PROFILE] dispatch=%llu push=%llu pop=%llu max_depth=%zu\n",
             (unsigned long long)vm->profile.dispatch_count,
@@ -709,5 +716,6 @@ bool vm_exec(VM *vm) {
             (unsigned long long)vm->profile.pop_count,
             vm->profile.max_depth);
 #endif
+
     return res;
 }

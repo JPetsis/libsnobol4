@@ -33,9 +33,16 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
 
 /* Extern declaration from snobol_pattern.c */
 void snobol_pattern_minit(void);
+PHP_MINFO_FUNCTION(snobol);
+#ifdef SNOBOL_JIT
+#include "snobol_jit.h"
+#endif
 
 PHP_MINIT_FUNCTION(snobol) {
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): START");
+#ifdef SNOBOL_JIT
+    snobol_jit_init();
+#endif
     snobol_pattern_minit();
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): DONE");
     return SUCCESS;
@@ -49,7 +56,7 @@ zend_module_entry snobol_module_entry = {
     NULL,
     NULL,
     NULL,
-    NULL,
+    PHP_MINFO(snobol),
     PHP_SNOBOL_VERSION,
     STANDARD_MODULE_PROPERTIES
 };

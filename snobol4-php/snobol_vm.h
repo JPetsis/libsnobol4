@@ -38,6 +38,25 @@ static inline int utf8_peek_next(const char *s, size_t len, size_t pos, uint32_t
     return 0;
 }
 
+/* helpers to read u32/u16/u8 from bc with bounds checking */
+static inline uint32_t read_u32(const uint8_t *bc, size_t bc_len, size_t *ip) {
+    if (*ip + 4 > bc_len) { *ip = bc_len; return 0; }
+    uint32_t v = ((uint32_t)bc[*ip] << 24) | ((uint32_t)bc[*ip+1] << 16) | ((uint32_t)bc[*ip+2] << 8) | (uint32_t)bc[*ip+3];
+    *ip += 4;
+    return v;
+}
+static inline uint16_t read_u16(const uint8_t *bc, size_t bc_len, size_t *ip) {
+    if (*ip + 2 > bc_len) { *ip = bc_len; return 0; }
+    uint16_t v = ((uint16_t)bc[*ip] << 8) | ((uint16_t)bc[*ip+1]);
+    *ip += 2;
+    return v;
+}
+static inline uint8_t read_u8(const uint8_t *bc, size_t bc_len, size_t *ip) {
+    if (*ip + 1 > bc_len) { *ip = bc_len; return 0; }
+    uint8_t v = bc[(*ip)++];
+    return v;
+}
+
 /* Bytecode opcodes */
 typedef enum {
     OP_ACCEPT = 0,
@@ -137,7 +156,26 @@ typedef struct {
         size_t max_depth;
     } profile;
 #endif
+
+#ifdef SNOBOL_JIT
+    struct {
+        uint64_t *ip_counts;
+        uint64_t *op_counts;
+        void **traces;
+        bool enabled;
+    } jit;
+#endif
 } VM;
+
+const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count, uint16_t *out_case);
+bool ranges_to_ascii_bitmap(const uint8_t *ranges_ptr, size_t count, uint64_t map[2]);
+bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp);
+
+static inline bool bitmap_test(const uint64_t map[2], uint8_t c) {
+    if (c > 127) return false;
+    if (c < 64) return (map[0] & (1ULL << c)) != 0;
+    return (map[1] & (1ULL << (c - 64))) != 0;
+}
 
 /* VM entry */
 bool vm_exec(VM *vm);
