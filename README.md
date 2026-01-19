@@ -301,6 +301,58 @@ Typical results:
 The native implementation minimizes data copying between PHP and C and avoids the overhead of returning match result
 arrays to PHP for every replacement.
 
+## Micro-JIT (experimental)
+
+The VM includes an **opt-in micro-JIT** (currently targeting **ARM64/aarch64**) that accelerates some hot, ASCII-heavy
+straight-line opcode traces (not a general-purpose regex JIT).
+
+### Build and run
+
+Inside DDEV:
+
+```bash
+make build-jit
+make install
+```
+
+You can also toggle JIT at runtime per pattern:
+
+```php
+$pattern->setJit(true);  // enable
+$pattern->setJit(false); // disable
+```
+
+### Benchmarks
+
+- Run benchmarks: `make bench`
+- Compare SNOBOL vs PCRE for a single run: `php bench/compare.php ...`
+- Compare JIT OFF vs JIT ON snapshots: `php bench/compare_jit.php ...`
+
+Details and reference tables live in:
+
+- `openspec/specs/jit.md`
+- `bench/README.md`
+
+## Development workflow
+
+### Cleaning
+
+`make clean` removes build artifacts and also deletes generated benchmark result JSONs under `bench/`.
+It keeps only the example file:
+
+- `bench/results_example.json`
+
+If you want to keep a benchmark run, copy/rename it before cleaning (for example to `bench/results_*_jitoff.json` or
+`bench/results_*_jiton.json`).
+
+### Benchmarks and JIT comparisons
+
+- Run benchmarks: `make bench`
+- Compare SNOBOL vs PCRE for a single run: `php bench/compare.php ...`
+- Compare JIT OFF vs JIT ON snapshots: `php bench/compare_jit.php ...`
+
+See `bench/README.md` and `openspec/specs/jit.md` for details.
+
 ## Use Cases
 
 - **Data Sanitization:** Masking or transforming sensitive patterns in large logs or datasets.

@@ -199,6 +199,27 @@ Benchmarks can be run in CI as optional jobs (non-gating):
 
 See `.github/workflows/benchmarks.yml` (if present) for CI configuration.
 
+## Result files and cleaning
+
+Benchmark result JSON files are generated as `bench/results_*.json`.
+
+For micro-JIT evaluation we also keep explicit snapshots:
+
+- `bench/results_*_jitoff.json` (JIT OFF build)
+- `bench/results_*_jiton.json` (JIT ON build)
+
+To compare JIT OFF vs JIT ON (SNOBOL speedup + PCRE-vs-SNOBOL factors), use:
+
+```bash
+php bench/compare_jit.php \
+  --off bench/results_tokenize_jitoff.json --on bench/results_tokenize_jiton.json \
+  --off bench/results_replace_jitoff.json  --on bench/results_replace_jiton.json \
+  --off bench/results_dates_jitoff.json    --on bench/results_dates_jiton.json \
+  --off bench/results_backtracking_jitoff.json --on bench/results_backtracking_jiton.json
+```
+
+Note: `make clean` removes generated benchmark result JSONs and leaves only `bench/results_example.json`.
+
 ## Example Results
 
 See `results_example.json` for a sample output shape. (Note: Results will vary by hardware, PHP version, and workload.)

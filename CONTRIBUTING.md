@@ -188,6 +188,40 @@ In addition to automated tests, you can experiment using the example scripts und
 ddev exec php public/test.php
 ```
 
+## Micro-JIT (experimental)
+
+The project includes an **opt-in micro-JIT** intended to accelerate hot, ASCII-heavy VM traces.
+
+### Build with JIT enabled
+
+Inside DDEV:
+
+```bash
+make build-jit
+make install
+```
+
+### Correctness testing
+
+The PHP test suite includes JIT correctness coverage. When investigating changes that might affect JIT execution,
+start with:
+
+```bash
+ddev exec vendor/bin/phpunit tests/php/JitCorrectnessTest.php
+```
+
+### Benchmarking JIT OFF vs JIT ON
+
+We keep two benchmark snapshots:
+
+- `bench/results_*_jitoff.json`
+- `bench/results_*_jiton.json`
+
+To produce and compare them, see `openspec/specs/jit.md` and `bench/README.md`.
+
+Note: `make clean` deletes generated benchmark result JSONs under `bench/` and preserves only
+`bench/results_example.json`, so copy/rename any results you want to keep before cleaning.
+
 ## Technical Guidelines
 
 ### Memory Management
