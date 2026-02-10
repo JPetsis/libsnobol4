@@ -4,6 +4,7 @@
 
 #include "php.h"
 #include "php_snobol.h"
+#include "ext/standard/info.h"
 
 #include <stdio.h>
 #include <time.h>
@@ -37,6 +38,23 @@ PHP_MINFO_FUNCTION(snobol);
 #ifdef SNOBOL_JIT
 #include "snobol_jit.h"
 #endif
+
+PHP_MINFO_FUNCTION(snobol) {
+    php_info_print_table_start();
+    php_info_print_table_header(2, "snobol support", "enabled");
+    php_info_print_table_row(2, "version", PHP_SNOBOL_VERSION);
+#ifdef SNOBOL_JIT
+    php_info_print_table_row(2, "micro-JIT", "enabled");
+#else
+    php_info_print_table_row(2, "micro-JIT", "disabled");
+#endif
+#ifdef SNOBOL_PROFILE
+    php_info_print_table_row(2, "profiling", "enabled");
+#else
+    php_info_print_table_row(2, "profiling", "disabled");
+#endif
+    php_info_print_table_end();
+}
 
 PHP_MINIT_FUNCTION(snobol) {
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): START");

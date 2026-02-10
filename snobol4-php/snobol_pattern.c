@@ -388,23 +388,6 @@ PHP_METHOD(Snobol_Pattern, setJit) {
     RETURN_TRUE;
 }
 
-PHP_MINFO_FUNCTION(snobol) {
-    php_info_print_table_start();
-    php_info_print_table_header(2, "snobol support", "enabled");
-    php_info_print_table_row(2, "version", PHP_SNOBOL_VERSION);
-#ifdef SNOBOL_JIT
-    php_info_print_table_row(2, "micro-JIT", "enabled");
-#else
-    php_info_print_table_row(2, "micro-JIT", "disabled");
-#endif
-#ifdef SNOBOL_PROFILE
-    php_info_print_table_row(2, "profiling", "enabled");
-#else
-    php_info_print_table_row(2, "profiling", "disabled");
-#endif
-    php_info_print_table_end();
-}
-
 static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, compileFromAst, ai_compileFromAst, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
     PHP_ME(Snobol_Pattern, match, ai_match, ZEND_ACC_PUBLIC)

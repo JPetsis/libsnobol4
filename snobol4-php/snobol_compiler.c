@@ -1,43 +1,12 @@
+#include "snobol_internal.h"
 #include "snobol_vm.h"      /* MUST come before snobol_compiler.h to get CHARCLASS_BITMAP_BYTES */
 #include "snobol_compiler.h"
-
-#ifndef STANDALONE_BUILD
-#include "php.h"
-#endif
 
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
 #include <stdarg.h>
-
-/* DEBUG LOGGING DISABLED
-static inline void snobol_log_impl(const char *file, int line, const char *fmt, ...) {
-    FILE *f = fopen("/var/www/html/snobol_debug.log", "a");
-    if (f) {
-        time_t now = time(NULL);
-        struct tm *t = localtime(&now);
-        char ts[32];
-        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
-        fprintf(f, "[%s] [%s:%d] ", ts, file, line);
-        va_list args;
-        va_start(args, fmt);
-        vfprintf(f, fmt, args);
-        va_end(args);
-        fprintf(f, "\n");
-        fflush(f);
-        fclose(f);
-    }
-}
-*/
-/* No-op macro to disable logging */
-#define SNOBOL_LOG(fmt, ...) ((void)0)
-
-#ifdef STANDALONE_BUILD
-#define emalloc malloc
-#define efree free
-#define erealloc realloc
-#endif
 
 /* Minimal dynamic code buffer */
 typedef struct {
@@ -48,12 +17,12 @@ typedef struct {
 
 static void cb_init(CodeBuf *c) {
     c->cap = 4096;
-    c->buf = emalloc(c->cap);
+    c->buf = snobol_malloc(c->cap);
     c->len = 0;
 }
 static void cb_free(CodeBuf *c) {
     if (c->buf) {
-        efree(c->buf);
+        snobol_free(c->buf);
         c->buf = NULL;
     }
     c->cap = c->len = 0;
@@ -62,7 +31,7 @@ static void cb_ensure(CodeBuf *c, size_t need) {
     if (c->len + need <= c->cap) return;
     size_t newcap = c->cap ? c->cap * 2 : 4096;
     while (c->len + need > newcap) newcap *= 2;
-    c->buf = erealloc(c->buf, newcap);
+    c->buf = snobol_realloc(c->buf, newcap);
     c->cap = newcap;
 }
 static size_t cb_pos(CodeBuf *c) { return c->len; }
@@ -88,8 +57,8 @@ static void free_charclass_list(void) {
     CCEntry *e = charclass_head;
     while (e) {
         CCEntry *next = e->next;
-        if (e->ranges) efree(e->ranges);
-        efree(e);
+        if (e->ranges) snobol_free(e->ranges);
+        snobol_free(e);
         e = next;
     }
     charclass_head = NULL;
@@ -100,7 +69,7 @@ static void free_charclass_list(void) {
 static void add_range(CCEntry *e, uint32_t start, uint32_t end) {
     if (e->range_count == e->range_cap) {
         e->range_cap = e->range_cap ? e->range_cap * 2 : 4;
-        e->ranges = erealloc(e->ranges, e->range_cap * sizeof(CpRange));
+        e->ranges = snobol_realloc(e->ranges, e->range_cap * sizeof(CpRange));
     }
     e->ranges[e->range_count].start = start;
     e->ranges[e->range_count].end = end;
@@ -134,7 +103,7 @@ static void normalize_ranges(CCEntry *e) {
 }
 
 static int add_or_get_charclass(const char *s, size_t len) {
-    CCEntry *ne = emalloc(sizeof(*ne));
+    CCEntry *ne = snobol_malloc(sizeof(*ne));
     memset(ne, 0, sizeof(*ne));
     ne->case_insensitive = compiler_case_insensitive ? 1 : 0;
     
@@ -166,8 +135,8 @@ static int add_or_get_charclass(const char *s, size_t len) {
         if (e->range_count == ne->range_count &&
             e->case_insensitive == ne->case_insensitive &&
             memcmp(e->ranges, ne->ranges, e->range_count * sizeof(CpRange)) == 0) {
-            if (ne->ranges) efree(ne->ranges);
-            efree(ne);
+            if (ne->ranges) snobol_free(ne->ranges);
+            snobol_free(ne);
             return id;
         }
         id++; e = e->next;
@@ -240,10 +209,6 @@ static int emit_alt(zval *left, zval *right, CodeBuf *c) {
 /* arbno (zero or more) */
 static int emit_arbno(zval *sub, CodeBuf *c) {
     // Optimization: Unwrap nested ARBNOs.
-    // ARBNO(ARBNO(x)) is logically equivalent to ARBNO(x) for matching purposes
-    // (matches sequence of x's), but implementation-wise ARBNO(ARBNO(x)) creates
-    // exponential backtracking paths.
-    // We loop peeling off ARBNO layers.
     while (sub && Z_TYPE_P(sub) == IS_ARRAY) {
         zval *type_zv = zend_hash_str_find(Z_ARRVAL_P(sub), "type", sizeof("type")-1);
         if (!type_zv || Z_TYPE_P(type_zv) != IS_STRING) break;
@@ -566,7 +531,7 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *
     }
     charclass_head = rev;
 
-    size_t *offsets = charclass_count > 0 ? emalloc(charclass_count * sizeof(size_t)) : NULL;
+    size_t *offsets = charclass_count > 0 ? snobol_malloc(charclass_count * sizeof(size_t)) : NULL;
     int idx = 0;
     for (CCEntry *it = charclass_head; it != NULL; it = it->next) {
         if (offsets) offsets[idx++] = cb_pos(&cb);
@@ -582,14 +547,14 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *
         for (uint32_t i = 0; i < charclass_count; ++i) {
             cb_emit_u32(&cb, (uint32_t)offsets[i]);
         }
-        efree(offsets);
+        snobol_free(offsets);
     }
 
     cb_emit_u32(&cb, charclass_count);
 
-    uint8_t *out = emalloc(cb.len);
+    uint8_t *out = snobol_malloc(cb.len);
     if (!out) {
-        SNOBOL_LOG("compile_ast_to_bytecode FAILED to emalloc final bc");
+        SNOBOL_LOG("compile_ast_to_bytecode FAILED to allocate final bc");
         cb_free(&cb); 
         return -1; 
     }
@@ -689,7 +654,7 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
 
     cb_emit_u8(&cb, OP_ACCEPT);
 
-    uint8_t *out = emalloc(cb.len);
+    uint8_t *out = snobol_malloc(cb.len);
     if (!out) { cb_free(&cb); return -1; }
     memcpy(out, cb.buf, cb.len);
     *out_bc = out;
@@ -704,6 +669,6 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
 void compiler_free(uint8_t *bc) {
     if (bc) {
         SNOBOL_LOG("compiler_free bc=%p", (void*)bc);
-        efree(bc);
+        snobol_free(bc);
     }
 }

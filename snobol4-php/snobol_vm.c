@@ -1,11 +1,4 @@
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
-
-#ifndef STANDALONE_BUILD
-#include "php.h"
-#endif
-
+#include "snobol_internal.h"
 #include "snobol_vm.h"
 #include "snobol_jit.h"
 #include <stdlib.h>
@@ -13,28 +6,6 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdarg.h>
-
-/* DEBUG LOGGING DISABLED
-static inline void snobol_log_impl(const char *file, int line, const char *fmt, ...) {
-    FILE *f = fopen("/var/www/html/snobol_debug.log", "a");
-    if (f) {
-        time_t now = time(NULL);
-        struct tm *t = localtime(&now);
-        char ts[32];
-        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", t);
-        fprintf(f, "[%s] [%s:%d] ", ts, file, line);
-        va_list args;
-        va_start(args, fmt);
-        vfprintf(f, fmt, args);
-        va_end(args);
-        fprintf(f, "\n");
-        fflush(f);
-        fclose(f);
-    }
-}
-*/
-/* No-op macro to disable logging */
-#define SNOBOL_LOG(fmt, ...) ((void)0)
 
 const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count, uint16_t *out_case) {
     if (set_id == 0) return NULL;
@@ -122,11 +93,7 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
              SNOBOL_LOG("vm_push_choice: Hard limit reached (%zu)", new_cap);
              return;
         }
-#ifdef STANDALONE_BUILD
-        struct choice *new_choices = realloc(vm->choices, new_cap * sizeof(struct choice));
-#else
-        struct choice *new_choices = erealloc(vm->choices, new_cap * sizeof(struct choice));
-#endif
+        struct choice *new_choices = snobol_realloc(vm->choices, new_cap * sizeof(struct choice));
         if (!new_choices) return;
         vm->choices = new_choices;
         vm->choices_cap = new_cap;
@@ -193,11 +160,7 @@ bool vm_pop_choice(VM *vm) {
 
 void snobol_buf_init(snobol_buf *b) {
     b->cap = 1024;
-#ifdef STANDALONE_BUILD
-    b->data = malloc(b->cap);
-#else
-    b->data = emalloc(b->cap);
-#endif
+    b->data = snobol_malloc(b->cap);
     b->len = 0;
 }
 
@@ -206,11 +169,7 @@ void snobol_buf_append(snobol_buf *b, const char *data, size_t len) {
     if (b->len + len >= b->cap) {
         size_t newcap = b->cap ? b->cap * 2 : 1024;
         while (b->len + len >= newcap) newcap *= 2;
-#ifdef STANDALONE_BUILD
-        b->data = realloc(b->data, newcap);
-#else
-        b->data = erealloc(b->data, newcap);
-#endif
+        b->data = snobol_realloc(b->data, newcap);
         b->cap = newcap;
     }
     memcpy(b->data + b->len, data, len);
@@ -225,11 +184,7 @@ void snobol_buf_clear(snobol_buf *b) {
 
 void snobol_buf_free(snobol_buf *b) {
     if (b->data) {
-#ifdef STANDALONE_BUILD
-        free(b->data);
-#else
-        efree(b->data);
-#endif
+        snobol_free(b->data);
         b->data = NULL;
     }
     b->len = b->cap = 0;
@@ -237,11 +192,7 @@ void snobol_buf_free(snobol_buf *b) {
 
 bool vm_run(VM *vm) {
     size_t initial_cap = MAX_CHOICES;
-#ifdef STANDALONE_BUILD
-    vm->choices = malloc(initial_cap * sizeof(struct choice));
-#else
-    vm->choices = emalloc(initial_cap * sizeof(struct choice));
-#endif
+    vm->choices = snobol_malloc(initial_cap * sizeof(struct choice));
     if (!vm->choices) {
         SNOBOL_LOG("vm_run: FAILED to allocate choices");
         return false;
@@ -259,9 +210,9 @@ bool vm_run(VM *vm) {
             continue;
         }
 
+#ifdef SNOBOL_JIT
         size_t current_ip = vm->ip;
 
-#ifdef SNOBOL_JIT
         if (vm->jit.enabled && vm->jit.traces && vm->jit.traces[current_ip]) {
             jit_trace_fn fn = (jit_trace_fn)vm->jit.traces[current_ip];
             fn(vm);
@@ -288,11 +239,7 @@ bool vm_run(VM *vm) {
         switch (op) {
             case OP_ACCEPT:
                 if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-                    free(vm->choices); 
-#else
-                    efree(vm->choices);
-#endif
+                    snobol_free(vm->choices); 
                     vm->choices = NULL; 
                 }
                 SNOBOL_LOG("vm_run: SUCCESS (OP_ACCEPT)");
@@ -634,11 +581,7 @@ bool vm_run(VM *vm) {
                         size_t len = end - start;
                         
                         if (expr_type == 1) { // .upper()
-#ifdef STANDALONE_BUILD
-                            char *tmp = malloc(len + 1);
-#else
-                            char *tmp = emalloc(len + 1);
-#endif
+                            char *tmp = snobol_malloc(len + 1);
                             for (size_t i = 0; i < len; ++i) {
                                 char c = data[i];
                                 if (c >= 'a' && c <= 'z') tmp[i] = c - ('a' - 'A');
@@ -646,11 +589,7 @@ bool vm_run(VM *vm) {
                             }
                             if (vm->out) snobol_buf_append(vm->out, tmp, len);
                             if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
-#ifdef STANDALONE_BUILD
-                            free(tmp);
-#else
-                            efree(tmp);
-#endif
+                            snobol_free(tmp);
                         } else if (expr_type == 2) { // .length()
                             char tmp[32];
                             int n = snprintf(tmp, sizeof(tmp), "%zu", len);
@@ -672,22 +611,14 @@ bool vm_run(VM *vm) {
         }
     }
     if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-        free(vm->choices); 
-#else
-        efree(vm->choices);
-#endif
+        snobol_free(vm->choices); 
         vm->choices = NULL; 
     }
     return false;
 
 fail_ret:
     if (vm->choices) { 
-#ifdef STANDALONE_BUILD
-        free(vm->choices); 
-#else
-        efree(vm->choices);
-#endif
+        snobol_free(vm->choices); 
         vm->choices = NULL; 
     }
     SNOBOL_LOG("vm_run: FAIL");
