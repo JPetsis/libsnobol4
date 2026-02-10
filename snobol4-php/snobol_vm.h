@@ -163,6 +163,7 @@ typedef struct {
         uint64_t *op_counts;
         void **traces;
         bool enabled;
+        struct SnobolJitStats *stats;
     } jit;
 #endif
 } VM;

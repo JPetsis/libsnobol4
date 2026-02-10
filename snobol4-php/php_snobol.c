@@ -66,10 +66,48 @@ PHP_MINIT_FUNCTION(snobol) {
     return SUCCESS;
 }
 
+#ifdef SNOBOL_JIT
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_jit_stats, 0, 0, IS_ARRAY, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_snobol_reset_jit_stats, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
+PHP_FUNCTION(snobol_get_jit_stats) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        return;
+    }
+
+    SnobolJitStats *stats = snobol_jit_get_stats();
+    array_init(return_value);
+    add_assoc_long(return_value, "jit_compilations_total", (zend_long)stats->compilations_total);
+    add_assoc_long(return_value, "jit_cache_hits_total", (zend_long)stats->cache_hits_total);
+    add_assoc_long(return_value, "jit_entries_total", (zend_long)stats->entries_total);
+    add_assoc_long(return_value, "jit_exits_total", (zend_long)stats->exits_total);
+    add_assoc_long(return_value, "jit_bailouts_total", (zend_long)stats->bailouts_total);
+    add_assoc_long(return_value, "jit_time_ns_total", (zend_long)stats->time_ns_total);
+}
+
+PHP_FUNCTION(snobol_reset_jit_stats) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        return;
+    }
+    snobol_jit_reset_stats();
+}
+#endif
+
+static const zend_function_entry snobol_functions[] = {
+#ifdef SNOBOL_JIT
+    PHP_FE(snobol_get_jit_stats, ai_snobol_get_jit_stats)
+    PHP_FE(snobol_reset_jit_stats, ai_snobol_reset_jit_stats)
+#endif
+    PHP_FE_END
+};
+
 zend_module_entry snobol_module_entry = {
     STANDARD_MODULE_HEADER,
     "snobol",
-    NULL,
+    snobol_functions,
     PHP_MINIT(snobol),
     NULL,
     NULL,

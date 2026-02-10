@@ -3,9 +3,41 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "snobol_vm.h"
 
 #ifdef SNOBOL_JIT
+
+#include "snobol_vm.h"
+
+/* JIT Statistics */
+typedef struct SnobolJitStats {
+    uint64_t compilations_total;
+    uint64_t cache_hits_total;
+    uint64_t entries_total;
+    uint64_t exits_total;
+    uint64_t bailouts_total;
+    uint64_t time_ns_total;
+} SnobolJitStats;
+
+/* JIT Context - shared across patterns with same bytecode */
+typedef struct SnobolJitContext {
+    uint64_t *ip_counts;
+    void **traces;
+    size_t bc_len;
+    uint64_t hash;
+    int ref_count;
+} SnobolJitContext;
+
+/* Acquire a JIT context for the given bytecode */
+SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len);
+
+/* Release a JIT context */
+void snobol_jit_release_context(SnobolJitContext *ctx);
+
+/* Get the global stats pointer */
+SnobolJitStats *snobol_jit_get_stats(void);
+
+/* Reset global stats */
+void snobol_jit_reset_stats(void);
 
 /* Opaque handle for a JIT trace */
 typedef void (*jit_trace_fn)(VM *vm);

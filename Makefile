@@ -289,3 +289,13 @@ else
 		$(MAKE)
 endif
 
+bench-jit-guard:
+	@echo "Running JIT regression guard..."
+ifeq ($(IN_DDEV),1)
+	@$(ASAN_ENV) php $(PHP_OPTS) bench/jit_guard.php
+else ifdef DDEV
+	@ddev exec make bench-jit-guard
+else
+	@php bench/jit_guard.php
+endif
+

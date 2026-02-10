@@ -35,6 +35,8 @@ void test_assert(bool condition, const char *message) {
 void test_vm_suite(void);
 void test_backtracking_suite(void);
 void test_catastrophic_suite(void);
+void test_jit_observability_suite(void);
+void test_jit_cache_suite(void);
 int test_stress_backtracking_main(void);
 
 int main(void) {
@@ -45,6 +47,8 @@ int main(void) {
     test_vm_suite();
     test_backtracking_suite();
     test_catastrophic_suite();
+    test_jit_observability_suite();
+    test_jit_cache_suite();
 
     printf("\n=== Stress Tests ===\n");
     {

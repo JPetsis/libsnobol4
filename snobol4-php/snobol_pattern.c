@@ -3,6 +3,9 @@
 #include "zend_exceptions.h"
 #include "snobol_compiler.h"
 #include "snobol_vm.h"
+#ifdef SNOBOL_JIT
+#include "snobol_jit.h"
+#endif
 
 #include <stdio.h>
 #include <time.h>
@@ -35,9 +38,7 @@ typedef struct {
     uint8_t *bc;
     size_t bc_len;
 #ifdef SNOBOL_JIT
-    uint64_t *ip_counts;
-    uint64_t *op_counts;
-    void **traces; // Array of JIT entry points indexed by IP
+    struct SnobolJitContext *jit_ctx;
     bool jit_enabled;
 #endif
     zend_object std;
@@ -53,9 +54,6 @@ static inline snobol_pattern_t* php_snobol_fetch(zend_object *obj) {
 static void snobol_pattern_free(zend_object *object) {
     snobol_pattern_t *intern = php_snobol_fetch(object);
     SNOBOL_LOG("snobol_pattern_free: intern=%p, bc=%p", (void*)intern, (void*)intern->bc);
-#ifdef SNOBOL_JIT
-    fprintf(stderr, "DEBUG: free called, ip_counts=%p\n", (void*)intern->ip_counts);
-#endif
     
     if (intern->bc) {
         compiler_free(intern->bc);
@@ -63,46 +61,9 @@ static void snobol_pattern_free(zend_object *object) {
     }
 
 #ifdef SNOBOL_JIT
-    if (intern->ip_counts) {
-        // Find top 5 hot IPs
-        struct { size_t ip; uint64_t count; } top[5] = {0};
-        for (size_t i = 0; i < intern->bc_len; ++i) {
-            if (intern->ip_counts[i] > top[4].count) {
-                top[4].ip = i;
-                top[4].count = intern->ip_counts[i];
-                for (int j = 4; j > 0; --j) {
-                    if (top[j].count > top[j-1].count) {
-                        size_t tmp_ip = top[j-1].ip;
-                        uint64_t tmp_count = top[j-1].count;
-                        top[j-1].ip = top[j].ip;
-                        top[j-1].count = top[j].count;
-                        top[j].ip = tmp_ip;
-                        top[j].count = tmp_count;
-                    } else break;
-                }
-            }
-        }
-        
-        if (top[0].count > 0) {
-            fprintf(stderr, "[SNOBOL JIT] Hot IPs:");
-            for (int i = 0; i < 5; ++i) {
-                if (top[i].count > 0) {
-                    fprintf(stderr, " %zu(%llu)", top[i].ip, (unsigned long long)top[i].count);
-                }
-            }
-            fprintf(stderr, "\n");
-        }
-
-        efree(intern->ip_counts);
-        intern->ip_counts = NULL;
-    }
-    if (intern->op_counts) {
-        efree(intern->op_counts);
-        intern->op_counts = NULL;
-    }
-    if (intern->traces) {
-        efree(intern->traces);
-        intern->traces = NULL;
+    if (intern->jit_ctx) {
+        snobol_jit_release_context(intern->jit_ctx);
+        intern->jit_ctx = NULL;
     }
 #endif
     
@@ -117,9 +78,7 @@ static zend_object *snobol_pattern_create(zend_class_entry *ce) {
     intern->bc = NULL;
     intern->bc_len = 0;
 #ifdef SNOBOL_JIT
-    intern->ip_counts = NULL;
-    intern->op_counts = NULL;
-    intern->traces = NULL;
+    intern->jit_ctx = NULL;
     intern->jit_enabled = true;
 #endif
     
@@ -186,11 +145,7 @@ PHP_METHOD(Snobol_Pattern, compileFromAst) {
     intern->bc_len = bc_len;
 
 #ifdef SNOBOL_JIT
-    if (bc_len > 0) {
-        intern->ip_counts = ecalloc(bc_len, sizeof(uint64_t));
-        intern->op_counts = ecalloc(256, sizeof(uint64_t));
-        intern->traces = ecalloc(bc_len, sizeof(void*));
-    }
+    intern->jit_ctx = snobol_jit_acquire_context(bc, bc_len);
 #endif
     
     SNOBOL_LOG("Snobol_Pattern::compileFromAst: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
@@ -241,10 +196,12 @@ PHP_METHOD(Snobol_Pattern, match) {
     vm.emit_udata = &eb;
 
 #ifdef SNOBOL_JIT
-    vm.jit.ip_counts = intern->ip_counts;
-    vm.jit.op_counts = intern->op_counts;
-    vm.jit.traces = intern->traces;
+    if (intern->jit_ctx) {
+        vm.jit.ip_counts = intern->jit_ctx->ip_counts;
+        vm.jit.traces = intern->jit_ctx->traces;
+    }
     vm.jit.enabled = intern->jit_enabled;
+    vm.jit.stats = snobol_jit_get_stats();
 #endif
 
     bool ok = vm_exec(&vm); 

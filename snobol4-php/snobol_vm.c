@@ -214,16 +214,26 @@ bool vm_run(VM *vm) {
         size_t current_ip = vm->ip;
 
         if (vm->jit.enabled && vm->jit.traces && vm->jit.traces[current_ip]) {
+            if (vm->jit.stats) {
+                vm->jit.stats->entries_total++;
+                vm->jit.stats->cache_hits_total++;
+            }
+
             jit_trace_fn fn = (jit_trace_fn)vm->jit.traces[current_ip];
             fn(vm);
-            if (vm->ip != current_ip) continue; 
-        }
+            
+            if (vm->jit.stats) {
+                vm->jit.stats->exits_total++;
+                if (vm->ip == current_ip) {
+                    vm->jit.stats->bailouts_total++;
+                }
+            }
 
-        if (vm->jit.ip_counts && current_ip < vm->bc_len) {
+            if (vm->ip != current_ip) continue; 
+        } else if (vm->jit.ip_counts && current_ip < vm->bc_len) {
             uint64_t count = ++vm->jit.ip_counts[current_ip];
             if (count == 50 && vm->jit.traces && vm->jit.traces[current_ip] == NULL) {
                  vm->jit.traces[current_ip] = (void*)snobol_jit_compile(vm, current_ip);
-                 // If successful, we could execute it now, but simpler to wait for next iter
             }
         }
 #endif

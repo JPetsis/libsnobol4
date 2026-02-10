@@ -77,6 +77,12 @@ class Harness
         }
         $endTime = hrtime(true);
 
+        // Fetch JIT stats if available
+        $jitStats = [];
+        if (function_exists('snobol_get_jit_stats')) {
+            $jitStats = snobol_get_jit_stats();
+        }
+
         $durationNs = $endTime - $startTime;
         $durationMs = $durationNs / 1_000_000;
         $opsPerSec = $iterations / ($durationNs / 1_000_000_000);
@@ -89,6 +95,7 @@ class Harness
             'durationNs' => $durationNs,
             'durationMs' => $durationMs,
             'opsPerSec' => $opsPerSec,
+            'jitStats' => $jitStats,
         ];
 
         if ($inputSize !== null) {
@@ -154,28 +161,33 @@ class Harness
             return;
         }
 
-        echo "\n".str_repeat('=', 80)."\n";
+        echo "\n".str_repeat('=', 95)."\n";
         echo "BENCHMARK RESULTS\n";
-        echo str_repeat('=', 80)."\n";
-        printf("%-30s %-10s %12s %15s\n", "Scenario", "Impl", "Iterations", "Ops/Sec");
-        echo str_repeat('-', 80)."\n";
+        echo str_repeat('=', 95)."\n";
+        printf("%-30s %-10s %12s %15s %12s\n", "Scenario", "Impl", "Iterations", "Ops/Sec", "JIT Entries");
+        echo str_repeat('-', 95)."\n";
 
         foreach ($this->results as $result) {
             $opsDisplay = isset($result['timeout']) && $result['timeout']
                 ? 'TIMEOUT'
                 : number_format($result['opsPerSec'], 2);
 
+            $jitEntries = isset($result['jitStats']['jit_entries_total'])
+                ? $result['jitStats']['jit_entries_total']
+                : '-';
+
             printf(
-                "%-30s %-10s %12d %15s\n",
+                "%-30s %-10s %12d %15s %12s\n",
                 $result['scenario'],
                 $result['impl'],
                 $result['iterations'],
-                $opsDisplay
+                $opsDisplay,
+                $jitEntries
             );
         }
 
-        echo str_repeat('=', 80)."\n";
+        echo str_repeat('=', 95)."\n";
         echo "Peak memory: ".number_format(memory_get_peak_usage(true) / 1024 / 1024, 2)." MB\n";
-        echo str_repeat('=', 80)."\n\n";
+        echo str_repeat('=', 95)."\n\n";
     }
 }

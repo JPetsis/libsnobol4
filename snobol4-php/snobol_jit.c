@@ -11,12 +11,114 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stddef.h>
+#include <string.h>
+#include "snobol_internal.h"
+
+#define JIT_CACHE_MAX 128
+
+static SnobolJitStats global_jit_stats = {0};
+static SnobolJitContext *jit_cache[JIT_CACHE_MAX] = {0};
+static int jit_cache_count = 0;
+
+static uint64_t djb2_hash(const uint8_t *data, size_t len) {
+    uint64_t hash = 5381;
+    for (size_t i = 0; i < len; i++) {
+        hash = ((hash << 5) + hash) + data[i];
+    }
+    return hash;
+}
+
+SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len) {
+    uint64_t hash = djb2_hash(bc, bc_len);
+
+    // Search in cache
+    for (int i = 0; i < jit_cache_count; i++) {
+        if (jit_cache[i]->hash == hash && jit_cache[i]->bc_len == bc_len) {
+            jit_cache[i]->ref_count++;
+            global_jit_stats.cache_hits_total++;
+            return jit_cache[i];
+        }
+    }
+
+    // Not found, create new
+    SnobolJitContext *ctx = snobol_calloc(1, sizeof(SnobolJitContext));
+    ctx->bc_len = bc_len;
+    ctx->hash = hash;
+    ctx->ref_count = 1;
+    ctx->ip_counts = snobol_calloc(bc_len, sizeof(uint64_t));
+    ctx->traces = snobol_calloc(bc_len, sizeof(void *));
+
+    // Add to cache if room
+    if (jit_cache_count < JIT_CACHE_MAX) {
+        jit_cache[jit_cache_count++] = ctx;
+    } else {
+        // FIFO eviction for now (simplest)
+        // Find one with ref_count == 0? 
+        // For simplicity, if full, we don't cache this one for sharing, 
+        // but we return it so the pattern works.
+    }
+
+    return ctx;
+}
+
+void snobol_jit_release_context(SnobolJitContext *ctx) {
+    if (!ctx) return;
+    ctx->ref_count--;
+    if (ctx->ref_count <= 0) {
+        // If not in cache, free it. If in cache, keep it?
+        // Let's keep it in cache until evicted.
+        bool in_cache = false;
+        for (int i = 0; i < jit_cache_count; i++) {
+            if (jit_cache[i] == ctx) {
+                in_cache = true;
+                break;
+            }
+        }
+        if (!in_cache) {
+            if (ctx->ip_counts) snobol_free(ctx->ip_counts);
+            if (ctx->traces) {
+                // Should we free the code? Yes, eventually.
+                // For now, traces are pointers to code blobs.
+                // We'd need to track code size to free them properly.
+                snobol_free(ctx->traces);
+            }
+            snobol_free(ctx);
+        }
+    }
+}
 
 void snobol_jit_init(void) {
+    memset(&global_jit_stats, 0, sizeof(global_jit_stats));
+    memset(jit_cache, 0, sizeof(jit_cache));
+    jit_cache_count = 0;
     fprintf(stderr, "[SNOBOL JIT] ARM64 Micro-JIT Initialized\n");
 }
 
 void snobol_jit_shutdown(void) {
+    for (int i = 0; i < jit_cache_count; i++) {
+        SnobolJitContext *ctx = jit_cache[i];
+        if (ctx->ip_counts) snobol_free(ctx->ip_counts);
+        if (ctx->traces) snobol_free(ctx->traces);
+        snobol_free(ctx);
+    }
+    jit_cache_count = 0;
+}
+
+SnobolJitStats *snobol_jit_get_stats(void) {
+    return &global_jit_stats;
+}
+
+void snobol_jit_reset_stats(void) {
+    memset(&global_jit_stats, 0, sizeof(global_jit_stats));
+    // Clear cache to allow re-compilation in tests
+    for (int i = 0; i < jit_cache_count; i++) {
+        SnobolJitContext *ctx = jit_cache[i];
+        if (ctx->ip_counts) memset(ctx->ip_counts, 0, ctx->bc_len * sizeof(uint64_t));
+        // We don't necessarily need to free the traces, just resetting ip_counts 
+        // will make them re-warmup. But if we want 'compilations_total' to increment,
+        // we should probably clear the traces too.
+        if (ctx->traces) memset(ctx->traces, 0, ctx->bc_len * sizeof(void *));
+    }
 }
 
 void *snobol_jit_alloc_code(size_t size) {
@@ -142,7 +244,9 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip) {
         ops_count++;
     }
 
-    if (ops_count == 0 || !worthy) return NULL;
+    if (ops_count < 2 || !worthy) {
+        return NULL;
+    }
 
     size_t code_size = 16384;
     uint32_t *code = (uint32_t *)snobol_jit_alloc_code(code_size);
@@ -313,6 +417,7 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip) {
         }
     }
     snobol_jit_seal_code(code, code_size);
+    global_jit_stats.compilations_total++;
     return (jit_trace_fn)code;
 }
 
