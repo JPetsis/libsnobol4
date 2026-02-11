@@ -142,8 +142,14 @@ static int add_or_get_charclass(const char *s, size_t len) {
         id++; e = e->next;
     }
     
-    ne->next = charclass_head;
-    charclass_head = ne;
+    ne->next = NULL;
+    if (!charclass_head) {
+        charclass_head = ne;
+    } else {
+        CCEntry *tail = charclass_head;
+        while (tail->next) tail = tail->next;
+        tail->next = ne;
+    }
     charclass_count++;
     return (int)charclass_count;
 }

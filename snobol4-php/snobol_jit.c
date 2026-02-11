@@ -91,7 +91,6 @@ void snobol_jit_init(void) {
     memset(&global_jit_stats, 0, sizeof(global_jit_stats));
     memset(jit_cache, 0, sizeof(jit_cache));
     jit_cache_count = 0;
-    fprintf(stderr, "[SNOBOL JIT] ARM64 Micro-JIT Initialized\n");
 }
 
 void snobol_jit_shutdown(void) {
@@ -110,13 +109,12 @@ SnobolJitStats *snobol_jit_get_stats(void) {
 
 void snobol_jit_reset_stats(void) {
     memset(&global_jit_stats, 0, sizeof(global_jit_stats));
-    // Clear cache to allow re-compilation in tests
+    // Clear both ip_counts and traces to allow fresh JIT profiling.
+    // This is needed for test isolation - each test should start with
+    // a cold JIT and trigger compilation from scratch.
     for (int i = 0; i < jit_cache_count; i++) {
         SnobolJitContext *ctx = jit_cache[i];
         if (ctx->ip_counts) memset(ctx->ip_counts, 0, ctx->bc_len * sizeof(uint64_t));
-        // We don't necessarily need to free the traces, just resetting ip_counts 
-        // will make them re-warmup. But if we want 'compilations_total' to increment,
-        // we should probably clear the traces too.
         if (ctx->traces) memset(ctx->traces, 0, ctx->bc_len * sizeof(void *));
     }
 }
@@ -244,7 +242,7 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip) {
         ops_count++;
     }
 
-    if (ops_count < 2 || !worthy) {
+    if (ops_count < 1 || !worthy) {
         return NULL;
     }
 

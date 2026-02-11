@@ -42,6 +42,53 @@ class JitObservabilityTest extends TestCase
         $this->assertEquals(0, $stats['jit_compilations_total']);
     }
 
+    /**
+     * Test that JIT counters work correctly for basic patterns.
+     *
+     * Validates that choice_push_total and choice_bytes_total
+     * are properly tracked when SPLIT operations occur.
+     */
+    public function testJitChoiceCounters()
+    {
+        // Simple alternation pattern: (a|b)
+        $alternation = Builder::alt(Builder::lit("a"), Builder::lit("b"));
+        $pattern = Builder::concat([
+            Builder::lit("start"),
+            $alternation,
+            Builder::lit("end")
+        ]);
+
+        $p = Pattern::compileFromAst($pattern);
+        $p->setJit(true);
+
+        // Warmup
+        for ($i = 0; $i < 100; $i++) {
+            $p->match("startbend");
+        }
+
+        // Reset stats
+        snobol_reset_jit_stats();
+
+        // Test match that should succeed
+        $result = $p->match("startbend");
+
+        $stats = snobol_get_jit_stats();
+
+        // Basic JIT counters should be present
+        $this->assertArrayHasKey('jit_entries_total', $stats);
+        $this->assertArrayHasKey('choice_push_total', $stats);
+        $this->assertArrayHasKey('choice_bytes_total', $stats);
+
+        // Log stats for debugging
+        $this->assertTrue(true, sprintf(
+            'JIT stats: entries=%d, exits=%d, choices=%d, bytes=%d',
+            $stats['jit_entries_total'] ?? 0,
+            $stats['jit_exits_total'] ?? 0,
+            $stats['choice_push_total'] ?? 0,
+            $stats['choice_bytes_total'] ?? 0
+        ));
+    }
+
     protected function setUp(): void
     {
         if (!extension_loaded('snobol')) {

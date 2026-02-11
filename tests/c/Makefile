@@ -7,7 +7,7 @@ CFLAGS = -std=c11 -Wall -Wextra -I$(CORE_DIR) -g -O0 \
          -DSTANDALONE_BUILD -DSNOBOL_PROFILE -DSNOBOL_JIT
 
 # Test sources
-TEST_SOURCES = test_runner.c test_vm.c test_backtracking.c test_stress_backtracking.c test_catastrophic.c test_jit_observability.c test_jit_cache.c
+TEST_SOURCES = test_runner.c test_vm.c test_backtracking.c test_stress_backtracking.c test_catastrophic.c test_jit_observability.c test_jit_cache.c test_jit_branches.c
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_BINARY = test_runner
 
@@ -37,5 +37,6 @@ test: $(TEST_BINARY)
 	@./$(TEST_BINARY)
 
 clean:
+	# Remove binaries + objects, including any stale host-built artifacts accidentally mounted into the container
 	rm -f $(TEST_OBJECTS) $(TEST_BINARY)
 	rm -f $(CORE_OBJECTS)

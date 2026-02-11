@@ -93,6 +93,19 @@ typedef struct {
 /* Callback for emission */
 typedef void (*emit_cb)(const char *data, size_t len, void *udata);
 
+// choice stack for backtracking (Legacy format)
+struct choice {
+    size_t ip;
+    size_t pos;
+    size_t cap_start_snapshot[MAX_CAPS];
+    size_t cap_end_snapshot[MAX_CAPS];
+    size_t var_count_snapshot;
+    uint32_t counters_snapshot[MAX_LOOPS];
+    size_t loop_last_pos_snapshot[MAX_LOOPS];
+    uint8_t max_cap_used_snapshot;
+    uint8_t max_counter_used_snapshot;
+};
+
 typedef struct {
     const uint8_t *bc;
     size_t bc_len;
@@ -130,19 +143,10 @@ typedef struct {
     void *emit_udata;
 
     // choice stack for backtracking
-    struct choice {
-        size_t ip;
-        size_t pos;
-        // minimal snapshot of captures that might have changed: store changed reg id count and entries
-        // For simplicity we snapshot all captures here (safe but heavier).
-        size_t cap_start_snapshot[MAX_CAPS];
-        size_t cap_end_snapshot[MAX_CAPS];
-        size_t var_count_snapshot;
-        uint32_t counters_snapshot[MAX_LOOPS];
-        size_t loop_last_pos_snapshot[MAX_LOOPS];
-    } *choices;
+    void *choices;
     size_t choices_cap;
     size_t choices_top;
+    bool use_compact_choice;
 
     // callback for EVAL: returns true if ok, false to cause fail
     bool (*eval_fn)(int fn_id, const char *s, size_t start, size_t end, void *udata);

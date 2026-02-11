@@ -223,3 +223,107 @@ Note: `make clean` removes generated benchmark result JSONs and leaves only `ben
 ## Example Results
 
 See `results_example.json` for a sample output shape. (Note: Results will vary by hardware, PHP version, and workload.)
+
+## JIT Counters and Observability
+
+The SNOBOL extension exposes JIT performance counters via `snobol_get_jit_stats()`:
+
+### Available Counters
+
+| Counter                  | Description                                              |
+|--------------------------|----------------------------------------------------------|
+| `jit_entries_total`      | Number of times JIT-compiled code was entered            |
+| `jit_exits_total`        | Number of times JIT code exited (bailout to interpreter) |
+| `jit_compilations_total` | Number of distinct traces/regions compiled               |
+| `cache_hits_total`       | Number of times a compiled trace was reused              |
+| `choice_push_total`      | Number of backtracking choices pushed from JIT code      |
+| `choice_pop_total`       | Number of choices popped during backtracking             |
+| `choice_bytes_total`     | Total bytes of compact choice data pushed                |
+| `bailouts_total`         | Number of bailout events from JIT to interpreter         |
+
+### Using JIT Stats
+
+```php
+<?php
+// Reset stats before a benchmark
+snobol_reset_jit_stats();
+
+// Run your pattern matching workload
+for ($i = 0; $i < 1000; $i++) {
+    $pattern->match($subject);
+}
+
+// Fetch stats
+$stats = snobol_get_jit_stats();
+echo "JIT entries: " . $stats['jit_entries_total'] . "\n";
+echo "Choice pushes: " . $stats['choice_push_total'] . "\n";
+echo "Choice bytes: " . $stats['choice_bytes_total'] . "\n";
+```
+
+### Interpreting JIT Metrics
+
+#### Reduced Interpreter↔JIT Transitions
+
+With JIT branching support (JMP and SPLIT within compiled regions):
+
+- **Lower `jit_entries_total` for alternation patterns**: Indicates JIT stays in compiled code longer
+- **Higher `choice_push_total` with `choice_bytes_total`**: Proves choices are being pushed from JIT code
+- **Lower `jit_exits_total`**: Fewer bailouts to interpreter
+
+**Expected behavior for branch-heavy patterns:**
+
+| Pattern Type | Before JIT Branching           | With JIT Branching |
+|--------------|--------------------------------|--------------------|
+| `(a          | b                              | c                  |d)+` | ~N entries (N = input length) | 1-3 entries total |
+| Choice bytes | N/A (choices from interpreter) | Compact pushes     |
+
+#### Compact Choice Stack
+
+The `choice_bytes_total` counter measures the size of compact choice records pushed from JIT code:
+
+- **Smaller values = more compact representation**
+- **Compare against full snapshot mode** to validate correctness
+- **Use with `choice_push_total`** to calculate average choice size: `choice_bytes_total / choice_push_total`
+
+### Running JIT Observability Tests
+
+```bash
+# Run the JIT regression guard
+php bench/jit_guard.php
+
+# Run with median-of-N for stable measurements
+php bench/jit_guard.php --median 5
+```
+
+### Benchmark Harness Integration
+
+The benchmark harness automatically captures JIT stats and includes them in results:
+
+```bash
+php bench/tokenize.php
+php bench/replace.php
+php bench/dates.php
+php bench/backtracking.php
+```
+
+Results include JIT counters in the `jitStats` field.
+
+## Performance Regression Detection
+
+Use `bench/jit_guard.php` to detect performance regressions:
+
+1. **JIT Usage**: Must enter JIT at least once for hot patterns
+2. **Choice Operations**: Must push choices from JIT for alternation patterns
+3. **Speedup**: JIT should provide measurable speedup (conservative threshold: 5%)
+
+Run before commits:
+
+```bash
+php bench/jit_guard.php
+```
+
+Failures indicate:
+
+- JIT not being triggered
+- Branching support not working
+- Regression in JIT codegen

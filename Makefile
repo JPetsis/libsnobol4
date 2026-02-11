@@ -82,7 +82,7 @@ test:
 ifeq ($(IN_DDEV),1)
 	@echo "Running C tests..."
 	@if [ -d tests/c ]; then \
-		cd tests/c && $(MAKE) test || exit 1; \
+			cd tests/c && $(MAKE) clean && $(MAKE) test || exit 1; \
 	else \
 		echo "No C tests found (tests/c/ does not exist)"; \
 	fi
@@ -90,7 +90,7 @@ ifeq ($(IN_DDEV),1)
 	@echo "Checking PHP extension snobol..."
 	@$(ASAN_ENV) php $(PHP_OPTS) -m | grep snobol || echo "WARNING: snobol extension not found in php -m"
 	@if [ -f vendor/bin/phpunit ]; then \
-		$(ASAN_ENV) php $(PHP_OPTS) vendor/bin/phpunit tests/php || exit 1; \
+			$(ASAN_ENV) php $(PHP_OPTS) vendor/bin/phpunit tests/php || exit 1; \
 	else \
 		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
 	fi
@@ -100,13 +100,13 @@ else ifdef DDEV
 else
 	@echo "Running C tests..."
 	@if [ -d tests/c ]; then \
-		cd tests/c && $(MAKE) test || exit 1; \
+			cd tests/c && $(MAKE) test || exit 1; \
 	else \
 		echo "No C tests found (tests/c/ does not exist)"; \
 	fi
 	@echo "Running PHP tests..."
 	@if [ -f vendor/bin/phpunit ]; then \
-		php vendor/bin/phpunit tests/php || exit 1; \
+			php vendor/bin/phpunit tests/php || exit 1; \
 	else \
 		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
 	fi
@@ -276,7 +276,7 @@ ifeq ($(IN_DDEV),1)
 	@cp -rf /var/www/html/snobol4-php/. /tmp/snobol_build/
 	@cd /tmp/snobol_build && \
 		phpize && \
-		./configure --enable-snobol --enable-snobol-jit && \
+		./configure --enable-snobol --enable-snobol-jit --enable-snobol-profile && \
 		$(MAKE)
 	@echo "JIT build complete. Run 'make install' to install."
 else ifdef DDEV

@@ -1,11 +1,9 @@
-/*
- * test_runner.c - Minimal test harness for SNOBOL4 C core
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <signal.h>
+#include <setjmp.h>
 
 /* Test framework */
 typedef struct {
@@ -15,6 +13,15 @@ typedef struct {
 } TestContext;
 
 static TestContext test_ctx = {0};
+static jmp_buf test_jump;
+
+static void signal_handler(int sig) {
+    printf("\n  ✗ CRASHED with signal %d (%s) in suite: %s\n", 
+           sig, (sig == SIGILL ? "SIGILL" : (sig == SIGSEGV ? "SIGSEGV" : "SIGBUS")),
+           test_ctx.current_suite);
+    test_ctx.failed++;
+    longjmp(test_jump, 1);
+}
 
 void test_suite(const char *name) {
     test_ctx.current_suite = name;
@@ -37,21 +44,38 @@ void test_backtracking_suite(void);
 void test_catastrophic_suite(void);
 void test_jit_observability_suite(void);
 void test_jit_cache_suite(void);
+void test_jit_branches_suite(void);
 int test_stress_backtracking_main(void);
 
 int main(void) {
     printf("SNOBOL4 C Core Test Runner\n");
     printf("===========================\n");
 
-    /* Run test suites */
-    test_vm_suite();
-    test_backtracking_suite();
-    test_catastrophic_suite();
-    test_jit_observability_suite();
-    test_jit_cache_suite();
+    signal(SIGILL, signal_handler);
+    signal(SIGSEGV, signal_handler);
+    signal(SIGBUS, signal_handler);
+
+    if (setjmp(test_jump) == 0) {
+        test_vm_suite();
+    }
+    if (setjmp(test_jump) == 0) {
+        test_backtracking_suite();
+    }
+    if (setjmp(test_jump) == 0) {
+        test_catastrophic_suite();
+    }
+    if (setjmp(test_jump) == 0) {
+        test_jit_observability_suite();
+    }
+    if (setjmp(test_jump) == 0) {
+        test_jit_cache_suite();
+    }
+    if (setjmp(test_jump) == 0) {
+        test_jit_branches_suite();
+    }
 
     printf("\n=== Stress Tests ===\n");
-    {
+    if (setjmp(test_jump) == 0) {
         int rc = test_stress_backtracking_main();
         if (rc == 0) {
             test_ctx.passed++;

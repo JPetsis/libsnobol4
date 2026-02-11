@@ -86,6 +86,9 @@ PHP_FUNCTION(snobol_get_jit_stats) {
     add_assoc_long(return_value, "jit_exits_total", (zend_long)stats->exits_total);
     add_assoc_long(return_value, "jit_bailouts_total", (zend_long)stats->bailouts_total);
     add_assoc_long(return_value, "jit_time_ns_total", (zend_long)stats->time_ns_total);
+    add_assoc_long(return_value, "choice_push_total", (zend_long)stats->choice_push_total);
+    add_assoc_long(return_value, "choice_pop_total", (zend_long)stats->choice_pop_total);
+    add_assoc_long(return_value, "choice_bytes_total", (zend_long)stats->choice_bytes_total);
 }
 
 PHP_FUNCTION(snobol_reset_jit_stats) {

@@ -65,6 +65,9 @@ class Harness
         }
 
         // Measured run with timeout check
+        if (function_exists('snobol_reset_jit_stats')) {
+            snobol_reset_jit_stats();
+        }
         $startTime = hrtime(true);
         $wallStart = time();
         for ($i = 0; $i < $iterations; $i++) {
@@ -161,33 +164,37 @@ class Harness
             return;
         }
 
-        echo "\n".str_repeat('=', 95)."\n";
+        echo "\n".str_repeat('=', 120)."\n";
         echo "BENCHMARK RESULTS\n";
-        echo str_repeat('=', 95)."\n";
-        printf("%-30s %-10s %12s %15s %12s\n", "Scenario", "Impl", "Iterations", "Ops/Sec", "JIT Entries");
-        echo str_repeat('-', 95)."\n";
+        echo str_repeat('=', 120)."\n";
+        printf("%-30s %-10s %12s %15s %12s %14s %14s\n",
+            "Scenario", "Impl", "Iterations", "Ops/Sec", "JIT Entries", "Choice Pushes", "Choice Bytes");
+        echo str_repeat('-', 120)."\n";
 
         foreach ($this->results as $result) {
             $opsDisplay = isset($result['timeout']) && $result['timeout']
                 ? 'TIMEOUT'
                 : number_format($result['opsPerSec'], 2);
 
-            $jitEntries = isset($result['jitStats']['jit_entries_total'])
-                ? $result['jitStats']['jit_entries_total']
-                : '-';
+            $jitStats = $result['jitStats'] ?? [];
+            $jitEntries = isset($jitStats['jit_entries_total']) ? number_format($jitStats['jit_entries_total']) : '-';
+            $choicePushes = isset($jitStats['choice_push_total']) ? number_format($jitStats['choice_push_total']) : '-';
+            $choiceBytes = isset($jitStats['choice_bytes_total']) ? number_format($jitStats['choice_bytes_total']) : '-';
 
             printf(
-                "%-30s %-10s %12d %15s %12s\n",
+                "%-30s %-10s %12d %15s %12s %14s %14s\n",
                 $result['scenario'],
                 $result['impl'],
                 $result['iterations'],
                 $opsDisplay,
-                $jitEntries
+                $jitEntries,
+                $choicePushes,
+                $choiceBytes
             );
         }
 
-        echo str_repeat('=', 95)."\n";
+        echo str_repeat('=', 120)."\n";
         echo "Peak memory: ".number_format(memory_get_peak_usage(true) / 1024 / 1024, 2)." MB\n";
-        echo str_repeat('=', 95)."\n\n";
+        echo str_repeat('=', 120)."\n\n";
     }
 }

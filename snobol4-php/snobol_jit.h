@@ -16,6 +16,11 @@ typedef struct SnobolJitStats {
     uint64_t exits_total;
     uint64_t bailouts_total;
     uint64_t time_ns_total;
+    
+    /* Backtracking counters */
+    uint64_t choice_push_total;
+    uint64_t choice_pop_total;
+    uint64_t choice_bytes_total;
 } SnobolJitStats;
 
 /* JIT Context - shared across patterns with same bytecode */
