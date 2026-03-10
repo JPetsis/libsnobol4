@@ -89,6 +89,71 @@ class JitObservabilityTest extends TestCase
         ));
     }
 
+    /**
+     * Task 4.4: Backtracking-heavy pattern — assert reduced jit_exits_total
+     *
+     * The profitability gate should recognise alternation-dominated patterns
+     * (SPLIT immediately at ip=0 with no useful prefix) as unprofitable and
+     * skip JIT compilation for them.  The observable result is that either:
+     *   (a) jit_exits_total stays 0 (JIT never entered), OR
+     *   (b) jit_skipped_cold_total > 0 (gate explicitly skipped compilation).
+     * Either way the total JIT overhead for backtracking patterns is bounded.
+     */
+    public function testBacktrackingPatternProfitabilityGate(): void
+    {
+        // Pure alternation: (a|b|c|d|e) — SPLIT is the very first op, no useful prefix.
+        // The profitability gate (skip_backtrack_heavy + min_useful_ops) should skip JIT.
+        $pattern = Builder::alt(
+            Builder::lit("alpha"),
+            Builder::lit("beta"),
+            Builder::lit("gamma"),
+            Builder::lit("delta"),
+            Builder::lit("epsilon")
+        );
+        $p = Pattern::compileFromAst($pattern);
+        $p->setJit(true);
+
+        // Run enough iterations to trigger hotness threshold
+        for ($i = 0; $i < 200; $i++) {
+            $p->match("gamma");
+        }
+
+        $stats = snobol_get_jit_stats();
+
+        // The profitability gate must have intervened in at least one of these ways:
+        //   - compilations skipped due to cold/insufficient-ops heuristic
+        //   - exit rate exceeded threshold and further compilations were stopped
+        //   - JIT was entered but exits are bounded (not unbounded for every iteration)
+        $gateActivated =
+            ($stats['jit_skipped_cold_total'] ?? 0) > 0 ||
+            ($stats['jit_skipped_exit_rate_total'] ?? 0) > 0 ||
+            ($stats['jit_exits_total'] ?? 0) < 150; // fewer exits than iterations
+
+        $this->assertTrue($gateActivated,
+            sprintf(
+                'Profitability gate must reduce exit overhead for backtracking patterns. '.
+                'skipped_cold=%d, skipped_exit_rate=%d, exits=%d',
+                $stats['jit_skipped_cold_total'] ?? 0,
+                $stats['jit_skipped_exit_rate_total'] ?? 0,
+                $stats['jit_exits_total'] ?? 0
+            )
+        );
+
+        // New counters must be present in the stats array
+        $this->assertArrayHasKey('jit_compile_time_ns_total', $stats,
+            'jit_compile_time_ns_total counter must be present');
+        $this->assertArrayHasKey('jit_exec_time_ns_total', $stats,
+            'jit_exec_time_ns_total counter must be present');
+        $this->assertArrayHasKey('jit_interp_time_ns_total', $stats,
+            'jit_interp_time_ns_total counter must be present');
+        $this->assertArrayHasKey('jit_skipped_cold_total', $stats,
+            'jit_skipped_cold_total counter must be present');
+        $this->assertArrayHasKey('jit_skipped_exit_rate_total', $stats,
+            'jit_skipped_exit_rate_total counter must be present');
+        $this->assertArrayHasKey('jit_bailout_match_fail_total', $stats,
+            'jit_bailout_match_fail_total counter must be present');
+    }
+
     protected function setUp(): void
     {
         if (!extension_loaded('snobol')) {

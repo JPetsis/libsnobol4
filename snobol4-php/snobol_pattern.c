@@ -199,6 +199,7 @@ PHP_METHOD(Snobol_Pattern, match) {
     if (intern->jit_ctx) {
         vm.jit.ip_counts = intern->jit_ctx->ip_counts;
         vm.jit.traces = intern->jit_ctx->traces;
+        vm.jit.ctx = intern->jit_ctx;
     }
     vm.jit.enabled = intern->jit_enabled;
     vm.jit.stats = snobol_jit_get_stats();

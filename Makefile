@@ -292,10 +292,10 @@ endif
 bench-jit-guard:
 	@echo "Running JIT regression guard..."
 ifeq ($(IN_DDEV),1)
-	@$(ASAN_ENV) php $(PHP_OPTS) bench/jit_guard.php
+	@SNOBOL_JIT_HOTNESS=1 $(ASAN_ENV) php $(PHP_OPTS) bench/jit_guard.php
 else ifdef DDEV
-	@ddev exec make bench-jit-guard
+	@ddev exec env SNOBOL_JIT_HOTNESS=1 make bench-jit-guard
 else
-	@php bench/jit_guard.php
+	@SNOBOL_JIT_HOTNESS=1 php bench/jit_guard.php
 endif
 

@@ -168,6 +168,7 @@ typedef struct {
         void **traces;
         bool enabled;
         struct SnobolJitStats *stats;
+        struct SnobolJitContext *ctx;  /**< owning context; used for per-pattern profitability state */
     } jit;
 #endif
 } VM;

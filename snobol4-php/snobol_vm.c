@@ -192,27 +192,95 @@ bool vm_run(VM *vm) {
 #endif
         if (vm->ip >= vm->bc_len) { if (!vm_pop_choice(vm)) goto fail_ret; continue; }
 #ifdef SNOBOL_JIT
+        {
         size_t current_ip = vm->ip;
-        if (vm->jit.enabled && vm->jit.traces && vm->jit.traces[current_ip]) {
-            if (vm->jit.stats) { vm->jit.stats->entries_total++; vm->jit.stats->cache_hits_total++; }
+        const SnobolJitConfig *jit_cfg = snobol_jit_get_config();
+
+        if (vm->jit.ctx && vm->jit.ctx->stop_compiling &&
+            (!vm->jit.traces || vm->jit.traces[current_ip] == NULL)) {
+            /* Profitability gate permanently disabled JIT for this pattern and
+             * there is no trace at the current IP.  Fall straight through to
+             * the interpreter without paying profiling overhead each dispatch. */
+        } else if (vm->jit.enabled && vm->jit.traces && vm->jit.traces[current_ip]) {
+            /* ---- Execute compiled trace ---- */
+            if (vm->jit.stats) vm->jit.stats->entries_total++;
+            if (vm->jit.ctx)   vm->jit.ctx->ctx_entries++;
+
+            uint64_t t_exec = (vm->jit.stats) ? snobol_jit_now_ns() : 0;
             jit_trace_fn fn = (jit_trace_fn)vm->jit.traces[current_ip];
             fn(vm);
-            if (vm->jit.stats) { vm->jit.stats->exits_total++; if (vm->ip == current_ip) vm->jit.stats->bailouts_total++; }
-            if (vm->ip != current_ip) continue; 
+            if (vm->jit.stats) {
+                uint64_t exec_ns = snobol_jit_now_ns() - t_exec;
+                vm->jit.stats->exec_time_ns_total += exec_ns;
+                vm->jit.stats->time_ns_total      += exec_ns; /* legacy */
+                vm->jit.stats->exits_total++;
+                if (vm->ip == current_ip) {
+                    vm->jit.stats->bailouts_total++;
+                    vm->jit.stats->bailout_match_fail_total++;
+                } else {
+                    vm->jit.stats->bailout_partial_total++;
+                }
+            }
+
+            /* Per-pattern early-exit rule (task 2.3) */
+            if (vm->jit.ctx) {
+                vm->jit.ctx->ctx_exits++;
+                if (!vm->jit.ctx->stop_compiling &&
+                    vm->jit.ctx->ctx_entries > 100 &&
+                    jit_cfg->max_exit_rate_pct < 100) {
+                    uint64_t entries = vm->jit.ctx->ctx_entries;
+                    uint64_t exits   = vm->jit.ctx->ctx_exits;
+                    if (exits * 100 / entries > (uint64_t)jit_cfg->max_exit_rate_pct) {
+                        vm->jit.ctx->stop_compiling = true;
+                        if (vm->jit.stats) vm->jit.stats->skipped_exit_rate_total++;
+                    }
+                }
+            }
+
+            if (vm->ip != current_ip) continue;
+            /* Fell through (bailout): let interpreter handle current ip */
+
         } else if (vm->jit.ip_counts && current_ip < vm->bc_len) {
             uint64_t count = ++vm->jit.ip_counts[current_ip];
-            if (count == 50 && vm->jit.traces) {
-                if (vm->jit.traces[current_ip] == NULL) {
-                    if (vm->jit.stats) vm->jit.stats->compilations_total++;
-                    void *trace = (void*)snobol_jit_compile(vm, current_ip);
-                    if (trace) {
-                        vm->jit.traces[current_ip] = trace;
+
+            bool should_try = (count == jit_cfg->hotness_threshold) &&
+                              vm->jit.traces &&
+                              vm->jit.traces[current_ip] == NULL &&
+                              !(vm->jit.ctx && vm->jit.ctx->stop_compiling);
+
+            if (should_try) {
+                /* Profitability gate (task 2.2) */
+                if (!snobol_jit_should_compile(vm, current_ip, jit_cfg)) {
+                    if (vm->jit.ctx) vm->jit.ctx->stop_compiling = true;
+                    if (vm->jit.stats) vm->jit.stats->skipped_cold_total++;
+                } else {
+                    /* Compile budget check (task 3.5) */
+                    uint64_t budget_used = vm->jit.ctx ? vm->jit.ctx->compile_time_ns : 0;
+                    if (budget_used >= jit_cfg->compile_budget_ns) {
+                        if (vm->jit.ctx) vm->jit.ctx->stop_compiling = true;
+                        if (vm->jit.stats) vm->jit.stats->skipped_budget_total++;
                     } else {
-                        if (vm->jit.stats) vm->jit.stats->bailouts_total++;
+                        if (vm->jit.stats) vm->jit.stats->compilations_total++;
+                        uint64_t t_compile = (vm->jit.stats) ? snobol_jit_now_ns() : 0;
+                        size_t code_sz = 0;
+                        void *trace = (void *)snobol_jit_compile(vm, current_ip, &code_sz);
+                        if (t_compile && vm->jit.stats) {
+                            uint64_t compile_ns = snobol_jit_now_ns() - t_compile;
+                            vm->jit.stats->compile_time_ns_total += compile_ns;
+                            if (vm->jit.ctx) vm->jit.ctx->compile_time_ns += compile_ns;
+                        }
+                        if (trace) {
+                            vm->jit.traces[current_ip] = trace;
+                            if (vm->jit.ctx && vm->jit.ctx->trace_sizes)
+                                vm->jit.ctx->trace_sizes[current_ip] = code_sz;
+                        } else {
+                            if (vm->jit.stats) vm->jit.stats->bailouts_total++;
+                        }
                     }
                 }
             }
         }
+        } /* end SNOBOL_JIT block */
 #endif
         uint8_t op = vm->bc[vm->ip++];
         switch (op) {

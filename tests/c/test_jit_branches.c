@@ -109,6 +109,13 @@ static void test_jit_jmp_in_region(void) {
 }
 
 static void test_jit_split_in_region(void) {
+    /* Disable the profitability gate so we can test JIT compilation
+     * of SPLIT-containing patterns directly. */
+    SnobolJitConfig saved_cfg = *snobol_jit_get_config();
+    SnobolJitConfig cfg = saved_cfg;
+    cfg.min_useful_ops       = 0;
+    cfg.skip_backtrack_heavy = false;
+    snobol_jit_set_config(&cfg);
     uint8_t bc[512] = {0};
     size_t ip = 0;
     
@@ -181,6 +188,7 @@ static void test_jit_split_in_region(void) {
     test_assert(stats->choice_bytes_total > 0, "Should have recorded choice bytes");
     
     snobol_jit_release_context(ctx);
+    snobol_jit_set_config(&saved_cfg);
 }
 
 void test_jit_branches_suite(void) {

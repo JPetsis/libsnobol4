@@ -45,6 +45,7 @@ void test_catastrophic_suite(void);
 void test_jit_observability_suite(void);
 void test_jit_cache_suite(void);
 void test_jit_branches_suite(void);
+void test_jit_profitability_suite(void);
 int test_stress_backtracking_main(void);
 
 int main(void) {
@@ -72,6 +73,9 @@ int main(void) {
     }
     if (setjmp(test_jump) == 0) {
         test_jit_branches_suite();
+    }
+    if (setjmp(test_jump) == 0) {
+        test_jit_profitability_suite();
     }
 
     printf("\n=== Stress Tests ===\n");

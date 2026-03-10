@@ -80,15 +80,28 @@ PHP_FUNCTION(snobol_get_jit_stats) {
 
     SnobolJitStats *stats = snobol_jit_get_stats();
     array_init(return_value);
-    add_assoc_long(return_value, "jit_compilations_total", (zend_long)stats->compilations_total);
-    add_assoc_long(return_value, "jit_cache_hits_total", (zend_long)stats->cache_hits_total);
-    add_assoc_long(return_value, "jit_entries_total", (zend_long)stats->entries_total);
-    add_assoc_long(return_value, "jit_exits_total", (zend_long)stats->exits_total);
-    add_assoc_long(return_value, "jit_bailouts_total", (zend_long)stats->bailouts_total);
-    add_assoc_long(return_value, "jit_time_ns_total", (zend_long)stats->time_ns_total);
-    add_assoc_long(return_value, "choice_push_total", (zend_long)stats->choice_push_total);
-    add_assoc_long(return_value, "choice_pop_total", (zend_long)stats->choice_pop_total);
-    add_assoc_long(return_value, "choice_bytes_total", (zend_long)stats->choice_bytes_total);
+    /* Core counters */
+    add_assoc_long(return_value, "jit_compilations_total",       (zend_long)stats->compilations_total);
+    add_assoc_long(return_value, "jit_cache_hits_total",         (zend_long)stats->cache_hits_total);
+    add_assoc_long(return_value, "jit_entries_total",            (zend_long)stats->entries_total);
+    add_assoc_long(return_value, "jit_exits_total",              (zend_long)stats->exits_total);
+    add_assoc_long(return_value, "jit_bailouts_total",           (zend_long)stats->bailouts_total);
+    add_assoc_long(return_value, "jit_time_ns_total",            (zend_long)stats->time_ns_total);
+    /* Backtracking counters */
+    add_assoc_long(return_value, "choice_push_total",            (zend_long)stats->choice_push_total);
+    add_assoc_long(return_value, "choice_pop_total",             (zend_long)stats->choice_pop_total);
+    add_assoc_long(return_value, "choice_bytes_total",           (zend_long)stats->choice_bytes_total);
+    /* Timing */
+    add_assoc_long(return_value, "jit_compile_time_ns_total",    (zend_long)stats->compile_time_ns_total);
+    add_assoc_long(return_value, "jit_exec_time_ns_total",       (zend_long)stats->exec_time_ns_total);
+    add_assoc_long(return_value, "jit_interp_time_ns_total",     (zend_long)stats->interp_time_ns_total);
+    /* Profitability / skip reasons */
+    add_assoc_long(return_value, "jit_skipped_cold_total",       (zend_long)stats->skipped_cold_total);
+    add_assoc_long(return_value, "jit_skipped_exit_rate_total",  (zend_long)stats->skipped_exit_rate_total);
+    add_assoc_long(return_value, "jit_skipped_budget_total",     (zend_long)stats->skipped_budget_total);
+    /* Bailout reasons */
+    add_assoc_long(return_value, "jit_bailout_match_fail_total", (zend_long)stats->bailout_match_fail_total);
+    add_assoc_long(return_value, "jit_bailout_partial_total",    (zend_long)stats->bailout_partial_total);
 }
 
 PHP_FUNCTION(snobol_reset_jit_stats) {
