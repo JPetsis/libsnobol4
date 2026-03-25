@@ -16,5 +16,5 @@ if test "$PHP_SNOBOL_JIT" != "no"; then
 fi
 
 if test "$PHP_SNOBOL" != "no"; then
-  PHP_NEW_EXTENSION(snobol, php_snobol.c snobol_compiler.c snobol_pattern.c snobol_vm.c snobol_jit.c, $ext_shared)
+  PHP_NEW_EXTENSION(snobol, php_snobol.c snobol_compiler.c snobol_pattern.c snobol_vm.c snobol_jit.c snobol_table.c snobol_table_php.c snobol_dynamic_pattern.c, $ext_shared)
 fi

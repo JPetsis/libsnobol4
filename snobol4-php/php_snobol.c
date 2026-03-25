@@ -34,6 +34,10 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
 
 /* Extern declaration from snobol_pattern.c */
 void snobol_pattern_minit(void);
+
+/* Extern declaration from snobol_table_php.c */
+void snobol_table_php_minit(void);
+
 PHP_MINFO_FUNCTION(snobol);
 #ifdef SNOBOL_JIT
 #include "snobol_jit.h"
@@ -62,6 +66,7 @@ PHP_MINIT_FUNCTION(snobol) {
     snobol_jit_init();
 #endif
     snobol_pattern_minit();
+    snobol_table_php_minit();
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): DONE");
     return SUCCESS;
 }
