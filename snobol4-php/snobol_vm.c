@@ -409,6 +409,89 @@ bool vm_run(VM *vm) {
                 } break;
             }
             
+            /* Table-backed and formatted replacement opcodes */
+            case OP_EMIT_TABLE: {
+                /* Lookup table[key] and emit the value
+                 * Format: table_id u16, key_reg u8
+                 * If key not found, emit empty string (graceful degradation) */
+                uint16_t table_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                
+#ifdef SNOBOL_DYNAMIC_PATTERN
+                snobol_table_t *table = vm_get_table(vm, table_id);
+                if (table && key_reg < MAX_CAPS && 
+                    vm->cap_end[key_reg] >= vm->cap_start[key_reg] &&
+                    vm->cap_end[key_reg] <= vm->len) {
+                    
+                    /* Extract key */
+                    size_t key_len = vm->cap_end[key_reg] - vm->cap_start[key_reg];
+                    char *key = (char *)snobol_malloc(key_len + 1);
+                    memcpy(key, vm->s + vm->cap_start[key_reg], key_len);
+                    key[key_len] = '\0';
+                    
+                    /* Lookup and emit */
+                    const char *value = table_get(table, key);
+                    if (value) {
+                        size_t val_len = strlen(value);
+                        if (vm->out) snobol_buf_append(vm->out, value, val_len);
+                        if (vm->emit_fn) vm->emit_fn(value, val_len, vm->emit_udata);
+                    }
+                    /* If not found, emit nothing (graceful degradation) */
+                    snobol_free(key);
+                }
+#else
+                (void)table_id; (void)key_reg; /* Table support not enabled */
+#endif
+                break;
+            }
+            case OP_EMIT_FORMAT: {
+                /* Format capture with specified format type
+                 * Format: reg u8, format_type u8
+                 * format_type: 1=upper, 2=lower, 3=length */
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t format_type = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                
+                if (r < MAX_CAPS && vm->cap_end[r] >= vm->cap_start[r] && vm->cap_end[r] <= vm->len) {
+                    const char *data = vm->s + vm->cap_start[r];
+                    size_t len = vm->cap_end[r] - vm->cap_start[r];
+                    
+                    if (format_type == 1) {
+                        /* Uppercase */
+                        char *tmp = (char *)snobol_malloc(len + 1);
+                        for (size_t i = 0; i < len; ++i) {
+                            tmp[i] = (data[i] >= 'a' && data[i] <= 'z') ? data[i] - 32 : data[i];
+                        }
+                        tmp[len] = '\0';
+                        if (vm->out) snobol_buf_append(vm->out, tmp, len);
+                        if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
+                        snobol_free(tmp);
+                    } else if (format_type == 2) {
+                        /* Lowercase */
+                        char *tmp = (char *)snobol_malloc(len + 1);
+                        for (size_t i = 0; i < len; ++i) {
+                            tmp[i] = (data[i] >= 'A' && data[i] <= 'Z') ? data[i] + 32 : data[i];
+                        }
+                        tmp[len] = '\0';
+                        if (vm->out) snobol_buf_append(vm->out, tmp, len);
+                        if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
+                        snobol_free(tmp);
+                    } else if (format_type == 3) {
+                        /* Length as string */
+                        char tmp[32];
+                        int n = snprintf(tmp, sizeof(tmp), "%zu", len);
+                        if (vm->out) snobol_buf_append(vm->out, tmp, (size_t)n);
+                        if (vm->emit_fn) vm->emit_fn(tmp, (size_t)n, vm->emit_udata);
+                    } else {
+                        /* Unknown format - emit raw */
+                        if (vm->out) snobol_buf_append(vm->out, data, len);
+                        if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata);
+                    }
+                } else {
+                    /* Missing capture - emit empty (graceful degradation) */
+                }
+                break;
+            }
+            
             /* Control flow opcodes */
             case OP_LABEL: {
                 /* Define a label target - just skip during execution
@@ -574,13 +657,19 @@ bool vm_run(VM *vm) {
             case OP_DYNAMIC: {
                 /* Evaluate dynamic pattern from register
                  * Format: pattern_reg u8
-                 * The pattern in the register should be a compiled dynamic_pattern_t*
-                 * For now, this is a placeholder - full implementation requires
-                 * integrating with the dynamic pattern cache */
+                 * 
+                 * TODO: Full implementation requires pattern cache integration
+                 * - Lookup dynamic_pattern_t* from the pattern_reg
+                 * - Retrieve pattern from dynamic_pattern_cache_t
+                 * - Execute the pattern at current vm->ip/vm->pos
+                 * - Handle success/failure with proper backtracking
+                 * 
+                 * This is future work for completing task 4.2.
+                 * Currently this is a placeholder that does nothing.
+                 */
                 uint8_t pattern_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 (void)pattern_reg;
                 /* Placeholder: dynamic pattern evaluation not yet fully implemented */
-                /* This would lookup the pattern and execute it at current position */
                 break;
             }
 #endif /* SNOBOL_DYNAMIC_PATTERN */

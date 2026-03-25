@@ -636,6 +636,21 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
                         size_t off = cb_pos(&cb) + 4 + 4;
                         cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
                     }
+                } else if (i < len && tpl[i] == '[') {
+                    /* Table-backed replacement: {TABLE[key]}
+                     * 
+                     * TODO: Full table support in templates requires parser changes
+                     * - Parse TABLE[key] syntax within template strings
+                     * - Extract table name and key expression
+                     * - Emit OP_EMIT_TABLE with proper table_id and key_reg
+                     * - Currently this emits as literal '$' character
+                     * 
+                     * This is future work for completing task 5.1.
+                     */
+                    i = start_of_dollar + 1;
+                    cb_emit_u8(&cb, OP_EMIT_LITERAL);
+                    size_t off = cb_pos(&cb) + 4 + 4;
+                    cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
                 } else {
                     cb_emit_u8(&cb, OP_EMIT_CAPTURE); cb_emit_u8(&cb, reg);
                 }

@@ -86,6 +86,10 @@ typedef enum {
     OP_EMIT_CAPTURE, // reg u8 (Renamed from OP_EMIT_REF)
     OP_EMIT_EXPR,    // reg u8, expr_type u8 (New: for .upper(), .length() etc)
     
+    /* Table-backed replacement opcodes */
+    OP_EMIT_TABLE,   // table_id u16, key_reg u8 (lookup table[key] and emit)
+    OP_EMIT_FORMAT,  // reg u8, format_type u8 (format capture: 1=upper, 2=lower, 3=length)
+    
     /* Control flow opcodes for labelled patterns and goto-like transfers */
     OP_LABEL,      // label_id u16 (define a label target)
     OP_GOTO,       // label_id u16 (unconditional transfer to label)

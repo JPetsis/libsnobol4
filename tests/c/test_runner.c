@@ -43,6 +43,7 @@ void test_vm_suite(void);
 void test_table_suite(void);
 void test_dynamic_pattern_suite(void);
 void test_table_ops_suite(void);
+void test_template_ops_suite(void);
 void test_control_flow_suite(void);
 void test_backtracking_suite(void);
 void test_catastrophic_suite(void);
@@ -71,6 +72,9 @@ int main(void) {
     }
     if (setjmp(test_jump) == 0) {
         test_table_ops_suite();
+    }
+    if (setjmp(test_jump) == 0) {
+        test_template_ops_suite();
     }
     if (setjmp(test_jump) == 0) {
         test_control_flow_suite();
