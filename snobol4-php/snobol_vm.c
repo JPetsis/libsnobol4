@@ -410,26 +410,36 @@ bool vm_run(VM *vm) {
             
             /* Control flow opcodes */
             case OP_LABEL: {
-                /* Define a label target - just skip during execution */
+                /* Define a label target - just skip during execution
+                 * Labels are resolved at compile time, OP_LABEL is a no-op at runtime */
                 uint16_t label_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
-                (void)label_id; /* Label is resolved at compile time */
+                (void)label_id;
                 break;
             }
             case OP_GOTO: {
-                /* Unconditional transfer to label */
+                /* Unconditional transfer to label
+                 * CRITICAL: GOTO does NOT restore backtracking state
+                 * This distinguishes explicit control flow from ordinary backtracking */
                 uint16_t label_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint32_t target = vm_get_label_offset(vm, label_id);
+                
                 if (target == 0 && label_id != 0) {
-                    /* Invalid label - fail */
+                    /* Invalid label - fail without restoring backtracking state */
+                    vm->in_goto_fail = true;
                     if (!vm_pop_choice(vm)) goto fail_ret;
                 } else {
+                    /* Transfer control to label target
+                     * Note: We do NOT pop any choice here - GOTO is explicit flow,
+                     * not backtracking. The choice stack remains for future backtracking. */
                     vm->ip = target;
                 }
                 break;
             }
             case OP_GOTO_F: {
-                /* Transfer to label if last match failed */
+                /* Transfer to label if last match failed
+                 * This is used for conditional control flow after a match attempt */
                 uint16_t label_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                
                 if (vm->in_goto_fail) {
                     uint32_t target = vm_get_label_offset(vm, label_id);
                     if (target == 0 && label_id != 0) {
@@ -439,7 +449,7 @@ bool vm_run(VM *vm) {
                         vm->in_goto_fail = false;
                     }
                 } else {
-                    /* Continue normally */
+                    /* Continue normally - no failure occurred */
                     break;
                 }
                 break;
