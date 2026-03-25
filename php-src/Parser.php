@@ -8,6 +8,8 @@ class Parser
     private array $tokens;
     private int $pos;
     private int $count;
+    private array $labels = []; // Track defined labels for duplicate detection
+    private array $gotoRefs = []; // Track goto references for validation
 
     public function __construct(string $input)
     {
@@ -19,14 +21,72 @@ class Parser
         $this->tokens = $this->lexer->tokenize();
         $this->count = count($this->tokens);
         $this->pos = 0;
+        $this->labels = [];
+        $this->gotoRefs = [];
 
-        $ast = $this->expr();
+        $ast = $this->statement();
 
         if ($this->curr()['type'] !== Lexer::T_EOF) {
             throw new \Exception("Unexpected token after expression: ".$this->curr()['value']);
         }
 
+        // Validate labels and gotos
+        $this->validateLabelsAndGotos();
+
         return $ast;
+    }
+
+    private function validateLabelsAndGotos(): void
+    {
+        // Check for duplicate labels
+        $labelCounts = [];
+        foreach ($this->labels as $label) {
+            $labelCounts[$label] = ($labelCounts[$label] ?? 0) + 1;
+        }
+        foreach ($labelCounts as $label => $count) {
+            if ($count > 1) {
+                throw new \Exception("Duplicate label '$label'");
+            }
+        }
+
+        // Note: We don't validate goto references here because:
+        // 1. Forward references are allowed in SNOBOL
+        // 2. Labels may be defined in other statements/programs
+        // Runtime validation will handle unresolved labels
+    }
+
+    private function statement(): array
+    {
+        // Check for label: IDENT ':'
+        if ($this->curr()['type'] === Lexer::T_IDENT) {
+            $lookahead = $this->peek(1);
+            if ($lookahead['type'] === Lexer::T_COLON) {
+                $labelName = $this->curr()['value'];
+                $this->labels[] = $labelName; // Track defined label
+                $this->next(); // consume IDENT
+                $this->next(); // consume COLON
+                $target = $this->statement();
+                return Builder::label($labelName, $target);
+            }
+        }
+
+        // Check for goto: ':' '(' IDENT ')'
+        if ($this->curr()['type'] === Lexer::T_COLON) {
+            $this->next();
+            if ($this->match(Lexer::T_LPAREN)) {
+                if ($this->curr()['type'] !== Lexer::T_IDENT) {
+                    throw new \Exception("Expected label identifier after ':('");
+                }
+                $label = $this->curr()['value'];
+                $this->gotoRefs[] = $label; // Track goto reference
+                $this->next();
+                $this->expect(Lexer::T_RPAREN);
+                return Builder::goto($label);
+            }
+            throw new \Exception("Expected '(' after ':' in goto syntax");
+        }
+
+        return $this->expr();
     }
 
     private function expr(): array
@@ -49,6 +109,22 @@ class Parser
 
         while ($this->isStartOfFactor()) {
             $factors[] = $this->factor();
+        }
+
+        // Check for goto at the end of a term: :(LABEL)
+        if ($this->curr()['type'] === Lexer::T_COLON) {
+            $this->next();
+            if ($this->match(Lexer::T_LPAREN)) {
+                if ($this->curr()['type'] !== Lexer::T_IDENT) {
+                    throw new \Exception("Expected label identifier after ':('");
+                }
+                $label = $this->curr()['value'];
+                $this->next();
+                $this->expect(Lexer::T_RPAREN);
+                $factors[] = Builder::goto($label);
+            } else {
+                throw new \Exception("Expected '(' after ':' in goto syntax");
+            }
         }
 
         if (count($factors) === 1) {
@@ -101,14 +177,43 @@ class Parser
         }
 
         if ($t['type'] === Lexer::T_IDENT) {
-            // Builtin call?
+            // Builtin call or table access or variable ref?
             $name = $t['value'];
             $this->next();
+
+            // Check for table access: TABLE[key]
+            if ($this->match(Lexer::T_LBRACKET)) {
+                $keyExpr = $this->atomForTableKey();
+                $this->expect(Lexer::T_RBRACKET);
+
+                // Check for table update: TABLE[key] = value
+                if ($this->match(Lexer::T_EQUALS)) {
+                    $valueExpr = $this->statement();
+                    return Builder::tableUpdate($name, $keyExpr, $valueExpr);
+                }
+
+                return Builder::tableAccess($name, $keyExpr);
+            }
+            
             if ($this->match(Lexer::T_LPAREN)) {
+                // Check for dynamic eval: EVAL(expr)
+                if (strtoupper($name) === 'EVAL') {
+                    // Check for empty EVAL()
+                    if ($this->curr()['type'] === Lexer::T_RPAREN) {
+                        throw new \Exception("EVAL requires a pattern expression argument");
+                    }
+                    // EVAL takes a full expression
+                    $expr = $this->expr();
+                    $this->expect(Lexer::T_RPAREN);
+                    return Builder::dynamicEval($expr);
+                }
+
+                // Regular builtin - parse simple args
                 $args = $this->parseArgs();
                 $this->expect(Lexer::T_RPAREN);
                 return $this->buildFunction($name, $args);
             }
+
             // Just IDENT? Fail for now unless we support variables
             throw new \Exception("Unexpected identifier '$name' (variable ref not supported yet)");
         }
@@ -190,6 +295,15 @@ class Parser
         }
     }
 
+    private function peek(int $offset): array
+    {
+        $idx = $this->pos + $offset;
+        if ($idx < $this->count) {
+            return $this->tokens[$idx];
+        }
+        return ['type' => Lexer::T_EOF, 'value' => ''];
+    }
+
     // Factor -> Atom [ Quantifier ]
 
     private function expandRanges(string $s): string
@@ -254,28 +368,12 @@ class Parser
 
     private function parseArgs(): array
     {
-        // Simple comma separated args?
-        // Currently builtins take 1 arg usually.
-        // EVAL takes fn, reg.
-        // Let's support expression as arg.
         $args = [];
         if ($this->curr()['type'] !== Lexer::T_RPAREN) {
-            // Args are usually strings (LIT) or numbers for LEN.
-            // But EVAL takes a function index (int).
-            // Let's parse generic 'Value'.
-            // For simplicity, parse LIT or NUMBER (LIT) or EXPR?
-            // SPAN('...') -> LIT.
-            // LEN(5) -> LIT (value 5).
-
-            // We need to consume tokens until RPAREN or COMMA.
-            // Actually, let's just parse a single literal or integer for now as that's what builtins take.
-            // Except EVAL?
-
-            // If the next token is LIT, take it.
-            // If IDENT, maybe?
-            // If NUMBER? Lexer doesn't have T_NUMBER yet, treats digits as IDENT or LIT?
-            // Lexer treats digits as IDENT currently (ctype_alnum).
-
+            // For EVAL, we need to parse the full expression
+            // For other builtins, we just need a literal value
+            // For now, parse as a simple value (LIT or IDENT)
+            
             $val = $this->curr()['value'];
             $this->next();
             $args[] = $val;
@@ -322,5 +420,23 @@ class Parser
             $t === Lexer::T_ANCHOR_START ||
             $t === Lexer::T_ANCHOR_END ||
             $t === Lexer::T_AT;
+    }
+
+    // Parse an atom that can be a table key (literal or identifier)
+    private function atomForTableKey(): array
+    {
+        $t = $this->curr();
+
+        if ($t['type'] === Lexer::T_LIT) {
+            $this->next();
+            return Builder::lit($t['value']);
+        }
+
+        if ($t['type'] === Lexer::T_IDENT) {
+            $this->next();
+            return Builder::lit($t['value']);
+        }
+
+        throw new \Exception("Invalid table key: expected literal or identifier, got ".$t['type']);
     }
 }

@@ -17,6 +17,11 @@ class Lexer
     const T_ANCHOR_START = 'ANCHOR_START';
     const T_ANCHOR_END = 'ANCHOR_END';
     const T_AT = 'AT';
+    const T_COLON = 'COLON';
+    const T_LBRACKET = 'LBRACKET';
+    const T_RBRACKET = 'RBRACKET';
+    const T_EQUALS = 'EQUALS';
+    const T_COMMA = 'COMMA';
 
     private string $input;
     private int $pos;
@@ -67,10 +72,56 @@ class Lexer
             } elseif ($char === '@') {
                 $tokens[] = ['type' => self::T_AT, 'value' => '@'];
                 $this->pos++;
+            } elseif ($char === ':') {
+                $tokens[] = ['type' => self::T_COLON, 'value' => ':'];
+                $this->pos++;
+            } elseif ($char === '[') {
+                // Check if this is a charclass [abc] or table access [key]
+                // Table access: ['string'] or [Key] where Key starts with uppercase (PascalCase/CamelCase)
+                // Charclass: [abc] or [a-z] or [^...] - typically lowercase
+                $nextPos = $this->pos + 1;
+                if ($nextPos < $this->len) {
+                    $nextChar = $this->input[$nextPos];
+                    // If followed by quote, it's table access
+                    if ($nextChar === "'" || $nextChar === '"') {
+                        $tokens[] = ['type' => self::T_LBRACKET, 'value' => '['];
+                        $this->pos++;
+                    } elseif ($nextChar === '^') {
+                        // Negated charclass [^...]
+                        $tokens[] = $this->readCharClass();
+                    } elseif (ctype_upper($nextChar)) {
+                        // Starts with uppercase - likely a table key variable
+                        $endPos = strpos($this->input, ']', $nextPos);
+                        if ($endPos !== false) {
+                            $content = substr($this->input, $nextPos, $endPos - $nextPos);
+                            // If it's a single uppercase-starting identifier, treat as table access
+                            if (preg_match('/^[A-Z][a-zA-Z0-9_]*$/', $content) && !str_contains($content, '-')) {
+                                $tokens[] = ['type' => self::T_LBRACKET, 'value' => '['];
+                                $this->pos++;
+                            } else {
+                                $tokens[] = $this->readCharClass();
+                            }
+                        } else {
+                            $tokens[] = $this->readCharClass();
+                        }
+                    } else {
+                        // Lowercase start - treat as charclass
+                        $tokens[] = $this->readCharClass();
+                    }
+                } else {
+                    $tokens[] = $this->readCharClass();
+                }
+            } elseif ($char === ']') {
+                $tokens[] = ['type' => self::T_RBRACKET, 'value' => ']'];
+                $this->pos++;
+            } elseif ($char === '=') {
+                $tokens[] = ['type' => self::T_EQUALS, 'value' => '='];
+                $this->pos++;
+            } elseif ($char === ',') {
+                $tokens[] = ['type' => self::T_COMMA, 'value' => ','];
+                $this->pos++;
             } elseif ($char === "'" || $char === '"') {
                 $tokens[] = $this->readQuoted($char);
-            } elseif ($char === '[') {
-                $tokens[] = $this->readCharClass();
             } elseif (ctype_alnum($char) || $char === '_') {
                 $tokens[] = $this->readIdent();
             } else {

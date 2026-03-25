@@ -88,4 +88,32 @@ final class Builder
     {
         return ['type' => 'emit', 'reg' => $reg];
     }
+
+    // Label and control-flow nodes
+    public static function label(string $name, array $target): array
+    {
+        return ['type' => 'label', 'name' => $name, 'target' => $target];
+    }
+
+    public static function goto(string $label): array
+    {
+        return ['type' => 'goto', 'label' => $label];
+    }
+
+    // Dynamic evaluation node
+    public static function dynamicEval(array $expr): array
+    {
+        return ['type' => 'dynamic_eval', 'expr' => $expr];
+    }
+
+    // Table access/update nodes
+    public static function tableAccess(string $tableName, array $keyExpr): array
+    {
+        return ['type' => 'table_access', 'table' => $tableName, 'key' => $keyExpr];
+    }
+
+    public static function tableUpdate(string $tableName, array $keyExpr, array $valueExpr): array
+    {
+        return ['type' => 'table_update', 'table' => $tableName, 'key' => $keyExpr, 'value' => $valueExpr];
+    }
 }
