@@ -1,5 +1,6 @@
 #include "snobol_internal.h"
 #include "snobol_vm.h"
+#include "snobol_table.h"
 #include "snobol_jit.h"
 #include <stdlib.h>
 #include <string.h>
@@ -455,6 +456,135 @@ bool vm_run(VM *vm) {
                 break;
             }
             
+#ifdef SNOBOL_DYNAMIC_PATTERN
+            /* Table operations */
+            case OP_TABLE_GET: {
+                /* Lookup table[key] and store result in dest register
+                 * Format: table_id u16, key_reg u8, dest_reg u8
+                 * If key not found, fail (trigger backtracking) */
+                uint16_t table_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t dest_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                
+                snobol_table_t *table = vm_get_table(vm, table_id);
+                if (!table) {
+                    /* Invalid table - fail */
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                
+                /* Get key from capture register */
+                if (key_reg >= MAX_CAPS || vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
+                    /* Invalid key register - fail */
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                
+                /* Extract key string */
+                size_t key_start = vm->cap_start[key_reg];
+                size_t key_end = vm->cap_end[key_reg];
+                size_t key_len = key_end - key_start;
+                
+                /* Allocate and copy key */
+                char *key = (char *)snobol_malloc(key_len + 1);
+                if (!key) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                memcpy(key, vm->s + key_start, key_len);
+                key[key_len] = '\0';
+                
+                /* Lookup in table */
+                const char *value = table_get(table, key);
+                snobol_free(key);
+                
+                if (!value) {
+                    /* Key not found - fail (trigger backtracking) */
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                
+                /* Store result: update dest_reg to match the value
+                 * For now, we just note the lookup succeeded
+                 * Full implementation would store value in a temp buffer */
+                (void)dest_reg; /* Result available via table */
+                break;
+            }
+            case OP_TABLE_SET: {
+                /* Set table[key] = value
+                 * Format: table_id u16, key_reg u8, value_reg u8
+                 * Always succeeds (table operations don't fail) */
+                uint16_t table_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t value_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                
+                snobol_table_t *table = vm_get_table(vm, table_id);
+                if (!table) {
+                    /* Invalid table - fail */
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                
+                /* Get key from capture register */
+                if (key_reg >= MAX_CAPS || vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                
+                /* Get value from capture register */
+                if (value_reg >= MAX_CAPS || vm->cap_end[value_reg] <= vm->cap_start[value_reg]) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                
+                size_t key_start = vm->cap_start[key_reg];
+                size_t key_end = vm->cap_end[key_reg];
+                size_t key_len = key_end - key_start;
+                
+                size_t val_start = vm->cap_start[value_reg];
+                size_t val_end = vm->cap_end[value_reg];
+                size_t val_len = val_end - val_start;
+                
+                /* Allocate and copy key */
+                char *key = (char *)snobol_malloc(key_len + 1);
+                if (!key) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                memcpy(key, vm->s + key_start, key_len);
+                key[key_len] = '\0';
+                
+                /* Allocate and copy value */
+                char *value = (char *)snobol_malloc(val_len + 1);
+                if (!value) {
+                    snobol_free(key);
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                memcpy(value, vm->s + val_start, val_len);
+                value[val_len] = '\0';
+                
+                /* Set in table */
+                table_set(table, key, value);
+                
+                snobol_free(key);
+                snobol_free(value);
+                break;
+            }
+            case OP_DYNAMIC: {
+                /* Evaluate dynamic pattern from register
+                 * Format: pattern_reg u8
+                 * The pattern in the register should be a compiled dynamic_pattern_t*
+                 * For now, this is a placeholder - full implementation requires
+                 * integrating with the dynamic pattern cache */
+                uint8_t pattern_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                (void)pattern_reg;
+                /* Placeholder: dynamic pattern evaluation not yet fully implemented */
+                /* This would lookup the pattern and execute it at current position */
+                break;
+            }
+#endif /* SNOBOL_DYNAMIC_PATTERN */
+            
             default: if (!vm_pop_choice(vm)) goto fail_ret; break;
         }
     }
@@ -465,10 +595,26 @@ bool vm_run(VM *vm) {
 bool vm_exec(VM *vm) {
     vm->ip = 0; vm->pos = 0; vm->max_cap_used = 0; vm->max_counter_used = 0;
     memset(vm->counters, 0, sizeof(vm->counters));
+    
+    /* Initialize control flow state */
+    vm_init_labels(vm);
+    
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    /* Initialize table registry */
+    vm_init_tables(vm);
+#endif
+    
 #ifdef SNOBOL_PROFILE
     memset(&vm->profile, 0, sizeof(vm->profile));
 #endif
     bool res = vm_run(vm);
+    
+    /* Cleanup */
+    vm_free_labels(vm);
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    vm_free_tables(vm);
+#endif
+    
 #ifdef SNOBOL_PROFILE
 #endif
     return res;

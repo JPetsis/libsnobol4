@@ -5,6 +5,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/* Enable dynamic pattern and table support */
+#define SNOBOL_DYNAMIC_PATTERN 1
+
+/* Forward declare table type */
+typedef struct snobol_table snobol_table_t;
+
 #define MAX_CAPS 64
 #define MAX_VARS 64
 
