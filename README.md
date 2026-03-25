@@ -29,6 +29,18 @@ manipulation tasks.
     * Assign captured values to variables, returned as an associative array upon successful match.
 * **Replacement & Emission:**
     * Emit literals or captured references to an output buffer during matching for stream-based replacements.
+* **Associative Tables:**
+    * Runtime-owned table objects for key-value storage (`Snobol\Table`).
+    * Table-backed pattern matching and replacements.
+* **Dynamic Pattern Evaluation:**
+    * Runtime pattern compilation and caching (`Snobol\DynamicPatternCache`).
+    * Efficient reuse of compiled patterns.
+* **Formatted Substitutions:**
+    * Template-based replacements with formatting options (upper, lower, length).
+    * Graceful degradation for missing values.
+* **Labelled Control Flow:**
+    * Labels and goto-like transfers for advanced pattern flow.
+    * Explicit control flow distinct from backtracking.
 
 ## Requirements
 
