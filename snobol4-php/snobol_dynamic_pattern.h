@@ -104,7 +104,7 @@ void dynamic_pattern_release(dynamic_pattern_t *pattern);
  */
 const dynamic_pattern_cache_key_t *dynamic_pattern_compute_key(
     const char *source, 
-    ssize_t source_len,
+    size_t source_len,
     dynamic_pattern_cache_key_t *out_key
 );
 
@@ -128,13 +128,13 @@ void dynamic_pattern_cache_destroy(dynamic_pattern_cache_t *cache);
  * @param source Source string
  * @param source_len Length of source (or -1 for strlen)
  * @return Cached pattern (reference retained), or NULL if not found
- * 
+ *
  * Ownership: Caller must call dynamic_pattern_release() when done
  */
 dynamic_pattern_t *dynamic_pattern_cache_get(
     dynamic_pattern_cache_t *cache,
     const char *source,
-    ssize_t source_len
+    int source_len
 );
 
 /**
@@ -162,7 +162,7 @@ bool dynamic_pattern_cache_put(
 bool dynamic_pattern_cache_remove(
     dynamic_pattern_cache_t *cache,
     const char *source,
-    ssize_t source_len
+    int source_len
 );
 
 /**

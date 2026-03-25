@@ -407,6 +407,44 @@ bool vm_run(VM *vm) {
                     else { if (vm->out) snobol_buf_append(vm->out, data, len); if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata); }
                 } break;
             }
+            
+            /* Control flow opcodes */
+            case OP_LABEL: {
+                /* Define a label target - just skip during execution */
+                uint16_t label_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                (void)label_id; /* Label is resolved at compile time */
+                break;
+            }
+            case OP_GOTO: {
+                /* Unconditional transfer to label */
+                uint16_t label_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint32_t target = vm_get_label_offset(vm, label_id);
+                if (target == 0 && label_id != 0) {
+                    /* Invalid label - fail */
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                } else {
+                    vm->ip = target;
+                }
+                break;
+            }
+            case OP_GOTO_F: {
+                /* Transfer to label if last match failed */
+                uint16_t label_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                if (vm->in_goto_fail) {
+                    uint32_t target = vm_get_label_offset(vm, label_id);
+                    if (target == 0 && label_id != 0) {
+                        if (!vm_pop_choice(vm)) goto fail_ret;
+                    } else {
+                        vm->ip = target;
+                        vm->in_goto_fail = false;
+                    }
+                } else {
+                    /* Continue normally */
+                    break;
+                }
+                break;
+            }
+            
             default: if (!vm_pop_choice(vm)) goto fail_ret; break;
         }
     }
@@ -425,3 +463,91 @@ bool vm_exec(VM *vm) {
 #endif
     return res;
 }
+
+/* Control flow initialization and cleanup */
+
+void vm_init_labels(VM *vm) {
+    vm->label_offsets = NULL;
+    vm->label_count = 0;
+    vm->label_capacity = 0;
+    vm->current_label = 0;
+    vm->in_goto_fail = false;
+}
+
+void vm_free_labels(VM *vm) {
+    if (vm->label_offsets) {
+        snobol_free(vm->label_offsets);
+        vm->label_offsets = NULL;
+    }
+    vm->label_count = 0;
+    vm->label_capacity = 0;
+}
+
+bool vm_register_label(VM *vm, uint16_t label_id, uint32_t offset) {
+    /* Ensure capacity */
+    if (label_id >= vm->label_capacity) {
+        size_t new_cap = (label_id + 1) * 2;
+        uint16_t *new_offsets = (uint16_t *)snobol_realloc(vm->label_offsets, new_cap * sizeof(uint16_t));
+        if (!new_offsets) return false;
+        vm->label_offsets = new_offsets;
+        vm->label_capacity = new_cap;
+    }
+    
+    vm->label_offsets[label_id] = (uint16_t)offset;
+    if (label_id >= vm->label_count) {
+        vm->label_count = label_id + 1;
+    }
+    return true;
+}
+
+uint32_t vm_get_label_offset(VM *vm, uint16_t label_id) {
+    if (label_id < vm->label_count && vm->label_offsets) {
+        return vm->label_offsets[label_id];
+    }
+    return 0; /* Invalid label - will cause fail */
+}
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+/* Table registry functions */
+
+void vm_init_tables(VM *vm) {
+    vm->tables = NULL;
+    vm->table_count = 0;
+    vm->table_capacity = 0;
+}
+
+void vm_free_tables(VM *vm) {
+    if (vm->tables) {
+        for (size_t i = 0; i < vm->table_count; i++) {
+            if (vm->tables[i]) {
+                table_release(vm->tables[i]);
+            }
+        }
+        snobol_free(vm->tables);
+        vm->tables = NULL;
+    }
+    vm->table_count = 0;
+    vm->table_capacity = 0;
+}
+
+bool vm_register_table(VM *vm, snobol_table_t *table, uint16_t *out_id) {
+    if (vm->table_count >= vm->table_capacity) {
+        size_t new_cap = (vm->table_capacity == 0) ? 16 : vm->table_capacity * 2;
+        snobol_table_t **new_tables = (snobol_table_t **)snobol_realloc(vm->tables, new_cap * sizeof(snobol_table_t *));
+        if (!new_tables) return false;
+        vm->tables = new_tables;
+        vm->table_capacity = new_cap;
+    }
+    
+    *out_id = (uint16_t)vm->table_count;
+    vm->tables[vm->table_count++] = table_retain(table);
+    return true;
+}
+
+snobol_table_t *vm_get_table(VM *vm, uint16_t table_id) {
+    if (table_id < vm->table_count && vm->tables) {
+        return vm->tables[table_id];
+    }
+    return NULL;
+}
+#endif

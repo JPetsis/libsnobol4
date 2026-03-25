@@ -79,6 +79,14 @@ typedef enum {
     OP_EMIT_LITERAL, // offset u32, len u32 (Renamed from OP_EMIT_LIT)
     OP_EMIT_CAPTURE, // reg u8 (Renamed from OP_EMIT_REF)
     OP_EMIT_EXPR,    // reg u8, expr_type u8 (New: for .upper(), .length() etc)
+    
+    /* Control flow opcodes for labelled patterns and goto-like transfers */
+    OP_LABEL,      // label_id u16 (define a label target)
+    OP_GOTO,       // label_id u16 (unconditional transfer to label)
+    OP_GOTO_F,     // label_id u16 (transfer to label if last match failed)
+    OP_TABLE_GET,  // table_id u16, key_reg u8, dest_reg u8 (lookup table[key])
+    OP_TABLE_SET,  // table_id u16, key_reg u8, value_reg u8 (set table[key] = value)
+    OP_DYNAMIC,    // pattern_reg u8 (evaluate dynamic pattern from register)
 } OpCode;
 
 #define MAX_LOOPS 16
@@ -152,6 +160,21 @@ typedef struct {
     bool (*eval_fn)(int fn_id, const char *s, size_t start, size_t end, void *udata);
     void *eval_udata;
 
+    /* Control flow state for labelled patterns and goto-like transfers */
+    uint16_t *label_offsets;  /* label_id -> bytecode offset */
+    size_t label_count;         /* Number of defined labels */
+    size_t label_capacity;      /* Allocated capacity */
+    uint16_t current_label;     /* Current label being processed */
+    bool in_goto_fail;         /* True if in GOTO_F failure handling */
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    /* Dynamic pattern support */
+    struct dynamic_pattern_cache_t *dyn_cache;  /* Dynamic pattern cache */
+    snobol_table_t **tables;                     /* Table registry */
+    size_t table_count;                          /* Number of registered tables */
+    size_t table_capacity;                       /* Table registry capacity */
+#endif
+
 #ifdef SNOBOL_PROFILE
     struct {
         uint64_t dispatch_count;
@@ -186,6 +209,20 @@ static inline bool bitmap_test(const uint64_t map[2], uint8_t c) {
 /* VM entry */
 bool vm_exec(VM *vm);
 bool vm_run(VM *vm);
+
+/* Control flow management */
+void vm_init_labels(VM *vm);
+void vm_free_labels(VM *vm);
+bool vm_register_label(VM *vm, uint16_t label_id, uint32_t offset);
+uint32_t vm_get_label_offset(VM *vm, uint16_t label_id);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+/* Table registry */
+void vm_init_tables(VM *vm);
+void vm_free_tables(VM *vm);
+bool vm_register_table(VM *vm, snobol_table_t *table, uint16_t *out_id);
+snobol_table_t *vm_get_table(VM *vm, uint16_t table_id);
+#endif
 
 /* Buffer management */
 void snobol_buf_init(snobol_buf *b);

@@ -147,24 +147,28 @@ static void test_dynamic_pattern_cache_default_size(void) {
 
 static void test_dynamic_pattern_cache_put_get(void) {
     test_suite("Dynamic Pattern: cache put and get");
-    
+
     dynamic_pattern_cache_t cache;
-    dynamic_pattern_cache_init(&cache, 10);
-    
+    bool init_result = dynamic_pattern_cache_init(&cache, 10);
+    test_assert(init_result == true, "cache init succeeds");
+    test_assert(cache.buckets != NULL, "cache buckets allocated");
+    test_assert(cache.bucket_count > 0, "cache bucket_count > 0");
+
     size_t bc_len;
     uint8_t *bc = create_mock_bytecode(&bc_len);
-    
+
     dynamic_pattern_t *pattern = dynamic_pattern_create("test source", bc, bc_len);
-    
+    test_assert(pattern != NULL, "pattern created");
+
     bool result = dynamic_pattern_cache_put(&cache, "test source", pattern);
     test_assert(result == true, "cache put succeeds");
     test_assert(cache.size == 1, "cache size is 1");
-    
+
     dynamic_pattern_t *retrieved = dynamic_pattern_cache_get(&cache, "test source", -1);
     test_assert(retrieved != NULL, "cache get returns non-NULL");
     test_assert(retrieved == pattern, "retrieved pattern is same pointer");
     test_assert(retrieved->refcount >= 2, "retrieved pattern has incremented refcount");
-    
+
     dynamic_pattern_release(pattern);
     dynamic_pattern_release(retrieved);
     dynamic_pattern_cache_destroy(&cache);

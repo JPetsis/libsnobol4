@@ -104,7 +104,7 @@ void dynamic_pattern_release(dynamic_pattern_t *pattern) {
 
 const dynamic_pattern_cache_key_t *dynamic_pattern_compute_key(
     const char *source,
-    ssize_t source_len,
+    size_t source_len,
     dynamic_pattern_cache_key_t *out_key
 ) {
     if (!source || !out_key) {
@@ -196,22 +196,22 @@ static dynamic_pattern_cache_entry_t *cache_find_entry(
 dynamic_pattern_t *dynamic_pattern_cache_get(
     dynamic_pattern_cache_t *cache,
     const char *source,
-    ssize_t source_len
+    int source_len
 ) {
     if (!cache || !source) {
         return NULL;
     }
-    
+
     size_t len = (source_len < 0) ? strlen(source) : (size_t)source_len;
     uint32_t hash = dynamic_pattern_hash_source(source, len);
-    
+
     dynamic_pattern_cache_entry_t *entry = cache_find_entry(cache, hash, source, len);
-    
+
     if (entry) {
         SNOBOL_LOG("dynamic_pattern_cache_get: cache=%p source='%s' HIT", (void*)cache, source);
         return dynamic_pattern_retain(entry->pattern);
     }
-    
+
     SNOBOL_LOG("dynamic_pattern_cache_get: cache=%p source='%s' MISS", (void*)cache, source);
     return NULL;
 }
@@ -300,12 +300,12 @@ bool dynamic_pattern_cache_put(
 bool dynamic_pattern_cache_remove(
     dynamic_pattern_cache_t *cache,
     const char *source,
-    ssize_t source_len
+    int source_len
 ) {
     if (!cache || !source) {
         return false;
     }
-    
+
     size_t len = (source_len < 0) ? strlen(source) : (size_t)source_len;
     uint32_t hash = dynamic_pattern_hash_source(source, len);
     
