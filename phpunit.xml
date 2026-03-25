@@ -9,6 +9,7 @@
     <testsuites>
         <testsuite name="SNOBOL4 Test Suite">
             <directory>tests/php</directory>
+            <directory>tests/compat</directory>
         </testsuite>
     </testsuites>
     <source>

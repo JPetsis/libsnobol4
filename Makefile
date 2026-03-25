@@ -90,7 +90,7 @@ ifeq ($(IN_DDEV),1)
 	@echo "Checking PHP extension snobol..."
 	@$(ASAN_ENV) php $(PHP_OPTS) -m | grep snobol || echo "WARNING: snobol extension not found in php -m"
 	@if [ -f vendor/bin/phpunit ]; then \
-			$(ASAN_ENV) php $(PHP_OPTS) vendor/bin/phpunit tests/php || exit 1; \
+			$(ASAN_ENV) php $(PHP_OPTS) vendor/bin/phpunit tests/php tests/compat || exit 1; \
 	else \
 		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
 	fi
@@ -106,7 +106,7 @@ else
 	fi
 	@echo "Running PHP tests..."
 	@if [ -f vendor/bin/phpunit ]; then \
-			php vendor/bin/phpunit tests/php || exit 1; \
+			php vendor/bin/phpunit tests/php tests/compat || exit 1; \
 	else \
 		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
 	fi
