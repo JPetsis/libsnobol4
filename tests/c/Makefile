@@ -7,13 +7,13 @@ CFLAGS = -std=c11 -Wall -Wextra -I$(CORE_DIR) -g -O0 \
          -DSTANDALONE_BUILD -DSNOBOL_PROFILE -DSNOBOL_JIT
 
 # Test sources
-TEST_SOURCES = test_runner.c test_vm.c test_tables.c test_backtracking.c test_stress_backtracking.c test_catastrophic.c test_jit_observability.c test_jit_cache.c test_jit_branches.c test_jit_profitability.c
+TEST_SOURCES = test_runner.c test_vm.c test_tables.c test_dynamic_patterns.c test_backtracking.c test_stress_backtracking.c test_catastrophic.c test_jit_observability.c test_jit_cache.c test_jit_branches.c test_jit_profitability.c
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_BINARY = test_runner
 
 # SNOBOL4 core sources (relative to snobol4-php/)
 CORE_DIR = ../../snobol4-php
-CORE_SOURCES = snobol_vm.c snobol_jit.c snobol_table.c
+CORE_SOURCES = snobol_vm.c snobol_jit.c snobol_table.c snobol_dynamic_pattern.c
 # Build object files in the current directory to avoid read-only errors
 CORE_OBJECTS = $(CORE_SOURCES:.c=.o)
 

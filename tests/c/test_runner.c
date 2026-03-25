@@ -41,6 +41,7 @@ void test_assert(bool condition, const char *message) {
 /* Forward declarations for test suites */
 void test_vm_suite(void);
 void test_table_suite(void);
+void test_dynamic_pattern_suite(void);
 void test_backtracking_suite(void);
 void test_catastrophic_suite(void);
 void test_jit_observability_suite(void);
@@ -62,6 +63,9 @@ int main(void) {
     }
     if (setjmp(test_jump) == 0) {
         test_table_suite();
+    }
+    if (setjmp(test_jump) == 0) {
+        test_dynamic_pattern_suite();
     }
     if (setjmp(test_jump) == 0) {
         test_backtracking_suite();
