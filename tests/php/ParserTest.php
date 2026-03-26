@@ -273,4 +273,60 @@ class ParserTest extends TestCase
         $p = new Parser("EVAL()");
         $p->parse();
     }
+
+    public function testCommaSeparatedArguments(): void
+    {
+        // Test SPAN with multiple arguments (if supported by semantic validation later)
+        // For now, test that parser can consume comma-separated args
+        $p = new Parser("ANY('a', 'b')");
+        $ast = $p->parse();
+        $this->assertEquals('any', $ast['type']);
+        $this->assertEquals('a', $ast['set']);
+    }
+
+    public function testCommaSeparatedArgumentsWithLiterals(): void
+    {
+        // Test that comma-separated literals are parsed correctly
+        $p = new Parser("SPAN('0-9', 'a-z')");
+        $ast = $p->parse();
+        $this->assertEquals('span', $ast['type']);
+        $this->assertEquals('0-9', $ast['set']);
+    }
+
+    public function testMalformedTrailingComma(): void
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("Unexpected ')' after comma in argument list");
+
+        $p = new Parser("SPAN('a',)");
+        $p->parse();
+    }
+
+    public function testMalformedMissingArgAfterComma(): void
+    {
+        $this->expectException(\Exception::class);
+
+        // Comma followed by closing paren
+        $p = new Parser("ANY(,)");
+        $p->parse();
+    }
+
+    public function testDynamicEvalWithComplexExpression(): void
+    {
+        // EVAL with concatenation inside
+        $p = new Parser("EVAL('A' 'B')");
+        $ast = $p->parse();
+        $this->assertEquals('dynamic_eval', $ast['type']);
+        $this->assertEquals('concat', $ast['expr']['type']);
+    }
+
+    public function testDynamicEvalWithNestedEval(): void
+    {
+        // EVAL with nested EVAL
+        $p = new Parser("EVAL(EVAL('A'))");
+        $ast = $p->parse();
+        $this->assertEquals('dynamic_eval', $ast['type']);
+        $this->assertEquals('dynamic_eval', $ast['expr']['type']);
+        $this->assertEquals('lit', $ast['expr']['expr']['type']);
+    }
 }

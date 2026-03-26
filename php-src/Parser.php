@@ -370,17 +370,60 @@ class Parser
     {
         $args = [];
         if ($this->curr()['type'] !== Lexer::T_RPAREN) {
-            // For EVAL, we need to parse the full expression
-            // For other builtins, we just need a literal value
-            // For now, parse as a simple value (LIT or IDENT)
-            
-            $val = $this->curr()['value'];
-            $this->next();
-            $args[] = $val;
+            // Parse first argument
+            $args[] = $this->parseArg();
 
-            // TODO: Comma support if needed.
+            // Consume comma-separated arguments until )
+            while ($this->curr()['type'] === Lexer::T_COMMA) {
+                $this->next(); // consume comma
+
+                // Check for trailing comma or missing argument after comma
+                if ($this->curr()['type'] === Lexer::T_RPAREN) {
+                    throw new \Exception("Unexpected ')' after comma in argument list");
+                }
+
+                $args[] = $this->parseArg();
+            }
         }
         return $args;
+    }
+
+    private function parseArg(): array
+    {
+        $t = $this->curr();
+
+        // Literal argument
+        if ($t['type'] === Lexer::T_LIT) {
+            $this->next();
+            return Builder::lit($t['value']);
+        }
+
+        // Identifier argument (for table vars or future expression support)
+        if ($t['type'] === Lexer::T_IDENT) {
+            $this->next();
+            return Builder::lit($t['value']);
+        }
+
+        // Parenthesized expression
+        if ($t['type'] === Lexer::T_LPAREN) {
+            $this->next();
+            $expr = $this->expr();
+            $this->expect(Lexer::T_RPAREN);
+            return $expr;
+        }
+
+        // Charclass argument
+        if ($t['type'] === Lexer::T_CHARCLASS) {
+            $this->next();
+            $val = $t['value'];
+            if (str_starts_with($val, '^')) {
+                return Builder::notany($this->expandRanges(substr($val, 1)));
+            } else {
+                return Builder::any($this->expandRanges($val));
+            }
+        }
+
+        throw new \Exception("Unexpected token in argument list: ".$t['type']);
     }
 
     private function expect(string $type): void
@@ -392,19 +435,28 @@ class Parser
 
     private function buildFunction(string $name, array $args): array
     {
+        // Extract first argument value if it's a literal AST node
+        $getArgValue = function ($arg) {
+            if (is_array($arg) && $arg['type'] === 'lit') {
+                return $arg['text'];
+            }
+            return $arg;
+        };
+
         $arg0 = $args[0] ?? null;
+        $arg0Value = $getArgValue($arg0);
+        
         switch (strtoupper($name)) {
             case 'SPAN':
-                return Builder::span($arg0);
+                return Builder::span($arg0Value);
             case 'BREAK':
-                return Builder::brk($arg0);
+                return Builder::brk($arg0Value);
             case 'LEN':
-                return Builder::len((int) $arg0);
+                return Builder::len((int) $arg0Value);
             case 'ANY':
-                return Builder::any($arg0);
+                return Builder::any($arg0Value);
             case 'NOTANY':
-                return Builder::notany($arg0);
-            // TODO: EVAL
+                return Builder::notany($arg0Value);
             default:
                 throw new \Exception("Unknown builtin function: $name");
         }

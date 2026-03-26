@@ -502,6 +502,38 @@ static int emit_node(zval *node, CodeBuf *c) {
     if (zend_string_equals_literal(type, "emit")) {
         return emit_emit(node, c);
     }
+    if (zend_string_equals_literal(type, "dynamic_eval")) {
+        /* dynamic_eval: compile the inner expression and emit as dynamic pattern source
+         * Format: pattern source will be compiled and stored for runtime evaluation
+         * The inner expression is compiled to bytecode which will be used at runtime */
+        zval *expr = zend_hash_str_find(Z_ARRVAL_P(node), "expr", sizeof("expr")-1);
+        if (!expr) return -1;
+        
+        /* For dynamic_eval, we need to compile the inner expression separately
+         * and store it for runtime pattern generation.
+         * Currently this compiles the expression inline - full implementation
+         * requires runtime pattern cache integration (see task 3.1/3.2) */
+        
+        /* Create a sub-buffer for the dynamic pattern bytecode */
+        CodeBuf dynamic_cb;
+        cb_init(&dynamic_cb);
+        
+        if (emit_node(expr, &dynamic_cb) != 0) {
+            cb_free(&dynamic_cb);
+            return -1;
+        }
+        cb_emit_u8(&dynamic_cb, OP_ACCEPT);
+        
+        /* Emit the dynamic pattern bytecode as a data block
+         * Format: OP_DYNAMIC_DEF followed by length and bytecode
+         * This will be picked up by OP_DYNAMIC at runtime */
+        cb_emit_u8(c, OP_DYNAMIC_DEF);
+        cb_emit_u32(c, (uint32_t)dynamic_cb.len);
+        cb_emit_bytes(c, dynamic_cb.buf, dynamic_cb.len);
+        
+        cb_free(&dynamic_cb);
+        return 0;
+    }
     return -1;
 }
 
@@ -637,20 +669,97 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
                         cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
                     }
                 } else if (i < len && tpl[i] == '[') {
-                    /* Table-backed replacement: {TABLE[key]}
-                     * 
-                     * TODO: Full table support in templates requires parser changes
-                     * - Parse TABLE[key] syntax within template strings
-                     * - Extract table name and key expression
-                     * - Emit OP_EMIT_TABLE with proper table_id and key_reg
-                     * - Currently this emits as literal '$' character
-                     * 
-                     * This is future work for completing task 5.1.
-                     */
-                    i = start_of_dollar + 1;
-                    cb_emit_u8(&cb, OP_EMIT_LITERAL);
-                    size_t off = cb_pos(&cb) + 4 + 4;
-                    cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
+                    /* Table-backed replacement: $TABLE[key]
+                     * Parse TABLE name and key, emit OP_EMIT_TABLE */
+                    i++; /* skip '[' */
+                    
+                    /* Parse table name (identifier until '.' or '[') */
+                    size_t table_name_start = i;
+                    while (i < len && tpl[i] != '.' && tpl[i] != '[' && tpl[i] != ']') {
+                        i++;
+                    }
+                    size_t table_name_len = i - table_name_start;
+                    
+                    if (table_name_len == 0 || i >= len || tpl[i] != '[') {
+                        /* Invalid syntax, emit as literal '$' */
+                        i = start_of_dollar + 1;
+                        cb_emit_u8(&cb, OP_EMIT_LITERAL);
+                        size_t off = cb_pos(&cb) + 4 + 4;
+                        cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
+                        continue;
+                    }
+                    
+                    /* For now, table name must be a literal identifier */
+                    /* Extract table name */
+                    const char *table_name = tpl + table_name_start;
+                    
+                    /* Skip '[' and parse key */
+                    i++; /* skip '[' */
+                    size_t key_start = i;
+                    
+                    /* Key can be: quoted literal or identifier */
+                    bool quoted = (i < len && tpl[i] == '\'');
+                    if (quoted) {
+                        i++; /* skip opening quote */
+                        key_start = i;
+                        while (i < len && tpl[i] != '\'') {
+                            i++;
+                        }
+                        if (i >= len) {
+                            /* Unclosed quote, emit as literal '$' */
+                            i = start_of_dollar + 1;
+                            cb_emit_u8(&cb, OP_EMIT_LITERAL);
+                            size_t off = cb_pos(&cb) + 4 + 4;
+                            cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
+                            continue;
+                        }
+                        /* key is from key_start to i (exclusive of closing quote) */
+                        size_t key_len = i - key_start;
+                        i++; /* skip closing quote */
+                        
+                        /* Check for closing ']' */
+                        if (i >= len || tpl[i] != ']') {
+                            i = start_of_dollar + 1;
+                            cb_emit_u8(&cb, OP_EMIT_LITERAL);
+                            size_t off = cb_pos(&cb) + 4 + 4;
+                            cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
+                            continue;
+                        }
+                        i++; /* skip ']' */
+                        
+                        /* For literal keys, we need to store the key in a capture register temporarily */
+                        /* For now, use a placeholder approach: emit OP_EMIT_TABLE with table_id=0 and key from a fixed reg */
+                        /* TODO: Proper table name resolution requires a table registry */
+                        cb_emit_u8(&cb, OP_EMIT_TABLE);
+                        cb_emit_u16(&cb, 0); /* table_id placeholder */
+                        cb_emit_u8(&cb, 0);  /* key_reg placeholder - literal key not yet supported */
+                        /* Emit the literal key as a capture for now */
+                        /* This is a simplified approach - full implementation needs table name registry */
+                    } else {
+                        /* Identifier key (capture-derived) */
+                        while (i < len && tpl[i] >= '0' && tpl[i] <= '9') {
+                            i++;
+                        }
+                        if (i >= len || tpl[i] != ']') {
+                            i = start_of_dollar + 1;
+                            cb_emit_u8(&cb, OP_EMIT_LITERAL);
+                            size_t off = cb_pos(&cb) + 4 + 4;
+                            cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
+                            continue;
+                        }
+                        size_t key_reg = 0;
+                        /* Parse register number from identifier like v0, v1, etc. */
+                        if (key_start > 0 && tpl[key_start - 1] == 'v') {
+                            const char *reg_start = tpl + key_start;
+                            key_reg = (uint8_t)(reg_start[0] - '0');
+                        }
+                        i++; /* skip ']' */
+                        
+                        /* Emit OP_EMIT_TABLE */
+                        cb_emit_u8(&cb, OP_EMIT_TABLE);
+                        cb_emit_u16(&cb, 0); /* table_id placeholder - needs resolution */
+                        cb_emit_u8(&cb, key_reg);
+                    }
                 } else {
                     cb_emit_u8(&cb, OP_EMIT_CAPTURE); cb_emit_u8(&cb, reg);
                 }

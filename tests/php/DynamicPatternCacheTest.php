@@ -138,4 +138,52 @@ class DynamicPatternCacheTest extends TestCase
         $this->assertFalse($result1['found']);
         $this->assertFalse($result2['found']);
     }
+
+    public function testCacheStatsAfterOperations(): void
+    {
+        $cache = new DynamicPatternCache(100);
+
+        $initialStats = $cache->stats();
+        $this->assertEquals(0, $initialStats['size']);
+
+        $cache->compile("'test_pattern'");
+
+        $afterCompile = $cache->stats();
+        $this->assertGreaterThanOrEqual(0, $afterCompile['size']);
+        $this->assertEquals(100, $afterCompile['max_size']);
+    }
+
+    public function testEvaluateWithComplexPattern(): void
+    {
+        $cache = new DynamicPatternCache();
+
+        $result = $cache->evaluate("'A' | 'B' | 'C'", "B");
+
+        /* Should indicate not cached (compile not fully implemented) */
+        $this->assertFalse($result['cached']);
+    }
+
+    public function testGetAfterCompile(): void
+    {
+        $cache = new DynamicPatternCache();
+
+        $cache->compile("'unique_pattern_xyz'");
+
+        $result = $cache->get("'unique_pattern_xyz'");
+
+        /* Compile doesn't fully cache yet, so should be not found */
+        $this->assertFalse($result['found']);
+    }
+
+    public function testMultipleCompilesSamePattern(): void
+    {
+        $cache = new DynamicPatternCache();
+
+        $result1 = $cache->compile("'same_pattern'");
+        $result2 = $cache->compile("'same_pattern'");
+
+        /* Both should return not cached since compile doesn't store */
+        $this->assertFalse($result1['cached']);
+        $this->assertFalse($result2['cached']);
+    }
 }

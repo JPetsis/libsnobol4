@@ -11,6 +11,11 @@
 /* Forward declare table type */
 typedef struct snobol_table snobol_table_t;
 
+#ifdef SNOBOL_DYNAMIC_PATTERN
+/* Include dynamic pattern types */
+#include "snobol_dynamic_pattern.h"
+#endif
+
 #define MAX_CAPS 64
 #define MAX_VARS 64
 
@@ -97,6 +102,7 @@ typedef enum {
     OP_TABLE_GET,  // table_id u16, key_reg u8, dest_reg u8 (lookup table[key])
     OP_TABLE_SET,  // table_id u16, key_reg u8, value_reg u8 (set table[key] = value)
     OP_DYNAMIC,    // pattern_reg u8 (evaluate dynamic pattern from register)
+    OP_DYNAMIC_DEF, // len u32, bytecode... (define dynamic pattern bytecode block)
 } OpCode;
 
 #define MAX_LOOPS 16
@@ -179,7 +185,7 @@ typedef struct {
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
     /* Dynamic pattern support */
-    struct dynamic_pattern_cache_t *dyn_cache;  /* Dynamic pattern cache */
+    dynamic_pattern_cache_t *dyn_cache;  /* Dynamic pattern cache */
     snobol_table_t **tables;                     /* Table registry */
     size_t table_count;                          /* Number of registered tables */
     size_t table_capacity;                       /* Table registry capacity */

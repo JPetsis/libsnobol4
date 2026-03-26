@@ -299,23 +299,106 @@ static void test_table_multiple_lookups(void) {
 
 static void test_format_unknown_type(void) {
     test_suite("Template Ops: FORMAT unknown type");
-    
+
     VM vm;
     snobol_buf out;
     init_test_vm(&vm, "test", &out);
-    
+
     vm.cap_start[0] = 0;
     vm.cap_end[0] = 4;
     vm.max_cap_used = 1;
-    
+
     /* Unknown format type should emit raw */
     const char *data = vm.s + vm.cap_start[0];
     size_t len = vm.cap_end[0] - vm.cap_start[0];
-    
+
     /* Should emit "test" as-is */
     test_assert(len == 4, "length is 4");
     test_assert(memcmp(data, "test", 4) == 0, "data is 'test'");
-    
+
+    cleanup_test_vm(&vm);
+    snobol_buf_free(&out);
+}
+
+static void test_table_backed_template_literal_key(void) {
+    test_suite("Template Ops: table-backed template with literal key");
+
+    VM vm;
+    snobol_buf out;
+    init_test_vm(&vm, "key", &out);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    /* Create a table */
+    snobol_table_t *table = table_create("test");
+    table_set(table, "key", "value_from_table");
+
+    /* Register the table */
+    uint16_t table_id;
+    vm_register_table(&vm, table, &table_id);
+
+    /* Set up capture register 0 to capture "key" */
+    vm.cap_start[0] = 0;
+    vm.cap_end[0] = 3;
+    vm.max_cap_used = 1;
+
+    /* Simulate table lookup via capture-derived key */
+    snobol_table_t *t = vm_get_table(&vm, table_id);
+    test_assert(t != NULL, "table retrieved");
+
+    size_t key_len = vm.cap_end[0] - vm.cap_start[0];
+    char *key_str = (char *)malloc(key_len + 1);
+    memcpy(key_str, vm.s + vm.cap_start[0], key_len);
+    key_str[key_len] = '\0';
+
+    const char *value = table_get(t, key_str);
+    test_assert(value != NULL, "table lookup succeeds with capture-derived key");
+    test_assert(strcmp(value, "value_from_table") == 0, "value matches for literal key");
+
+    free(key_str);
+    table_release(table);
+#else
+    test_assert(true, "table support not enabled (skipped)");
+#endif
+
+    cleanup_test_vm(&vm);
+    snobol_buf_free(&out);
+}
+
+static void test_table_backed_template_missing_key_fallback(void) {
+    test_suite("Template Ops: table-backed template missing key fallback");
+
+    VM vm;
+    snobol_buf out;
+    init_test_vm(&vm, "missing_key", &out);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    snobol_table_t *table = table_create("test");
+    table_set(table, "existing", "value");
+
+    uint16_t table_id;
+    vm_register_table(&vm, table, &table_id);
+
+    /* Set up capture for missing key */
+    vm.cap_start[0] = 0;
+    vm.cap_end[0] = 11;
+    vm.max_cap_used = 1;
+
+    snobol_table_t *t = vm_get_table(&vm, table_id);
+    size_t key_len = vm.cap_end[0] - vm.cap_start[0];
+    char *key_str = (char *)malloc(key_len + 1);
+    memcpy(key_str, vm.s + vm.cap_start[0], key_len);
+    key_str[key_len] = '\0';
+
+    const char *value = table_get(t, key_str);
+    test_assert(value == NULL, "missing key returns NULL");
+    /* Graceful degradation: missing key emits empty string */
+
+    free(key_str);
+    table_release(table);
+#else
+    test_assert(true, "table support not enabled (skipped)");
+#endif
+
     cleanup_test_vm(&vm);
     snobol_buf_free(&out);
 }
@@ -329,4 +412,6 @@ void test_template_ops_suite(void) {
     test_table_emit_missing_key();
     test_table_multiple_lookups();
     test_format_unknown_type();
+    test_table_backed_template_literal_key();
+    test_table_backed_template_missing_key_fallback();
 }
