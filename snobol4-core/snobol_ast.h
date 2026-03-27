@@ -13,7 +13,38 @@
  * Uses tagged union structs for type-safe AST nodes.
  * Memory ownership: parent nodes own child nodes recursively.
  * Caller is responsible for calling snobol_ast_free() to free entire tree.
+ *
+ * Version: 1.0.0
+ * - Major: Breaking changes to AST structure or memory layout
+ * - Minor: New node types or non-breaking additions
+ * - Patch: Bug fixes, no API changes
  */
+
+/**
+ * AST version information
+ * Use snobol_ast_get_version() to retrieve at runtime
+ */
+#define SNOBOL_AST_VERSION_MAJOR 1
+#define SNOBOL_AST_VERSION_MINOR 0
+#define SNOBOL_AST_VERSION_PATCH 0
+#define SNOBOL_AST_VERSION_STRING "1.0.0"
+
+/**
+ * Check if AST version is compatible
+ * Returns true if major version matches and minor version >= required
+ */
+#define SNOBOL_AST_VERSION_CHECK(major, minor) \
+    ((major) == SNOBOL_AST_VERSION_MAJOR && (minor) <= SNOBOL_AST_VERSION_MINOR)
+
+/**
+ * AST version structure for runtime queries
+ */
+typedef struct {
+    uint16_t major;
+    uint16_t minor;
+    uint16_t patch;
+    const char* string;
+} snobol_ast_version_t;
 
 /**
  * AST node type tags
@@ -278,5 +309,25 @@ const char* snobol_ast_type_name(ast_type_t type);
  * @param indent Current indentation level (0 for root)
  */
 void snobol_ast_dump(const ast_node_t* node, FILE* out, int indent);
+
+/**
+ * Get AST version information
+ * @return Version structure with major, minor, patch, and string representation
+ */
+snobol_ast_version_t snobol_ast_get_version(void);
+
+/**
+ * Check if AST library version is compatible with required version
+ * @param required_major Required major version
+ * @param required_minor Required minor version
+ * @return true if compatible (same major, minor >= required)
+ */
+bool snobol_ast_version_check(uint16_t required_major, uint16_t required_minor);
+
+/**
+ * Get AST version as a string (e.g., "1.0.0")
+ * @return Version string (static, do not free)
+ */
+const char* snobol_ast_version_string(void);
 
 #endif /* SNOBOL_AST_H */

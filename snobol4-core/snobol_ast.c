@@ -109,12 +109,23 @@ ast_node_t* snobol_ast_create_repeat(ast_node_t* sub, int32_t min, int32_t max) 
 ast_node_t* snobol_ast_create_label(char* name, ast_node_t* target) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
     if (!node) {
-        free(name);
         return NULL;
     }
-    
+
     node->type = AST_LABEL;
-    node->data.label.name = name;
+    /* Make a copy of the name - caller may pass string literals */
+    if (name) {
+        size_t len = strlen(name);
+        node->data.label.name = (char*)malloc(len + 1);
+        if (node->data.label.name) {
+            strcpy(node->data.label.name, name);
+        }
+        /* Note: We don't free 'name' - caller is responsible for it.
+         * If caller passed a malloc'd string, they should free it.
+         * If caller passed a string literal, we have our own copy. */
+    } else {
+        node->data.label.name = NULL;
+    }
     node->data.label.target = target;
     return node;
 }
@@ -135,7 +146,7 @@ void snobol_ast_free(ast_node_t* node) {
             snobol_ast_free(node->data.alt.left);
             snobol_ast_free(node->data.alt.right);
             break;
-            
+
         case AST_REPETITION:
         case AST_ARBNO:
             snobol_ast_free(node->data.repetition.sub);
@@ -278,4 +289,31 @@ void snobol_ast_dump(const ast_node_t* node, FILE* out, int indent) {
             fprintf(out, "%*s%s\n", indent, "", type_name);
             break;
     }
+}
+
+/**
+ * Get AST version information
+ */
+snobol_ast_version_t snobol_ast_get_version(void) {
+    snobol_ast_version_t version = {
+        .major = SNOBOL_AST_VERSION_MAJOR,
+        .minor = SNOBOL_AST_VERSION_MINOR,
+        .patch = SNOBOL_AST_VERSION_PATCH,
+        .string = SNOBOL_AST_VERSION_STRING
+    };
+    return version;
+}
+
+/**
+ * Check if AST library version is compatible
+ */
+bool snobol_ast_version_check(uint16_t required_major, uint16_t required_minor) {
+    return SNOBOL_AST_VERSION_CHECK(required_major, required_minor);
+}
+
+/**
+ * Get AST version as a string
+ */
+const char* snobol_ast_version_string(void) {
+    return SNOBOL_AST_VERSION_STRING;
 }

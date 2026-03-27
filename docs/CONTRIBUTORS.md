@@ -99,6 +99,27 @@ snobol_parser_destroy(parser);
 
 **Purpose:** Represent parsed pattern structure as a tagged union.
 
+**Version:** 1.0.0 (semantic versioning)
+
+**Version API:**
+
+```c
+// Get version at runtime
+snobol_ast_version_t ver = snobol_ast_get_version();
+printf("AST version: %s\n", ver.string);  // "1.0.0"
+
+// Check compatibility
+if (!snobol_ast_version_check(1, 0)) {
+    fprintf(stderr, "AST version mismatch!\n");
+    return -1;
+}
+
+// Or use macro
+#if !SNOBOL_AST_VERSION_CHECK(1, 0)
+#error "AST version 1.0 or higher required"
+#endif
+```
+
 **Node Types:**
 
 - `AST_LITERAL` - Literal string match
@@ -118,6 +139,7 @@ snobol_parser_destroy(parser);
 - Parent nodes own child nodes
 - Call `snobol_ast_free()` to recursively free entire tree
 - Use `snobol_ast_create_*()` functions to create nodes
+- `snobol_ast_create_label()` makes a copy of the label name (handles string literals safely)
 
 ### 4. Compiler (`snobol_compiler.c`)
 

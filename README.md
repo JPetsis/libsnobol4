@@ -97,16 +97,19 @@ manipulation tasks.
 
 ### C Core Components
 
-| Component            | File                         | Description                              |
-|----------------------|------------------------------|------------------------------------------|
-| **Lexer**            | `snobol_lexer.h/c`           | UTF-8 aware tokenizer with save/restore  |
-| **Parser**           | `snobol_parser.h/c`          | Recursive descent parser producing C AST |
-| **AST**              | `snobol_ast.h/c`             | Tagged union AST with memory management  |
-| **Compiler**         | `snobol_compiler.c`          | AST → bytecode compiler                  |
-| **VM**               | `snobol_vm.c`                | Bytecode interpreter with backtracking   |
-| **Tables**           | `snobol_table.h/c`           | Associative table runtime                |
-| **Dynamic Patterns** | `snobol_dynamic_pattern.h/c` | EVAL(...) runtime cache                  |
-| **JIT**              | `snobol_jit.h/c`             | Micro-JIT for hot patterns               |
+| Component            | File                         | Description                               |
+|----------------------|------------------------------|-------------------------------------------|
+| **Lexer**            | `snobol_lexer.h/c`           | UTF-8 aware tokenizer with save/restore   |
+| **Parser**           | `snobol_parser.h/c`          | Recursive descent parser producing C AST  |
+| **AST**              | `snobol_ast.h/c`             | Tagged union AST with versioning (v1.0.0) |
+| **Compiler**         | `snobol_compiler.c`          | AST → bytecode compiler                   |
+| **VM**               | `snobol_vm.c`                | Bytecode interpreter with backtracking    |
+| **Tables**           | `snobol_table.h/c`           | Associative table runtime                 |
+| **Dynamic Patterns** | `snobol_dynamic_pattern.h/c` | EVAL(...) runtime cache                   |
+| **JIT**              | `snobol_jit.h/c`             | Micro-JIT for hot patterns                |
+
+**AST Versioning:** The AST API follows semantic versioning. Use `snobol_ast_get_version()` or
+`snobol_ast_version_check(1, 0)` to verify compatibility at runtime. Current version: **1.0.0**.
 
 ### PHP Binding
 

@@ -7,7 +7,7 @@ CFLAGS = -std=c11 -Wall -Wextra -I$(CORE_DIR) -g -O0 \
          -DSTANDALONE_BUILD -DSNOBOL_PROFILE -DSNOBOL_JIT
 
 # Test sources
-TEST_SOURCES = test_runner.c test_vm.c test_tables.c test_dynamic_patterns.c test_table_ops.c test_template_ops.c test_control_flow.c test_backtracking.c test_stress_backtracking.c test_catastrophic.c test_jit_observability.c test_jit_cache.c test_jit_branches.c test_jit_profitability.c test_lexer.c test_parser.c
+TEST_SOURCES = test_runner.c test_vm.c test_tables.c test_dynamic_patterns.c test_table_ops.c test_template_ops.c test_control_flow.c test_backtracking.c test_stress_backtracking.c test_catastrophic.c test_jit_observability.c test_jit_cache.c test_jit_branches.c test_jit_profitability.c test_lexer.c test_parser.c test_ast.c
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_BINARY = test_runner
 
