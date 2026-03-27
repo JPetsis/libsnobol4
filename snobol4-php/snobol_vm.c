@@ -727,79 +727,119 @@ bool vm_run(VM *vm) {
                 break;
             }
             case OP_DYNAMIC_DEF: {
-                /* Define dynamic pattern bytecode block
-                 * Format: len u32, bytecode...
-                 * The bytecode is stored for later execution via OP_DYNAMIC */
-                uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                /* Define dynamic pattern source and bytecode for runtime caching
+                 * Format: source_len(u32) + source_text + bc_len(u32) + bytecode
+                 * 
+                 * Canonical approach: Store both source text and compiled bytecode.
+                 * - Source text: Used as cache key for reuse across repeated EVAL(...)
+                 * - Bytecode: Used for efficient execution in the VM
+                 */
+                uint32_t source_len = read_u32(vm->bc, vm->bc_len, &vm->ip);
 
-                /* Copy the bytecode for storage */
-                uint8_t *bc_copy = (uint8_t *)emalloc(len);
-                if (bc_copy) {
-                    memcpy(bc_copy, vm->bc + vm->ip, len);
+                /* Copy the source text for cache keying */
+                char *source_copy = (char *)emalloc(source_len + 1);
+                if (source_copy) {
+                    memcpy(source_copy, vm->bc + vm->ip, source_len);
+                    source_copy[source_len] = '\0';
                 }
-                vm->ip += len;
+                vm->ip += source_len;
+
+                /* Copy the bytecode for execution */
+                uint32_t bc_len = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t *bc_copy = (uint8_t *)emalloc(bc_len);
+                if (bc_copy) {
+                    memcpy(bc_copy, vm->bc + vm->ip, bc_len);
+                }
+                vm->ip += bc_len;
 
                 /* Store for OP_DYNAMIC to use */
 #ifdef SNOBOL_DYNAMIC_PATTERN
-                /* Free any previously pending bytecode */
+                /* Free any previously pending data */
+                if (vm->dyn_pending_source) {
+                    efree(vm->dyn_pending_source);
+                }
                 if (vm->dyn_pending_bc) {
                     efree(vm->dyn_pending_bc);
                 }
+                
+                vm->dyn_pending_source = source_copy;
+                vm->dyn_pending_source_len = source_len;
                 vm->dyn_pending_bc = bc_copy;
-                vm->dyn_pending_bc_len = len;
+                vm->dyn_pending_bc_len = bc_len;
 #else
+                if (source_copy) efree(source_copy);
                 if (bc_copy) efree(bc_copy);
 #endif
                 break;
             }
             case OP_DYNAMIC: {
-                /* Evaluate dynamic pattern from stored bytecode
-                 * Format: (no additional operands - uses bytecode from OP_DYNAMIC_DEF)
+                /* Evaluate dynamic pattern using cached compilation
+                 * Format: (no additional operands - uses data from OP_DYNAMIC_DEF)
                  *
-                 * Implementation:
-                 * 1. Get the pattern bytecode from OP_DYNAMIC_DEF storage
-                 * 2. Compute canonical cache key from bytecode
-                 * 3. Look up in dynamic pattern cache
-                 * 4. On hit: execute cached pattern
-                 * 5. On miss: create pattern object, cache it, then execute
-                 * 6. Handle success/failure with proper backtracking */
+                 * Canonical implementation:
+                 * 1. Look up pattern in dynamic pattern cache by source text
+                 * 2. On hit: use cached pattern (retains reference)
+                 * 3. On miss: create pattern from bytecode, cache it
+                 * 4. Execute the pattern with full VM semantics
+                 * 5. Handle success/failure with proper backtracking
+                 *
+                 * This enables:
+                 * - Cache reuse across repeated EVAL(...) with same source
+                 * - Full pattern semantics: alternation, backtracking, nested EVAL(...)
+                 * - Proper retain/release ownership through runtime cache
+                 */
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
-                /* Get the stored bytecode from OP_DYNAMIC_DEF */
-                if (!vm->dyn_pending_bc || vm->dyn_pending_bc_len == 0) {
-                    /* No pending bytecode - fail */
+                /* Verify we have both source and bytecode */
+                if (!vm->dyn_pending_source || !vm->dyn_pending_bc) {
+                    SNOBOL_LOG("OP_DYNAMIC: missing source or bytecode");
                     goto fail_ret;
                 }
 
-                /* Debug: verify bytecode starts with OP_LIT */
-                if (vm->dyn_pending_bc[0] != OP_LIT) {
-                    goto fail_ret;
-                }
+                SNOBOL_LOG("OP_DYNAMIC: looking up source '%.*s' (len=%zu) in cache",
+                           (int)vm->dyn_pending_source_len, vm->dyn_pending_source,
+                           vm->dyn_pending_source_len);
 
-                /* Use the pending bytecode as a key for caching */
-                char cache_key[64];
-                snprintf(cache_key, sizeof(cache_key), "dyn_%zu", vm->dyn_pending_bc_len);
-
-                /* Copy the bytecode for the pattern object (pattern owns its copy) */
-                uint8_t *bc_copy = (uint8_t *)emalloc(vm->dyn_pending_bc_len);
-                if (!bc_copy) {
-                    goto fail_ret;
-                }
-                memcpy(bc_copy, vm->dyn_pending_bc, vm->dyn_pending_bc_len);
-
-                /* Create pattern object with its own copy of the bytecode */
-                dynamic_pattern_t *pattern = dynamic_pattern_create(
-                    cache_key,
-                    bc_copy,
-                    vm->dyn_pending_bc_len
+                /* Look up in dynamic pattern cache by source text */
+                dynamic_pattern_t *pattern = dynamic_pattern_cache_get(
+                    vm->dyn_cache,
+                    vm->dyn_pending_source,
+                    (int)vm->dyn_pending_source_len
                 );
 
-                if (!pattern || !pattern->is_valid || !pattern->bc) {
-                    if (pattern) dynamic_pattern_release(pattern);
-                    goto fail_ret;
+                if (!pattern) {
+                    /* Cache miss - create pattern from pre-compiled bytecode */
+                    SNOBOL_LOG("OP_DYNAMIC: cache miss, creating pattern from bytecode (bc_len=%zu)",
+                               vm->dyn_pending_bc_len);
+
+                    /* Copy bytecode for the pattern object (pattern owns its copy) */
+                    uint8_t *bc_copy = (uint8_t *)emalloc(vm->dyn_pending_bc_len);
+                    if (!bc_copy) {
+                        SNOBOL_LOG("OP_DYNAMIC: failed to allocate bytecode copy");
+                        goto fail_ret;
+                    }
+                    memcpy(bc_copy, vm->dyn_pending_bc, vm->dyn_pending_bc_len);
+
+                    /* Create pattern object with the bytecode */
+                    pattern = dynamic_pattern_create(vm->dyn_pending_source, bc_copy, vm->dyn_pending_bc_len);
+                    if (!pattern || !pattern->is_valid) {
+                        SNOBOL_LOG("OP_DYNAMIC: failed to create pattern");
+                        if (pattern) dynamic_pattern_release(pattern);
+                        if (bc_copy) efree(bc_copy);
+                        goto fail_ret;
+                    }
+
+                    /* Cache the compiled pattern */
+                    if (!dynamic_pattern_cache_put(vm->dyn_cache, vm->dyn_pending_source, pattern)) {
+                        SNOBOL_LOG("OP_DYNAMIC: failed to cache pattern (continuing anyway)");
+                    }
+
+                    SNOBOL_LOG("OP_DYNAMIC: created and cached pattern");
+                } else {
+                    SNOBOL_LOG("OP_DYNAMIC: cache hit");
                 }
 
-                /* Execute the dynamic pattern
+                /* Execute the dynamic pattern with full VM semantics
                  * Save/restore IP and position for proper backtracking */
                 size_t saved_ip = vm->ip;
                 size_t saved_pos = vm->pos;
@@ -807,7 +847,7 @@ bool vm_run(VM *vm) {
                 memcpy(saved_cap_start, vm->cap_start, sizeof(saved_cap_start));
                 memcpy(saved_cap_end, vm->cap_end, sizeof(saved_cap_end));
 
-                /* Execute dynamic pattern bytecode */
+                /* Execute dynamic pattern bytecode through the VM */
                 uint8_t *saved_bc = vm->bc;
                 size_t saved_bc_len = vm->bc_len;
                 vm->bc = pattern->bc;
@@ -815,41 +855,10 @@ bool vm_run(VM *vm) {
                 vm->ip = 0;
                 vm->pos = saved_pos;
 
-                /* Run the dynamic pattern bytecode inline */
-                int dynamic_result = 0;
-                while (vm->ip < vm->bc_len) {
-                    uint8_t op = vm->bc[vm->ip++];
-                    switch (op) {
-                        case OP_LIT: {
-                            uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip);
-                            uint32_t lit_len = read_u32(vm->bc, vm->bc_len, &vm->ip);
-                            if (vm->pos + lit_len > vm->len) {
-                                dynamic_result = 0;
-                                goto dynamic_done;
-                            }
-                            /* Compare subject with literal bytes from pattern bytecode */
-                            if (memcmp(vm->s + vm->pos, vm->bc + off, lit_len) != 0) {
-                                dynamic_result = 0;
-                                goto dynamic_done;
-                            }
-                            vm->pos += lit_len;
-                            /* Advance IP past the literal bytes */
-                            vm->ip += lit_len;
-                            break;
-                        }
-                        case OP_ACCEPT:
-                            dynamic_result = 1;
-                            goto dynamic_done;
-                        default:
-                            /* For simplicity, only OP_LIT and OP_ACCEPT supported in dynamic patterns */
-                            dynamic_result = 0;
-                            goto dynamic_done;
-                    }
-                }
-                /* Reached end of bytecode without ACCEPT - consider it a match if we consumed something */
-                dynamic_result = 1;
+                /* Run the dynamic pattern bytecode through vm_run for full semantics
+                 * This enables alternation, backtracking, nested EVAL(...), etc. */
+                int dynamic_result = vm_run(vm);
 
-dynamic_done:
                 /* Restore VM state */
                 vm->bc = saved_bc;
                 vm->bc_len = saved_bc_len;
@@ -857,6 +866,7 @@ dynamic_done:
 
                 if (!dynamic_result) {
                     /* Dynamic pattern failed - restore captures and position */
+                    SNOBOL_LOG("OP_DYNAMIC: pattern failed, restoring state");
                     vm->pos = saved_pos;
                     memcpy(vm->cap_start, saved_cap_start, sizeof(saved_cap_start));
                     memcpy(vm->cap_end, saved_cap_end, sizeof(saved_cap_end));
@@ -864,11 +874,14 @@ dynamic_done:
                     goto fail_ret;
                 }
 
-                /* Success - free the pattern (we keep bytecode in dyn_pending_bc for now)
-                 * The bytecode will be freed when a new OP_DYNAMIC_DEF comes or at VM cleanup */
+                /* Success - pattern matched */
+                SNOBOL_LOG("OP_DYNAMIC: pattern matched, pos=%zu", vm->pos);
+
+                /* Release our reference to the pattern (cache retains its own) */
                 dynamic_pattern_release(pattern);
 #else
                 /* Dynamic pattern support not enabled */
+                SNOBOL_LOG("OP_DYNAMIC: support not enabled");
 #endif
                 break;
             }

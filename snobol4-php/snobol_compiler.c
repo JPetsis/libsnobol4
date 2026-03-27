@@ -503,18 +503,23 @@ static int emit_node(zval *node, CodeBuf *c) {
         return emit_emit(node, c);
     }
     if (zend_string_equals_literal(type, "dynamic_eval")) {
-        /* dynamic_eval: compile the inner expression and emit as dynamic pattern source
-         * Format: pattern source will be compiled and stored for runtime evaluation
-         * The inner expression is compiled to bytecode which will be used at runtime */
+        /* dynamic_eval: compile pattern for runtime caching and execution
+         * 
+         * Canonical approach: Store both the compiled bytecode AND the source text.
+         * - Source text: Used as cache key for reuse across repeated EVAL(...)
+         * - Bytecode: Used for efficient execution in the VM
+         * 
+         * This enables:
+         * - Cache reuse across repeated EVAL(...) calls with the same source
+         * - Full pattern semantics including alternation, backtracking, nested EVAL(...)
+         * - Proper retain/release ownership through the runtime cache
+         */
         zval *expr = zend_hash_str_find(Z_ARRVAL_P(node), "expr", sizeof("expr")-1);
+        zval *source_text = zend_hash_str_find(Z_ARRVAL_P(node), "source", sizeof("source")-1);
+        
         if (!expr) return -1;
 
-        /* For dynamic_eval, we need to compile the inner expression separately
-         * and store it for runtime pattern generation.
-         * Currently this compiles the expression inline - full implementation
-         * requires runtime pattern cache integration (see task 3.1/3.2) */
-
-        /* Create a sub-buffer for the dynamic pattern bytecode */
+        /* Compile the expression AST to bytecode */
         CodeBuf dynamic_cb;
         cb_init(&dynamic_cb);
 
@@ -524,14 +529,27 @@ static int emit_node(zval *node, CodeBuf *c) {
         }
         cb_emit_u8(&dynamic_cb, OP_ACCEPT);
 
-        /* Emit the dynamic pattern bytecode as a data block
-         * Format: OP_DYNAMIC_DEF followed by length and bytecode
-         * This will be picked up by OP_DYNAMIC at runtime */
+        /* Emit the compiled bytecode with source text metadata
+         * Format: OP_DYNAMIC_DEF + source_len(u32) + source_text + bc_len(u32) + bytecode
+         * The VM will use source for cache keying and bytecode for execution */
         cb_emit_u8(c, OP_DYNAMIC_DEF);
+        
+        /* Emit source length and source text (for cache keying) */
+        if (source_text && Z_TYPE_P(source_text) == IS_STRING) {
+            zend_string *source_zs = Z_STR_P(source_text);
+            cb_emit_u32(c, (uint32_t)ZSTR_LEN(source_zs));
+            cb_emit_bytes(c, (const uint8_t*)ZSTR_VAL(source_zs), ZSTR_LEN(source_zs));
+        } else {
+            /* Fallback: use bytecode as source (no cache reuse) */
+            cb_emit_u32(c, (uint32_t)dynamic_cb.len);
+            cb_emit_bytes(c, dynamic_cb.buf, dynamic_cb.len);
+        }
+        
+        /* Emit bytecode length and bytecode (for execution) */
         cb_emit_u32(c, (uint32_t)dynamic_cb.len);
         cb_emit_bytes(c, dynamic_cb.buf, dynamic_cb.len);
 
-        /* Emit OP_DYNAMIC to execute the stored bytecode */
+        /* Emit OP_DYNAMIC to trigger execution */
         cb_emit_u8(c, OP_DYNAMIC);
 
         cb_free(&dynamic_cb);

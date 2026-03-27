@@ -8,13 +8,40 @@
 /**
  * @file snobol_dynamic_pattern.h
  * @brief Dynamic pattern objects and canonical cache keys
- * 
+ *
  * Ownership/Lifetime Rules:
  * - Dynamic patterns are created with dynamic_pattern_create() and freed with dynamic_pattern_release()
  * - Dynamic patterns use reference counting for safe sharing
  * - The compiled bytecode is owned by the dynamic pattern object
  * - Cache entries hold references to dynamic patterns (via retain/release)
  * - Canonical keys are computed from pattern content for cache lookup
+ *
+ * Retain/Release Semantics:
+ * - dynamic_pattern_create(): Returns pattern with refcount=1. Caller owns reference.
+ * - dynamic_pattern_retain(): Increments refcount. Returns same pointer for convenience.
+ * - dynamic_pattern_release(): Decrements refcount. Frees pattern when refcount reaches 0.
+ *
+ * Cache Ownership Rules:
+ * - dynamic_pattern_cache_get(): Returns pattern with retained reference. Caller must release.
+ * - dynamic_pattern_cache_put(): Cache retains its own reference. Caller still owns their reference.
+ * - dynamic_pattern_cache_remove(): Cache releases its reference. Caller still owns their reference.
+ * - dynamic_pattern_cache_clear(): Cache releases all references.
+ * - dynamic_pattern_cache_destroy(): Cache releases all references and frees memory.
+ *
+ * Execution Lifecycle (VM):
+ * 1. OP_DYNAMIC_DEF: Stores source text and bytecode (both owned by VM)
+ * 2. OP_DYNAMIC cache miss: Creates pattern, caches it (cache retains reference)
+ * 3. OP_DYNAMIC cache hit: Retrieves pattern (caller retains reference)
+ * 4. Pattern execution: Uses pattern bytecode (pattern not modified)
+ * 5. After execution: Caller releases their reference (cache retains its reference)
+ *
+ * Success Path:
+ * - Cache miss: create() → put() [cache retains] → execute → release() [caller's ref]
+ * - Cache hit: get() [retains for caller] → execute → release() [caller's ref]
+ *
+ * Failure Path:
+ * - Cache miss with create failure: No pattern created, no cache entry
+ * - Cache hit with execution failure: release() caller's reference, restore VM state
  */
 
 /* Forward declarations */

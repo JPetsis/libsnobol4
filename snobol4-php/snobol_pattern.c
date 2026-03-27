@@ -213,6 +213,8 @@ PHP_METHOD(Snobol_Pattern, match) {
     } else {
         vm.dyn_cache = NULL;
     }
+    vm.dyn_pending_source = NULL;
+    vm.dyn_pending_source_len = 0;
     vm.dyn_pending_bc = NULL;
     vm.dyn_pending_bc_len = 0;
 #endif
@@ -227,8 +229,8 @@ PHP_METHOD(Snobol_Pattern, match) {
         if (vm.dyn_cache) {
             dynamic_pattern_cache_destroy(vm.dyn_cache);
         }
-        if (vm.dyn_pending_bc) {
-            efree(vm.dyn_pending_bc);
+        if (vm.dyn_pending_source) {
+            efree(vm.dyn_pending_source);
         }
 #endif
         RETURN_FALSE;
@@ -261,6 +263,9 @@ PHP_METHOD(Snobol_Pattern, match) {
 #ifdef SNOBOL_DYNAMIC_PATTERN
     if (vm.dyn_cache) {
         dynamic_pattern_cache_destroy(vm.dyn_cache);
+    }
+    if (vm.dyn_pending_source) {
+        efree(vm.dyn_pending_source);
     }
     if (vm.dyn_pending_bc) {
         efree(vm.dyn_pending_bc);
@@ -325,6 +330,8 @@ PHP_METHOD(Snobol_Pattern, subst) {
         } else {
             vm.dyn_cache = NULL;
         }
+        vm.dyn_pending_source = NULL;
+        vm.dyn_pending_source_len = 0;
         vm.dyn_pending_bc = NULL;
         vm.dyn_pending_bc_len = 0;
 #endif
@@ -361,6 +368,9 @@ PHP_METHOD(Snobol_Pattern, subst) {
         /* Clean up dynamic pattern cache for this VM iteration */
         if (vm.dyn_cache) {
             dynamic_pattern_cache_destroy(vm.dyn_cache);
+        }
+        if (vm.dyn_pending_source) {
+            efree(vm.dyn_pending_source);
         }
         if (vm.dyn_pending_bc) {
             efree(vm.dyn_pending_bc);

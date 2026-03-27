@@ -102,33 +102,12 @@ PHP_METHOD(Snobol_DynamicPatternCache, __construct) {
 }
 
 PHP_METHOD(Snobol_DynamicPatternCache, compile) {
-    char *pattern_string;
-    size_t pattern_string_len;
-    
-    ZEND_PARSE_PARAMETERS_START(1, 1)
-        Z_PARAM_STRING(pattern_string, pattern_string_len)
-    ZEND_PARSE_PARAMETERS_END();
-
-    snobol_dynamic_pattern_cache_php_t *intern = php_snobol_dyn_cache_fetch(Z_OBJ_P(getThis()));
-    
-    /* Check if already in cache */
-    dynamic_pattern_t *cached = dynamic_pattern_cache_get(&intern->cache, pattern_string, -1);
-    
-    if (cached) {
-        /* Return cached pattern info */
-        array_init(return_value);
-        add_assoc_bool(return_value, "cached", 1);
-        add_assoc_long(return_value, "bc_len", (zend_long)cached->bc_len);
-        add_assoc_bool(return_value, "valid", cached->is_valid);
-        dynamic_pattern_release(cached);
-        return;
-    }
-    
-    /* Not cached - would need to compile via PHP Pattern class */
-    /* For now, return not cached indicator */
+    /* This method is no longer used - DynamicPatternCache is implemented in PHP */
+    /* Stub implementation for backward compatibility */
     array_init(return_value);
     add_assoc_bool(return_value, "cached", 0);
-    add_assoc_string(return_value, "pattern", pattern_string);
+    add_assoc_string(return_value, "pattern", "stub");
+    add_assoc_bool(return_value, "compiled", 0);
 }
 
 PHP_METHOD(Snobol_DynamicPatternCache, evaluate) {
@@ -222,13 +201,17 @@ static const zend_function_entry snobol_dynamic_pattern_cache_methods[] = {
 zend_class_entry *snobol_dynamic_pattern_cache_ce;
 
 void snobol_dynamic_pattern_cache_php_minit(void) {
-    zend_class_entry ce;
-
-    memcpy(&snobol_dynamic_pattern_cache_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
-    snobol_dynamic_pattern_cache_object_handlers.offset = XtOffsetOf(snobol_dynamic_pattern_cache_php_t, std);
-    snobol_dynamic_pattern_cache_object_handlers.free_obj = snobol_dynamic_pattern_cache_php_free;
-
-    INIT_CLASS_ENTRY(ce, "Snobol\\DynamicPatternCache", snobol_dynamic_pattern_cache_methods);
-    snobol_dynamic_pattern_cache_ce = zend_register_internal_class(&ce);
-    snobol_dynamic_pattern_cache_ce->create_object = snobol_dynamic_pattern_cache_php_create;
+    /* DynamicPatternCache is now implemented in PHP (php-src/DynamicPatternCache.php)
+     * The C extension no longer registers this class to allow the PHP implementation
+     * to provide truthful cache behavior with proper compile/evaluate/get methods.
+     * 
+     * Commented out class registration:
+     * zend_class_entry ce;
+     * memcpy(&snobol_dynamic_pattern_cache_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
+     * snobol_dynamic_pattern_cache_object_handlers.offset = XtOffsetOf(snobol_dynamic_pattern_cache_php_t, std);
+     * snobol_dynamic_pattern_cache_object_handlers.free_obj = snobol_dynamic_pattern_cache_php_free;
+     * INIT_CLASS_ENTRY(ce, "Snobol\\DynamicPatternCache", snobol_dynamic_pattern_cache_methods);
+     * snobol_dynamic_pattern_cache_ce = zend_register_internal_class(&ce);
+     * snobol_dynamic_pattern_cache_ce->create_object = snobol_dynamic_pattern_cache_php_create;
+     */
 }

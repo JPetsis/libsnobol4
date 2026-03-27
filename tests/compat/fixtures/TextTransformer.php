@@ -37,8 +37,10 @@ class TextTransformer
     public function transformWithPattern(string $text, string $pattern): array
     {
         /* Use core runtime for dynamic pattern evaluation via PatternHelper
-         * Note: Complex patterns with alternation (|) require backtracking support
-         * in the dynamic executor. For now, use simple literal patterns.
+         * The runtime now supports full pattern semantics including:
+         * - Alternation (|) with backtracking
+         * - Nested EVAL(...) expressions
+         * - Cache reuse for repeated patterns
          */
         $result = PatternHelper::evalPattern($pattern, $text);
 
@@ -59,22 +61,8 @@ class TextTransformer
             return ['found' => true, 'matches' => $matches];
         }
 
-        /* Fallback: use PHP-native matching for complex patterns */
-        /* This maintains backward compatibility for patterns with alternation */
-        if (strpos($pattern, '|') !== false) {
-            $parts = explode('|', $pattern);
-            $matches = [];
-            foreach ($parts as $part) {
-                $part = trim($part, " '\"");
-                if (strpos($text, $part) !== false) {
-                    $matches[] = $part;
-                }
-            }
-            if (count($matches) > 0) {
-                return ['found' => true, 'matches' => $matches];
-            }
-        }
-
+        /* No fallback - rely exclusively on runtime semantics
+         * If the pattern fails, it fails - no PHP-native workaround */
         return ['found' => false, 'matches' => []];
     }
 

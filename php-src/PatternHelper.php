@@ -342,14 +342,16 @@ class PatternHelper
      */
     public static function evalPattern(string $patternExpr, string $subject, array $options = [])
     {
-        /* Build AST for EVAL(expression) */
+        /* Parse the pattern expression */
         $parser = new Parser($patternExpr);
         $exprAst = $parser->parse();
 
-        /* Wrap in dynamic_eval node */
+        /* Wrap in dynamic_eval node with source text for canonical runtime caching
+         * The C extension will use the source for cache keying and the AST for compilation */
         $evalAst = [
             'type' => 'dynamic_eval',
-            'expr' => $exprAst
+            'expr' => $exprAst,
+            'source' => $patternExpr  /* Canonical source for runtime cache keying */
         ];
 
         /* Compile and execute through core runtime */

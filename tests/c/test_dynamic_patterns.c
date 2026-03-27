@@ -429,6 +429,134 @@ static void test_dynamic_pattern_vm_op_dynamic_def(void) {
                 "length encoding correct");
 }
 
+static void test_dynamic_pattern_cache_reuse(void) {
+    test_suite("Dynamic Pattern: cache reuse for repeated patterns");
+
+    dynamic_pattern_cache_t cache;
+    dynamic_pattern_cache_init(&cache, 10);
+
+    size_t bc_len;
+    uint8_t *bc = create_mock_bytecode(&bc_len);
+
+    /* Create and cache a pattern */
+    dynamic_pattern_t *pattern1 = dynamic_pattern_create("test_reuse", bc, bc_len);
+    dynamic_pattern_cache_put(&cache, "test_reuse", pattern1);
+
+    /* Retrieve the same pattern - should be cached */
+    dynamic_pattern_t *pattern2 = dynamic_pattern_cache_get(&cache, "test_reuse", -1);
+    test_assert(pattern2 != NULL, "cache hit for repeated pattern");
+    test_assert(pattern2 == pattern1, "same pattern object returned");
+
+    /* Verify refcount increased (cache retained its reference) */
+    test_assert(pattern2->refcount >= 2, "cache retains reference");
+
+    dynamic_pattern_release(pattern1);
+    dynamic_pattern_release(pattern2);
+    dynamic_pattern_cache_destroy(&cache);
+}
+
+static void test_dynamic_pattern_invalid_source_handling(void) {
+    test_suite("Dynamic Pattern: invalid source handling");
+
+    dynamic_pattern_cache_t cache;
+    dynamic_pattern_cache_init(&cache, 10);
+
+    /* Try to get non-existent pattern */
+    dynamic_pattern_t *pattern = dynamic_pattern_cache_get(&cache, "nonexistent", -1);
+    test_assert(pattern == NULL, "get returns NULL for missing pattern");
+
+    /* Try to cache with empty source */
+    size_t bc_len;
+    uint8_t *bc = create_mock_bytecode(&bc_len);
+    pattern = dynamic_pattern_create("", bc, bc_len);
+    test_assert(pattern != NULL, "create with empty source succeeds");
+    test_assert(pattern->is_valid == true, "empty source pattern is valid");
+
+    bool result = dynamic_pattern_cache_put(&cache, "", pattern);
+    test_assert(result == true, "can cache with empty source key");
+
+    dynamic_pattern_release(pattern);
+    dynamic_pattern_cache_destroy(&cache);
+}
+
+static void test_dynamic_pattern_ownership_lifecycle(void) {
+    test_suite("Dynamic Pattern: ownership and lifecycle");
+
+    dynamic_pattern_cache_t cache;
+    dynamic_pattern_cache_init(&cache, 10);
+
+    size_t bc_len;
+    uint8_t *bc = create_mock_bytecode(&bc_len);
+
+    /* Create pattern - caller owns reference (refcount=1) */
+    dynamic_pattern_t *pattern = dynamic_pattern_create("lifecycle", bc, bc_len);
+    test_assert(pattern->refcount == 1, "initial refcount is 1");
+
+    /* Cache it - cache retains its own reference */
+    bool put_result = dynamic_pattern_cache_put(&cache, "lifecycle", pattern);
+    test_assert(put_result == true, "put succeeds");
+    test_assert(pattern->refcount == 2, "refcount is 2 after cache put");
+
+    /* Get it back - caller gets retained reference */
+    dynamic_pattern_t *retrieved = dynamic_pattern_cache_get(&cache, "lifecycle", -1);
+    test_assert(retrieved == pattern, "get returns same pattern");
+    test_assert(pattern->refcount == 3, "refcount is 3 after get");
+
+    /* Release caller's original reference */
+    dynamic_pattern_release(pattern);
+    test_assert(pattern->refcount == 2, "refcount is 2 after caller release");
+
+    /* Release retrieved reference */
+    dynamic_pattern_release(retrieved);
+    test_assert(pattern->refcount == 1, "refcount is 1 after retrieved release");
+
+    /* Clear cache - cache releases its reference */
+    dynamic_pattern_cache_clear(&cache);
+    test_assert(true, "clear completes without crash");
+    /* Pattern should now be freed (refcount went to 0) */
+
+    dynamic_pattern_cache_destroy(&cache);
+}
+
+static void test_dynamic_pattern_concurrent_cache_access(void) {
+    test_suite("Dynamic Pattern: concurrent cache access simulation");
+
+    dynamic_pattern_cache_t cache;
+    dynamic_pattern_cache_init(&cache, 100);
+
+    /* Simulate multiple patterns being cached and accessed */
+    dynamic_pattern_t *patterns[10];
+    for (int i = 0; i < 10; i++) {
+        char key[32];
+        snprintf(key, sizeof(key), "concurrent_%d", i);
+        size_t bc_len;
+        uint8_t *bc = create_mock_bytecode(&bc_len);
+        patterns[i] = dynamic_pattern_create(key, bc, bc_len);
+        dynamic_pattern_cache_put(&cache, key, patterns[i]);
+    }
+
+    test_assert(cache.size == 10, "all 10 patterns cached");
+
+    /* Access all patterns in different order */
+    for (int i = 9; i >= 0; i--) {
+        char key[32];
+        snprintf(key, sizeof(key), "concurrent_%d", i);
+        dynamic_pattern_t *retrieved = dynamic_pattern_cache_get(&cache, key, -1);
+        test_assert(retrieved != NULL, "can retrieve pattern");
+        if (retrieved) {
+            dynamic_pattern_release(retrieved);
+        }
+    }
+
+    /* Release original references */
+    for (int i = 0; i < 10; i++) {
+        dynamic_pattern_release(patterns[i]);
+    }
+
+    dynamic_pattern_cache_destroy(&cache);
+    test_assert(true, "concurrent access simulation completed");
+}
+
 void test_dynamic_pattern_suite(void) {
     test_dynamic_pattern_create_free();
     test_dynamic_pattern_create_null_source();
@@ -450,4 +578,8 @@ void test_dynamic_pattern_suite(void) {
     test_dynamic_pattern_cache_stress();
     test_dynamic_pattern_vm_execution();
     test_dynamic_pattern_vm_op_dynamic_def();
+    test_dynamic_pattern_cache_reuse();
+    test_dynamic_pattern_invalid_source_handling();
+    test_dynamic_pattern_ownership_lifecycle();
+    test_dynamic_pattern_concurrent_cache_access();
 }

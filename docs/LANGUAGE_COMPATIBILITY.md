@@ -18,27 +18,28 @@ The engine now supports full SNOBOL language compatibility including:
 
 ### ✅ Completed Features
 
-| Feature                                       | Status     | Notes                                     |
-|-----------------------------------------------|------------|-------------------------------------------|
-| Parser: Generic comma-separated arguments     | ✅ Complete | Arity validation in semantic layer        |
-| Parser: `EVAL(...)` syntax                    | ✅ Complete | Parses dynamic evaluation expressions     |
-| Parser: Table access `TABLE[key]`             | ✅ Complete | Supports literal and capture-derived keys |
-| Runtime: Dynamic pattern cache                | ✅ Complete | With retain/release ownership semantics   |
-| Runtime: `OP_DYNAMIC_DEF` / `OP_DYNAMIC`      | ✅ Complete | Bytecode storage and execution            |
-| Runtime: Table-backed templates               | ✅ Complete | Literal keys stored in bytecode           |
-| Runtime: Capture-derived table lookups        | ✅ Complete | Key from capture register                 |
-| Runtime: Formatted substitutions              | ✅ Complete | upper, lower, length operations           |
-| Helper API: `PatternHelper::evalPattern()`    | ✅ Complete | Routes through core runtime               |
-| Helper API: `PatternHelper::tableSubst()`     | ✅ Complete | Table-backed substitution helper          |
-| Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                 |
-| Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics              |
-| Test coverage                                 | ✅ Complete | 158 PHP tests, 896 C tests                |
+| Feature                                       | Status     | Notes                                         |
+|-----------------------------------------------|------------|-----------------------------------------------|
+| Parser: Generic comma-separated arguments     | ✅ Complete | Arity validation in semantic layer            |
+| Parser: `EVAL(...)` syntax                    | ✅ Complete | Parses dynamic evaluation expressions         |
+| Parser: Table access `TABLE[key]`             | ✅ Complete | Supports literal and capture-derived keys     |
+| Runtime: Dynamic pattern cache                | ✅ Complete | With retain/release ownership semantics       |
+| Runtime: `OP_DYNAMIC_DEF` / `OP_DYNAMIC`      | ✅ Complete | Source-based cache keying, bytecode execution |
+| Runtime: Full pattern semantics in EVAL       | ✅ Complete | Alternation, backtracking, nested EVAL        |
+| Runtime: Table-backed templates               | ✅ Complete | Literal keys stored in bytecode               |
+| Runtime: Capture-derived table lookups        | ✅ Complete | Key from capture register                     |
+| Runtime: Formatted substitutions              | ✅ Complete | upper, lower, length operations               |
+| Helper API: `PatternHelper::evalPattern()`    | ✅ Complete | Routes through core runtime with caching      |
+| Helper API: `PatternHelper::tableSubst()`     | ✅ Complete | Table-backed substitution helper              |
+| Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                     |
+| Helper API: `DynamicPatternCache`             | ✅ Complete | Truthful runtime-backed cache interface       |
+| Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)    |
+| Test coverage                                 | ✅ Complete | 158 PHP tests, 896 C tests                    |
 
 ### ⚠️ Known Limitations
 
 | Feature                           | Limitation                                 | Workaround                                 | Future                               |
 |-----------------------------------|--------------------------------------------|--------------------------------------------|--------------------------------------|
-| Dynamic patterns with alternation | `EVAL('A' \| 'B')` falls back to PHP       | Use simple literal/concat patterns in EVAL | Add backtracking to dynamic executor |
 | Table registration                | Placeholder `table_id=0`                   | Runtime resolves by name                   | Explicit registration API            |
 | Recursive EVAL                    | `EVAL(EVAL(...))` parsed but not optimized | Avoid deep nesting                         | Optimize recursive evaluation        |
 | JIT coverage                      | Skips tables, dynamic, control flow        | Interpreter handles complex patterns       | JIT for simple labelled patterns     |
@@ -77,17 +78,21 @@ Evaluate patterns constructed at runtime:
 // Dynamic eval syntax: EVAL(pattern_expr)
 use Snobol\PatternHelper;
 
-// Simple literal pattern - uses core runtime
+// Simple literal pattern - uses core runtime with caching
 $result = PatternHelper::evalPattern("'hello'", "hello world");
 // Returns: ['_match_len' => 5, '_output' => '']
 
-// Concatenation - uses core runtime
+// Concatenation - uses core runtime with caching
 $result = PatternHelper::evalPattern("'hello' 'world'", "hello world");
 // Returns: ['_match_len' => 10, '_output' => '']
 
-// Alternation - falls back to PHP (limitation)
+// Alternation - uses core runtime with full backtracking support
 $result = PatternHelper::evalPattern("'hello' | 'world'", "hello world");
-// Returns: ['found' => true, 'matches' => ['hello']]
+// Returns: ['v0' => 'hello', '_match_len' => 5, '_output' => '']
+
+// Repeated evaluation - pattern is cached by source
+$result1 = PatternHelper::evalPattern("'A' | 'B' | 'C'", "B");  // Cache miss
+$result2 = PatternHelper::evalPattern("'A' | 'B' | 'C'", "C");  // Cache hit
 ```
 
 ### Table Access and Update
@@ -143,17 +148,25 @@ use Snobol\DynamicPatternCache;
 // Create a cache
 $cache = new DynamicPatternCache(64);  // Max 64 patterns
 
-// Check if pattern is cached
+// Compile and cache a pattern
 $result = $cache->compile("'A' | 'B'");
-// Returns: ['cached' => false, 'pattern' => "'A' | 'B'"]
+// Returns: ['cached' => false, 'pattern' => "'A' | 'B'", 'compiled' => true]
+
+// Compile again - will be cached
+$result = $cache->compile("'A' | 'B'");
+// Returns: ['cached' => true, 'pattern' => "'A' | 'B'", 'compiled' => true]
+
+// Evaluate a pattern through the cache
+$result = $cache->evaluate("'A' | 'B'", "A");
+// Returns: ['cached' => bool, 'evaluated' => bool, 'matches' => [...]]
 
 // Get cached pattern info
 $info = $cache->get("'A'");
-// Returns: ['found' => bool, 'bc_len' => int, 'valid' => bool]
+// Returns: ['found' => bool, 'pattern' => Pattern|null]
 
 // Get statistics
 $stats = $cache->stats();
-// Returns: ['size' => int, 'max_size' => int]
+// Returns: ['size' => int, 'max_size' => int, 'compile_count' => int, 'evaluate_count' => int]
 
 // Clear cache
 $cache->clear();
@@ -261,13 +274,14 @@ make test
 
 ### Snobol\DynamicPatternCache
 
-| Method        | Parameters                           | Returns | Description                |
-|---------------|--------------------------------------|---------|----------------------------|
-| `__construct` | `?int $maxSize`                      | -       | Create cache with max size |
-| `compile`     | `string $pattern`                    | `array` | Check/compile pattern      |
-| `get`         | `string $pattern`                    | `array` | Get cached pattern info    |
-| `clear`       | -                                    | `void`  | Clear cache                |
-| `stats`       | -                                    | `array` | Get cache statistics       |
+| Method        | Parameters                           | Returns | Description                    |
+|---------------|--------------------------------------|---------|--------------------------------|
+| `__construct` | `int $maxSize`                       | -       | Create cache with max size     |
+| `compile`     | `string $pattern`                    | `array` | Compile and cache pattern      |
+| `evaluate`    | `string $pattern`, `string $subject` | `array` | Evaluate pattern through cache |
+| `get`         | `string $pattern`                    | `array` | Get cached pattern             |
+| `clear`       | -                                    | `void`  | Clear cache                    |
+| `stats`       | -                                    | `array` | Get cache statistics           |
 
 ## Memory Management
 
