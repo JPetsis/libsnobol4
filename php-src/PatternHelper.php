@@ -94,17 +94,17 @@ class PatternHelper
     /**
      * Compile a pattern from a textual SNOBOL-like pattern string.
      *
-     * Note: Textual parsing is not yet fully implemented. This is a stub for future compatibility.
+     * This method is now provided by the C extension as Pattern::fromString().
+     * This stub is kept for backward compatibility but delegates to the C implementation.
      *
      * @param  string  $pattern  Textual pattern representation
      * @param  array  $options  Compilation options
      * @return Pattern Compiled pattern instance
-     * @throws \LogicException When textual parsing is not yet available
      */
     public static function fromString(string $pattern, array $options = []): Pattern
     {
-        $parser = new Parser($pattern);
-        return self::fromAst($parser->parse(), $options);
+        /* Delegate to C extension implementation */
+        return Pattern::fromString($pattern, $options);
     }
 
     /**
@@ -342,20 +342,8 @@ class PatternHelper
      */
     public static function evalPattern(string $patternExpr, string $subject, array $options = [])
     {
-        /* Parse the pattern expression */
-        $parser = new Parser($patternExpr);
-        $exprAst = $parser->parse();
-
-        /* Wrap in dynamic_eval node with source text for canonical runtime caching
-         * The C extension will use the source for cache keying and the AST for compilation */
-        $evalAst = [
-            'type' => 'dynamic_eval',
-            'expr' => $exprAst,
-            'source' => $patternExpr  /* Canonical source for runtime cache keying */
-        ];
-
-        /* Compile and execute through core runtime */
-        $pattern = self::fromAst($evalAst, $options);
+        /* Use C parser via Pattern::fromString for canonical runtime compilation */
+        $pattern = Pattern::fromString($patternExpr, $options);
         return $pattern->match($subject);
     }
 
@@ -373,9 +361,8 @@ class PatternHelper
      */
     public static function tableSubst(Table $table, string $keyPattern, string $template, string $subject): string
     {
-        /* Compile the key-capturing pattern */
-        $parser = new Parser($keyPattern);
-        $pattern = self::fromAst($parser->parse());
+        /* Compile the key-capturing pattern using C parser */
+        $pattern = Pattern::fromString($keyPattern);
 
         /*
          * Note: Full table-backed substitution requires:

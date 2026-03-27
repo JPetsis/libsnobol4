@@ -47,6 +47,76 @@ manipulation tasks.
     * Labels and goto-like transfers for advanced pattern flow.
     * Explicit control flow distinct from backtracking.
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Language Bindings                    │
+│  ┌────────────┐    ┌────────────┐    ┌────────────┐     │
+│  │    PHP     │    │   Python   │    │    Rust    │     │
+│  │  Binding   │    │  Binding   │    │  Binding   │     │
+│  └─────┬──────┘    └─────┬──────┘    └─────┬──────┘     │
+│        │                 │                 │            │
+│        └─────────────────┼─────────────────┘            │
+│                          │                              │
+│                   C Extension API                       │
+└──────────────────────────┼──────────────────────────────┘
+                           │
+┌──────────────────────────┼──────────────────────────────┐
+│              Language-Agnostic Core (C23)               │
+│                          │                              │
+│  ┌──────────────┐  ┌─────▼──────┐  ┌──────────────┐     │
+│  │ Lexer (C)    │─▶│ Parser (C) │─▶│  Compiler    │     │
+│  │ UTF-8 aware  │  │ Recursive  │  │  Bytecode    │     │
+│  └──────────────┘  │  Descent   │  └──────┬───────┘     │
+│                    └────────────┘         │             │
+│                          │                │             │
+│                    EBNF Grammar      ┌────▼───────┐     │
+│                    (snobol.ebnf)     │  Runtime   │     │
+│                                      │   Cache    │     │
+│                                      └────┬───────┘     │
+│                                           │             │
+│  ┌──────────────┐  ┌──────────────┐  ┌───▼────────┐     │
+│  │      VM      │◀─│   Bytecode   │◀─│   Tables   │     │
+│  │  Backtracking│  │   Execution  │  │  (Assoc)   │     │
+│  └──────────────┘  └──────────────┘  └────────────┘     │
+│                          │                              │
+│                    Optional JIT                         │
+│                  (Micro-JIT for hot                     │
+│                   patterns)                             │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Key Design Principles:**
+
+1. **Language-Agnostic Core**: The C core (`snobol4-php/`) has no dependencies on PHP or any other host language.
+2. **Thin Bindings**: Language bindings (PHP, Python, Rust) are thin wrappers over the C API.
+3. **Formal Grammar**: The SNOBOL pattern syntax is defined in `grammar/snobol.ebnf`.
+4. **Caching**: Compiled patterns are cached by source text for efficient reuse.
+5. **Optional JIT**: Hot patterns can be JIT-compiled for performance.
+
+### C Core Components
+
+| Component            | File                         | Description                              |
+|----------------------|------------------------------|------------------------------------------|
+| **Lexer**            | `snobol_lexer.h/c`           | UTF-8 aware tokenizer with save/restore  |
+| **Parser**           | `snobol_parser.h/c`          | Recursive descent parser producing C AST |
+| **AST**              | `snobol_ast.h/c`             | Tagged union AST with memory management  |
+| **Compiler**         | `snobol_compiler.c`          | AST → bytecode compiler                  |
+| **VM**               | `snobol_vm.c`                | Bytecode interpreter with backtracking   |
+| **Tables**           | `snobol_table.h/c`           | Associative table runtime                |
+| **Dynamic Patterns** | `snobol_dynamic_pattern.h/c` | EVAL(...) runtime cache                  |
+| **JIT**              | `snobol_jit.h/c`             | Micro-JIT for hot patterns               |
+
+### PHP Binding
+
+The PHP binding (`php-src/`) provides:
+
+- `Pattern::fromString($source)` - Parse and compile SNOBOL pattern text
+- `Pattern::compileFromAst($ast)` - Compile AST from `Builder` API
+- `PatternHelper` - High-level convenience methods
+- `DynamicPatternCache` - PHP interface to runtime cache
+
 ## Requirements
 
 * PHP 8.0+ (Developed with PHP 8.4)

@@ -128,11 +128,9 @@ class DynamicPatternCache
             ];
         }
 
-        /* Parse and compile the pattern through the core runtime */
+        /* Parse and compile the pattern through the C core runtime */
         try {
-            $parser = new Parser($patternSource);
-            $ast = $parser->parse();
-            $pattern = PatternHelper::fromAst($ast);
+            $pattern = Pattern::fromString($patternSource);
 
             /* Cache the compiled pattern */
             $this->put($patternSource, $pattern);

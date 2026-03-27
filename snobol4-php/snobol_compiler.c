@@ -825,3 +825,383 @@ void compiler_free(uint8_t *bc) {
         snobol_free(bc);
     }
 }
+
+/* ============================================================================
+ * C AST-based compilation
+ * ============================================================================
+ * Compiles C AST (ast_node_t*) to bytecode.
+ * This is the new compilation path for the language-agnostic core.
+ */
+
+/* Forward declaration */
+static int emit_node_c(ast_node_t* node, CodeBuf *c);
+static int emit_alt_c(ast_node_t* left, ast_node_t* right, CodeBuf *c);
+static int emit_arbno_c(ast_node_t* sub, CodeBuf *c);
+static int emit_cap_c(zval *reg_zv, ast_node_t* sub, CodeBuf *c);
+static int emit_repeat_c(ast_node_t* sub, zval *min_zv, zval *max_zv, CodeBuf *c);
+
+/**
+ * Compile C AST to bytecode
+ * @param ast Root AST node
+ * @param options Compilation options (can be NULL)
+ * @param out_bc Output: bytecode buffer
+ * @param out_len Output: bytecode length
+ * @return 0 on success, -1 on failure
+ */
+int compile_ast_to_bytecode_c(ast_node_t* ast, zval *options, uint8_t **out_bc, size_t *out_len) {
+    SNOBOL_LOG("compile_ast_to_bytecode_c START");
+    free_charclass_list();
+    next_loop_id = 0;
+    compiler_case_insensitive = false;
+
+    if (options && Z_TYPE_P(options) == IS_ARRAY) {
+        zval *ci = zend_hash_str_find(Z_ARRVAL_P(options), "caseInsensitive", sizeof("caseInsensitive")-1);
+        if (ci && (Z_TYPE_P(ci) == IS_TRUE || (Z_TYPE_P(ci) == IS_LONG && Z_LVAL_P(ci)))) {
+            compiler_case_insensitive = true;
+        }
+    }
+
+    CodeBuf cb;
+    cb_init(&cb);
+    
+    if (emit_node_c(ast, &cb) != 0) {
+        SNOBOL_LOG("compile_ast_to_bytecode_c FAILED at emit_node_c");
+        cb_free(&cb);
+        free_charclass_list();
+        return -1;
+    }
+    cb_emit_u8(&cb, OP_ACCEPT);
+
+    CCEntry *rev = NULL;
+    for (CCEntry *it = charclass_head; it != NULL; ) {
+        CCEntry *next = it->next;
+        it->next = rev;
+        rev = it;
+        it = next;
+    }
+    charclass_head = rev;
+
+    size_t *offsets = charclass_count > 0 ? snobol_malloc(charclass_count * sizeof(size_t)) : NULL;
+    int idx = 0;
+    for (CCEntry *it = charclass_head; it != NULL; it = it->next) {
+        if (offsets) offsets[idx++] = cb_pos(&cb);
+        cb_emit_u16(&cb, it->range_count);
+        cb_emit_u16(&cb, it->case_insensitive);
+        for (size_t i = 0; i < it->range_count; ++i) {
+            cb_emit_u32(&cb, it->ranges[i].start);
+            cb_emit_u32(&cb, it->ranges[i].end);
+        }
+    }
+
+    if (offsets) {
+        for (uint32_t i = 0; i < charclass_count; ++i) {
+            cb_emit_u32(&cb, (uint32_t)offsets[i]);
+        }
+        snobol_free(offsets);
+    }
+
+    cb_emit_u32(&cb, charclass_count);
+
+    uint8_t *out = snobol_malloc(cb.len);
+    if (!out) {
+        SNOBOL_LOG("compile_ast_to_bytecode_c FAILED to allocate final bc");
+        cb_free(&cb);
+        return -1;
+    }
+    memcpy(out, cb.buf, cb.len);
+    *out_bc = out;
+    *out_len = cb.len;
+
+    cb_free(&cb);
+    free_charclass_list();
+    SNOBOL_LOG("compile_ast_to_bytecode_c SUCCESS, len=%zu", *out_len);
+    return 0;
+}
+
+/* C AST emit helpers */
+static int emit_alt_c(ast_node_t* left, ast_node_t* right, CodeBuf *c) {
+    /* Emit SPLIT opcode to try both alternatives */
+    size_t where_split = cb_pos(c);
+    cb_emit_u8(c, OP_SPLIT);
+    size_t where_a = cb_pos(c); cb_emit_u32(c, 0);  /* placeholder */
+    size_t where_b = cb_pos(c); cb_emit_u32(c, 0);  /* placeholder */
+
+    /* Left alternative */
+    size_t left_start = cb_pos(c);
+    if (emit_node_c(left, c) != 0) return -1;
+
+    /* Jump past right alternative */
+    size_t jmp_where = cb_pos(c);
+    cb_emit_u8(c, OP_JMP);
+    size_t jmp_target_pos = cb_pos(c); cb_emit_u32(c, 0);
+
+    /* Right alternative */
+    size_t right_start = cb_pos(c);
+    if (emit_node_c(right, c) != 0) return -1;
+
+    /* Fill in placeholders */
+    size_t end_pos = cb_pos(c);
+    uint32_t v1 = (uint32_t)left_start;
+    c->buf[where_a+0] = (v1 >> 24) & 0xff; c->buf[where_a+1] = (v1 >> 16) & 0xff;
+    c->buf[where_a+2] = (v1 >> 8) & 0xff; c->buf[where_a+3] = v1 & 0xff;
+    
+    uint32_t v2 = (uint32_t)right_start;
+    c->buf[where_b+0] = (v2 >> 24) & 0xff; c->buf[where_b+1] = (v2 >> 16) & 0xff;
+    c->buf[where_b+2] = (v2 >> 8) & 0xff; c->buf[where_b+3] = v2 & 0xff;
+    
+    uint32_t vj = (uint32_t)end_pos;
+    c->buf[jmp_target_pos+0] = (vj >> 24) & 0xff; c->buf[jmp_target_pos+1] = (vj >> 16) & 0xff;
+    c->buf[jmp_target_pos+2] = (vj >> 8) & 0xff; c->buf[jmp_target_pos+3] = vj & 0xff;
+
+    return 0;
+}
+
+static int emit_arbno_c(ast_node_t* sub, CodeBuf *c) {
+    /* Unwrap nested ARBNOs */
+    while (sub && sub->type == AST_ARBNO) {
+        sub = sub->data.arbno.sub;
+    }
+    
+    /* Unwrap REPEAT(0, -1) which is equivalent to ARBNO */
+    while (sub && sub->type == AST_REPETITION) {
+        if (sub->data.repetition.min == 0 && sub->data.repetition.max == -1) {
+            sub = sub->data.repetition.sub;
+            continue;
+        }
+        break;
+    }
+    
+    if (!sub) return -1;
+    if (next_loop_id >= MAX_LOOPS) return -1;
+    
+    uint8_t loop_id = next_loop_id++;
+    uint32_t min = 0;
+    uint32_t max = (uint32_t)-1;
+
+    size_t init_pos = cb_pos(c);
+    cb_emit_u8(c, OP_REPEAT_INIT);
+    cb_emit_u8(c, loop_id);
+    cb_emit_u32(c, min);
+    cb_emit_u32(c, max);
+    size_t skip_target_off = cb_pos(c);
+    cb_emit_u32(c, 0); /* placeholder for skip_target */
+
+    size_t body_start = cb_pos(c);
+    if (emit_node_c(sub, c) != 0) return -1;
+
+    cb_emit_u8(c, OP_REPEAT_STEP);
+    cb_emit_u8(c, loop_id);
+    cb_emit_u32(c, (uint32_t)body_start);
+
+    size_t done_pos = cb_pos(c);
+    
+    /* Fill skip_target placeholder */
+    uint32_t v_done = (uint32_t)done_pos;
+    c->buf[skip_target_off+0] = (v_done >> 24) & 0xff;
+    c->buf[skip_target_off+1] = (v_done >> 16) & 0xff;
+    c->buf[skip_target_off+2] = (v_done >> 8) & 0xff;
+    c->buf[skip_target_off+3] = v_done & 0xff;
+
+    return 0;
+}
+
+static int emit_cap_c(zval *reg_zv, ast_node_t* sub, CodeBuf *c) {
+    /* Emit capture start, sub-pattern, capture end */
+    cb_emit_u8(c, OP_CAP_START);
+    cb_emit_u8(c, (uint8_t)Z_LVAL_P(reg_zv));
+    
+    if (emit_node_c(sub, c) != 0) return -1;
+    
+    cb_emit_u8(c, OP_CAP_END);
+    cb_emit_u8(c, (uint8_t)Z_LVAL_P(reg_zv));
+    return 0;
+}
+
+static int emit_repeat_c(ast_node_t* sub, zval *min_zv, zval *max_zv, CodeBuf *c) {
+    if (!sub) return -1;
+    if (next_loop_id >= MAX_LOOPS) return -1;
+    
+    uint8_t loop_id = next_loop_id++;
+    uint32_t min = (uint32_t)Z_LVAL_P(min_zv);
+    uint32_t max = (uint32_t)Z_LVAL_P(max_zv);
+
+    /* Flatten repeat(0, -1) as ARBNO */
+    if (min == 0 && max == (uint32_t)-1) {
+        /* Unwrap nested */
+        while (sub && sub->type == AST_REPETITION) {
+            if (sub->data.repetition.min == 0 && sub->data.repetition.max == -1) {
+                sub = sub->data.repetition.sub;
+                continue;
+            }
+            break;
+        }
+        /* Use arbno logic */
+        return emit_arbno_c(sub, c);
+    }
+
+    size_t init_pos = cb_pos(c);
+    cb_emit_u8(c, OP_REPEAT_INIT);
+    cb_emit_u8(c, loop_id);
+    cb_emit_u32(c, min);
+    cb_emit_u32(c, max);
+    size_t skip_target_off = cb_pos(c);
+    cb_emit_u32(c, 0); /* placeholder */
+
+    size_t body_start = cb_pos(c);
+    if (emit_node_c(sub, c) != 0) return -1;
+
+    cb_emit_u8(c, OP_REPEAT_STEP);
+    cb_emit_u8(c, loop_id);
+    cb_emit_u32(c, (uint32_t)body_start);
+
+    size_t done_pos = cb_pos(c);
+    
+    /* Fill skip_target */
+    uint32_t v_done = (uint32_t)done_pos;
+    c->buf[skip_target_off+0] = (v_done >> 24) & 0xff;
+    c->buf[skip_target_off+1] = (v_done >> 16) & 0xff;
+    c->buf[skip_target_off+2] = (v_done >> 8) & 0xff;
+    c->buf[skip_target_off+3] = v_done & 0xff;
+
+    return 0;
+}
+
+/**
+ * Emit bytecode for a C AST node
+ */
+static int emit_node_c(ast_node_t* node, CodeBuf *c) {
+    if (!node) return -1;
+
+    switch (node->type) {
+        case AST_LITERAL:
+            return emit_lit_bytes(c, node->data.literal.text, node->data.literal.len);
+
+        case AST_CONCAT:
+            for (size_t i = 0; i < node->data.concat.count; i++) {
+                if (emit_node_c(node->data.concat.parts[i], c) != 0) {
+                    return -1;
+                }
+            }
+            return 0;
+
+        case AST_ALT:
+            return emit_alt_c(node->data.alt.left, node->data.alt.right, c);
+
+        case AST_REPETITION: {
+            zval min_zv, max_zv;
+            ZVAL_LONG(&min_zv, node->data.repetition.min);
+            ZVAL_LONG(&max_zv, node->data.repetition.max);
+            return emit_repeat_c(node->data.repetition.sub, &min_zv, &max_zv, c);
+        }
+
+        case AST_SPAN: {
+            zval set_zv;
+            ZVAL_STRINGL(&set_zv, node->data.charclass.set, node->data.charclass.len);
+            int result = emit_span(&set_zv, c);
+            zval_ptr_dtor(&set_zv);
+            return result;
+        }
+
+        case AST_BREAK: {
+            zval set_zv;
+            ZVAL_STRINGL(&set_zv, node->data.charclass.set, node->data.charclass.len);
+            int result = emit_break(&set_zv, c);
+            zval_ptr_dtor(&set_zv);
+            return result;
+        }
+
+        case AST_ANY: {
+            zval set_zv;
+            if (node->data.charclass.set) {
+                ZVAL_STRINGL(&set_zv, node->data.charclass.set, node->data.charclass.len);
+            } else {
+                ZVAL_NULL(&set_zv);
+            }
+            int result = emit_any(&set_zv, c);
+            zval_ptr_dtor(&set_zv);
+            return result;
+        }
+
+        case AST_NOTANY: {
+            zval set_zv;
+            ZVAL_STRINGL(&set_zv, node->data.charclass.set, node->data.charclass.len);
+            int result = emit_notany(&set_zv, c);
+            zval_ptr_dtor(&set_zv);
+            return result;
+        }
+
+        case AST_ARBNO:
+            return emit_arbno_c(node->data.arbno.sub, c);
+
+        case AST_CAP: {
+            zval reg_zv;
+            ZVAL_LONG(&reg_zv, node->data.cap.reg);
+            return emit_cap_c(&reg_zv, node->data.cap.sub, c);
+        }
+
+        case AST_ASSIGN: {
+            zval var_zv, reg_zv;
+            ZVAL_LONG(&var_zv, node->data.assign.var);
+            ZVAL_LONG(&reg_zv, node->data.assign.reg);
+            return emit_assign(&var_zv, &reg_zv, c);
+        }
+
+        case AST_LEN: {
+            zval n_zv;
+            ZVAL_LONG(&n_zv, node->data.len.n);
+            return emit_len(&n_zv, c);
+        }
+
+        case AST_EVAL: {
+            zval fn_zv, reg_zv;
+            ZVAL_LONG(&fn_zv, node->data.eval.fn);
+            ZVAL_LONG(&reg_zv, node->data.eval.reg);
+            return emit_eval(&fn_zv, &reg_zv, c);
+        }
+
+        case AST_DYNAMIC_EVAL:
+            /* Dynamic eval: compile inner expression and emit as dynamic pattern */
+            return emit_node_c(node->data.dynamic_eval.expr, c);
+
+        case AST_ANCHOR: {
+            zval type_zv;
+            if (node->data.anchor.atype == ANCHOR_START) {
+                ZVAL_STRING(&type_zv, "start");
+            } else {
+                ZVAL_STRING(&type_zv, "end");
+            }
+            int result = emit_anchor(&type_zv, c);
+            zval_ptr_dtor(&type_zv);
+            return result;
+        }
+
+        case AST_EMIT: {
+            /* Create emit node in PHP array format for existing emit_emit() */
+            zval emit_node;
+            array_init(&emit_node);
+            add_assoc_string(&emit_node, "type", "emit");
+            if (node->data.emit.text) {
+                add_assoc_string(&emit_node, "text", node->data.emit.text);
+            } else {
+                zval reg_zv;
+                ZVAL_LONG(&reg_zv, node->data.emit.reg);
+                add_assoc_zval(&emit_node, "reg", &reg_zv);
+            }
+            int result = emit_emit(&emit_node, c);
+            zval_ptr_dtor(&emit_node);
+            return result;
+        }
+
+        case AST_LABEL:
+        case AST_GOTO:
+        case AST_TABLE_ACCESS:
+        case AST_TABLE_UPDATE:
+            /* These are handled at statement level, not pattern compilation */
+            SNOBOL_LOG("emit_node_c: unhandled node type %d", node->type);
+            return -1;
+
+        default:
+            SNOBOL_LOG("emit_node_c: unknown node type %d", node->type);
+            return -1;
+    }
+}

@@ -1,0 +1,179 @@
+(* SNOBOL4 Pattern Grammar *)
+(* Formal EBNF specification for the SNOBOL pattern syntax *)
+(* Used as the canonical reference for parser implementation *)
+
+(* ============================================================================ *)
+(* Core Pattern Structure *)
+(* ============================================================================ *)
+
+pattern         = statement , EOF ;
+
+statement       = [ label ] , pattern_expr , [ goto ] ;
+
+label           = IDENT , ":" ;
+
+goto            = ":" , "(" , IDENT , ")" ;
+
+pattern_expr    = alternation ;
+
+(* ============================================================================ *)
+(* Pattern Operators (precedence: lowest to highest) *)
+(* ============================================================================ *)
+
+(* Alternation: lowest precedence *)
+alternation     = concatenation , { "|" , concatenation } ;
+
+(* Concatenation: higher precedence than alternation *)
+concatenation   = repetition , { repetition } ;
+
+(* Repetition operators: higher precedence than concatenation *)
+repetition      = primary , [ ( "*" | "+" | "?" ) ] ;
+
+(* Bounded repetition: repeat(P, min, max) *)
+bounded_repeat = "repeat" , "(" , primary , "," , integer , "," , integer , ")" ;
+
+(* Primary patterns: highest precedence *)
+primary         = literal
+                | charclass
+                | anchored_pattern
+                | parenthesized
+                | function_call
+                | dynamic_eval
+                | table_access
+                | capture
+                | assignment
+                | length_match
+                | emit_directive
+                ;
+
+(* ============================================================================ *)
+(* Primary Pattern Types *)
+(* ============================================================================ *)
+
+(* Literal string match *)
+literal         = "'" , { character } , "'" ;
+
+(* Character class: match any character in set *)
+charclass       = "[" , { class_char } , "]" ;
+
+(* Anchored patterns *)
+anchored_pattern = ( "^" | "$" ) ;
+
+(* Parenthesized pattern for grouping *)
+parenthesized   = "(" , pattern_expr , ")" ;
+
+(* Function calls: SPAN, ANY, NOTANY, BREAK, LEN, EVAL *)
+function_call   = func_name , "(" , [ arg_list ] , ")" ;
+
+func_name       = "SPAN" | "ANY" | "NOTANY" | "BREAK" | "LEN" | "EVAL" ;
+
+arg_list        = arg , { "," , arg } ;
+
+arg             = literal
+                | IDENT
+                | variable_ref
+                | integer
+                ;
+
+(* Dynamic evaluation: EVAL(pattern_expr) *)
+dynamic_eval    = "EVAL" , "(" , pattern_expr , ")" ;
+
+(* Table access: TABLE[key] *)
+table_access    = IDENT , "[" , arg , "]" ;
+
+(* Capture: @variable or @register *)
+capture         = "@" , ( IDENT | integer ) ;
+
+(* Assignment: variable = register *)
+assignment      = IDENT , "=" , integer ;
+
+(* Length match: LEN(n) *)
+length_match    = "LEN" , "(" , integer , ")" ;
+
+(* Emit directive for output construction *)
+emit_directive  = "EMIT" , ( literal | "@" , integer ) ;
+
+(* ============================================================================ *)
+(* Lexical Elements *)
+(* ============================================================================ *)
+
+(* Single character - any valid UTF-8 character *)
+character       = ? any UTF-8 character except single quote ? ;
+
+(* Character class content - any character except ] *)
+class_char      = ? any UTF-8 character except ] ? ;
+
+(* Identifier: variable or function names *)
+IDENT           = letter , { letter | digit | "_" } ;
+
+letter          = "a" | ... | "z" | "A" | ... | "Z" | "_" ;
+
+digit           = "0" | ... | "9" ;
+
+(* Integer literal *)
+integer         = digit , { digit } ;
+
+(* Variable reference: $varname *)
+variable_ref    = "$" , IDENT ;
+
+(* Whitespace - ignored between tokens *)
+whitespace      = " " | "\t" | "\n" | "\r" ;
+
+(* ============================================================================ *)
+(* Operator Precedence Summary (lowest to highest) *)
+(* ============================================================================ *)
+(*
+  1. Alternation (|)
+  2. Concatenation (juxtaposition)
+  3. Repetition (*, +, ?)
+  4. Primary patterns (literals, classes, functions, etc.)
+  
+  Example: 'A' | 'B' 'C'*
+  Parses as: ALT(LIT('A'), CONCAT(LIT('B'), ARBNO(LIT('C'))))
+*)
+
+(* ============================================================================ *)
+(* AST Mapping Reference *)
+(* ============================================================================ *)
+(*
+  pattern          → AST node (type depends on content)
+  alternation      → AST_ALT (left-recursive → left-associated tree)
+  concatenation    → AST_CONCAT (flattened array of parts)
+  repetition       → AST_ARBNO (*), AST_REPETITION (+, ?, bounded)
+  literal          → AST_LITERAL
+  charclass        → AST_SPAN, AST_ANY, AST_NOTANY, AST_BREAK
+  function_call    → Depends on function name
+  dynamic_eval     → AST_DYNAMIC_EVAL
+  capture          → AST_CAP
+  anchor           → AST_ANCHOR
+  emit_directive   → AST_EMIT
+  table_access     → AST_TABLE_ACCESS
+*)
+
+(* ============================================================================ *)
+(* Error Recovery Rules *)
+(* ============================================================================ *)
+(*
+  1. On unexpected token in pattern_expr: report error, skip to next | or end
+  2. On unmatched (: report error, insert closing )
+  3. On unmatched ': report error, insert closing '
+  4. On unknown function name: report error, treat as IDENT
+  5. On invalid character: report error, skip character
+*)
+
+(* ============================================================================ *)
+(* Examples *)
+(* ============================================================================ *)
+(*
+  'hello'                     → LITERAL("hello")
+  'A' | 'B'                   → ALT(LIT("A"), LIT("B"))
+  'A' 'B'                     → CONCAT(LIT("A"), LIT("B"))
+  'x'*                        → ARBNO(LIT("x"))
+  'x'+                        → REPETITION(LIT("x"), 1, -1)
+  SPAN('0-9')                 → SPAN("0-9")
+  ANY('aeiou')                → ANY("aeiou")
+  @1 'hello'                  → CAP(1, LIT("hello"))
+  EVAL('A' | 'B')             → DYNAMIC_EVAL(ALT(LIT("A"), LIT("B")))
+  LABEL: 'A' :(END)           → LABEL("LABEL", LIT("A")), GOTO("END")
+  TABLE['key']                → TABLE_ACCESS("TABLE", LIT("key"))
+*)

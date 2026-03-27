@@ -5,29 +5,26 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* AST node kinds used by the PHP -> C compiler bridge.
-   The AST is represented in PHP as associative arrays; the extension reads them.
-   Node format (PHP array):
-     [ 'type' => 'lit', 'text' => 'abc' ]
-     [ 'type' => 'concat', 'parts' => [node1, node2, ...] ]
-     [ 'type' => 'alt', 'left' => node1, 'right' => node2 ]
-     [ 'type' => 'span', 'set' => string_of_chars ] // set is literal list (compiler builds bitmap)
-     [ 'type' => 'break', 'set' => string_of_chars ]
-     [ 'type' => 'any' ]  // match any single codepoint
-     [ 'type' => 'notany', 'set' => string_of_chars ]
-     [ 'type' => 'arbno', 'sub' => node ] // zero or more of subpattern
-     [ 'type' => 'cap', 'reg' => integer, 'sub' => node ] // capture sub into reg
-     [ 'type' => 'assign', 'var' => integer, 'reg' => integer ] // assign capture reg to var
-     [ 'type' => 'len', 'n' => integer ]
-     [ 'type' => 'eval', 'fn' => integer, 'reg' => integer ] // call eval fn
+/* AST node types for C-based compilation.
+   See snobol_ast.h for the full AST node definitions.
+   
+   The compiler accepts both:
+   - C AST (ast_node_t*) for new C-based parser
+   - PHP zval* for backward compatibility during migration
 */
 
 #include "php.h"
+#include "snobol_ast.h"
 
+/* New C AST-based compilation */
+int compile_ast_to_bytecode_c(ast_node_t* ast, zval *options, uint8_t **out_bc, size_t *out_len);
+
+/* Legacy PHP AST compilation (for migration) */
 int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *out_len);
+
 int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, size_t *out_len);
 
 /* helper to free bc */
 void compiler_free(uint8_t *bc);
 
-#endif // SNOBOL_COMPILER_H
+#endif /* SNOBOL_COMPILER_H */

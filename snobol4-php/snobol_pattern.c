@@ -3,6 +3,8 @@
 #include "zend_exceptions.h"
 #include "snobol_compiler.h"
 #include "snobol_vm.h"
+#include "snobol_lexer.h"
+#include "snobol_parser.h"
 #ifdef SNOBOL_JIT
 #include "snobol_jit.h"
 #endif
@@ -95,6 +97,11 @@ ZEND_BEGIN_ARG_INFO_EX(ai_compileFromAst, 0, 0, 1)
     ZEND_ARG_ARRAY_INFO(0, options, 1)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(ai_fromString, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, source, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(ai_match, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, input, IS_STRING, 0)
 ZEND_END_ARG_INFO()
@@ -147,8 +154,99 @@ PHP_METHOD(Snobol_Pattern, compileFromAst) {
 #ifdef SNOBOL_JIT
     intern->jit_ctx = snobol_jit_acquire_context(bc, bc_len);
 #endif
-    
+
     SNOBOL_LOG("Snobol_Pattern::compileFromAst: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
+}
+
+/**
+ * Pattern::fromString(string $source, ?array $options = null): Pattern
+ * 
+ * Parse and compile a pattern from source text using the C parser.
+ * This is the new language-agnostic compilation path.
+ */
+PHP_METHOD(Snobol_Pattern, fromString) {
+    zend_string *source;
+    zval *options = NULL;
+    ZEND_PARSE_PARAMETERS_START(1,2)
+        Z_PARAM_STR(source)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_OR_NULL(options)
+    ZEND_PARSE_PARAMETERS_END();
+
+    SNOBOL_LOG("Snobol_Pattern::fromString: START, source='%.*s'", (int)ZSTR_LEN(source), ZSTR_VAL(source));
+
+    /* Create lexer and parser */
+    snobol_lexer_t* lexer = snobol_lexer_create(ZSTR_VAL(source), ZSTR_LEN(source));
+    if (!lexer) {
+        zend_throw_exception(zend_ce_exception, "Failed to create lexer", 0);
+        RETURN_NULL();
+    }
+
+    snobol_parser_t* parser = snobol_parser_create();
+    if (!parser) {
+        snobol_lexer_destroy(lexer);
+        zend_throw_exception(zend_ce_exception, "Failed to create parser", 0);
+        RETURN_NULL();
+    }
+
+    /* Parse the source */
+    ast_node_t* ast = snobol_parser_parse(parser, lexer);
+    
+    if (snobol_parser_has_error(parser)) {
+        const char* error = snobol_parser_get_error(parser);
+        size_t line, col;
+        snobol_parser_get_error_location(parser, &line, &col);
+        
+        char msg[512];
+        snprintf(msg, sizeof(msg), "Parse error at line %zu, column %zu: %s", line, col, error ? error : "unknown error");
+        
+        snobol_parser_destroy(parser);
+        snobol_lexer_destroy(lexer);
+        zend_throw_exception(zend_ce_exception, msg, 0);
+        RETURN_NULL();
+    }
+
+    if (!ast) {
+        snobol_parser_destroy(parser);
+        snobol_lexer_destroy(lexer);
+        zend_throw_exception(zend_ce_exception, "Parser returned NULL AST", 0);
+        RETURN_NULL();
+    }
+
+    /* Compile AST to bytecode */
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    
+    if (compile_ast_to_bytecode_c(ast, options, &bc, &bc_len) != 0) {
+        SNOBOL_LOG("Snobol_Pattern::fromString: compilation FAILED");
+        snobol_ast_free(ast);
+        snobol_parser_destroy(parser);
+        snobol_lexer_destroy(lexer);
+        zend_throw_exception(zend_ce_exception, "Failed to compile AST", 0);
+        RETURN_NULL();
+    }
+
+    /* Free AST - bytecode is now compiled */
+    snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+    snobol_lexer_destroy(lexer);
+
+    /* Create Pattern object */
+    if (object_init_ex(return_value, snobol_pattern_ce) != SUCCESS) {
+        SNOBOL_LOG("Snobol_Pattern::fromString: object_init_ex FAILED");
+        if (bc) compiler_free(bc);
+        RETURN_NULL();
+    }
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(return_value));
+    intern->bc = bc;
+    intern->bc_len = bc_len;
+
+#ifdef SNOBOL_JIT
+    intern->jit_ctx = snobol_jit_acquire_context(bc, bc_len);
+#endif
+
+    SNOBOL_LOG("Snobol_Pattern::fromString: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
 }
 
 typedef struct {
@@ -409,6 +507,7 @@ PHP_METHOD(Snobol_Pattern, setJit) {
 
 static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, compileFromAst, ai_compileFromAst, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_Pattern, fromString, ai_fromString, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
     PHP_ME(Snobol_Pattern, match, ai_match, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, subst, ai_subst, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, setEvalCallbacks, ai_setEval, ZEND_ACC_PUBLIC)
