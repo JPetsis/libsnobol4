@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
-#include "../../snobol4-php/snobol_vm.h"
-#include "../../snobol4-php/snobol_jit.h"
+#include "../../snobol4-core/snobol_vm.h"
+#include "../../snobol4-core/snobol_jit.h"
 
 void test_suite(const char *name);
 void test_assert(bool condition, const char *message);

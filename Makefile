@@ -52,7 +52,7 @@ ifeq ($(IN_DDEV),1)
 	@echo "Building inside DDEV container..."
 	@rm -rf /tmp/snobol_build
 	@mkdir -p /tmp/snobol_build
-	@cp -rf /var/www/html/snobol4-php/. /tmp/snobol_build/
+	@cp -rf /var/www/html/snobol4-core/. /tmp/snobol_build/
 	@cd /tmp/snobol_build && \
 		phpize && \
 		./configure --enable-snobol && \
@@ -70,7 +70,7 @@ else
 		yum install -y valgrind || \
 		brew install valgrind || \
 		echo "Warning: Could not install valgrind automatically. Please install manually."
-	@cd snobol4-php && \
+	@cd snobol4-core && \
 		phpize && \
 		./configure --enable-snobol && \
 		$(MAKE)
@@ -118,10 +118,10 @@ clean:
 ifeq ($(IN_DDEV),1)
 	@rm -rf /tmp/snobol_build
 endif
-	@cd snobol4-php && \
+	@cd snobol4-core && \
 		if [ -f Makefile ]; then $(MAKE) clean 2>/dev/null || true; fi && \
 		phpize --clean 2>/dev/null || true
-	@rm -rf snobol4-php/.libs snobol4-php/modules snobol4-php/*.lo snobol4-php/*.o
+	@rm -rf snobol4-core/.libs snobol4-core/modules snobol4-core/*.lo snobol4-core/*.o
 	@if [ -d tests/c ]; then \
 		cd tests/c && $(MAKE) clean 2>/dev/null || true; \
 	fi
@@ -160,7 +160,7 @@ else ifdef DDEV
 	@ddev exec sudo make install
 else
 	@echo "Installing extension in native environment..."
-	@cd snobol4-php && sudo $(MAKE) install
+	@cd snobol4-core && sudo $(MAKE) install
 	@echo "Extension installed! Add 'extension=snobol.so' to your php.ini to enable."
 endif
 
@@ -217,7 +217,7 @@ ifeq ($(IN_DDEV),1)
 	@echo "Building with ASan inside DDEV..."
 	@rm -rf /tmp/snobol_build
 	@mkdir -p /tmp/snobol_build
-	@cp -rf /var/www/html/snobol4-php/. /tmp/snobol_build/
+	@cp -rf /var/www/html/snobol4-core/. /tmp/snobol_build/
 	@cd /tmp/snobol_build && \
 		phpize && \
 		./configure --enable-snobol CFLAGS="-fsanitize=address -fno-omit-frame-pointer -g" LDFLAGS="-fsanitize=address" && \
@@ -227,7 +227,7 @@ else ifdef DDEV
 	@ddev exec make build-asan
 else
 	@echo "Building with ASan natively..."
-	@cd snobol4-php && \
+	@cd snobol4-core && \
 		phpize && \
 		./configure --enable-snobol CFLAGS="-fsanitize=address -fno-omit-frame-pointer -g" LDFLAGS="-fsanitize=address" && \
 		$(MAKE)
@@ -273,7 +273,7 @@ ifeq ($(IN_DDEV),1)
 	@echo "Building with JIT inside DDEV..."
 	@rm -rf /tmp/snobol_build
 	@mkdir -p /tmp/snobol_build
-	@cp -rf /var/www/html/snobol4-php/. /tmp/snobol_build/
+	@cp -rf /var/www/html/snobol4-core/. /tmp/snobol_build/
 	@cd /tmp/snobol_build && \
 		phpize && \
 		./configure --enable-snobol --enable-snobol-jit --enable-snobol-profile && \
@@ -283,7 +283,7 @@ else ifdef DDEV
 	@ddev exec make build-jit
 else
 	@echo "Building with JIT natively..."
-	@cd snobol4-php && \
+	@cd snobol4-core && \
 		phpize && \
 		./configure --enable-snobol --enable-snobol-jit && \
 		$(MAKE)

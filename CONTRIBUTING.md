@@ -27,7 +27,7 @@ We recommend using **DDEV** for a consistent development environment that mirror
    ```
    This command will:
     * Start the web and database containers.
-   * Build the C extension from `snobol4-php/` in a temporary directory inside the container.
+   * Build the C extension from `snobol4-core/` in a temporary directory inside the container.
    * Install and enable the `snobol.so` extension for CLI and FPM.
 
 3. **Install PHP Dev Dependencies (optional but recommended):**
@@ -40,7 +40,7 @@ We recommend using **DDEV** for a consistent development environment that mirror
 
 ### Project Structure
 
-* `snobol4-php/`: **Core C Code** – VM, compiler, and extension glue (`php_snobol.c`).
+* `snobol4-core/`: **Core C Code** – VM, compiler, and extension glue (`php_snobol.c`).
 * `php-src/`: **PHP Helpers** – Userland PHP classes like `Snobol\Builder` (`Builder.php`).
 * `public/`: **Examples / Entrypoints** – Example scripts and the DDEV web docroot.
 * `tests/`: **Tests** – C tests (`tests/c`) and PHP tests (`tests/php`).
@@ -72,7 +72,7 @@ The Makefile automatically detects whether it is running:
 
 - Inside the DDEV container (builds from `/tmp/snobol_build`).
 - On the host with `ddev` available (delegates to `ddev exec`).
-- Purely natively (builds directly from `snobol4-php/`).
+- Purely natively (builds directly from `snobol4-core/`).
 
 ### Developer Tools (`dev/`)
 
@@ -95,7 +95,7 @@ de ./dev/build_in_ddev.sh
 
 ### Making Changes to C Code
 
-If you modify files in `snobol4-php/`, rebuild and **reinstall** the extension:
+If you modify files in `snobol4-core/`, rebuild and **reinstall** the extension:
 
 ```bash
 # Preferred: use Makefile from host
@@ -164,7 +164,7 @@ To diagnose performance issues or optimized hotspots, you can build the extensio
 
 1. **Rebuild with profiling:**
    ```bash
-   ddev exec "cd snobol4-php && phpize && ./configure --enable-snobol --enable-snobol-profile && make && sudo make install"
+   ddev exec "cd snobol4-core && phpize && ./configure --enable-snobol --enable-snobol-profile && make && sudo make install"
    ddev restart
    ```
 
@@ -251,13 +251,34 @@ The extension includes a built-in logging mechanism for development:
 ## Coding Standards
 
 * **C Code:**
-    - Follow the conventions used in existing files under `snobol4-php/`.
+    - Follow the conventions used in existing files under `snobol4-core/`.
     - Target C23 where possible; avoid non‑portable extensions.
     - Keep functions small and focused; prefer explicit error handling and clear ownership of allocated memory.
 * **PHP Code:**
     - Follow PSR‑12 coding standards.
     - Use the `Snobol\` namespace for library code.
     - Update or add PHPUnit tests when changing public behavior.
+
+## Language-Agnostic Core
+
+Since the `language-agnostic-core` change, the C core (`snobol4-core/`) is completely separate from any language
+binding.
+
+**For contributors working on the C core:**
+
+- See [`docs/CONTRIBUTORS.md`](docs/CONTRIBUTORS.md) for detailed architecture documentation
+- Learn how to add new language bindings (Python, Rust, etc.)
+- Understand how to modify the grammar and update lexer/parser
+- Find debugging tips and performance considerations
+
+**Key components:**
+
+- `snobol_lexer.h/c` - UTF-8 aware tokenizer
+- `snobol_parser.h/c` - Recursive descent parser
+- `snobol_ast.h/c` - Tagged union AST
+- `snobol_compiler.c` - AST → bytecode compiler
+- `snobol_vm.c` - Bytecode interpreter with backtracking
+- `grammar/snobol.ebnf` - Formal grammar specification
 
 ## Submitting Pull Requests
 

@@ -11,8 +11,8 @@ TEST_SOURCES = test_runner.c test_vm.c test_tables.c test_dynamic_patterns.c tes
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_BINARY = test_runner
 
-# SNOBOL4 core sources (relative to snobol4-php/)
-CORE_DIR = ../../snobol4-php
+# SNOBOL4 core sources (relative to snobol4-core/)
+CORE_DIR = ../../snobol4-core
 CORE_SOURCES = snobol_vm.c snobol_jit.c snobol_table.c snobol_dynamic_pattern.c snobol_ast.c snobol_lexer.c snobol_parser.c
 # Note: snobol_compiler.c excluded from standalone tests (requires PHP headers)
 # Build object files in the current directory to avoid read-only errors

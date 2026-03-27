@@ -24,7 +24,7 @@ This is a **proof-of-concept** showing how to create a Python binding for the SN
 └──────────────────────────┼──────────────────────────────┘
                            │
 ┌──────────────────────────┼──────────────────────────────┐
-│              SNOBOL4 C Core (snobol4-php/)              │
+│              SNOBOL4 C Core (snobol4-core/)             │
 │                          │                              │
 │  ┌──────────────┐  ┌─────▼──────┐  ┌──────────────┐     │
 │  │ Lexer (C)    │─▶│ Parser (C) │─▶│  Compiler    │     │
@@ -357,7 +357,7 @@ from setuptools import setup, Extension
 import os
 
 # Get the absolute path to the C core
-CORE_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'snobol4-php')
+CORE_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'snobol4-core')
 
 core_sources = [
     'snobol_ast.c',

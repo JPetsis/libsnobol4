@@ -89,7 +89,7 @@ manipulation tasks.
 
 **Key Design Principles:**
 
-1. **Language-Agnostic Core**: The C core (`snobol4-php/`) has no dependencies on PHP or any other host language.
+1. **Language-Agnostic Core**: The C core (`snobol4-core/`) has no dependencies on PHP or any other host language.
 2. **Thin Bindings**: Language bindings (PHP, Python, Rust) are thin wrappers over the C API.
 3. **Formal Grammar**: The SNOBOL pattern syntax is defined in `grammar/snobol.ebnf`.
 4. **Caching**: Compiled patterns are cached by source text for efficient reuse.
@@ -157,7 +157,7 @@ If you are not using DDEV, you can build the extension manually on any Linux/Uni
 
 1. **Navigate to the source directory:**
    ```bash
-   cd snobol4-php
+   cd snobol4-core
    ```
 
 2. **Prepare the build environment:**
@@ -599,7 +599,7 @@ Key test files:
 
 ## Project Structure
 
-* `snobol4-php/` - C source code for the PHP extension.
+* `snobol4-core/` - C source code for the PHP extension.
 * `php-src/` - PHP helper classes:
     - `Parser.php` - Recursive-descent parser for SNOBOL-like pattern strings.
     - `Lexer.php` - Tokenizer for the parser.
