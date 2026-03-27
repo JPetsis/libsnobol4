@@ -508,29 +508,32 @@ static int emit_node(zval *node, CodeBuf *c) {
          * The inner expression is compiled to bytecode which will be used at runtime */
         zval *expr = zend_hash_str_find(Z_ARRVAL_P(node), "expr", sizeof("expr")-1);
         if (!expr) return -1;
-        
+
         /* For dynamic_eval, we need to compile the inner expression separately
          * and store it for runtime pattern generation.
          * Currently this compiles the expression inline - full implementation
          * requires runtime pattern cache integration (see task 3.1/3.2) */
-        
+
         /* Create a sub-buffer for the dynamic pattern bytecode */
         CodeBuf dynamic_cb;
         cb_init(&dynamic_cb);
-        
+
         if (emit_node(expr, &dynamic_cb) != 0) {
             cb_free(&dynamic_cb);
             return -1;
         }
         cb_emit_u8(&dynamic_cb, OP_ACCEPT);
-        
+
         /* Emit the dynamic pattern bytecode as a data block
          * Format: OP_DYNAMIC_DEF followed by length and bytecode
          * This will be picked up by OP_DYNAMIC at runtime */
         cb_emit_u8(c, OP_DYNAMIC_DEF);
         cb_emit_u32(c, (uint32_t)dynamic_cb.len);
         cb_emit_bytes(c, dynamic_cb.buf, dynamic_cb.len);
-        
+
+        /* Emit OP_DYNAMIC to execute the stored bytecode */
+        cb_emit_u8(c, OP_DYNAMIC);
+
         cb_free(&dynamic_cb);
         return 0;
     }
@@ -713,10 +716,10 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
                             cb_emit_u32(&cb, (uint32_t)off); cb_emit_u32(&cb, 1); cb_emit_u8(&cb, '$');
                             continue;
                         }
-                        /* key is from key_start to i (exclusive of closing quote) */
+                        /* Key is from key_start to i (exclusive of closing quote) */
                         size_t key_len = i - key_start;
                         i++; /* skip closing quote */
-                        
+
                         /* Check for closing ']' */
                         if (i >= len || tpl[i] != ']') {
                             i = start_of_dollar + 1;
@@ -726,15 +729,15 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
                             continue;
                         }
                         i++; /* skip ']' */
-                        
-                        /* For literal keys, we need to store the key in a capture register temporarily */
-                        /* For now, use a placeholder approach: emit OP_EMIT_TABLE with table_id=0 and key from a fixed reg */
-                        /* TODO: Proper table name resolution requires a table registry */
+
+                        /* Emit OP_EMIT_TABLE with literal key stored in bytecode
+                         * Format: opcode u8, table_id u16, key_type u8 (0=literal), key_len u16, key_bytes...
+                         * Table ID 0 means "resolve by name at runtime" - for now use placeholder */
                         cb_emit_u8(&cb, OP_EMIT_TABLE);
-                        cb_emit_u16(&cb, 0); /* table_id placeholder */
-                        cb_emit_u8(&cb, 0);  /* key_reg placeholder - literal key not yet supported */
-                        /* Emit the literal key as a capture for now */
-                        /* This is a simplified approach - full implementation needs table name registry */
+                        cb_emit_u16(&cb, 0); /* table_id placeholder - resolved at runtime */
+                        cb_emit_u8(&cb, 0);  /* key_type: 0 = literal key */
+                        cb_emit_u16(&cb, (uint16_t)key_len); /* literal key length */
+                        cb_emit_bytes(&cb, (const uint8_t*)(tpl + key_start), key_len);
                     } else {
                         /* Identifier key (capture-derived) */
                         while (i < len && tpl[i] >= '0' && tpl[i] <= '9') {
@@ -754,11 +757,13 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
                             key_reg = (uint8_t)(reg_start[0] - '0');
                         }
                         i++; /* skip ']' */
-                        
-                        /* Emit OP_EMIT_TABLE */
+
+                        /* Emit OP_EMIT_TABLE with capture-derived key
+                         * Format: opcode u8, table_id u16, key_type u8 (1=capture), key_reg u8 */
                         cb_emit_u8(&cb, OP_EMIT_TABLE);
                         cb_emit_u16(&cb, 0); /* table_id placeholder - needs resolution */
-                        cb_emit_u8(&cb, key_reg);
+                        cb_emit_u8(&cb, 1);  /* key_type: 1 = capture-derived key */
+                        cb_emit_u8(&cb, (uint8_t)key_reg);
                     }
                 } else {
                     cb_emit_u8(&cb, OP_EMIT_CAPTURE); cb_emit_u8(&cb, reg);

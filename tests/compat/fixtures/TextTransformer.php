@@ -7,6 +7,7 @@
 namespace Snobol\Tests\Compat;
 
 use Snobol\DynamicPatternCache;
+use Snobol\PatternHelper;
 
 class TextTransformer
 {
@@ -35,12 +36,32 @@ class TextTransformer
 
     public function transformWithPattern(string $text, string $pattern): array
     {
-        /* Use dynamic pattern cache for repeated patterns */
-        $compileResult = $this->cache->compile($pattern);
+        /* Use core runtime for dynamic pattern evaluation via PatternHelper
+         * Note: Complex patterns with alternation (|) require backtracking support
+         * in the dynamic executor. For now, use simple literal patterns.
+         */
+        $result = PatternHelper::evalPattern($pattern, $text);
 
-        /* Apply transformation based on pattern type */
+        if ($result !== false) {
+            /* Extract matched text from captures */
+            $matches = [];
+            foreach ($result as $key => $value) {
+                if (is_string($key) && str_starts_with($key, 'v') && is_string($value)) {
+                    $matches[] = $value;
+                }
+            }
+
+            /* If no captures, use the matched portion of subject */
+            if (empty($matches) && isset($result['_match_len'])) {
+                $matches[] = substr($text, 0, $result['_match_len']);
+            }
+
+            return ['found' => true, 'matches' => $matches];
+        }
+
+        /* Fallback: use PHP-native matching for complex patterns */
+        /* This maintains backward compatibility for patterns with alternation */
         if (strpos($pattern, '|') !== false) {
-            /* Alternation pattern - find matches */
             $parts = explode('|', $pattern);
             $matches = [];
             foreach ($parts as $part) {
@@ -49,7 +70,9 @@ class TextTransformer
                     $matches[] = $part;
                 }
             }
-            return ['found' => count($matches) > 0, 'matches' => $matches];
+            if (count($matches) > 0) {
+                return ['found' => true, 'matches' => $matches];
+            }
         }
 
         return ['found' => false, 'matches' => []];

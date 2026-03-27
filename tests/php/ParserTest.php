@@ -274,23 +274,99 @@ class ParserTest extends TestCase
         $p->parse();
     }
 
-    public function testCommaSeparatedArguments(): void
+    public function testEvalErrorHandlingWithNestedEval(): void
     {
-        // Test SPAN with multiple arguments (if supported by semantic validation later)
-        // For now, test that parser can consume comma-separated args
-        $p = new Parser("ANY('a', 'b')");
+        // Test that EVAL with nested EVAL parses correctly
+        $p = new Parser("EVAL(EVAL('A'))");
         $ast = $p->parse();
-        $this->assertEquals('any', $ast['type']);
-        $this->assertEquals('a', $ast['set']);
+        $this->assertEquals('dynamic_eval', $ast['type']);
+        $this->assertEquals('dynamic_eval', $ast['expr']['type']);
+        $this->assertEquals('lit', $ast['expr']['expr']['type']);
+    }
+
+    public function testEvalErrorHandlingWithComplexExpression(): void
+    {
+        // Test that EVAL with complex expression parses correctly
+        $p = new Parser("EVAL('A' 'B' | 'C')");
+        $ast = $p->parse();
+        $this->assertEquals('dynamic_eval', $ast['type']);
+        $this->assertEquals('alt', $ast['expr']['type']);
+    }
+
+    public function testCommaSeparatedArgumentsGenericParsing(): void
+    {
+        // Test that parser generically accepts comma-separated arguments
+        // The parser consumes all arguments; arity validation happens in semantic validation
+        // Parser successfully parses the argument list, then buildFunction validates arity
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("ANY requires exactly one argument, 2 given");
+
+        $p = new Parser("ANY('a', 'b')");
+        $p->parse();
     }
 
     public function testCommaSeparatedArgumentsWithLiterals(): void
     {
         // Test that comma-separated literals are parsed correctly
+        // Parser consumes both arguments, semantic validation rejects
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("SPAN requires exactly one argument, 2 given");
+        
         $p = new Parser("SPAN('0-9', 'a-z')");
-        $ast = $p->parse();
-        $this->assertEquals('span', $ast['type']);
-        $this->assertEquals('0-9', $ast['set']);
+        $p->parse();
+    }
+
+    public function testSurplusArgumentRejectionAtSemanticValidation(): void
+    {
+        // Test that single-argument builtins reject surplus arguments at semantic validation time
+        // Parser accepts the comma-separated list, but buildFunction validates arity
+
+        // SPAN with 2 arguments - should fail semantic validation
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("SPAN requires exactly one argument, 2 given");
+
+        $p = new Parser("SPAN('0-9', 'a-z')");
+        $p->parse();
+    }
+
+    public function testSurplusArgumentRejectionForAny(): void
+    {
+        // ANY with 2 arguments - should fail semantic validation
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("ANY requires exactly one argument, 2 given");
+
+        $p = new Parser("ANY('a', 'b')");
+        $p->parse();
+    }
+
+    public function testSurplusArgumentRejectionForLen(): void
+    {
+        // LEN with 3 arguments - should fail semantic validation
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("LEN requires exactly one argument, 3 given");
+
+        $p = new Parser("LEN(1, 2, 3)");
+        $p->parse();
+    }
+
+    public function testSurplusArgumentRejectionForBreak(): void
+    {
+        // BREAK with 2 arguments - should fail semantic validation
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("BREAK requires exactly one argument, 2 given");
+
+        $p = new Parser("BREAK('a', 'b')");
+        $p->parse();
+    }
+
+    public function testSurplusArgumentRejectionForNotany(): void
+    {
+        // NOTANY with 2 arguments - should fail semantic validation
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("NOTANY requires exactly one argument, 2 given");
+
+        $p = new Parser("NOTANY('a', 'b')");
+        $p->parse();
     }
 
     public function testMalformedTrailingComma(): void
@@ -309,24 +385,5 @@ class ParserTest extends TestCase
         // Comma followed by closing paren
         $p = new Parser("ANY(,)");
         $p->parse();
-    }
-
-    public function testDynamicEvalWithComplexExpression(): void
-    {
-        // EVAL with concatenation inside
-        $p = new Parser("EVAL('A' 'B')");
-        $ast = $p->parse();
-        $this->assertEquals('dynamic_eval', $ast['type']);
-        $this->assertEquals('concat', $ast['expr']['type']);
-    }
-
-    public function testDynamicEvalWithNestedEval(): void
-    {
-        // EVAL with nested EVAL
-        $p = new Parser("EVAL(EVAL('A'))");
-        $ast = $p->parse();
-        $this->assertEquals('dynamic_eval', $ast['type']);
-        $this->assertEquals('dynamic_eval', $ast['expr']['type']);
-        $this->assertEquals('lit', $ast['expr']['expr']['type']);
     }
 }

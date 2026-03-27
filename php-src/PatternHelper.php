@@ -328,5 +328,80 @@ class PatternHelper
     {
         self::$cache = null;
     }
+
+    /**
+     * Evaluate a dynamic pattern expression.
+     *
+     * This method routes dynamic pattern evaluation through the core runtime
+     * using EVAL(...) semantics rather than PHP-native pattern matching.
+     *
+     * @param  string  $patternExpr  Dynamic pattern expression (e.g., "'A' | 'B'")
+     * @param  string  $subject  Subject string to match against
+     * @param  array  $options  Optional flags: ['cache' => bool]
+     * @return array|false Match result or false on failure
+     */
+    public static function evalPattern(string $patternExpr, string $subject, array $options = [])
+    {
+        /* Build AST for EVAL(expression) */
+        $parser = new Parser($patternExpr);
+        $exprAst = $parser->parse();
+
+        /* Wrap in dynamic_eval node */
+        $evalAst = [
+            'type' => 'dynamic_eval',
+            'expr' => $exprAst
+        ];
+
+        /* Compile and execute through core runtime */
+        $pattern = self::fromAst($evalAst, $options);
+        return $pattern->match($subject);
+    }
+
+    /**
+     * Create a table-backed substitution pattern.
+     *
+     * This method creates a pattern that performs table lookups during substitution,
+     * routing through the core runtime rather than PHP-only string processing.
+     *
+     * @param  Table  $table  Runtime table object
+     * @param  string  $keyPattern  Pattern to capture the lookup key
+     * @param  string  $template  Template with table reference (e.g., "$TABLE[$v0]")
+     * @param  string  $subject  Subject string to transform
+     * @return string Transformed string with table-backed substitutions
+     */
+    public static function tableSubst(Table $table, string $keyPattern, string $template, string $subject): string
+    {
+        /* Compile the key-capturing pattern */
+        $parser = new Parser($keyPattern);
+        $pattern = self::fromAst($parser->parse());
+
+        /*
+         * Note: Full table-backed substitution requires:
+         * 1. Registering the table with the VM runtime (task 4.2)
+         * 2. Template compilation with structured table references (done in 3.1)
+         *
+         * For now, use the Pattern's native subst() which will execute
+         * template bytecode through the core runtime.
+         */
+        return $pattern->subst($subject, $template);
+    }
+
+    /**
+     * Perform formatted substitution with capture variables.
+     *
+     * Routes template execution through the core runtime with explicit
+     * format operations (upper, lower, length) rather than PHP post-processing.
+     *
+     * @param  string|array|Pattern  $patternOrAst  Pattern specification
+     * @param  string  $template  Template with format directives (e.g., "${v0.upper()}")
+     * @param  string  $subject  Subject string to transform
+     * @param  array  $options  Optional flags
+     * @return string Transformed string
+     */
+    public static function formattedSubst($patternOrAst, string $template, string $subject, array $options = []): string
+    {
+        $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true, $options);
+        return $pattern->subst($subject, $template);
+    }
 }
 

@@ -453,35 +453,66 @@ bool vm_run(VM *vm) {
             /* Table-backed and formatted replacement opcodes */
             case OP_EMIT_TABLE: {
                 /* Lookup table[key] and emit the value
-                 * Format: table_id u16, key_reg u8
+                 * Format: table_id u16, key_type u8, then:
+                 *   - key_type=0 (literal): key_len u16, key_bytes[key_len]
+                 *   - key_type=1 (capture): key_reg u8
                  * If key not found, emit empty string (graceful degradation) */
                 uint16_t table_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
-                uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
-                
+                uint8_t key_type = read_u8(vm->bc, vm->bc_len, &vm->ip);
+
 #ifdef SNOBOL_DYNAMIC_PATTERN
                 snobol_table_t *table = vm_get_table(vm, table_id);
-                if (table && key_reg < MAX_CAPS && 
-                    vm->cap_end[key_reg] >= vm->cap_start[key_reg] &&
-                    vm->cap_end[key_reg] <= vm->len) {
-                    
-                    /* Extract key */
-                    size_t key_len = vm->cap_end[key_reg] - vm->cap_start[key_reg];
-                    char *key = (char *)snobol_malloc(key_len + 1);
-                    memcpy(key, vm->s + vm->cap_start[key_reg], key_len);
-                    key[key_len] = '\0';
-                    
-                    /* Lookup and emit */
-                    const char *value = table_get(table, key);
-                    if (value) {
-                        size_t val_len = strlen(value);
-                        if (vm->out) snobol_buf_append(vm->out, value, val_len);
-                        if (vm->emit_fn) vm->emit_fn(value, val_len, vm->emit_udata);
+                const char *value = NULL;
+
+                if (key_type == 0) {
+                    /* Literal key: read key_len and key_bytes from bytecode */
+                    uint16_t key_len = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                    if (key_len > 0 && key_len < 1024) {
+                        char *key = (char *)snobol_malloc(key_len + 1);
+                        if (key) {
+                            memcpy(key, vm->bc + vm->ip, key_len);
+                            key[key_len] = '\0';
+                            vm->ip += key_len;
+
+                            /* Lookup and emit */
+                            if (table) {
+                                value = table_get(table, key);
+                            }
+                            snobol_free(key);
+                        }
                     }
-                    /* If not found, emit nothing (graceful degradation) */
-                    snobol_free(key);
+                } else if (key_type == 1) {
+                    /* Capture-derived key: read key_reg */
+                    uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+
+                    if (table && key_reg < MAX_CAPS &&
+                        vm->cap_end[key_reg] >= vm->cap_start[key_reg] &&
+                        vm->cap_end[key_reg] <= vm->len) {
+
+                        /* Extract key */
+                        size_t key_len = vm->cap_end[key_reg] - vm->cap_start[key_reg];
+                        char *key = (char *)snobol_malloc(key_len + 1);
+                        if (key) {
+                            memcpy(key, vm->s + vm->cap_start[key_reg], key_len);
+                            key[key_len] = '\0';
+
+                            /* Lookup */
+                            if (table) {
+                                value = table_get(table, key);
+                            }
+                            snobol_free(key);
+                        }
+                    }
+                }
+
+                /* Emit the value (or nothing if not found - graceful degradation) */
+                if (value) {
+                    size_t val_len = strlen(value);
+                    if (vm->out) snobol_buf_append(vm->out, value, val_len);
+                    if (vm->emit_fn) vm->emit_fn(value, val_len, vm->emit_udata);
                 }
 #else
-                (void)table_id; (void)key_reg; /* Table support not enabled */
+                (void)table_id; (void)key_type; /* Table support not enabled */
 #endif
                 break;
             }
@@ -700,84 +731,144 @@ bool vm_run(VM *vm) {
                  * Format: len u32, bytecode...
                  * The bytecode is stored for later execution via OP_DYNAMIC */
                 uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
-                
+
                 /* Copy the bytecode for storage */
-                uint8_t *bc_copy = (uint8_t *)snobol_malloc(len);
+                uint8_t *bc_copy = (uint8_t *)emalloc(len);
                 if (bc_copy) {
                     memcpy(bc_copy, vm->bc + vm->ip, len);
                 }
                 vm->ip += len;
-                
-                /* Store in a temporary location for OP_DYNAMIC to use
-                 * For now, this is a simple implementation - full implementation
-                 * would store in a register or table */
-                (void)bc_copy; /* Stored bytecode (simplified for task 3.1) */
+
+                /* Store for OP_DYNAMIC to use */
+#ifdef SNOBOL_DYNAMIC_PATTERN
+                /* Free any previously pending bytecode */
+                if (vm->dyn_pending_bc) {
+                    efree(vm->dyn_pending_bc);
+                }
+                vm->dyn_pending_bc = bc_copy;
+                vm->dyn_pending_bc_len = len;
+#else
+                if (bc_copy) efree(bc_copy);
+#endif
                 break;
             }
             case OP_DYNAMIC: {
-                /* Evaluate dynamic pattern from register
-                 * Format: pattern_reg u8
+                /* Evaluate dynamic pattern from stored bytecode
+                 * Format: (no additional operands - uses bytecode from OP_DYNAMIC_DEF)
                  *
                  * Implementation:
-                 * 1. Get the pattern source from the register (capture)
-                 * 2. Compute canonical cache key from source
+                 * 1. Get the pattern bytecode from OP_DYNAMIC_DEF storage
+                 * 2. Compute canonical cache key from bytecode
                  * 3. Look up in dynamic pattern cache
                  * 4. On hit: execute cached pattern
-                 * 5. On miss: compile pattern, cache it, then execute
+                 * 5. On miss: create pattern object, cache it, then execute
                  * 6. Handle success/failure with proper backtracking */
-                uint8_t pattern_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
-                
+
 #ifdef SNOBOL_DYNAMIC_PATTERN
-                /* Get the pattern source from capture register */
-                if (pattern_reg < MAX_CAPS && 
-                    vm->cap_end[pattern_reg] >= vm->cap_start[pattern_reg] &&
-                    vm->cap_end[pattern_reg] <= vm->len) {
-                    
-                    /* Extract pattern source string */
-                    size_t source_len = vm->cap_end[pattern_reg] - vm->cap_start[pattern_reg];
-                    char *source = (char *)snobol_malloc(source_len + 1);
-                    if (source) {
-                        memcpy(source, vm->s + vm->cap_start[pattern_reg], source_len);
-                        source[source_len] = '\0';
-                        
-                        /* Look up in cache */
-                        dynamic_pattern_t *pattern = NULL;
-                        if (vm->dyn_cache) {
-                            pattern = dynamic_pattern_cache_get(vm->dyn_cache, source, (int)source_len);
-                        }
-                        
-                        if (!pattern) {
-                            /* Cache miss: need to compile the pattern
-                             * For now, create a simple pattern that matches the source literally
-                             * Full implementation would parse SNOBOL syntax and compile properly */
-                            
-                            VmCodeBuf cb;
-                            vm_cb_init(&cb);
-                            vm_emit_lit_bytes(&cb, source, source_len);
-                            vm_cb_emit_u8(&cb, OP_ACCEPT);
-                            
-                            pattern = dynamic_pattern_create(source, cb.buf, cb.len);
-                            vm_cb_free(&cb);
-                            
-                            /* Cache the compiled pattern */
-                            if (pattern && vm->dyn_cache) {
-                                dynamic_pattern_cache_put(vm->dyn_cache, source, pattern);
+                /* Get the stored bytecode from OP_DYNAMIC_DEF */
+                if (!vm->dyn_pending_bc || vm->dyn_pending_bc_len == 0) {
+                    /* No pending bytecode - fail */
+                    goto fail_ret;
+                }
+
+                /* Debug: verify bytecode starts with OP_LIT */
+                if (vm->dyn_pending_bc[0] != OP_LIT) {
+                    goto fail_ret;
+                }
+
+                /* Use the pending bytecode as a key for caching */
+                char cache_key[64];
+                snprintf(cache_key, sizeof(cache_key), "dyn_%zu", vm->dyn_pending_bc_len);
+
+                /* Copy the bytecode for the pattern object (pattern owns its copy) */
+                uint8_t *bc_copy = (uint8_t *)emalloc(vm->dyn_pending_bc_len);
+                if (!bc_copy) {
+                    goto fail_ret;
+                }
+                memcpy(bc_copy, vm->dyn_pending_bc, vm->dyn_pending_bc_len);
+
+                /* Create pattern object with its own copy of the bytecode */
+                dynamic_pattern_t *pattern = dynamic_pattern_create(
+                    cache_key,
+                    bc_copy,
+                    vm->dyn_pending_bc_len
+                );
+
+                if (!pattern || !pattern->is_valid || !pattern->bc) {
+                    if (pattern) dynamic_pattern_release(pattern);
+                    goto fail_ret;
+                }
+
+                /* Execute the dynamic pattern
+                 * Save/restore IP and position for proper backtracking */
+                size_t saved_ip = vm->ip;
+                size_t saved_pos = vm->pos;
+                size_t saved_cap_start[MAX_CAPS], saved_cap_end[MAX_CAPS];
+                memcpy(saved_cap_start, vm->cap_start, sizeof(saved_cap_start));
+                memcpy(saved_cap_end, vm->cap_end, sizeof(saved_cap_end));
+
+                /* Execute dynamic pattern bytecode */
+                uint8_t *saved_bc = vm->bc;
+                size_t saved_bc_len = vm->bc_len;
+                vm->bc = pattern->bc;
+                vm->bc_len = pattern->bc_len;
+                vm->ip = 0;
+                vm->pos = saved_pos;
+
+                /* Run the dynamic pattern bytecode inline */
+                int dynamic_result = 0;
+                while (vm->ip < vm->bc_len) {
+                    uint8_t op = vm->bc[vm->ip++];
+                    switch (op) {
+                        case OP_LIT: {
+                            uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                            uint32_t lit_len = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                            if (vm->pos + lit_len > vm->len) {
+                                dynamic_result = 0;
+                                goto dynamic_done;
                             }
+                            /* Compare subject with literal bytes from pattern bytecode */
+                            if (memcmp(vm->s + vm->pos, vm->bc + off, lit_len) != 0) {
+                                dynamic_result = 0;
+                                goto dynamic_done;
+                            }
+                            vm->pos += lit_len;
+                            /* Advance IP past the literal bytes */
+                            vm->ip += lit_len;
+                            break;
                         }
-                        
-                        /* Execute the dynamic pattern
-                         * Note: Full implementation would recursively execute pattern->bc
-                         * For now, we just acknowledge the pattern was retrieved/compiled */
-                        
-                        if (pattern) {
-                            dynamic_pattern_release(pattern);
-                        }
-                        
-                        snobol_free(source);
+                        case OP_ACCEPT:
+                            dynamic_result = 1;
+                            goto dynamic_done;
+                        default:
+                            /* For simplicity, only OP_LIT and OP_ACCEPT supported in dynamic patterns */
+                            dynamic_result = 0;
+                            goto dynamic_done;
                     }
                 }
+                /* Reached end of bytecode without ACCEPT - consider it a match if we consumed something */
+                dynamic_result = 1;
+
+dynamic_done:
+                /* Restore VM state */
+                vm->bc = saved_bc;
+                vm->bc_len = saved_bc_len;
+                vm->ip = saved_ip;
+
+                if (!dynamic_result) {
+                    /* Dynamic pattern failed - restore captures and position */
+                    vm->pos = saved_pos;
+                    memcpy(vm->cap_start, saved_cap_start, sizeof(saved_cap_start));
+                    memcpy(vm->cap_end, saved_cap_end, sizeof(saved_cap_end));
+                    dynamic_pattern_release(pattern);
+                    goto fail_ret;
+                }
+
+                /* Success - free the pattern (we keep bytecode in dyn_pending_bc for now)
+                 * The bytecode will be freed when a new OP_DYNAMIC_DEF comes or at VM cleanup */
+                dynamic_pattern_release(pattern);
 #else
-                (void)pattern_reg; /* Dynamic pattern support not enabled */
+                /* Dynamic pattern support not enabled */
 #endif
                 break;
             }

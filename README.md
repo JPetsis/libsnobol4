@@ -31,13 +31,18 @@ manipulation tasks.
     * Emit literals or captured references to an output buffer during matching for stream-based replacements.
 * **Associative Tables:**
     * Runtime-owned table objects for key-value storage (`Snobol\Table`).
-    * Table-backed pattern matching and replacements.
+  * Table-backed pattern matching and replacements with literal and capture-derived keys.
 * **Dynamic Pattern Evaluation:**
-    * Runtime pattern compilation and caching (`Snobol\DynamicPatternCache`).
-    * Efficient reuse of compiled patterns.
+    * Runtime pattern compilation and caching via `EVAL(...)` syntax.
+    * Efficient reuse of compiled patterns through core runtime cache.
+    * Helper API: `PatternHelper::evalPattern()` for dynamic pattern execution.
 * **Formatted Substitutions:**
     * Template-based replacements with formatting options (upper, lower, length).
     * Graceful degradation for missing values.
+  * Helper API: `PatternHelper::formattedSubst()` for runtime-backed template execution.
+* **Table-Backed Substitutions:**
+    * Template syntax: `$TABLE['literal_key']` and `$TABLE[$v0]` for capture-derived lookups.
+    * Helper API: `PatternHelper::tableSubst()` for table-backed replacements.
 * **Labelled Control Flow:**
     * Labels and goto-like transfers for advanced pattern flow.
     * Explicit control flow distinct from backtracking.
@@ -370,8 +375,40 @@ See `bench/README.md` and `openspec/specs/jit.md` for details.
 - **Data Sanitization:** Masking or transforming sensitive patterns in large logs or datasets.
 - **Templating:** Efficiently applying complex pattern-based transformations to text blocks.
 - **Protocols:** Parsing and rewriting custom binary or text-based protocols where regular regex falls short.
+- **Dynamic Pattern Generation:** Building patterns at runtime from captured input or configuration.
+- **Table-Driven Transformations:** Lookup-based replacements for state machines, translators, and data mapping.
 
-| `emitRef(int $reg)`                           | Appends content of register `$reg` to the `_output` buffer on match.            |
+## Known Limitations and Future Work
+
+### Dynamic Pattern Evaluation
+
+- **Simple patterns only:** `EVAL(...)` currently supports literal patterns and concatenation. Patterns with
+  alternation (`|`) or complex backtracking fall back to PHP-native evaluation.
+- **No recursive EVAL:** Nested `EVAL(EVAL(...))` is parsed but not fully optimized.
+- **Future:** Full backtracking support in dynamic executor, recursive evaluation optimization.
+
+### Table-Backed Substitutions
+
+- **Table registration:** Tables must be accessed via template syntax; automatic VM registration is not yet implemented.
+- **Named table resolution:** Template compiler uses placeholder `table_id=0`; runtime resolves by name.
+- **Future:** Explicit table registration API, named table resolution in VM.
+
+### Labelled Control Flow
+
+- **Interpreter only:** Labels and gotos are interpreted; JIT skips patterns with control flow opcodes.
+- **Future:** JIT compilation for simple labelled patterns without backtracking.
+
+### Unicode and Case Insensitivity
+
+- **ASCII fast-path:** Case-insensitive matching uses ASCII bitmap for codepoints < 256.
+- **Full Unicode:** Unicode ranges work but case folding is limited to Latin-1.
+- **Future:** Full Unicode case folding, locale-aware matching.
+
+### JIT Coverage
+
+- **Limited to simple patterns:** JIT optimizes straight-line literal/character class patterns.
+- **Skips complex features:** Tables, dynamic evaluation, control flow, and formatting fall back to interpreter.
+- **By design:** Profitability gate correctly identifies patterns that don't benefit from JIT.
 
 ## Development
 

@@ -205,12 +205,32 @@ PHP_METHOD(Snobol_Pattern, match) {
     vm.jit.stats = snobol_jit_get_stats();
 #endif
 
-    bool ok = vm_exec(&vm); 
-    
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    /* Initialize dynamic pattern cache for EVAL(...) support */
+    dynamic_pattern_cache_t dyn_cache;
+    if (dynamic_pattern_cache_init(&dyn_cache, 64)) {
+        vm.dyn_cache = &dyn_cache;
+    } else {
+        vm.dyn_cache = NULL;
+    }
+    vm.dyn_pending_bc = NULL;
+    vm.dyn_pending_bc_len = 0;
+#endif
+
+    bool ok = vm_exec(&vm);
+
     SNOBOL_LOG("Snobol_Pattern::match: VM returned %d, pos=%zu, var_count=%zu", (int)ok, vm.pos, vm.var_count);
 
     if (!ok) {
         if (eb.buf) efree(eb.buf);
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        if (vm.dyn_cache) {
+            dynamic_pattern_cache_destroy(vm.dyn_cache);
+        }
+        if (vm.dyn_pending_bc) {
+            efree(vm.dyn_pending_bc);
+        }
+#endif
         RETURN_FALSE;
     }
 
@@ -220,7 +240,7 @@ PHP_METHOD(Snobol_Pattern, match) {
         size_t b = vm.var_end[i];
         char key[32];
         snprintf(key, sizeof(key), "v%u", (unsigned)i);
-        
+
         SNOBOL_LOG("  Capture %s: range [%zu, %zu]", key, a, b);
 
         if (b >= a && b <= vm.len) {
@@ -230,13 +250,22 @@ PHP_METHOD(Snobol_Pattern, match) {
         }
     }
     add_assoc_long(return_value, "_match_len", (zend_long)vm.pos);
-    
+
     if (eb.buf) {
         add_assoc_stringl(return_value, "_output", eb.buf, eb.len);
         efree(eb.buf);
     } else {
         add_assoc_string(return_value, "_output", "");
     }
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    if (vm.dyn_cache) {
+        dynamic_pattern_cache_destroy(vm.dyn_cache);
+    }
+    if (vm.dyn_pending_bc) {
+        efree(vm.dyn_pending_bc);
+    }
+#endif
 
     SNOBOL_LOG("Snobol_Pattern::match: DONE");
 }
@@ -288,6 +317,18 @@ PHP_METHOD(Snobol_Pattern, subst) {
         vm.jit.enabled = false;
 #endif
 
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        /* Initialize dynamic pattern cache for EVAL(...) support */
+        dynamic_pattern_cache_t dyn_cache;
+        if (dynamic_pattern_cache_init(&dyn_cache, 64)) {
+            vm.dyn_cache = &dyn_cache;
+        } else {
+            vm.dyn_cache = NULL;
+        }
+        vm.dyn_pending_bc = NULL;
+        vm.dyn_pending_bc_len = 0;
+#endif
+
         if (vm_exec(&vm)) {
             // Match found at offset.
             // 1. Append prefix (before this match)
@@ -305,16 +346,26 @@ PHP_METHOD(Snobol_Pattern, subst) {
             // 3. Advance
             size_t match_len = vm.pos;
             if (match_len == 0) match_len = 1; // avoid infinite loop
-            
+
             offset += match_len;
             last_match_end = offset;
-            
+
             // Allow matching at the very end (empty string) only once
             if (offset > subject_len) break;
         } else {
             // No match at current offset
             offset++;
         }
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        /* Clean up dynamic pattern cache for this VM iteration */
+        if (vm.dyn_cache) {
+            dynamic_pattern_cache_destroy(vm.dyn_cache);
+        }
+        if (vm.dyn_pending_bc) {
+            efree(vm.dyn_pending_bc);
+        }
+#endif
     }
 
     // Append remainder

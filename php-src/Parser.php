@@ -445,17 +445,37 @@ class Parser
 
         $arg0 = $args[0] ?? null;
         $arg0Value = $getArgValue($arg0);
-        
+
         switch (strtoupper($name)) {
             case 'SPAN':
+                // Semantic validation: SPAN requires exactly one argument
+                if (count($args) !== 1) {
+                    throw new \Exception("SPAN requires exactly one argument, ".count($args)." given");
+                }
                 return Builder::span($arg0Value);
             case 'BREAK':
+                // Semantic validation: BREAK requires exactly one argument
+                if (count($args) !== 1) {
+                    throw new \Exception("BREAK requires exactly one argument, ".count($args)." given");
+                }
                 return Builder::brk($arg0Value);
             case 'LEN':
+                // Semantic validation: LEN requires exactly one argument
+                if (count($args) !== 1) {
+                    throw new \Exception("LEN requires exactly one argument, ".count($args)." given");
+                }
                 return Builder::len((int) $arg0Value);
             case 'ANY':
+                // Semantic validation: ANY requires exactly one argument
+                if (count($args) !== 1) {
+                    throw new \Exception("ANY requires exactly one argument, ".count($args)." given");
+                }
                 return Builder::any($arg0Value);
             case 'NOTANY':
+                // Semantic validation: NOTANY requires exactly one argument
+                if (count($args) !== 1) {
+                    throw new \Exception("NOTANY requires exactly one argument, ".count($args)." given");
+                }
                 return Builder::notany($arg0Value);
             default:
                 throw new \Exception("Unknown builtin function: $name");

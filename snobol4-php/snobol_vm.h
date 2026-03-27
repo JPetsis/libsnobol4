@@ -189,6 +189,8 @@ typedef struct {
     snobol_table_t **tables;                     /* Table registry */
     size_t table_count;                          /* Number of registered tables */
     size_t table_capacity;                       /* Table registry capacity */
+    uint8_t *dyn_pending_bc;                     /* Pending dynamic pattern bytecode from OP_DYNAMIC_DEF */
+    size_t dyn_pending_bc_len;                   /* Length of pending bytecode */
 #endif
 
 #ifdef SNOBOL_PROFILE
