@@ -24,7 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Memory leak in `snobol_ast_free()` for `AST_CONCAT` nodes
 - Crash when freeing label nodes created with string literals
 
-## [1.0.0] - 2026-03-28
+### Version Status
+
+- **AST API**: v1.0.0 (stable)
+- **Core**: v1.x (active development)
+- **Full 1.0 Release**: Awaiting more language bindings (Python, Rust, JavaScript)
+
+## [1.0.0-alpha] - 2026-03-28
 
 ### Added
 
