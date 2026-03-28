@@ -20,14 +20,14 @@ hooks:
 
         # Build and enable the snobol extension on container start.
         # We build in /tmp because the project mount may be read-only or slow.
-        if [ ! -d "/var/www/html/snobol4-php" ]; then
-          echo "Warning: /var/www/html/snobol4-php directory not found"
+        if [ ! -d "/var/www/html/snobol4-core" ]; then
+          echo "Warning: /var/www/html/snobol4-core directory not found"
           exit 0
         fi
 
         sudo rm -rf /tmp/snobol_build
         mkdir -p /tmp/snobol_build
-        cp -r /var/www/html/snobol4-php/* /tmp/snobol_build/
+        cp -r /var/www/html/snobol4-core/* /tmp/snobol_build/
 
         cd /tmp/snobol_build
         make clean >/dev/null 2>&1 || true

@@ -51,7 +51,7 @@ jobs:
           php -r "require 'vendor/autoload.php'; var_dump(class_exists('Snobol\\\\Builder'));"
 
       - name: Build C extension
-        working-directory: snobol4-php
+        working-directory: snobol4-core
         run: |
           phpize
           ./configure --enable-snobol

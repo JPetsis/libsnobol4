@@ -46,7 +46,7 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: Build C extension with ASan/UBSan
-        working-directory: snobol4-php
+        working-directory: snobol4-core
         run: |
           phpize
           ./configure --enable-snobol

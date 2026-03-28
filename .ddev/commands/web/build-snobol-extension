@@ -15,7 +15,7 @@ if [ ! -f /usr/src/php/ext/snobol/modules/snobol.so ]; then
     sudo mkdir -p /usr/src/php/ext/snobol
     
     # Copy the source from the mounted directory
-    sudo cp -r /var/www/html/snobol4-php/* /usr/src/php/ext/snobol/
+    sudo cp -r /var/www/html/snobol4-core/* /usr/src/php/ext/snobol/
     
     # Build the extension
     cd /usr/src/php/ext/snobol
