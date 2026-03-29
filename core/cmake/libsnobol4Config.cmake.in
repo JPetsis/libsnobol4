@@ -1,0 +1,5 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/libsnobol4Targets.cmake")
+
+check_required_components(libsnobol4)

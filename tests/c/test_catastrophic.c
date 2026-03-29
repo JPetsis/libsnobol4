@@ -2,7 +2,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include "snobol_vm.h"
+#include "snobol/vm.h"
 
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);

@@ -1,301 +1,268 @@
-.PHONY: help build test clean install test-valgrind build-asan test-asan bench
+# libsnobol4 Makefile
+# Simple wrapper around CMake build system
+#
+# Usage:
+#   make          - Configure and build
+#   make test     - Run tests
+#   make clean    - Clean build artifacts
+#   make help     - Show all targets
+
+.PHONY: all build test clean distclean install help \
+        build-debug build-release build-jit build-asan \
+        test-verbose test-valgrind bench docs format lint warnings
+
+# Default build type
+BUILD_TYPE ?= Release
+CMAKE_EXTRA_FLAGS ?=
 
 # Detect if we're in DDEV
-DDEV := $(shell command -v ddev 2> /dev/null)
-IN_DDEV := $(if $(IS_DDEV_PROJECT),1,0)
+IN_DDEV := $(shell [ -n "$$IS_DDEV_PROJECT" ] && echo 1 || echo 0)
 
-# ASan detection for PHP extension
-ifeq ($(IN_DDEV),1)
-    PHP_EXT_DIR := $(shell php-config --extension-dir 2>/dev/null)
-    SNOBOL_SO := $(PHP_EXT_DIR)/snobol.so
-    HAS_ASAN := $(shell [ -f "$(SNOBOL_SO)" ] && ldd "$(SNOBOL_SO)" | grep -q libasan && echo 1 || echo 0)
-    LIBASAN_PATH := $(shell find /usr/lib -name "libasan.so.[0-9]" | head -n 1)
-    
-    # Check if extension is already enabled
-    IS_ENABLED := $(shell php -m 2>/dev/null | grep -q snobol && echo 1 || echo 0)
-    PHP_OPTS := $(if $(filter 0,$(IS_ENABLED)),-d extension=snobol.so)
-    
-    ifeq ($(HAS_ASAN),1)
-        ASAN_ENV := USE_ZEND_ALLOC=0 ASAN_OPTIONS=detect_leaks=0 LD_PRELOAD=$(LIBASAN_PATH)
+# DDEV wrapper
+ifneq ($(IN_DDEV),1)
+    DDEV := $(shell command -v ddev 2> /dev/null)
+    ifneq ($(DDEV),)
+        # DDEV available but not in project - wrap commands
+        DDEV_EXEC = ddev exec
     endif
 endif
 
-help:
-	@echo "SNOBOL4 Development Makefile"
-	@echo ""
-	@echo "Available targets:"
-	@echo "  help     - Show this help message"
-	@echo "  build    - Build the C core and PHP extension"
-	@echo "  test     - Run C and PHP unit tests"
-	@echo "  clean    - Remove build artifacts and test binaries"
-	@echo "  install  - Install and enable the snobol extension"
-	@echo "  test-valgrind - Run PHP tests under Valgrind"
-	@echo "  build-asan - Build extension with AddressSanitizer"
-	@echo "  test-asan - Run tests with AddressSanitizer enabled"
-	@echo "  bench    - Run benchmark suite"
-	@echo "  build-jit - Build with micro-JIT enabled"
-	@echo "  enable   - Enable the snobol extension globally"
-	@echo "  disable  - Disable the snobol extension globally"
-	@echo "  composer - Run composer with ASan environment if needed (e.g., make composer install)"
-	@echo ""
-	@echo "Environment detection:"
-ifeq ($(IN_DDEV),1)
-	@echo "  Running inside DDEV container"
-else ifdef DDEV
-	@echo "  DDEV available (use 'ddev exec make <target>')"
-else
-	@echo "  Native environment (no DDEV detected)"
-endif
+# CMake command
+CMAKE = cmake
+CMAKE_BUILD = $(CMAKE) --build build
+CMAKE_TEST = ctest --test-dir build
 
+# Default target
+all: build
+
+# Configure and build
 build:
-ifeq ($(IN_DDEV),1)
-	@echo "Building inside DDEV container..."
-	@rm -rf /tmp/snobol_build
-	@mkdir -p /tmp/snobol_build
-	@cp -rf /var/www/html/snobol4-core/. /tmp/snobol_build/
-	@cd /tmp/snobol_build && \
-		phpize && \
-		./configure --enable-snobol && \
-		$(MAKE)
-	@echo "Extension built successfully in /tmp/snobol_build/"
-	@echo "Run 'make install' to install the extension"
-	@echo "Build complete!"
-else ifdef DDEV
-	@echo "Running build inside DDEV..."
-	@ddev exec make build
-else
-	@echo "Building in native environment..."
-	@echo "Installing valgrind for native builds..."
-	@sudo apt-get update && sudo apt-get install -y valgrind || \
-		yum install -y valgrind || \
-		brew install valgrind || \
-		echo "Warning: Could not install valgrind automatically. Please install manually."
-	@cd snobol4-core && \
-		phpize && \
-		./configure --enable-snobol && \
-		$(MAKE)
-	@echo "Build complete!"
-endif
+	@echo "==> Configuring libsnobol4 ($(BUILD_TYPE))..."
+	$(CMAKE) -B build \
+		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
+		-DBUILD_TESTS=ON \
+		-DBUILD_PHP=OFF \
+		-DSNOBOL_JIT=ON \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+		$(CMAKE_EXTRA_FLAGS)
+	@echo "==> Building libsnobol4..."
+	$(CMAKE_BUILD)
+	@echo "==> Build complete!"
+	@echo "==> compile_commands.json generated for IDE support"
 
-test:
-	@echo "Running tests..."
-ifeq ($(IN_DDEV),1)
-	@echo "Running C tests..."
-	@if [ -d tests/c ]; then \
-			cd tests/c && $(MAKE) clean && $(MAKE) test || exit 1; \
-	else \
-		echo "No C tests found (tests/c/ does not exist)"; \
-	fi
-	@echo "Running PHP tests..."
-	@echo "Checking PHP extension snobol..."
-	@$(ASAN_ENV) php $(PHP_OPTS) -m | grep snobol || echo "WARNING: snobol extension not found in php -m"
-	@if [ -f vendor/bin/phpunit ]; then \
-			$(ASAN_ENV) php $(PHP_OPTS) vendor/bin/phpunit tests/php tests/compat || exit 1; \
-	else \
-		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
-	fi
-else ifdef DDEV
-	@echo "Running tests inside DDEV..."
-	@ddev exec make test
-else
-	@echo "Running C tests..."
-	@if [ -d tests/c ]; then \
-			cd tests/c && $(MAKE) test || exit 1; \
-	else \
-		echo "No C tests found (tests/c/ does not exist)"; \
-	fi
-	@echo "Running PHP tests..."
-	@if [ -f vendor/bin/phpunit ]; then \
-			php vendor/bin/phpunit tests/php tests/compat || exit 1; \
-	else \
-		echo "PHPUnit not found (run 'composer install' to enable PHP tests)"; \
-	fi
-endif
-	@echo "All tests passed!"
+# Build with different configurations
+build-debug:
+	@$(MAKE) build BUILD_TYPE=Debug
 
-clean:
-	@echo "Cleaning build artifacts..."
-ifeq ($(IN_DDEV),1)
-	@rm -rf /tmp/snobol_build
-endif
-	@cd snobol4-core && \
-		if [ -f Makefile ]; then $(MAKE) clean 2>/dev/null || true; fi && \
-		phpize --clean 2>/dev/null || true
-	@rm -rf snobol4-core/.libs snobol4-core/modules snobol4-core/*.lo snobol4-core/*.o
-	@if [ -d tests/c ]; then \
-		cd tests/c && $(MAKE) clean 2>/dev/null || true; \
-	fi
-	@echo "Cleaning benchmark result JSONs..."
-	@find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' -delete 2>/dev/null || true
-	@echo "Clean complete!"
-
-install:
-ifeq ($(IN_DDEV),1)
-	@echo "Installing extension inside DDEV..."
-	@if [ -f /tmp/snobol_build/modules/snobol.so ]; then \
-		sudo cp /tmp/snobol_build/modules/snobol.so $(PHP_EXT_DIR)/; \
-		echo "Creating snobol.ini..."; \
-		echo "extension=snobol.so" | sudo tee /etc/php/8.4/mods-available/snobol.ini > /dev/null; \
-		NEW_HAS_ASAN=$$(ldd /tmp/snobol_build/modules/snobol.so | grep -q libasan && echo 1 || echo 0); \
-		if [ "$$NEW_HAS_ASAN" = "1" ]; then \
-			echo "WARNING: ASan-instrumented extension detected."; \
-			echo "To avoid breaking PHP/Composer, the extension will NOT be enabled globally."; \
-			echo "Use 'make enable' to enable it (caution: requires LD_PRELOAD for all PHP calls)."; \
-			echo "Use 'make test' or 'make test-asan' which handle LD_PRELOAD automatically."; \
-			sudo rm -f /etc/php/8.4/cli/conf.d/20-snobol.ini; \
-			sudo rm -f /etc/php/8.4/fpm/conf.d/20-snobol.ini; \
-		else \
-			echo "Enabling extension for CLI and FPM..."; \
-			sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini; \
-			sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini; \
-			sudo service php8.4-fpm reload 2>/dev/null || true; \
-			echo "Extension installed and enabled!"; \
-		fi \
-	else \
-		echo "Error: Extension not built. Run 'make build' or 'make build-asan' first."; \
-		exit 1; \
-	fi
-else ifdef DDEV
-	@echo "Installing extension via DDEV..."
-	@ddev exec sudo make install
-else
-	@echo "Installing extension in native environment..."
-	@cd snobol4-core && sudo $(MAKE) install
-	@echo "Extension installed! Add 'extension=snobol.so' to your php.ini to enable."
-endif
-
-enable:
-ifeq ($(IN_DDEV),1)
-	@echo "Enabling snobol extension..."
-	@sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini
-	@sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini
-	@sudo service php8.4-fpm reload 2>/dev/null || true
-	@echo "Extension enabled. NOTE: If this is an ASan build, PHP commands will now require LD_PRELOAD."
-else ifdef DDEV
-	@ddev exec sudo make enable
-else
-	@echo "Please enable the extension in your php.ini manually."
-endif
-
-disable:
-ifeq ($(IN_DDEV),1)
-	@echo "Disabling snobol extension..."
-	@sudo rm -f /etc/php/8.4/cli/conf.d/20-snobol.ini
-	@sudo rm -f /etc/php/8.4/fpm/conf.d/20-snobol.ini
-	@sudo service php8.4-fpm reload 2>/dev/null || true
-	@echo "Extension disabled."
-else ifdef DDEV
-	@ddev exec sudo make disable
-else
-	@echo "Please disable the extension in your php.ini manually."
-endif
-
-composer:
-ifeq ($(IN_DDEV),1)
-	@$(ASAN_ENV) composer $(filter-out $@,$(MAKECMDGOALS))
-else ifdef DDEV
-	@ddev exec $(ASAN_ENV) composer $(filter-out $@,$(MAKECMDGOALS))
-else
-	@composer $(filter-out $@,$(MAKECMDGOALS))
-endif
-
-# To allow passing arguments to composer target
-%:
-	@:
-
-test-valgrind:
-ifeq ($(IN_DDEV),1)
-	@$(ASAN_ENV) ./dev/valgrind_phpunit.sh $(PHP_OPTS)
-else ifdef DDEV
-	@ddev exec make test-valgrind
-else
-	@./dev/valgrind_phpunit.sh $(PHP_OPTS)
-endif
-
-build-asan:
-ifeq ($(IN_DDEV),1)
-	@echo "Building with ASan inside DDEV..."
-	@rm -rf /tmp/snobol_build
-	@mkdir -p /tmp/snobol_build
-	@cp -rf /var/www/html/snobol4-core/. /tmp/snobol_build/
-	@cd /tmp/snobol_build && \
-		phpize && \
-		./configure --enable-snobol CFLAGS="-fsanitize=address -fno-omit-frame-pointer -g" LDFLAGS="-fsanitize=address" && \
-		$(MAKE)
-	@echo "ASan build complete. Run 'make install' to install."
-else ifdef DDEV
-	@ddev exec make build-asan
-else
-	@echo "Building with ASan natively..."
-	@cd snobol4-core && \
-		phpize && \
-		./configure --enable-snobol CFLAGS="-fsanitize=address -fno-omit-frame-pointer -g" LDFLAGS="-fsanitize=address" && \
-		$(MAKE)
-endif
-
-test-asan:
-ifeq ($(IN_DDEV),1)
-	@echo "Running tests with ASan..."
-	@if [ -z "$(LIBASAN_PATH)" ]; then \
-		echo "Error: libasan.so not found. Make sure gcc is installed."; \
-		exit 1; \
-	fi
-	@USE_ZEND_ALLOC=0 ASAN_OPTIONS=detect_leaks=0 LD_PRELOAD=$(LIBASAN_PATH) $(MAKE) test
-else ifdef DDEV
-	@ddev exec make test-asan
-else
-	@echo "Running tests with ASan..."
-	@USE_ZEND_ALLOC=0 $(MAKE) test
-endif
-
-bench:
-	@echo "Running benchmark suite..."
-ifeq ($(IN_DDEV),1)
-	@echo "Running benchmarks inside DDEV..."
-	@$(ASAN_ENV) php $(PHP_OPTS) bench/tokenize.php
-	@$(ASAN_ENV) php $(PHP_OPTS) bench/replace.php
-	@$(ASAN_ENV) php $(PHP_OPTS) bench/dates.php
-	@$(ASAN_ENV) php $(PHP_OPTS) bench/backtracking.php
-	@echo "Benchmarks complete! Results written to bench/results_*.json"
-else ifdef DDEV
-	@ddev exec make bench
-else
-	@echo "Running benchmarks..."
-	@php bench/tokenize.php
-	@php bench/replace.php
-	@php bench/dates.php
-	@php bench/backtracking.php
-	@echo "Benchmarks complete! Results written to bench/results_*.json"
-endif
+build-release:
+	@$(MAKE) build BUILD_TYPE=Release
 
 build-jit:
-ifeq ($(IN_DDEV),1)
-	@echo "Building with JIT inside DDEV..."
-	@rm -rf /tmp/snobol_build
-	@mkdir -p /tmp/snobol_build
-	@cp -rf /var/www/html/snobol4-core/. /tmp/snobol_build/
-	@cd /tmp/snobol_build && \
-		phpize && \
-		./configure --enable-snobol --enable-snobol-jit --enable-snobol-profile && \
-		$(MAKE)
-	@echo "JIT build complete. Run 'make install' to install."
-else ifdef DDEV
-	@ddev exec make build-jit
-else
-	@echo "Building with JIT natively..."
-	@cd snobol4-core && \
-		phpize && \
-		./configure --enable-snobol --enable-snobol-jit && \
-		$(MAKE)
-endif
+	@$(MAKE) build BUILD_TYPE=Release CMAKE_EXTRA_FLAGS="-DSNOBOL_JIT=ON -DSNOBOL_PROFILE=ON"
 
-bench-jit-guard:
-	@echo "Running JIT regression guard..."
-ifeq ($(IN_DDEV),1)
-	@SNOBOL_JIT_HOTNESS=1 $(ASAN_ENV) php $(PHP_OPTS) bench/jit_guard.php
-else ifdef DDEV
-	@ddev exec env SNOBOL_JIT_HOTNESS=1 make bench-jit-guard
-else
-	@SNOBOL_JIT_HOTNESS=1 php bench/jit_guard.php
-endif
+build-asan:
+	@$(MAKE) build BUILD_TYPE=Debug \
+		CMAKE_EXTRA_FLAGS="-DCMAKE_C_FLAGS='-fsanitize=address -fno-omit-frame-pointer -g'"
 
+# Run tests
+test:
+	@echo "==> Running tests..."
+	@if [ -d build ]; then \
+		$(CMAKE_TEST) --output-on-failure; \
+	else \
+		echo "Build directory not found. Run 'make build' first."; \
+		exit 1; \
+	fi
+
+test-verbose:
+	@echo "==> Running tests (verbose)..."
+	@if [ -d build ]; then \
+		$(CMAKE_TEST) --verbose --output-on-failure; \
+	else \
+		echo "Build directory not found. Run 'make build' first."; \
+		exit 1; \
+	fi
+
+# Run tests under Valgrind
+test-valgrind:
+	@echo "==> Running tests under Valgrind..."
+	@if command -v valgrind >/dev/null 2>&1; then \
+		if [ -f build/tests/c/snobol4_tests ]; then \
+			valgrind \
+				--leak-check=full \
+				--show-leak-kinds=all \
+				--track-origins=yes \
+				--verbose \
+				--error-exitcode=1 \
+				./build/tests/c/snobol4_tests; \
+		else \
+			echo "Test executable not found. Run 'make build' first."; \
+			exit 1; \
+		fi; \
+	else \
+		echo "Valgrind not found. Install with:"; \
+		echo "  macOS: brew install valgrind (may require --HEAD on Apple Silicon)"; \
+		echo "  Linux: apt install valgrind (Debian/Ubuntu) or yum install valgrind (RHEL/CentOS)"; \
+		exit 1; \
+	fi
+
+# Clean targets
+clean:
+	@echo "==> Cleaning build artifacts..."
+	rm -rf build/
+	@echo "==> Cleaning benchmark results..."
+	find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' -delete 2>/dev/null || true
+	@echo "==> Clean complete!"
+
+distclean: clean
+	@echo "==> Removing generated config files..."
+	rm -f snobol4-core/config.h.in~
+	rm -f snobol4-core/configure~
+	@echo "==> Deep clean complete!"
+
+# Install
+install:
+	@echo "==> Installing libsnobol4..."
+	$(CMAKE) --install build
+
+# Benchmark (requires PHP extension)
+bench:
+	@echo "==> Running benchmark suite..."
+	@if command -v php >/dev/null 2>&1; then \
+		for bench in bench/tokenize.php bench/replace.php bench/dates.php bench/backtracking.php; do \
+			if [ -f "$$bench" ]; then \
+				echo "Running $$bench..."; \
+				php "$$bench"; \
+			fi; \
+		done; \
+	else \
+		echo "PHP not found. Benchmarks require PHP extension."; \
+		echo "Run 'make build-php' to build PHP binding first."; \
+	fi
+
+# Documentation
+docs:
+	@echo "==> Generating documentation..."
+	@if command -v doxygen >/dev/null 2>&1; then \
+		if [ -f Doxyfile ]; then \
+			doxygen Doxyfile; \
+			echo "Documentation generated in html/"; \
+		else \
+			echo "Doxyfile not found. Creating basic documentation..."; \
+		fi; \
+	else \
+		echo "Doxygen not installed. Install with: brew install doxygen (macOS) or apt install doxygen (Linux)"; \
+	fi
+
+# Code formatting
+format:
+	@echo "==> Formatting code..."
+	@if command -v clang-format >/dev/null 2>&1; then \
+		find core/include core/src tests/c -name '*.c' -o -name '*.h' | xargs clang-format -i; \
+		echo "Code formatted!"; \
+	else \
+		echo "clang-format not found. Install with: brew install clang-format (macOS) or apt install clang-format (Linux)"; \
+	fi
+
+# Linting
+lint:
+	@echo "==> Running linter..."
+	@if command -v clang-tidy >/dev/null 2>&1; then \
+		if [ -d build ]; then \
+			find core/include core/src tests/c -name '*.c' -o -name '*.h' | xargs clang-tidy; \
+		else \
+			echo "Build directory not found. Run 'make build' first."; \
+		fi; \
+	else \
+		echo "clang-tidy not found. Options:"; \
+		echo ""; \
+		echo "  Option 1: Install LLVM toolchain with clang-tidy"; \
+		echo "    macOS:  brew install llvm"; \
+		echo "            (clang-tidy is included in LLVM)"; \
+		echo "    Then ensure PATH includes LLVM bin:"; \
+		echo "    export PATH=\"\$$PATH:/opt/homebrew/opt/llvm/bin\""; \
+		echo ""; \
+		echo "  Option 2: Use compiler warnings instead (no extra install)"; \
+		echo "    make warnings"; \
+		echo "    (Builds with -Wall -Wextra -Wpedantic -Werror)"; \
+		echo ""; \
+		echo "  Option 3: Run clang-tidy manually"; \
+		echo "    clang-tidy core/src/*.c -- -Icore/include"; \
+		echo "    (Uses compile_commands.json from build/)"; \
+		exit 0; \
+	fi
+
+# Build with strict warnings (alternative to clang-tidy)
+warnings:
+	@echo "==> Building with strict warnings..."
+	$(CMAKE) -B build \
+		-DCMAKE_BUILD_TYPE=Debug \
+		-DBUILD_TESTS=ON \
+		-DBUILD_PHP=OFF \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+		-DCMAKE_C_FLAGS="-Wall -Wextra -Wpedantic"
+	$(CMAKE_BUILD)
+	@echo "==> Build with strict warnings complete!"
+	@echo "Note: -Werror omitted to allow unused placeholders in active development"
+
+# PHP binding build
+build-php:
+	@echo "==> Building with PHP binding..."
+	$(CMAKE) -B build \
+		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
+		-DBUILD_TESTS=ON \
+		-DBUILD_PHP=ON \
+		-DSNOBOL_JIT=ON \
+		$(CMAKE_EXTRA_FLAGS)
+	$(CMAKE_BUILD)
+	@echo "==> PHP binding build complete!"
+
+# Help
+help:
+	@echo "libsnobol4 Build System"
+	@echo "======================="
+	@echo ""
+	@echo "Build targets:"
+	@echo "  all (default)  - Configure and build the project"
+	@echo "  build          - Build with default configuration (Release)"
+	@echo "  build-debug    - Build with Debug configuration"
+	@echo "  build-release  - Build with Release configuration"
+	@echo "  build-jit      - Build with JIT and profiling enabled"
+	@echo "  build-asan     - Build with AddressSanitizer"
+	@echo "  build-php      - Build with PHP binding (requires PHP dev headers)"
+	@echo ""
+	@echo "Test targets:"
+	@echo "  test           - Run C test suite"
+	@echo "  test-verbose   - Run tests with verbose output"
+	@echo "  test-valgrind  - Run tests under Valgrind (memory leak detection)"
+	@echo ""
+	@echo "Clean targets:"
+	@echo "  clean          - Remove build artifacts and benchmark results"
+	@echo "  distclean      - Remove all generated files"
+	@echo ""
+	@echo "Other targets:"
+	@echo "  install        - Install system-wide (requires sudo)"
+	@echo "  bench          - Run benchmark suite (requires PHP)"
+	@echo "  docs           - Generate documentation (requires Doxygen)"
+	@echo "  format         - Format code (requires clang-format)"
+	@echo "  lint           - Run clang-tidy (requires LLVM toolchain)"
+	@echo "  warnings       - Build with strict warnings (alternative to lint)"
+	@echo "  help           - Show this help message"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make                    # Build the project"
+	@echo "  make build-debug        # Debug build"
+	@echo "  make test               # Run tests"
+	@echo "  make test-verbose       # Verbose test output"
+	@echo "  make test-valgrind      # Run tests under Valgrind"
+	@echo "  make clean              # Clean build"
+	@echo "  make build-php          # Build with PHP binding"
+	@echo "  make install            # Install system-wide"
+	@echo ""
+	@echo "Variables:"
+	@echo "  BUILD_TYPE     - CMake build type (default: Release)"
+	@echo "  CMAKE_EXTRA_FLAGS - Additional CMake flags"
+	@echo ""
+	@echo "Examples with variables:"
+	@echo "  make build BUILD_TYPE=Debug"
+	@echo "  make build CMAKE_EXTRA_FLAGS='-DBUILD_PHP=ON'"

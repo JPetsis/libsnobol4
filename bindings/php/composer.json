@@ -1,0 +1,38 @@
+{
+  "name": "libsnobol4/libsnobol4-php",
+  "description": "SNOBOL4 pattern matching for PHP",
+  "type": "library",
+  "keywords": [
+    "snobol",
+    "pattern-matching",
+    "regex",
+    "string-processing"
+  ],
+  "license": "Apache-2.0",
+  "require": {
+    "php": ">=8.0",
+    "ext-ctype": "*"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "Snobol\\": "php-src/"
+    },
+    "files": [
+      "php-src/functions.php"
+    ]
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Snobol\\Tests\\": "tests/php/"
+    }
+  },
+  "extra": {
+    "branch-alias": {
+      "dev-main": "0.1.x-dev"
+    }
+  }
+}
+

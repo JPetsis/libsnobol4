@@ -12,8 +12,8 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
-#include "../../snobol4-core/snobol_vm.h"
-#include "../../snobol4-core/snobol_jit.h"
+#include "../../core/include/snobol/vm.h"
+#include "../../core/include/snobol/jit.h"
 
 void test_suite(const char *name);
 void test_assert(bool condition, const char *message);

@@ -11,8 +11,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "snobol_internal.h"
-#include "snobol_vm.h"
+#include "../../core/src/snobol_internal.h"
+#include "snobol/vm.h"
 
 /* External test framework functions */
 extern void test_suite(const char *name);

@@ -1,0 +1,75 @@
+name: libsnobol4-php
+type: php
+docroot: public
+php_version: "8.4"
+webserver_type: nginx-fpm
+xdebug_enabled: false
+additional_hostnames: [ ]
+additional_fqdns: [ ]
+database:
+  type: mariadb
+  version: "10.11"
+use_dns_when_possible: true
+composer_version: "2"
+web_environment: [ ]
+corepack_enable: false
+disable_upload_dirs_warning: true
+hooks:
+  post-start:
+    - exec: |
+        set -euo pipefail
+        echo "🔨 Building libsnobol4 PHP extension..."
+        
+        # Check for config.m4
+        if [ ! -f "/var/www/html/config.m4" ]; then
+          echo "❌ config.m4 not found"
+          echo "   Make sure you're running DDEV from bindings/php directory"
+          exit 0
+        fi
+        
+        # Check if core is mounted (via docker-compose.local.yaml)
+        if [ -d "/var/www/core/src" ]; then
+          echo "✓ Core directory found (mounted)"
+          CORE_DIR="/var/www/core"
+        elif [ -d "/var/www/html/../core" ]; then
+          echo "✓ Core directory found (relative)"
+          CORE_DIR="/var/www/html/../core"
+        else
+          echo "❌ Core directory not found!"
+          echo ""
+          echo "Setup instructions:"
+          echo "1. Copy .ddev/docker-compose.core.yaml.example to .ddev/docker-compose.local.yaml"
+          echo "2. Edit docker-compose.local.yaml and update paths for your system"
+          echo "3. Run 'ddev restart'"
+          echo ""
+          echo "Skipping extension build."
+          exit 0
+        fi
+        
+        # Build the extension in /tmp
+        sudo rm -rf /tmp/snobol_build
+        mkdir -p /tmp/snobol_build
+        cp -r /var/www/html/* /tmp/snobol_build/
+        cp -r "$CORE_DIR" /tmp/snobol_build/core
+        
+        cd /tmp/snobol_build
+        phpize
+        ./configure --enable-snobol
+        make -j"$(nproc)"
+        sudo make install
+        
+        # Enable the extension
+        echo "extension=snobol.so" | sudo tee /etc/php/8.4/mods-available/snobol.ini > /dev/null
+        sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini
+        sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini
+        
+        # Cleanup
+        sudo rm -rf /tmp/snobol_build
+        
+        # Verify installation
+        if php -m | grep -q snobol; then
+          echo "✅ libsnobol4 PHP extension installed successfully!"
+        else
+          echo "❌ Failed to enable snobol extension"
+          exit 1
+        fi

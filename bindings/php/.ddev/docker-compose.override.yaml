@@ -1,0 +1,4 @@
+services:
+  web:
+    healthcheck:
+      test: [ "CMD", "true" ]

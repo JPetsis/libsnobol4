@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include "snobol_ast.h"
+#include "snobol/ast.h"
 
 /* Test framework functions (from test_runner.c) */
 extern void test_suite(const char *name);

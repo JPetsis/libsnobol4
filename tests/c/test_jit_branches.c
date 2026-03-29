@@ -2,8 +2,8 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
-#include "../../snobol4-core/snobol_vm.h"
-#include "../../snobol4-core/snobol_jit.h"
+#include "../../core/include/snobol/vm.h"
+#include "../../core/include/snobol/jit.h"
 
 /* Forward declare test framework helpers */
 void test_suite(const char *name);

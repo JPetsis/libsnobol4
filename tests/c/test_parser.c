@@ -7,9 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include "snobol_parser.h"
-#include "snobol_lexer.h"
-#include "snobol_ast.h"
+#include "snobol/parser.h"
+#include "snobol/lexer.h"
+#include "snobol/ast.h"
 
 /* Test framework functions (from test_runner.c) */
 extern void test_suite(const char *name);

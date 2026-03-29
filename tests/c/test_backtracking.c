@@ -10,7 +10,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-#include "snobol_vm.h"
+#include "snobol/vm.h"
 
 /* External test framework functions */
 extern void test_suite(const char *name);

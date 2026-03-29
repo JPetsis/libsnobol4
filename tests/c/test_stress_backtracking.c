@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#include "snobol_vm.h"
+#include "snobol/vm.h"
 
 // Simple stress: deep alternation pushes many choices, then fails and backtracks.
 // We only assert it doesn't crash/corrupt and returns false.

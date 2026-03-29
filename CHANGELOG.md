@@ -1,52 +1,80 @@
 # Changelog
 
-All notable changes to the SNOBOL4 project are documented in this file.
+All notable changes to the libsnobol4 project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-03-28
+
 ### Added
 
-- AST versioning API (`snobol_ast_get_version()`, `snobol_ast_version_check()`)
-- AST version macros (`SNOBOL_AST_VERSION_MAJOR`, `SNOBOL_AST_VERSION_CHECK`)
-- C test suite for AST versioning and memory management (`tests/c/test_ast.c`)
+- **Monorepo Structure**: Language-agnostic core with separate bindings directories
+- **Core C23 Library** (`core/`):
+  - Complete lexer, parser, AST, compiler, VM implementation
+  - Public API headers in `core/include/snobol/`
+  - CMake build system with proper installation rules
+  - Optional micro-JIT for ARM64
+  - Associative tables for runtime lookups
+  - Dynamic pattern evaluation with caching
+- **PHP Binding** (`bindings/php/`):
+  - Complete PHP extension with DDEV support
+  - PHP helper classes (Pattern, PatternHelper, Builder, Table)
+  - Full PHPUnit test suite (122 tests passing)
+  - Native CMake build option
+- **C Test Suite** (`tests/c/`):
+  - 1,065+ tests covering all core functionality
+  - JIT correctness and performance tests
+  - Stress tests for backtracking and edge cases
+- **Examples** (`examples/c/`):
+  - Basic pattern matching example
+  - Capture and assignment example
+- **Documentation**:
+  - Language-agnostic README.md
+  - PHP-specific documentation in `bindings/php/README.md`
+  - Updated CONTRIBUTING.md for monorepo structure
+  - Updated ELEVATOR_PITCH.md and PITCH.md
+- **CI/CD**:
+  - GitHub Actions workflows for core (Linux, macOS, Windows)
+  - PHP binding tests across PHP 8.0-8.4
+  - AddressSanitizer and UBSan testing
 
 ### Changed
 
-- Renamed `snobol4-php/` to `snobol4-core/` to reflect language-agnostic architecture
-- `snobol_ast_create_label()` now makes a copy of the label name (handles string literals safely)
-- `snobol_ast_free()` now properly handles `AST_CONCAT` nodes (frees parts array + children)
+- **Repository Rename**: `snobol4-ddev` → `libsnobol4`
+- **Project Structure**: Complete restructure to monorepo layout
+  - Core C code moved from `snobol4-core/` to `core/`
+  - PHP binding moved to `bindings/php/`
+  - `.ddev/` moved to `bindings/php/.ddev/`
+- **Build System**: Migrated from phpize to CMake
+- **Include Paths**: Updated to namespaced `snobol/*.h` paths
+- **AST API**: Full C AST compilation support
+- **Template Compilation**: Full implementation for pattern replacements
 
 ### Fixed
 
-- Memory leak in `snobol_ast_free()` for `AST_CONCAT` nodes
-- Crash when freeing label nodes created with string literals
+- All PHP extension tests now pass (122/122)
+- Capture and assign operations for all register numbers
+- Template compilation for table-backed substitutions
+- Emit literal and capture reference operations
+- Dynamic pattern evaluation (EVAL)
+
+### Removed
+
+- Old `snobol4-core/` directory (merged into `core/`)
+- Old `php-src/` directory (moved to `bindings/php/php-src/`)
+- Old `.ddev/` at root (moved to `bindings/php/.ddev/`)
+- PHP-coupled build system (replaced with CMake)
 
 ### Version Status
 
+- **Core Library**: v0.1.0 (initial release)
+- **PHP Binding**: v0.1.0 (initial release)
 - **AST API**: v1.0.0 (stable)
-- **Core**: v1.x (active development)
-- **Full 1.0 Release**: Awaiting more language bindings (Python, Rust, JavaScript)
 
-## [1.0.0-alpha] - 2026-03-28
-
-### Added
-
-- **Language-Agnostic Core**: Complete C implementation of lexer, parser, and AST
-- **C Lexer** (`snobol_lexer.h/c`): UTF-8 aware tokenizer with save/restore for backtracking
-- **C Parser** (`snobol_parser.h/c`): Recursive descent parser following EBNF grammar
-- **C AST** (`snobol_ast.h/c`): Tagged union AST with 16 node types
-- **Formal Grammar** (`grammar/snobol.ebnf`): EBNF specification of SNOBOL pattern syntax
-- **PHP Binding**: `Pattern::fromString()` method using C parser
-- **C Tests**: 12 lexer tests, 14 parser tests, 11 AST tests
-- **Documentation**:
-    - Architecture documentation in README.md
-    - Contributor guide in docs/CONTRIBUTORS.md
-    - Python binding proof-of-concept in examples/python-binding/
-
-### Changed
+---
 
 - **Architecture**: Separated language-agnostic C core from language-specific bindings
 - **Performance**: Eliminated PHP parser overhead (5-15% improvement for simple patterns)

@@ -1,0 +1,76 @@
+name: CI - Core Library
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  core-tests:
+    name: Core C Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+
+      - name: Configure CMake
+        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run Tests
+        working-directory: build
+        run: ctest --output-on-failure
+
+  sanitizers:
+    name: Sanitizers (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential
+
+      - name: Build with AddressSanitizer
+        run: |
+          cmake -B build \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run Tests (ASan)
+        working-directory: build
+        run: ASAN_OPTIONS=detect_leaks=1 ctest --output-on-failure
+
+      - name: Build with UndefinedBehaviorSanitizer
+        run: |
+          cmake -B build-ubsan \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer -g"
+
+      - name: Build (UBSan)
+        run: cmake --build build-ubsan
+
+      - name: Run Tests (UBSan)
+        working-directory: build-ubsan
+        run: UBSAN_OPTIONS=print_stacktrace=1 ctest --output-on-failure

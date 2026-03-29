@@ -1,0 +1,102 @@
+name: CI - PHP Binding
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'bindings/php/**'
+      - 'core/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'bindings/php/**'
+      - 'core/**'
+
+jobs:
+  php-tests:
+    name: PHP ${{ matrix.php-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+        php-version: [ '8.0', '8.1', '8.2', '8.3', '8.4' ]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: json
+          tools: composer
+          coverage: none
+
+      - name: Install system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential php${{ matrix.php-version }}-dev autoconf
+
+      - name: Install system dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install cmake autoconf
+
+      - name: Install Composer dependencies
+        working-directory: bindings/php
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Configure CMake with PHP binding
+        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Install extension
+        run: sudo cmake --install build
+
+      - name: Enable extension
+        run: |
+          echo "extension=snobol" | sudo tee /etc/php/${{ matrix.php-version }}/cli/conf.d/99-snobol.ini
+
+      - name: Verify extension loaded
+        run: php -r "if (!extension_loaded('snobol')) exit(1);"
+
+      - name: Run PHP tests
+        working-directory: bindings/php
+        run: vendor/bin/phpunit tests/php
+
+  php-windows:
+    name: PHP ${{ matrix.php-version }} (Windows)
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: [ '8.2', '8.3', '8.4' ]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          tools: composer
+          coverage: none
+
+      - name: Install CMake
+        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+
+      - name: Install Composer dependencies
+        working-directory: bindings/php
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      # Windows PHP extension building is complex - skip for now
+      - name: Skip Windows build (needs PHP SDK)
+        run: echo "Windows PHP extension build requires PHP SDK - skipped for now"

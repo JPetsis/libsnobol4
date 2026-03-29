@@ -1,0 +1,124 @@
+<?php
+
+namespace Snobol;
+
+/**
+ * SNOBOL4 Pattern class (Native C Extension).
+ *
+ * This class is registered by the native C extension (snobol4-php/snobol_pattern.c)
+ * and provides the core pattern matching functionality. This PHP file serves as
+ * a type hint and documentation stub for IDEs and static analysis tools.
+ *
+ * The actual implementation is in C and provides:
+ * - Pattern compilation from AST
+ * - Pattern matching against subject strings
+ * - Capture and assignment handling
+ *
+ * @see PatternHelper For high-level convenience methods
+ * @see Builder For constructing pattern ASTs
+ */
+class Pattern
+{
+    /**
+     * Private constructor - use Pattern::compileFromAst() to create instances.
+     */
+    private function __construct()
+    {
+        // Native implementation provided by C extension
+    }
+
+    /**
+     * Compile a pattern from a SNOBOL4 pattern string.
+     *
+     * Parses the given pattern string using the C extension's built-in parser
+     * and compiles it into a Pattern object with internal bytecode.
+     *
+     * @param  string  $pattern  SNOBOL4 pattern string
+     * @param  array  $options  Optional compilation options (e.g. ['caseInsensitive' => true])
+     * @return Pattern Compiled pattern object
+     * @throws \Exception When pattern parsing or compilation fails
+     */
+    public static function fromString(string $pattern, array $options = []): Pattern
+    {
+        // Native implementation in C extension
+        return new self();
+    }
+
+    /**
+     * Compile a pattern from an AST produced by Snobol\Builder.
+     *
+     * This is a static factory method that compiles an AST representation
+     * of a pattern into a Pattern object with internal bytecode.
+     *
+     * @param  array  $ast  Pattern AST from Builder methods
+     * @param  array|null  $options  Optional compilation options (e.g. ['caseInsensitive' => true])
+     * @return Pattern Compiled pattern object
+     * @throws \Exception When AST compilation fails
+     */
+    public static function compileFromAst(array $ast, ?array $options = null): Pattern
+    {
+        // Native implementation in C extension
+        return new self();
+    }
+
+    /**
+     * Match this pattern against a subject string.
+     *
+     * Attempts to match the compiled pattern against the beginning of the subject string.
+     * Returns an associative array of captured variables on success, or false on failure.
+     *
+     * Captured variables are returned as keys like 'v0', 'v1', etc., corresponding to
+     * the variable indices used in assign() operations in the pattern AST.
+     *
+     * @param  string  $subject  The string to match against
+     * @return array|false Associative array of captures ['v0' => 'value', ...] or false
+     */
+    public function match(string $subject)
+    {
+        // Native implementation in C extension
+        return false;
+    }
+
+    /**
+     * Set evaluation callbacks for dynamic pattern matching.
+     *
+     * Allows PHP callbacks to be invoked during pattern matching for
+     * advanced use cases (e.g., conditional matching logic).
+     *
+     * @param  array  $callbacks  Array of callback functions indexed by callback ID
+     * @return void
+     */
+    public function setEvalCallbacks(array $callbacks): void
+    {
+        // Native implementation in C extension
+    }
+
+    /**
+     * Enable or disable JIT compilation for this pattern.
+     *
+     * When enabled, the pattern's bytecode will be compiled to native machine
+     * code after a warmup threshold is reached, improving match performance.
+     * Requires the extension to be built with SNOBOL_JIT support.
+     *
+     * @param  bool  $enabled  Whether to enable JIT for this pattern
+     * @return void
+     */
+    public function setJit(bool $enabled): void
+    {
+        // Native implementation in C extension
+    }
+
+    /**
+     * Perform streaming substitution using a template string.
+     *
+     * @param  string  $subject
+     * @param  string  $template
+     * @return string
+     */
+    public function subst(string $subject, string $template): string
+    {
+        // Native implementation in C extension
+        return "";
+    }
+}
+

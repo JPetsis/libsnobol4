@@ -1,0 +1,7 @@
+# Empty override file - customize locally if needed
+# Copy docker-compose.core.yaml.example to docker-compose.local.yaml
+# and adjust paths for your system
+version: '3.6'
+services:
+  web:
+    volumes: [ ]

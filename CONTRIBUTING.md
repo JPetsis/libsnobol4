@@ -1,299 +1,222 @@
-# Contributing to SNOBOL4 for PHP
+# Contributing to libsnobol4
 
-Thank you for considering contributing to the SNOBOL4 for PHP extension! This document provides guidelines and
-instructions for setting up your development environment, building the extension, and submitting changes.
+Thank you for considering contributing to libsnobol4! This document provides guidelines and instructions for setting up
+your development environment, building the project, and submitting changes.
+
+## Project Structure
+
+libsnobol4 uses a **monorepo** structure with a language-agnostic C23 core and language-specific bindings:
+
+```
+libsnobol4/
+├── core/                    # Core C23 library (language-agnostic)
+│   ├── include/snobol/      # Public API headers
+│   ├── src/                 # Core implementation
+│   └── grammar/             # SNOBOL pattern grammar
+├── bindings/                # Language-specific bindings
+│   └── php/                 # PHP binding
+│       ├── src/             # PHP extension source
+│       ├── php-src/         # PHP helper classes
+│       └── tests/           # PHPUnit tests
+├── tests/c/                 # Core C test suite
+├── examples/c/              # C usage examples
+└── README.md                # Project overview
+```
 
 ## Development Environment
 
-We recommend using **DDEV** for a consistent development environment that mirrors the production build process.
+### Option 1: DDEV (Recommended for PHP Development)
 
-### Prerequisites
+[DDEV](https://ddev.com/) provides a consistent containerized environment:
 
-* [Docker Desktop](https://www.docker.com/products/docker-desktop) (or Colima/OrbStack on macOS)
-* [DDEV](https://ddev.com/get-started/)
-* [Composer](https://getcomposer.org/) (for PHP dev dependencies / PHPUnit)
+```bash
+# PHP binding development
+cd bindings/php
+ddev start
+```
 
-### Setup
+This will:
 
-1. **Fork and Clone** the repository:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/snobol4-ddev.git
-   cd snobol4-ddev
-   ```
+- Start a PHP 8.4 container
+- Build the libsnobol4 extension from `core/`
+- Enable the extension automatically
 
-2. **Start the Environment:**
-   ```bash
-   ddev start
-   ```
-   This command will:
-    * Start the web and database containers.
-   * Build the C extension from `snobol4-core/` in a temporary directory inside the container.
-   * Install and enable the `snobol.so` extension for CLI and FPM.
+### Option 2: Native Build
 
-3. **Install PHP Dev Dependencies (optional but recommended):**
-   ```bash
-   ddev composer install
-   ```
-   This installs PHPUnit and wiring for the PHP test suite.
+For core library development without PHP:
+
+```bash
+# Install CMake and a C compiler
+# macOS: brew install cmake
+# Ubuntu: apt install cmake build-essential
+
+# Configure and build
+cmake -B build -DBUILD_TESTS=ON
+cmake --build build
+
+# Run tests
+ctest --test-dir build
+```
 
 ## Development Workflow
 
-### Project Structure
-
-* `snobol4-core/`: **Core C Code** – VM, compiler, and extension glue (`php_snobol.c`).
-* `php-src/`: **PHP Helpers** – Userland PHP classes like `Snobol\Builder` (`Builder.php`).
-* `public/`: **Examples / Entrypoints** – Example scripts and the DDEV web docroot.
-* `tests/`: **Tests** – C tests (`tests/c`) and PHP tests (`tests/php`).
-* `dev/`: **Developer Tools** – Scripts to build/test and trace the VM.
-* `.ddev/`: **Config** – DDEV configuration files including the extension build hook.
-
-### Using the Makefile
-
-For most day‑to‑day work, use the top‑level `Makefile`:
+### Building
 
 ```bash
-# Show available targets
-make help
-
-# Build the extension (inside DDEV or natively)
+# Core library only
 make build
 
-# Run C and PHP tests
-make test
+# Debug build
+make build-debug
 
-# Clean build artifacts
+# With PHP binding
+make build-php
+
+# Clean build
 make clean
-
-# Install/enable the extension
-make install
 ```
-
-The Makefile automatically detects whether it is running:
-
-- Inside the DDEV container (builds from `/tmp/snobol_build`).
-- On the host with `ddev` available (delegates to `ddev exec`).
-- Purely natively (builds directly from `snobol4-core/`).
-
-### Developer Tools (`dev/`)
-
-Useful scripts for faster iteration:
-
-```bash
-# Build inside DDEV
-de ./dev/build_in_ddev.sh
-
-# Run tests inside DDEV
-./dev/test_in_ddev.sh
-
-# Toggle VM tracing for debug builds
-./dev/trace_vm.sh on   # enable
-./dev/trace_vm.sh off  # disable
-
-# Run smoke tests (CLI + web endpoint)
-./dev/run_smoke.sh
-```
-
-### Making Changes to C Code
-
-If you modify files in `snobol4-core/`, rebuild and **reinstall** the extension:
-
-```bash
-# Preferred: use Makefile from host
-make build
-make install
-ddev restart  # Crucial to clear PHP process-level caching
-```
-
-**Crucial Note on Reloading:** Simply running `make build` updates the binary in a temporary directory. You **must** run
-`make install` to copy it to the PHP extension directory and `ddev restart` to ensure that both the CLI and FPM
-processes reload the new shared object. Failing to restart can lead to "stale code" bugs where your changes appear to
-have no effect.
 
 ### Running Tests
 
-#### C Tests
-
-C tests live under `tests/c/` and currently exercise the VM (`snobol_vm.c`) via a minimal test harness.
-
-Run them via:
-
 ```bash
-# From project root
+# Core C tests
 make test
 
-# Or directly
-cd tests/c
+# Verbose test output
+make test-verbose
+
+# PHP tests (requires PHP binding)
+cd bindings/php
+vendor/bin/phpunit tests/php
+
+# Memory leak detection (requires Valgrind)
+make test-valgrind
+```
+
+### Code Quality
+
+```bash
+# Build with strict warnings
+make warnings
+
+# Run clang-tidy (requires LLVM)
+make lint
+
+# Format code (requires clang-format)
+make format
+```
+
+## Submitting Changes
+
+### 1. Create a Branch
+
+```bash
+git checkout -b feature/your-feature-name
+```
+
+### 2. Make Changes
+
+- Keep changes focused and minimal
+- Follow existing code style
+- Add tests for new functionality
+- Update documentation as needed
+
+### 3. Run Tests
+
+Ensure all tests pass before submitting:
+
+```bash
+# Core tests
 make test
+
+# PHP tests (if applicable)
+cd bindings/php && vendor/bin/phpunit tests/php
 ```
 
-These tests are designed to run without PHP installed (pure C + standard library only).
+### 4. Commit Changes
 
-#### PHP Tests (PHPUnit)
-
-PHP tests live under `tests/php/` and are configured via `phpunit.xml`.
-They exercise the `Snobol\Builder` and `Snobol\Pattern` API.
-
-1. **Install dev dependencies (once):**
-   ```bash
-   ddev composer install
-   ```
-
-2. **Run tests:**
-   ```bash
-   # From project root
-   make test
-
-   # Or directly inside DDEV
-   ddev exec vendor/bin/phpunit
-   ```
-
-### Benchmarking
-
-The project includes a suite of benchmark scripts in `bench/` to measure performance.
+Write clear, descriptive commit messages:
 
 ```bash
-# Run all benchmarks
-ddev exec make bench
+git commit -m "feat: add bounded repetition support
+
+- Implement repeat(P, min, max) pattern
+- Add C tests for bounded repetition
+- Update documentation"
 ```
 
-Results are saved to `bench/results_*.json`.
+### 5. Submit a Pull Request
 
-### Performance Profiling
-
-To diagnose performance issues or optimized hotspots, you can build the extension with internal VM profiling enabled.
-
-1. **Rebuild with profiling:**
-   ```bash
-   ddev exec "cd snobol4-core && phpize && ./configure --enable-snobol --enable-snobol-profile && make && sudo make install"
-   ddev restart
-   ```
-
-2. **Run your script/test:**
-   The VM will print statistics to `stderr` after each execution:
-   ```text
-   [SNOBOL PROFILE] dispatch=12345 push=500 pop=500 max_depth=12
-   ```
-
-3. **Disable profiling:**
-   Rebuild without the flag to restore maximum performance.
-
-### Manual Testing / Examples
-
-In addition to automated tests, you can experiment using the example scripts under `public/` while DDEV is running:
-
-```bash
-# Open in browser (URL from `ddev describe`)
-# or run a CLI script
-
-ddev exec php public/test.php
-```
-
-## Micro-JIT (experimental)
-
-The project includes an **opt-in micro-JIT** intended to accelerate hot, ASCII-heavy VM traces.
-
-### Build with JIT enabled
-
-Inside DDEV:
-
-```bash
-make build-jit
-make install
-```
-
-### Correctness testing
-
-The PHP test suite includes JIT correctness coverage. When investigating changes that might affect JIT execution,
-start with:
-
-```bash
-ddev exec vendor/bin/phpunit tests/php/JitCorrectnessTest.php
-```
-
-### Benchmarking JIT OFF vs JIT ON
-
-We keep two benchmark snapshots:
-
-- `bench/results_*_jitoff.json`
-- `bench/results_*_jiton.json`
-
-To produce and compare them, see `openspec/specs/jit.md` and `bench/README.md`.
-
-Note: `make clean` deletes generated benchmark result JSONs under `bench/` and preserves only
-`bench/results_example.json`, so copy/rename any results you want to keep before cleaning.
-
-## Technical Guidelines
-
-### Memory Management
-
-This is a PHP extension; memory management is critical to prevent `zend_mm_heap corrupted` errors.
-
-- **Use Zend Allocators:** For all memory that will be associated with PHP objects or returned to PHP, you **must** use
-  `emalloc`, `efree`, `erealloc`, and `estrndup`. These allocators are tracked by PHP's memory manager.
-- **Avoid standard `malloc`/`free`:** Only use standard C allocators for internal, short-lived buffers that are
-  completely invisible to the Zend engine and are guaranteed to be freed before returning control to PHP.
-- **Object Lifecycle:** Ensure that any bytecode or internal buffers associated with a `Snobol\Pattern` object are
-  correctly freed in the `free_obj` handler.
-
-<!-- DEBUG LOGGING DISABLED
-### Debugging & Logging
-
-The extension includes a built-in logging mechanism for development:
-
-- **Logging Macro:** Use `SNOBOL_LOG("format", ...)` in C code. It automatically includes the filename and line number.
-- **Log Location:** Logs are written to `/var/www/html/snobol_debug.log` inside the container.
-- **Real-time Tracing:** You can watch the logs while running tests:
-  ```bash
-  ddev exec tail -f /var/www/html/snobol_debug.log
-  ```
--->
+- Push to your fork
+- Open a PR against the `main` branch
+- Include a description of changes
+- Reference any related issues
 
 ## Coding Standards
 
-* **C Code:**
-    - Follow the conventions used in existing files under `snobol4-core/`.
-    - Target C23 where possible; avoid non‑portable extensions.
-    - Keep functions small and focused; prefer explicit error handling and clear ownership of allocated memory.
-* **PHP Code:**
-    - Follow PSR‑12 coding standards.
-    - Use the `Snobol\` namespace for library code.
-    - Update or add PHPUnit tests when changing public behavior.
+### C Code (Core Library)
 
-## Language-Agnostic Core
+- **Standard**: C23
+- **Formatting**: Use `clang-format` (run `make format`)
+- **Naming**:
+  - Types: `snake_case_t` (e.g., `ast_node_t`)
+  - Functions: `snake_case` (e.g., `snobol_ast_create`)
+  - Macros: `SCREAMING_SNAKE_CASE` (e.g., `SNOBOL_AST_VERSION`)
+- **Documentation**: Add file-level and function-level comments
 
-Since the `language-agnostic-core` change, the C core (`snobol4-core/`) is completely separate from any language
-binding.
+### PHP Code (Bindings)
 
-**For contributors working on the C core:**
+- **Standard**: PSR-12
+- **Formatting**: Use `phpcbf` or configure your editor
+- **Naming**:
+  - Classes: `PascalCase` (e.g., `PatternHelper`)
+  - Methods: `camelCase` (e.g., `matchOnce`)
+  - Constants: `SCREAMING_SNAKE_CASE` (e.g., `VERSION`)
 
-- See [`docs/CONTRIBUTORS.md`](docs/CONTRIBUTORS.md) for detailed architecture documentation
-- Learn how to add new language bindings (Python, Rust, etc.)
-- Understand how to modify the grammar and update lexer/parser
-- Find debugging tips and performance considerations
+## Testing Guidelines
 
-**Key components:**
+### C Tests
 
-- `snobol_lexer.h/c` - UTF-8 aware tokenizer
-- `snobol_parser.h/c` - Recursive descent parser
-- `snobol_ast.h/c` - Tagged union AST
-- `snobol_compiler.c` - AST → bytecode compiler
-- `snobol_vm.c` - Bytecode interpreter with backtracking
-- `grammar/snobol.ebnf` - Formal grammar specification
+- Place tests in `tests/c/`
+- Use the existing test framework in `test_runner.c`
+- Test both success and failure cases
+- Include stress tests for edge cases
 
-## Submitting Pull Requests
+### PHP Tests
 
-1. Create a new branch for your feature or fix:
+- Place tests in `bindings/php/tests/php/`
+- Use PHPUnit framework
+- Test public API methods
+- Include regression tests for bugs
+
+## Release Process
+
+### Versioning
+
+libsnobol4 uses independent versioning for core and bindings:
+
+- **Core**: `v<major>.<minor>.<patch>` (e.g., `v0.1.0`)
+- **PHP Binding**: `v<major>.<minor>.<patch>` (e.g., `v0.1.0`)
+
+### Creating a Release
+
+1. Update version constants in code
+2. Update CHANGELOG.md
+3. Create git tags:
    ```bash
-   git checkout -b feature/my-new-feature
+   git tag core/v0.1.0
+   git tag php/v0.1.0
+   git push origin --tags
    ```
-2. Run tests and linting (where available):
-   ```bash
-   make test
-   ```
-3. Commit your changes with clear, descriptive messages.
-4. Push to your fork and submit a Pull Request (PR).
-5. Ensure your PR description clearly explains the changes, their motivation, and any testing performed.
+4. Create GitHub release with changelog
 
-## License
+## Getting Help
 
-By contributing, you agree that your contributions will be licensed under the [Apache License, Version 2.0](LICENSE).
+- **Documentation**: See `README.md` and `bindings/php/README.md`
+- **Issues**: Open an issue on GitHub
+- **Discussions**: Use GitHub Discussions for questions
+
+## Code of Conduct
+
+Please be respectful and constructive in all interactions. We welcome contributors of all backgrounds and experience
+levels.
