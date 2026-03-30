@@ -50,14 +50,18 @@ if test "$PHP_SNOBOL" != "no"; then
   dnl The micro-JIT emits ARM64 machine code; it is not supported on other arches.
   dnl SNOBOL_JIT=1 is the actual feature gate used throughout all C sources.
   dnl HAVE_SNOBOL_JIT=1 is retained for autoconf-style capability detection.
+  dnl
+  dnl Note: phpize configure scripts do not call AC_CANONICAL_HOST, so $host_cpu
+  dnl is empty.  We detect the architecture via `uname -m` instead.
   AC_DEFINE(HAVE_SNOBOL_JIT, 1, [Have libsnobol4 JIT support])
-  case "$host_cpu" in
+  SNOBOL_HOST_CPU=`uname -m`
+  case "$SNOBOL_HOST_CPU" in
     aarch64|arm64)
       AC_DEFINE(SNOBOL_JIT, 1, [Enable micro-JIT support (ARM64 only)])
-      AC_MSG_NOTICE([micro-JIT enabled (ARM64)])
+      AC_MSG_NOTICE([micro-JIT enabled ($SNOBOL_HOST_CPU)])
       ;;
     *)
-      AC_MSG_NOTICE([micro-JIT disabled (ARM64 only; host_cpu=$host_cpu)])
+      AC_MSG_NOTICE([micro-JIT disabled (ARM64 only; detected=$SNOBOL_HOST_CPU)])
       ;;
   esac
 
