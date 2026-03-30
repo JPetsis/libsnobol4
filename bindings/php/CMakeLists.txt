@@ -101,6 +101,7 @@ configure_file(
 # PHP extension module target
 add_library(snobol_php MODULE
     src/php_snobol.c
+    src/snobol_pattern.c
     src/snobol_table_php.c
     src/snobol_dynamic_pattern_php.c
 )
@@ -115,6 +116,13 @@ target_include_directories(snobol_php PRIVATE
     ${CMAKE_SOURCE_DIR}/core/include
     ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+# On macOS, PHP symbols (zend_malloc, emalloc, etc.) are resolved at runtime
+# when the extension is loaded into the PHP process. The Apple linker requires
+# -undefined dynamic_lookup to permit this.
+if(APPLE)
+    target_link_options(snobol_php PRIVATE -undefined dynamic_lookup)
+endif()
 
 # Set PHP extension properties
 set_target_properties(snobol_php PROPERTIES

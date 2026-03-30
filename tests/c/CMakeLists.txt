@@ -27,11 +27,13 @@ target_link_libraries(snobol4_tests PRIVATE snobol4)
 # Use C23 standard
 target_compile_features(snobol4_tests PRIVATE c_std_23)
 
-# Enable profiling and JIT for tests
-target_compile_definitions(snobol4_tests PRIVATE
-    SNOBOL_PROFILE=1
-    SNOBOL_JIT=1
-)
+# Enable profiling for tests
+target_compile_definitions(snobol4_tests PRIVATE SNOBOL_PROFILE=1)
+
+# Enable JIT for tests on platforms that support it (requires sys/mman.h)
+if(NOT WIN32)
+    target_compile_definitions(snobol4_tests PRIVATE SNOBOL_JIT=1)
+endif()
 
 # Register with CTest
 add_test(
