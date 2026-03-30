@@ -9,32 +9,32 @@ PHP_ARG_ENABLE([snobol],
 if test "$PHP_SNOBOL" != "no"; then
   dnl Check if core library exists
   dnl When running configure from bindings/php/, core is at ../../core/
-  CORE_DIR=""
+  CORE_REL=""
   if test -f "$abs_srcdir/../../core/src/lexer.c"; then
-    CORE_DIR="$abs_srcdir/../../core"
+    CORE_REL="../../core"
   elif test -f "$abs_srcdir/../core/src/lexer.c"; then
-    CORE_DIR="$abs_srcdir/../core"
+    CORE_REL="../core"
   elif test -f "$abs_srcdir/core/src/lexer.c"; then
-    CORE_DIR="$abs_srcdir/core"
+    CORE_REL="core"
   fi
 
-  if test -z "$CORE_DIR"; then
+  if test -z "$CORE_REL"; then
     AC_MSG_ERROR([libsnobol4 core not found. Please ensure core/ directory exists.])
   fi
 
-  AC_MSG_NOTICE([Using core directory: $CORE_DIR])
+  AC_MSG_NOTICE([Using core directory: $CORE_REL])
 
-  dnl Add core source files (use absolute paths)
+  dnl Add core source files (relative to configure location)
   snobol_core_sources="
-    $CORE_DIR/src/lexer.c
-    $CORE_DIR/src/parser.c
-    $CORE_DIR/src/ast.c
-    $CORE_DIR/src/compiler.c
-    $CORE_DIR/src/vm.c
-    $CORE_DIR/src/table.c
-    $CORE_DIR/src/dynamic_pattern.c
-    $CORE_DIR/src/jit.c
-    $CORE_DIR/src/version.c
+    $CORE_REL/src/lexer.c
+    $CORE_REL/src/parser.c
+    $CORE_REL/src/ast.c
+    $CORE_REL/src/compiler.c
+    $CORE_REL/src/vm.c
+    $CORE_REL/src/table.c
+    $CORE_REL/src/dynamic_pattern.c
+    $CORE_REL/src/jit.c
+    $CORE_REL/src/version.c
   "
 
   dnl Add PHP extension sources
@@ -47,12 +47,12 @@ if test "$PHP_SNOBOL" != "no"; then
   "
 
   dnl Add include paths
-  PHP_ADD_INCLUDE([$CORE_DIR/include])
+  PHP_ADD_INCLUDE([$abs_srcdir/$CORE_REL/include])
   PHP_ADD_INCLUDE([$abs_srcdir/src])
 
   dnl Enable JIT if available
   AC_DEFINE(HAVE_SNOBOL_JIT, 1, [Have libsnobol4 JIT support])
 
   dnl Create the extension
-  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [-I$CORE_DIR/include])
+  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [-I$abs_srcdir/$CORE_REL/include])
 fi

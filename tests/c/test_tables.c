@@ -12,7 +12,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "../../core/src/snobol_internal.h"
+#include "../../core/include/snobol/snobol_internal.h"
 #include "snobol/table.h"
 
 /* External test framework functions */
