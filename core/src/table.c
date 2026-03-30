@@ -6,7 +6,7 @@
  * Tables are owned by the C core and can be safely shared across pattern executions.
  */
 
-#include "snobol_internal.h"
+#include "snobol/snobol_internal.h"
 #include "snobol/table.h"
 #include <string.h>
 #include <stdint.h>

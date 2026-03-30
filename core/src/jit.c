@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include <stddef.h>
 #include <string.h>
-#include "snobol_internal.h"
+#include "snobol/snobol_internal.h"
 
 /* ---------------------------------------------------------------------------
  * Global state

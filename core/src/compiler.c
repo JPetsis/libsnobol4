@@ -1,4 +1,4 @@
-#include "snobol_internal.h"
+#include "snobol/snobol_internal.h"
 #include "snobol/vm.h"      /* MUST come before snobol/compiler.h to get CHARCLASS_BITMAP_BYTES */
 #include "snobol/compiler.h"
 

@@ -6,7 +6,7 @@
  * and a cache for reusing previously compiled patterns.
  */
 
-#include "snobol_internal.h"
+#include "snobol/snobol_internal.h"
 #include "snobol/dynamic_pattern.h"
 #include "snobol/table.h"
 #include <string.h>

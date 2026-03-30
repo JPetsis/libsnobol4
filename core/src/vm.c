@@ -1,4 +1,4 @@
-#include "snobol_internal.h"
+#include "snobol/snobol_internal.h"
 #include "snobol/vm.h"
 #include "snobol/table.h"
 #include "snobol/dynamic_pattern.h"
