@@ -51,7 +51,7 @@ jobs:
           php -r "require 'vendor/autoload.php'; var_dump(class_exists('Snobol\\\\Builder'));"
 
       - name: Build C extension
-        working-directory: core
+        working-directory: bindings/php
         run: |
           phpize
           ./configure --enable-snobol
@@ -97,9 +97,15 @@ jobs:
       - name: Verify Composer autoload (Snobol\\Builder)
         run: php -r "require 'vendor/autoload.php'; if (!class_exists('Snobol\\Builder')) { fwrite(STDERR, 'Snobol\\Builder not autoloadable\n'); exit(1);}"
 
+      - name: Configure CMake
+        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF
+
+      - name: Build C library
+        run: cmake --build build
+
       - name: Run C tests
-        working-directory: tests/c
-        run: make test
+        working-directory: build
+        run: ctest --output-on-failure
         continue-on-error: true
         env:
           ASAN_OPTIONS: detect_leaks=0

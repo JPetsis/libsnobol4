@@ -45,8 +45,19 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist
 
+      - name: Configure CMake with sanitizers
+        run: |
+          cmake -B build \
+            -DBUILD_TESTS=ON \
+            -DBUILD_PHP=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+
+      - name: Build C library
+        run: cmake --build build
+
       - name: Build C extension with ASan/UBSan
-        working-directory: snobol4-core
+        working-directory: bindings/php
         run: |
           phpize
           ./configure --enable-snobol
@@ -60,8 +71,8 @@ jobs:
           php -m | grep snobol || echo "Warning: Extension not loaded, continuing anyway"
 
       - name: Run C tests with sanitizers
-        working-directory: tests/c
-        run: make test
+        working-directory: build
+        run: ctest --output-on-failure
         continue-on-error: true
 
       - name: Run PHP tests with sanitizers
