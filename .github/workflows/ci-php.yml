@@ -70,14 +70,43 @@ jobs:
         run: sudo cmake --install build
 
       - name: Enable extension
+        shell: bash
         run: |
-          PHP_INI_DIR=$(php --ini | grep "Scan for additional .ini files" -A 1 | tail -1 | tr -d ' ' | xargs dirname)
-          echo "Creating INI file in: $PHP_INI_DIR"
-          sudo mkdir -p "$PHP_INI_DIR"
-          echo "extension=snobol.so" | sudo tee "${PHP_INI_DIR}/99-snobol.ini"
+          set -euo pipefail
 
-      - name: Verify extension loaded
-        run: php -r "if (!extension_loaded('snobol')) exit(1);"
+          # setup-php sets PHP_INI_SCAN_DIR; use it when available
+          if [ -n "${PHP_INI_SCAN_DIR:-}" ] && [ -d "$PHP_INI_SCAN_DIR" ]; then
+            INI_DIR="$PHP_INI_SCAN_DIR"
+            echo "Using PHP_INI_SCAN_DIR: $INI_DIR"
+          else
+            LOADED_INI=$(php -r 'echo php_ini_loaded_file() ?: "";')
+            echo "Loaded php.ini: ${LOADED_INI:-<none>}"
+            if [ -n "$LOADED_INI" ]; then
+              BASE_DIR=$(dirname "$LOADED_INI")
+              if [ -d "$BASE_DIR/conf.d" ]; then
+                INI_DIR="$BASE_DIR/conf.d"
+                echo "Using conf.d: $INI_DIR"
+              else
+                echo "Appending extension line to $LOADED_INI"
+                echo "extension=snobol.so" | sudo tee -a "$LOADED_INI" > /dev/null
+                INI_DIR=""
+              fi
+            else
+              echo "Cannot locate php.ini; aborting" >&2; exit 1
+            fi
+          fi
+
+          if [ -n "${INI_DIR:-}" ]; then
+            sudo mkdir -p "$INI_DIR"
+            echo "extension=snobol.so" | sudo tee "$INI_DIR/99-snobol.ini" > /dev/null
+            echo "Wrote $INI_DIR/99-snobol.ini"
+          fi
+
+          echo "=== php --ini ==="
+          php --ini | cat
+          echo "=== Verify extension loaded ==="
+          php -m | grep -i '^snobol$'
+          php -r "if (!extension_loaded('snobol')) { fwrite(STDERR, 'Extension not loaded\n'); exit(1); }"
 
       - name: Run PHP tests
         working-directory: bindings/php

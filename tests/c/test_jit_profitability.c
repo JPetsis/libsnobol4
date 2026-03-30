@@ -84,6 +84,8 @@ static size_t build_split_only(uint8_t *bc) {
 
 /* ------------------------------------------------------------------- */
 
+#ifdef SNOBOL_JIT
+
 /* Test (a): direct call to snobol_jit_should_compile - cold/simple patterns */
 static void test_profitability_cold_skip(void) {
     SnobolJitConfig cfg = *snobol_jit_get_config();
@@ -220,6 +222,8 @@ static void test_profitability_counter_cold(void) {
     snobol_jit_set_config(&saved);
     snobol_jit_init();
 }
+
+#endif /* SNOBOL_JIT */
 
 void test_jit_profitability_suite(void) {
 #ifdef SNOBOL_JIT

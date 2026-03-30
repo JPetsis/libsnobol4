@@ -9,49 +9,37 @@ PHP_ARG_ENABLE([snobol],
 if test "$PHP_SNOBOL" != "no"; then
   dnl Check if core library exists
   dnl When running configure from bindings/php/, core is at ../../core/
-  dnl CORE_DIR  = absolute path (used for -I include flags)
-  dnl CORE_REL  = relative path from $abs_srcdir (used for source file lists;
-  dnl             phpize prepends $ext_srcdir/ to every source path, so passing
-  dnl             absolute paths here causes path doubling)
+  dnl CORE_DIR = absolute path, used only for -I compiler flags.
+  dnl
+  dnl NOTE: phpize's PHP_NEW_EXTENSION prepends $ext_srcdir/ to every source
+  dnl path.  Absolute paths cause path doubling; relative paths with ".."
+  dnl cause empty object-file names (phpize cannot handle ".." components).
+  dnl We therefore compile all core sources via the in-directory amalgamation
+  dnl file core_amalgam.c which lives next to config.m4.
   CORE_DIR=""
-  CORE_REL=""
   if test -f "$abs_srcdir/../../core/src/lexer.c"; then
     CORE_DIR="$abs_srcdir/../../core"
-    CORE_REL="../../core"
   elif test -f "$abs_srcdir/../core/src/lexer.c"; then
     CORE_DIR="$abs_srcdir/../core"
-    CORE_REL="../core"
   elif test -f "$abs_srcdir/core/src/lexer.c"; then
     CORE_DIR="$abs_srcdir/core"
-    CORE_REL="core"
   fi
 
   if test -z "$CORE_DIR"; then
     AC_MSG_ERROR([libsnobol4 core not found. Please ensure core/ directory exists.])
   fi
 
-  AC_MSG_NOTICE([Using core directory: $CORE_DIR (relative: $CORE_REL)])
+  AC_MSG_NOTICE([Using core directory: $CORE_DIR])
 
-  dnl Add core source files using relative paths so phpize does not double them
-  snobol_core_sources="
-    $CORE_REL/src/lexer.c
-    $CORE_REL/src/parser.c
-    $CORE_REL/src/ast.c
-    $CORE_REL/src/compiler.c
-    $CORE_REL/src/vm.c
-    $CORE_REL/src/table.c
-    $CORE_REL/src/dynamic_pattern.c
-    $CORE_REL/src/jit.c
-    $CORE_REL/src/version.c
-  "
-
-  dnl Add PHP extension sources (relative to $ext_srcdir / $abs_srcdir)
+  dnl All source paths are relative to $ext_srcdir (= $abs_srcdir).
+  dnl core_amalgam.c lives here and #include-s all core translation units,
+  dnl avoiding any ".." path components that confuse phpize.
   snobol_sources="
     src/php_snobol.c
     src/snobol_pattern.c
     src/snobol_table_php.c
     src/snobol_dynamic_pattern_php.c
-    $snobol_core_sources
+    core_amalgam.c
   "
 
   dnl Add include paths (absolute paths are fine for -I compiler flags)
