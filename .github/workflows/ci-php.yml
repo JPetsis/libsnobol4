@@ -3,14 +3,8 @@ name: CI - PHP Binding
 on:
   push:
     branches: [ main, develop ]
-    paths:
-      - 'bindings/php/**'
-      - 'core/**'
   pull_request:
     branches: [ main, develop ]
-    paths:
-      - 'bindings/php/**'
-      - 'core/**'
 
 jobs:
   php-tests:
