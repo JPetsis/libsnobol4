@@ -58,16 +58,17 @@ jobs:
 
       - name: Install Composer dependencies
         working-directory: bindings/php
-        run: composer install --no-interaction --prefer-dist --no-progress
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          composer dump-autoload -o
 
-      - name: Configure CMake with PHP binding
-        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=ON
-
-      - name: Build
-        run: cmake --build build
-
-      - name: Install extension
-        run: sudo cmake --install build
+      - name: Build PHP extension with phpize
+        working-directory: bindings/php
+        run: |
+          phpize
+          ./configure --enable-snobol
+          make
+          sudo make install
 
       - name: Enable extension
         shell: bash

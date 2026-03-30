@@ -32,7 +32,7 @@ jobs:
 
       - name: Run Tests
         working-directory: build
-        run: ctest --output-on-failure
+        run: ctest --output-on-failure -C ${{ matrix.os == 'windows-latest' && 'Release' || '' }}
 
   sanitizers:
     name: Sanitizers (Ubuntu)
