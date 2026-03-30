@@ -66,6 +66,10 @@ static void test_jit_jmp_in_region(void) {
     vm.len = 2;
     vm.jit.enabled = true;
 
+    // Initialize JIT first, then override config for testing
+    snobol_jit_init();
+    snobol_jit_reset_stats();
+    
     // Disable profitability gate for testing - force JIT compilation
     SnobolJitConfig saved_cfg = *snobol_jit_get_config();
     SnobolJitConfig test_cfg = saved_cfg;
@@ -73,9 +77,7 @@ static void test_jit_jmp_in_region(void) {
     test_cfg.min_useful_ops = 0;         // Allow any pattern
     test_cfg.skip_backtrack_heavy = false; // Don't skip backtrack patterns
     snobol_jit_set_config(&test_cfg);
-
-    snobol_jit_init();
-    snobol_jit_reset_stats();
+    
     SnobolJitStats *stats = snobol_jit_get_stats();
 
     SnobolJitContext *ctx = snobol_jit_acquire_context(bc, vm.bc_len);
@@ -119,66 +121,70 @@ static void test_jit_jmp_in_region(void) {
 }
 
 static void test_jit_split_in_region(void) {
-    /* Disable the profitability gate so we can test JIT compilation
-     * of SPLIT-containing patterns directly. */
-    SnobolJitConfig saved_cfg = *snobol_jit_get_config();
-    SnobolJitConfig cfg = saved_cfg;
-    cfg.min_useful_ops       = 0;
-    cfg.skip_backtrack_heavy = false;
-    snobol_jit_set_config(&cfg);
     uint8_t bc[512] = {0};
     size_t ip = 0;
-    
+
     // Program: SPLIT a, b  a: LIT 'a' JMP end  b: LIT 'b'  end: ACCEPT
     // Subject: "b"
-    
+
     size_t split_ip = ip;
     bc[ip++] = OP_SPLIT;
     emit_u32(bc, &ip, 0); // a
     emit_u32(bc, &ip, 0); // b
-    
+
     size_t a_ip = ip;
     bc[ip++] = OP_LIT;
     emit_u32(bc, &ip, 500);
     emit_u32(bc, &ip, 1);
     bc[500] = 'a';
-    
+
     size_t jmp_ip = ip;
     bc[ip++] = OP_JMP;
     emit_u32(bc, &ip, 0); // end
-    
+
     size_t b_ip = ip;
     bc[ip++] = OP_LIT;
     emit_u32(bc, &ip, 501);
     emit_u32(bc, &ip, 1);
     bc[501] = 'b';
-    
+
     size_t end_ip = ip;
     bc[ip++] = OP_ACCEPT;
-    
+
     ip = split_ip + 1;
     emit_u32(bc, &ip, (uint32_t)a_ip);
     emit_u32(bc, &ip, (uint32_t)b_ip);
     ip = jmp_ip + 1;
     emit_u32(bc, &ip, (uint32_t)end_ip);
-    
+
     VM vm = {0};
     vm.bc = bc;
     vm.bc_len = 512;
     vm.s = "b";
     vm.len = 1;
     vm.jit.enabled = true;
-    
+
+    // Initialize JIT first, then override config for testing
     snobol_jit_init();
     snobol_jit_reset_stats();
-    SnobolJitStats *stats = snobol_jit_get_stats();
     
+    /* Disable the profitability gate so we can test JIT compilation
+     * of SPLIT-containing patterns directly. */
+    SnobolJitConfig saved_cfg = *snobol_jit_get_config();
+    SnobolJitConfig cfg = saved_cfg;
+    cfg.min_useful_ops       = 0;
+    cfg.hotness_threshold    = 5;
+    cfg.skip_backtrack_heavy = false;
+    snobol_jit_set_config(&cfg);
+    
+    SnobolJitStats *stats = snobol_jit_get_stats();
+
     SnobolJitContext *ctx = snobol_jit_acquire_context(bc, vm.bc_len);
     vm.jit.ip_counts = ctx->ip_counts;
     vm.jit.traces = ctx->traces;
     vm.jit.stats = stats;
 
-    for(int i=0; i<100; i++) {
+    for(int i=0; i<20; i++) {
         vm.ip = 0; vm.pos = 0;
         vm_run(&vm);
     }
