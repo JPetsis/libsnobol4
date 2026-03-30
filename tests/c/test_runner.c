@@ -17,7 +17,7 @@ static jmp_buf test_jump;
 
 static void signal_handler(int sig) {
     printf("\n  ✗ CRASHED with signal %d (%s) in suite: %s\n", 
-           sig, (sig == SIGILL ? "SIGILL" : (sig == SIGSEGV ? "SIGSEGV" : "SIGBUS")),
+           sig, (sig == SIGILL ? "SIGILL" : (sig == SIGSEGV ? "SIGSEGV" : "UNKNOWN")),
            test_ctx.current_suite);
     test_ctx.failed++;
     longjmp(test_jump, 1);
@@ -62,7 +62,9 @@ int main(void) {
 
     signal(SIGILL, signal_handler);
     signal(SIGSEGV, signal_handler);
+#ifdef SIGBUS
     signal(SIGBUS, signal_handler);
+#endif
 
     if (setjmp(test_jump) == 0) {
         test_vm_suite();

@@ -135,7 +135,7 @@ set_target_properties(snobol_php PROPERTIES
 target_compile_definitions(snobol_php PRIVATE
     HAVE_CONFIG_H
     PHP_BUILD=1
-    ZEND_COMPILE_DL_EXT=1
+    COMPILE_DL_SNOBOL
 )
 
 # Installation

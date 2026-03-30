@@ -19,6 +19,7 @@ static bool jit_is_supported(void) {
 #endif
 }
 
+#ifdef SNOBOL_JIT
 static void emit_u32(uint8_t *bc, size_t *ip, uint32_t v) {
     bc[(*ip)++] = (uint8_t)((v >> 24) & 0xFF);
     bc[(*ip)++] = (uint8_t)((v >> 16) & 0xFF);
@@ -230,6 +231,7 @@ static void test_jit_split_in_region(void) {
     snobol_jit_set_config(&saved_cfg);
     snobol_jit_shutdown();
 }
+#endif /* SNOBOL_JIT */
 
 void test_jit_branches_suite(void) {
 #ifdef SNOBOL_JIT

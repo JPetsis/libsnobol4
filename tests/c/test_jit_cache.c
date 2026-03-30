@@ -17,6 +17,7 @@ static bool jit_is_supported(void) {
 #endif
 }
 
+#ifdef SNOBOL_JIT
 /* -----------------------------------------------------------------------
  * Task 3.4: LRU cache eviction stress tests
  * Validates:
@@ -193,6 +194,7 @@ static void test_backtrack_alternation_fixture(void) {
     snobol_jit_release_context(ctx);
     snobol_jit_shutdown();
 }
+#endif /* SNOBOL_JIT */
 
 void test_jit_cache_suite(void) {
 #ifdef SNOBOL_JIT
