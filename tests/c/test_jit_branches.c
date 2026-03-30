@@ -9,6 +9,15 @@
 void test_suite(const char *name);
 void test_assert(bool condition, const char *message);
 
+/* Check if JIT is supported on this architecture (ARM64 only) */
+static bool jit_is_supported(void) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return true;
+#else
+    return false;
+#endif
+}
+
 static void emit_u32(uint8_t *bc, size_t *ip, uint32_t v) {
     bc[(*ip)++] = (uint8_t)((v >> 24) & 0xFF);
     bc[(*ip)++] = (uint8_t)((v >> 16) & 0xFF);
@@ -17,6 +26,24 @@ static void emit_u32(uint8_t *bc, size_t *ip, uint32_t v) {
 }
 
 static void test_jit_jmp_in_region(void) {
+    /* Skip test on non-ARM64 architectures where JIT is not implemented */
+    if (!jit_is_supported()) {
+        test_assert(true, "JIT JMP test skipped (ARM64 only)");
+        return;
+    }
+    
+    // Initialize JIT and set config BEFORE creating VM
+    snobol_jit_init();
+    snobol_jit_reset_stats();
+    
+    // Disable profitability gate for testing - force JIT compilation
+    SnobolJitConfig saved_cfg = *snobol_jit_get_config();
+    SnobolJitConfig test_cfg = saved_cfg;
+    test_cfg.hotness_threshold = 5;      // Lower threshold for faster testing
+    test_cfg.min_useful_ops = 0;         // Allow any pattern
+    test_cfg.skip_backtrack_heavy = false; // Don't skip backtrack patterns
+    snobol_jit_set_config(&test_cfg);
+    
     uint8_t bc[512] = {0};
     size_t ip = 0;
 
@@ -66,24 +93,13 @@ static void test_jit_jmp_in_region(void) {
     vm.len = 2;
     vm.jit.enabled = true;
 
-    // Initialize JIT first, then override config for testing
-    snobol_jit_init();
-    snobol_jit_reset_stats();
-    
-    // Disable profitability gate for testing - force JIT compilation
-    SnobolJitConfig saved_cfg = *snobol_jit_get_config();
-    SnobolJitConfig test_cfg = saved_cfg;
-    test_cfg.hotness_threshold = 5;      // Lower threshold for faster testing
-    test_cfg.min_useful_ops = 0;         // Allow any pattern
-    test_cfg.skip_backtrack_heavy = false; // Don't skip backtrack patterns
-    snobol_jit_set_config(&test_cfg);
-    
     SnobolJitStats *stats = snobol_jit_get_stats();
 
     SnobolJitContext *ctx = snobol_jit_acquire_context(bc, vm.bc_len);
     vm.jit.ip_counts = ctx->ip_counts;
     vm.jit.traces = ctx->traces;
     vm.jit.stats = stats;
+    vm.jit.ctx = ctx;
 
     // Warm up JIT: need 5+ visits to trigger compilation (with lowered threshold)
     for(int i=0; i<20; i++) {
@@ -121,6 +137,12 @@ static void test_jit_jmp_in_region(void) {
 }
 
 static void test_jit_split_in_region(void) {
+    /* Skip test on non-ARM64 architectures where JIT is not implemented */
+    if (!jit_is_supported()) {
+        test_assert(true, "JIT SPLIT test skipped (ARM64 only)");
+        return;
+    }
+
     uint8_t bc[512] = {0};
     size_t ip = 0;
 

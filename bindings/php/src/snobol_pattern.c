@@ -5,7 +5,7 @@
 #include "snobol/vm.h"
 #include "snobol/lexer.h"
 #include "snobol/parser.h"
-#include "../core/src/snobol_internal.h"
+#include "snobol/snobol_internal.h"
 #ifdef SNOBOL_JIT
 #include "snobol/jit.h"
 #endif

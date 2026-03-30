@@ -71,8 +71,10 @@ jobs:
 
       - name: Enable extension
         run: |
-          PHP_INI_DIR=$(php --ini | grep "Scan for additional .ini files" -A 1 | tail -1 | xargs dirname)
-          echo "extension=snobol.so" | sudo tee "$PHP_INI_DIR/99-snobol.ini"
+          PHP_INI_DIR=$(php --ini | grep "Scan for additional .ini files" -A 1 | tail -1 | tr -d ' ' | xargs dirname)
+          echo "Creating INI file in: $PHP_INI_DIR"
+          sudo mkdir -p "$PHP_INI_DIR"
+          echo "extension=snobol.so" | sudo tee "${PHP_INI_DIR}/99-snobol.ini"
 
       - name: Verify extension loaded
         run: php -r "if (!extension_loaded('snobol')) exit(1);"

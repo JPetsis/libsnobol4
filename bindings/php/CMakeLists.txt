@@ -48,6 +48,19 @@ execute_process(
 message(STATUS "PHP version: ${PHP_VERSION}")
 message(STATUS "PHP extension dir: ${PHP_EXTENSION_DIR}")
 
+# Get PHP library path and libs
+execute_process(
+    COMMAND ${PHP_CONFIG} --ldflags
+    OUTPUT_VARIABLE PHP_LDFLAGS
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+execute_process(
+    COMMAND ${PHP_CONFIG} --libs
+    OUTPUT_VARIABLE PHP_LIBS
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
 # Parse include flags
 string(REPLACE " " ";" PHP_INCLUDE_LIST "${PHP_INCLUDES}")
 set(PHP_INCLUDE_DIRS "")
@@ -56,6 +69,21 @@ foreach(flag ${PHP_INCLUDE_LIST})
         list(APPEND PHP_INCLUDE_DIRS "${CMAKE_MATCH_1}")
     endif()
 endforeach()
+
+# Parse library flags for linking
+set(PHP_LINK_LIBS "")
+foreach(flag ${PHP_LDFLAGS} ${PHP_LIBS})
+    if(flag MATCHES "^-L(.+)$")
+        list(APPEND PHP_LINK_DIRS "${CMAKE_MATCH_1}")
+    elseif(flag MATCHES "^-l(.+)$")
+        list(APPEND PHP_LINK_LIBS "${CMAKE_MATCH_1}")
+    endif()
+endforeach()
+
+# Add library search paths
+if(PHP_LINK_DIRS)
+    link_directories(${PHP_LINK_DIRS})
+endif()
 
 # Generate config.h for PHP extension
 configure_file(
@@ -70,8 +98,8 @@ add_library(snobol_php MODULE
     src/snobol_dynamic_pattern_php.c
 )
 
-# Link against core library
-target_link_libraries(snobol_php PRIVATE snobol4)
+# Link against core library and PHP
+target_link_libraries(snobol_php PRIVATE snobol4 ${PHP_LINK_LIBS})
 
 # PHP extension configuration
 target_include_directories(snobol_php PRIVATE

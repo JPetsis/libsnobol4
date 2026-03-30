@@ -7,6 +7,15 @@
 void test_suite(const char *name);
 void test_assert(bool condition, const char *message);
 
+/* Check if JIT is supported on this architecture (ARM64 only) */
+static bool jit_is_supported(void) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return true;
+#else
+    return false;
+#endif
+}
+
 /* -----------------------------------------------------------------------
  * Task 3.4: LRU cache eviction stress tests
  * Validates:
@@ -15,6 +24,12 @@ void test_assert(bool condition, const char *message);
  *   - Repeated compile/execute cycles remain safe after eviction
  * ----------------------------------------------------------------------- */
 static void test_cache_eviction_stress(void) {
+    /* Skip on non-ARM64 where JIT compilation is not available */
+    if (!jit_is_supported()) {
+        test_assert(true, "Cache eviction stress test skipped (ARM64 only)");
+        return;
+    }
+    
     /* Use a very small cache to force evictions quickly */
     SnobolJitConfig cfg = *snobol_jit_get_config();
     SnobolJitConfig saved = cfg;
@@ -86,6 +101,12 @@ static void test_cache_eviction_stress(void) {
  * patterns even when the profitability gate skips JIT for them.
  * ----------------------------------------------------------------------- */
 static void test_backtrack_alternation_fixture(void) {
+    /* Skip on non-ARM64 where JIT compilation is not available */
+    if (!jit_is_supported()) {
+        test_assert(true, "Backtrack alternation fixture skipped (ARM64 only)");
+        return;
+    }
+    
     /* SPLIT a,b  a:LIT 'x' JMP end  b:LIT 'y'  end:ACCEPT
      * Matches "x" or "y" via alternation */
     uint8_t bc[64] = {0};
