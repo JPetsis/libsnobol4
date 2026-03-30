@@ -61,8 +61,12 @@ jobs:
         run: |
           phpize
           ./configure --enable-snobol
+          make clean
           make
+          echo "Extension built at: $(find . -name 'snobol.so' -type f)"
           sudo make install
+          echo "Extension installed to: $(php -r 'echo ini_get("extension_dir");')"
+          ls -la $(php -r 'echo ini_get("extension_dir");') | grep snobol || echo "Extension not found in extension_dir"
 
       - name: Enable extension
         shell: bash

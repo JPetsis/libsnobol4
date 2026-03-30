@@ -162,6 +162,14 @@ class JitObservabilityTest extends TestCase
         if (!function_exists('snobol_get_jit_stats')) {
             $this->markTestSkipped('JIT stats not available (JIT disabled?)');
         }
+
+        // Check if JIT is supported (ARM64 only)
+        // On x86_64, JIT compilation is not available
+        $arch = php_uname('m');
+        if ($arch !== 'arm64' && $arch !== 'aarch64') {
+            $this->markTestSkipped('JIT compilation is ARM64-only (current arch: '.$arch.')');
+        }
+        
         snobol_reset_jit_stats();
     }
 }
