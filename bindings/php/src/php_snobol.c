@@ -2,6 +2,14 @@
 #include "config.h"
 #endif
 
+/* phpize always builds shared extensions; ensure get_module() is compiled in.
+   On macOS the autoconf-generated config.h sometimes omits COMPILE_DL_SNOBOL
+   when --enable-snobol is passed without =shared.  This fallback is harmless
+   for cmake builds because cmake defines it explicitly. */
+#ifndef COMPILE_DL_SNOBOL
+# define COMPILE_DL_SNOBOL 1
+#endif
+
 #include "php.h"
 #include "php_snobol.h"
 #include "ext/standard/info.h"

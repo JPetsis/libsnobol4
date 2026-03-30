@@ -45,11 +45,15 @@ if test "$PHP_SNOBOL" != "no"; then
   dnl Add include paths (absolute paths are fine for -I compiler flags)
   PHP_ADD_INCLUDE([$CORE_DIR/include])
   PHP_ADD_INCLUDE([$abs_srcdir/src])
-  PHP_ADD_INCLUDE([$abs_srcdir/..])
 
   dnl Enable JIT if available
   AC_DEFINE(HAVE_SNOBOL_JIT, 1, [Have libsnobol4 JIT support])
 
+  dnl phpize always builds shared extensions; make sure COMPILE_DL_SNOBOL is
+  dnl present in config.h regardless of ext_shared value (belt-and-suspenders
+  dnl for macOS where PHP_NEW_EXTENSION sometimes omits it).
+  AC_DEFINE([COMPILE_DL_SNOBOL], [1], [Build snobol as a dynamically-loaded module])
+
   dnl Create the extension
-  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [-I$CORE_DIR/include -I$abs_srcdir/..])
+  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [-I$CORE_DIR/include])
 fi

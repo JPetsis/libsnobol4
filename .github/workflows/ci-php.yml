@@ -60,13 +60,34 @@ jobs:
         working-directory: bindings/php
         run: |
           phpize
-          ./configure --enable-snobol
+          # Use =shared to explicitly tell phpize to define COMPILE_DL_SNOBOL
+          ./configure --enable-snobol=shared
           make clean
           make
           echo "Extension built at: $(find . -name 'snobol.so' -type f)"
+          # Verify get_module is exported (required by PHP to load the extension)
+          BUILT_SO=$(find . -name 'snobol.so' -not -path './.libs/*' -type f | head -1)
+          if [ -z "$BUILT_SO" ]; then
+            BUILT_SO=$(find . -name 'snobol.so' -type f | head -1)
+          fi
+          if [ -n "$BUILT_SO" ]; then
+            echo "=== Built extension: $BUILT_SO ==="
+            file "$BUILT_SO" || true
+            nm "$BUILT_SO" 2>/dev/null | grep -i get_module \
+              && echo "OK: get_module symbol found" \
+              || echo "WARNING: get_module NOT found in $BUILT_SO"
+          else
+            echo "WARNING: snobol.so not found after make"
+          fi
           sudo make install
-          echo "Extension installed to: $(php -r 'echo ini_get("extension_dir");')"
-          ls -la $(php -r 'echo ini_get("extension_dir");') | grep snobol || echo "Extension not found in extension_dir"
+          EXT_DIR=$(php -r 'echo ini_get("extension_dir");')
+          echo "Extension installed to: $EXT_DIR"
+          ls -la "$EXT_DIR" | grep snobol || echo "Extension not found in extension_dir"
+          if [ -f "$EXT_DIR/snobol.so" ]; then
+            nm "$EXT_DIR/snobol.so" 2>/dev/null | grep -i get_module \
+              && echo "OK: get_module in installed extension" \
+              || echo "WARNING: get_module NOT in installed $EXT_DIR/snobol.so"
+          fi
 
       - name: Enable extension
         shell: bash
