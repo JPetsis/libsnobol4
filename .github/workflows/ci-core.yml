@@ -28,7 +28,7 @@ jobs:
         run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF
 
       - name: Build
-        run: cmake --build build
+        run: cmake --build build --config Release
 
       - name: Run Tests
         if: matrix.os != 'windows-latest'
@@ -38,7 +38,7 @@ jobs:
       - name: Run Tests (Windows)
         if: matrix.os == 'windows-latest'
         working-directory: build
-        run: ctest --output-on-failure -C Release
+        run: ctest --output-on-failure -C Release --verbose
 
   sanitizers:
     name: Sanitizers (Ubuntu)
