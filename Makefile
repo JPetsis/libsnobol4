@@ -110,6 +110,7 @@ test-valgrind:
 clean:
 	@echo "==> Cleaning build artifacts..."
 	rm -rf build/
+	rm -rf build_test/
 	@echo "==> Cleaning benchmark results..."
 	find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' -delete 2>/dev/null || true
 	@echo "==> Clean complete!"
