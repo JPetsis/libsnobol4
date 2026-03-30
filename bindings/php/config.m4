@@ -46,8 +46,20 @@ if test "$PHP_SNOBOL" != "no"; then
   PHP_ADD_INCLUDE([$CORE_DIR/include])
   PHP_ADD_INCLUDE([$abs_srcdir/src])
 
-  dnl Enable JIT if available
+  dnl Enable JIT on ARM64 (requires mmap/mprotect with PROT_EXEC)
+  dnl The micro-JIT emits ARM64 machine code; it is not supported on other arches.
+  dnl SNOBOL_JIT=1 is the actual feature gate used throughout all C sources.
+  dnl HAVE_SNOBOL_JIT=1 is retained for autoconf-style capability detection.
   AC_DEFINE(HAVE_SNOBOL_JIT, 1, [Have libsnobol4 JIT support])
+  case "$host_cpu" in
+    aarch64|arm64)
+      AC_DEFINE(SNOBOL_JIT, 1, [Enable micro-JIT support (ARM64 only)])
+      AC_MSG_NOTICE([micro-JIT enabled (ARM64)])
+      ;;
+    *)
+      AC_MSG_NOTICE([micro-JIT disabled (ARM64 only; host_cpu=$host_cpu)])
+      ;;
+  esac
 
   dnl phpize always builds shared extensions; make sure COMPILE_DL_SNOBOL is
   dnl present in config.h regardless of ext_shared value (belt-and-suspenders
