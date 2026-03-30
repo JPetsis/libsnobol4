@@ -19,33 +19,33 @@ static void emit_u32(uint8_t *bc, size_t *ip, uint32_t v) {
 static void test_jit_jmp_in_region(void) {
     uint8_t bc[512] = {0};
     size_t ip = 0;
-    
+
     // Program: ANY('x') JMP target LIT 'b' target: LIT 'a' ACCEPT
     // Subject: "xa"
-    
+
     bc[ip++] = OP_ANY;
     bc[ip++] = 0; bc[ip++] = 1; // set_id = 1
-    
+
     size_t jmp_ip = ip;
     bc[ip++] = OP_JMP;
     emit_u32(bc, &ip, 0); // target placeholder
-    
+
     bc[ip++] = OP_LIT;
     emit_u32(bc, &ip, 500);
     emit_u32(bc, &ip, 1);
     bc[500] = 'b';
-    
+
     size_t target_ip = ip;
     bc[ip++] = OP_LIT;
     emit_u32(bc, &ip, 501);
     emit_u32(bc, &ip, 1);
     bc[501] = 'a';
     bc[ip++] = OP_ACCEPT;
-    
+
     size_t set_pos = 200;
     size_t offset_pos = 396;
     size_t count_pos = 400;
-    
+
     size_t p = offset_pos;
     bc[p++] = 0; bc[p++] = 0; bc[p++] = 0; bc[p++] = (uint8_t)set_pos;
     p = count_pos;
@@ -55,28 +55,36 @@ static void test_jit_jmp_in_region(void) {
     bc[p++] = 0; bc[p++] = 0;
     bc[p++] = 0; bc[p++] = 0; bc[p++] = 0; bc[p++] = 'x';
     bc[p++] = 0; bc[p++] = 0; bc[p++] = 0; bc[p++] = 'x';
-    
+
     ip = jmp_ip + 1;
     emit_u32(bc, &ip, (uint32_t)target_ip);
-    
+
     VM vm = {0};
     vm.bc = bc;
     vm.bc_len = 404;
     vm.s = "xa";
     vm.len = 2;
     vm.jit.enabled = true;
-    
+
+    // Disable profitability gate for testing - force JIT compilation
+    SnobolJitConfig saved_cfg = *snobol_jit_get_config();
+    SnobolJitConfig test_cfg = saved_cfg;
+    test_cfg.hotness_threshold = 5;      // Lower threshold for faster testing
+    test_cfg.min_useful_ops = 0;         // Allow any pattern
+    test_cfg.skip_backtrack_heavy = false; // Don't skip backtrack patterns
+    snobol_jit_set_config(&test_cfg);
+
     snobol_jit_init();
     snobol_jit_reset_stats();
     SnobolJitStats *stats = snobol_jit_get_stats();
-    
+
     SnobolJitContext *ctx = snobol_jit_acquire_context(bc, vm.bc_len);
     vm.jit.ip_counts = ctx->ip_counts;
     vm.jit.traces = ctx->traces;
     vm.jit.stats = stats;
 
-    // Warm up JIT: need 50+ visits to trigger compilation
-    for(int i=0; i<100; i++) {
+    // Warm up JIT: need 5+ visits to trigger compilation (with lowered threshold)
+    for(int i=0; i<20; i++) {
         vm.ip = 0; vm.pos = 0;
         vm_run(&vm);
     }
@@ -106,6 +114,7 @@ static void test_jit_jmp_in_region(void) {
     test_assert(stats->entries_total >= 1, "Should enter JIT at least once");
 
     snobol_jit_release_context(ctx);
+    snobol_jit_set_config(&saved_cfg);
     snobol_jit_shutdown();
 }
 
@@ -196,10 +205,7 @@ static void test_jit_split_in_region(void) {
 void test_jit_branches_suite(void) {
 #ifdef SNOBOL_JIT
     test_suite("JIT Branches");
-    snobol_jit_init();
     test_jit_jmp_in_region();
-    snobol_jit_init();
     test_jit_split_in_region();
-    snobol_jit_shutdown();
 #endif
 }

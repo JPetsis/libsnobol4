@@ -7,22 +7,27 @@ PHP_ARG_ENABLE([snobol],
   [no])
 
 if test "$PHP_SNOBOL" != "no"; then
-  dnl Check if core library exists
+  dnl Check if core library exists (handle both absolute and relative paths)
   if test ! -f "$abs_srcdir/core/src/lexer.c"; then
-    AC_MSG_ERROR([libsnobol4 core not found. Please ensure core/ directory exists.])
+    if test ! -f "$abs_srcdir/../core/src/lexer.c"; then
+      AC_MSG_ERROR([libsnobol4 core not found. Please ensure core/ directory exists.])
+    fi
+    CORE_DIR="$abs_srcdir/../core"
+  else
+    CORE_DIR="$abs_srcdir/core"
   fi
 
   dnl Add core source files
   snobol_core_sources="
-    core/src/lexer.c
-    core/src/parser.c
-    core/src/ast.c
-    core/src/compiler.c
-    core/src/vm.c
-    core/src/table.c
-    core/src/dynamic_pattern.c
-    core/src/jit.c
-    core/src/version.c
+    $CORE_DIR/src/lexer.c
+    $CORE_DIR/src/parser.c
+    $CORE_DIR/src/ast.c
+    $CORE_DIR/src/compiler.c
+    $CORE_DIR/src/vm.c
+    $CORE_DIR/src/table.c
+    $CORE_DIR/src/dynamic_pattern.c
+    $CORE_DIR/src/jit.c
+    $CORE_DIR/src/version.c
   "
 
   dnl Add PHP extension sources
@@ -35,12 +40,12 @@ if test "$PHP_SNOBOL" != "no"; then
   "
 
   dnl Add include paths
-  PHP_ADD_INCLUDE([$abs_srcdir/core/include])
+  PHP_ADD_INCLUDE([$CORE_DIR/include])
   PHP_ADD_INCLUDE([$abs_srcdir/src])
 
   dnl Enable JIT if available
   AC_DEFINE(HAVE_SNOBOL_JIT, 1, [Have libsnobol4 JIT support])
 
   dnl Create the extension
-  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [-I$abs_srcdir/core/include])
+  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [-I$CORE_DIR/include])
 fi
