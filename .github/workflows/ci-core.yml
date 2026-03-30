@@ -3,8 +3,22 @@ name: CI - Core Library
 on:
   push:
     branches: [ main, develop ]
+    paths:
+      - 'core/**'
+      - 'tests/c/**'
+      - 'CMakeLists.txt'
+      - 'dev/generate_amalgam.sh'
+      - '.github/workflows/ci-core.yml'
+      - '.github/workflows/ci-php.yml'
   pull_request:
     branches: [ main, develop ]
+    paths:
+      - 'core/**'
+      - 'tests/c/**'
+      - 'CMakeLists.txt'
+      - 'dev/generate_amalgam.sh'
+      - '.github/workflows/ci-core.yml'
+      - '.github/workflows/ci-php.yml'
 
 jobs:
   core-tests:
