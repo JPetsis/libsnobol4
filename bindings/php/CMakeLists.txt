@@ -138,6 +138,14 @@ target_compile_definitions(snobol_php PRIVATE
     COMPILE_DL_SNOBOL
 )
 
+# Enable JIT only on ARM64: the micro-JIT emits ARM64 machine code.
+# Defining SNOBOL_JIT on x86_64 would compile in ARM64 trace execution
+# and crash when those function pointers are called.
+# This mirrors config.m4 which gates on host_cpu = aarch64|arm64.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+    target_compile_definitions(snobol_php PRIVATE SNOBOL_JIT=1)
+endif()
+
 # Installation
 install(TARGETS snobol_php
     LIBRARY DESTINATION ${PHP_EXTENSION_DIR}
