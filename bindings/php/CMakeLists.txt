@@ -71,13 +71,17 @@ foreach(flag ${PHP_INCLUDE_LIST})
 endforeach()
 
 # Parse library directory and filter libs
+# Split space-separated flag strings into CMake lists first so each flag
+# is processed individually by the foreach loop below.
+string(REPLACE " " ";" PHP_LDFLAGS_LIST "${PHP_LDFLAGS}")
+string(REPLACE " " ";" PHP_LIBS_LIST "${PHP_LIBS}")
 set(PHP_LINK_DIRS "")
 set(PHP_LINK_LIBS "")
-foreach(flag ${PHP_LDFLAGS} ${PHP_LIBS})
+foreach(flag ${PHP_LDFLAGS_LIST} ${PHP_LIBS_LIST})
     if(flag MATCHES "^-L(.+)$")
         list(APPEND PHP_LINK_DIRS "${CMAKE_MATCH_1}")
-    elseif(flag MATCHES "^-l(sodium|argon2|onig)$")
-        # Skip optional PHP dependencies that may not be installed
+    elseif(flag MATCHES "^-l(sodium|argon2|onig|sybdb)$")
+        # Skip optional PHP dependencies that may not be present on all systems
     elseif(flag MATCHES "^-l(.+)$")
         list(APPEND PHP_LINK_LIBS "${CMAKE_MATCH_1}")
     endif()

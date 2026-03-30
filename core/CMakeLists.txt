@@ -60,8 +60,10 @@ if(SNOBOL_PROFILE)
     target_compile_definitions(snobol4 PRIVATE SNOBOL_PROFILE=1)
 endif()
 
-# Enable micro-JIT by default
-target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
+# Enable micro-JIT by default (Unix/macOS only — requires sys/mman.h)
+if(NOT WIN32)
+    target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
+endif()
 
 # Installation rules
 include(GNUInstallDirs)

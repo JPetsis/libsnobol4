@@ -202,15 +202,6 @@ typedef struct {
     size_t dyn_pending_bc_len;                   /* Length of pending bytecode */
 #endif
 
-#ifdef SNOBOL_PROFILE
-    struct {
-        uint64_t dispatch_count;
-        uint64_t push_count;
-        uint64_t pop_count;
-        size_t max_depth;
-    } profile;
-#endif
-
 #ifdef SNOBOL_JIT
     struct {
         uint64_t *ip_counts;
@@ -220,6 +211,15 @@ typedef struct {
         struct SnobolJitStats *stats;
         struct SnobolJitContext *ctx;  /**< owning context; used for per-pattern profitability state */
     } jit;
+#endif
+
+#ifdef SNOBOL_PROFILE
+    struct {
+        uint64_t dispatch_count;
+        uint64_t push_count;
+        uint64_t pop_count;
+        size_t max_depth;
+    } profile;
 #endif
 } VM;
 
