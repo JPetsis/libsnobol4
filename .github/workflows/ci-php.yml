@@ -46,9 +46,15 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: |
           brew install cmake autoconf
-          brew install php@${{ matrix.php-version }}
-          brew link php@${{ matrix.php-version }} --force
-          which php-config
+          # Handle PHP installation - may already exist from different tap
+          if brew list --versions php@${{ matrix.php-version }} >/dev/null 2>&1; then
+            echo "PHP ${{ matrix.php-version }} already installed"
+            brew link php@${{ matrix.php-version }} --force || true
+          else
+            brew install php@${{ matrix.php-version }} || brew link php@${{ matrix.php-version }} --force || true
+          fi
+          which php-config || echo "php-config not found, checking alternatives"
+          ls /usr/local/bin/php-config* 2>/dev/null || ls /opt/homebrew/bin/php-config* 2>/dev/null || true
 
       - name: Install Composer dependencies
         working-directory: bindings/php

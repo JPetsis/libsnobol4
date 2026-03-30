@@ -16,7 +16,7 @@ find_program(PHP_CONFIG php-config
 )
 
 if(NOT PHP_CONFIG)
-    message(FATAL_ERROR 
+    message(FATAL_ERROR
         "php-config not found. Please install PHP development package:\n"
         "  - Ubuntu/Debian: php-dev or phpX.X-dev\n"
         "  - macOS (brew): brew install php\n"
@@ -57,6 +57,12 @@ foreach(flag ${PHP_INCLUDE_LIST})
     endif()
 endforeach()
 
+# Generate config.h for PHP extension
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/config.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/config.h
+)
+
 # PHP extension module target
 add_library(snobol_php MODULE
     src/php_snobol.c
@@ -71,6 +77,7 @@ target_link_libraries(snobol_php PRIVATE snobol4)
 target_include_directories(snobol_php PRIVATE
     ${PHP_INCLUDE_DIRS}
     ${CMAKE_SOURCE_DIR}/core/include
+    ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 # Set PHP extension properties

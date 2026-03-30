@@ -10,15 +10,16 @@ if test "$PHP_SNOBOL" != "no"; then
   dnl Check if core library exists
   dnl When running configure from bindings/php/, core is at ../../core/
   dnl When running from root, core is at core/
-  if test -f "$abs_srcdir/core/src/lexer.c"; then
+  CORE_DIR=""
+  if test -f "core/src/lexer.c"; then
     CORE_DIR="$abs_srcdir/core"
-  elif test -f "$abs_srcdir/../core/src/lexer.c"; then
+  elif test -f "../core/src/lexer.c"; then
     CORE_DIR="$abs_srcdir/../core"
-  elif test -f "$srcdir/core/src/lexer.c"; then
-    CORE_DIR="$srcdir/core"
-  elif test -f "$srcdir/../core/src/lexer.c"; then
-    CORE_DIR="$srcdir/../core"
-  else
+  elif test -f "../../core/src/lexer.c"; then
+    CORE_DIR="$abs_srcdir/../../core"
+  fi
+  
+  if test -z "$CORE_DIR"; then
     AC_MSG_ERROR([libsnobol4 core not found. Please ensure core/ directory exists.])
   fi
 
