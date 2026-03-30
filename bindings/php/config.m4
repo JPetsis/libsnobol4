@@ -45,10 +45,11 @@ if test "$PHP_SNOBOL" != "no"; then
   dnl Add include paths (absolute paths are fine for -I compiler flags)
   PHP_ADD_INCLUDE([$CORE_DIR/include])
   PHP_ADD_INCLUDE([$abs_srcdir/src])
+  PHP_ADD_INCLUDE([$abs_srcdir/..])
 
   dnl Enable JIT if available
   AC_DEFINE(HAVE_SNOBOL_JIT, 1, [Have libsnobol4 JIT support])
 
   dnl Create the extension
-  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [-I$CORE_DIR/include])
+  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [-I$CORE_DIR/include -I$abs_srcdir/..])
 fi
