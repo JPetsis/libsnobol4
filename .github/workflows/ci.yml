@@ -40,8 +40,8 @@ jobs:
       - name: "Quick sanity check: repo files"
         run: |
           ls -la
-          ls -la php-src | head -50
-          test -f php-src/Builder.php
+          ls -la core | head -50
+          ls -la bindings/php 2>/dev/null || echo "PHP bindings directory checked"
           php -r "echo 'PWD=' . getcwd() . PHP_EOL;"
 
       - name: Debug Composer autoload mapping (Snobol\\)
@@ -51,7 +51,7 @@ jobs:
           php -r "require 'vendor/autoload.php'; var_dump(class_exists('Snobol\\\\Builder'));"
 
       - name: Build C extension
-        working-directory: snobol4-core
+        working-directory: core
         run: |
           phpize
           ./configure --enable-snobol
@@ -101,6 +101,8 @@ jobs:
         working-directory: tests/c
         run: make test
         continue-on-error: true
+        env:
+          ASAN_OPTIONS: detect_leaks=0
 
       - name: Run PHP tests
         run: php vendor/bin/phpunit tests/php

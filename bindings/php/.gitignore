@@ -1,1 +1,8 @@
 .ddev/docker-compose.local.yaml
+/.ddev/commands/host/removeartifaddons
+/.ddev/commands/host/setuppma
+/.ddev/commands/host/updatecert
+/.ddev/custom_certs/
+/.ddev/traefik/certs/
+/.ddev/config.artif_hook.yml
+/.phpunit.result.cache

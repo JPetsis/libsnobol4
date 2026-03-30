@@ -39,12 +39,16 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential php${{ matrix.php-version }}-dev autoconf
+          sudo apt-get install -y cmake build-essential php${{ matrix.php-version }}-dev php${{ matrix.php-version }}-cli autoconf
+          which php-config
 
       - name: Install system dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           brew install cmake autoconf
+          brew install php@${{ matrix.php-version }}
+          brew link php@${{ matrix.php-version }} --force
+          which php-config
 
       - name: Install Composer dependencies
         working-directory: bindings/php
@@ -61,7 +65,8 @@ jobs:
 
       - name: Enable extension
         run: |
-          echo "extension=snobol" | sudo tee /etc/php/${{ matrix.php-version }}/cli/conf.d/99-snobol.ini
+          PHP_INI_DIR=$(php --ini | grep "Scan for additional .ini files" -A 1 | tail -1 | xargs dirname)
+          echo "extension=snobol.so" | sudo tee "$PHP_INI_DIR/99-snobol.ini"
 
       - name: Verify extension loaded
         run: php -r "if (!extension_loaded('snobol')) exit(1);"

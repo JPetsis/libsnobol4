@@ -104,8 +104,9 @@ static void test_jit_jmp_in_region(void) {
         printf("  DEBUG: entries_total = %llu\n", (unsigned long long)stats->entries_total);
     }
     test_assert(stats->entries_total >= 1, "Should enter JIT at least once");
-    
+
     snobol_jit_release_context(ctx);
+    snobol_jit_shutdown();
 }
 
 static void test_jit_split_in_region(void) {
@@ -186,15 +187,19 @@ static void test_jit_split_in_region(void) {
     test_assert(ok, "SPLIT in-region: match should succeed");
     test_assert(stats->choice_push_total > 0, "Should have pushed a choice");
     test_assert(stats->choice_bytes_total > 0, "Should have recorded choice bytes");
-    
+
     snobol_jit_release_context(ctx);
     snobol_jit_set_config(&saved_cfg);
+    snobol_jit_shutdown();
 }
 
 void test_jit_branches_suite(void) {
 #ifdef SNOBOL_JIT
     test_suite("JIT Branches");
+    snobol_jit_init();
     test_jit_jmp_in_region();
+    snobol_jit_init();
     test_jit_split_in_region();
+    snobol_jit_shutdown();
 #endif
 }
