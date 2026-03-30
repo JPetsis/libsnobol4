@@ -11,7 +11,8 @@ void test_assert(bool condition, const char *message);
 
 /* Check if JIT is supported on this architecture (ARM64 only) */
 static bool jit_is_supported(void) {
-#if defined(__aarch64__) || defined(_M_ARM64)
+/* ARM64 detection: __aarch64__ (Linux), __arm64__ (macOS), _M_ARM64 (Windows) */
+#if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
     return true;
 #else
     return false;

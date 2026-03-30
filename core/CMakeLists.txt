@@ -28,18 +28,31 @@ target_include_directories(snobol4
         $<INSTALL_INTERFACE:include>
 )
 
-# Warning flags - disable unused variable warnings for now
-# (Many variables are placeholders for future functionality)
-# Also disable sign conversion warnings - these are intentional in bytecode/UTF-8 handling
-target_compile_options(snobol4 PRIVATE
-    -Wall -Wextra
-    -Wno-unused-variable
-    -Wno-unused-but-set-variable
-    -Wno-unused-function
-    -Wno-sign-conversion
-    -Wno-implicit-int-conversion
-    -Wno-shorten-64-to-32
-)
+# Warning flags - compiler-specific
+if(MSVC)
+    # MSVC warning flags
+    target_compile_options(snobol4 PRIVATE
+        /W4
+        /wd4100  # unreferenced formal parameter
+        /wd4101  # unreferenced local variable
+        /wd4189  # local variable initialized but not referenced
+        /wd4244  # conversion (possible loss of data)
+        /wd4267  # conversion from 'size_t' to smaller type
+    )
+else()
+    # GCC/Clang warning flags
+    # Disable unused variable warnings (placeholders for future functionality)
+    # Disable sign conversion warnings (intentional in bytecode/UTF-8 handling)
+    target_compile_options(snobol4 PRIVATE
+        -Wall -Wextra
+        -Wno-unused-variable
+        -Wno-unused-but-set-variable
+        -Wno-unused-function
+        -Wno-sign-conversion
+        -Wno-implicit-int-conversion
+        -Wno-shorten-64-to-32
+    )
+endif()
 
 # Optional: Enable VM profiling
 option(SNOBOL_PROFILE "Enable VM profiling" OFF)

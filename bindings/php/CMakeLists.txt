@@ -48,16 +48,10 @@ execute_process(
 message(STATUS "PHP version: ${PHP_VERSION}")
 message(STATUS "PHP extension dir: ${PHP_EXTENSION_DIR}")
 
-# Get PHP library path and libs
+# Get PHP library path
 execute_process(
     COMMAND ${PHP_CONFIG} --ldflags
     OUTPUT_VARIABLE PHP_LDFLAGS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-execute_process(
-    COMMAND ${PHP_CONFIG} --libs
-    OUTPUT_VARIABLE PHP_LIBS
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
@@ -70,13 +64,11 @@ foreach(flag ${PHP_INCLUDE_LIST})
     endif()
 endforeach()
 
-# Parse library flags for linking
-set(PHP_LINK_LIBS "")
-foreach(flag ${PHP_LDFLAGS} ${PHP_LIBS})
+# Parse library directory for linking
+set(PHP_LINK_DIRS "")
+foreach(flag ${PHP_LDFLAGS})
     if(flag MATCHES "^-L(.+)$")
         list(APPEND PHP_LINK_DIRS "${CMAKE_MATCH_1}")
-    elseif(flag MATCHES "^-l(.+)$")
-        list(APPEND PHP_LINK_LIBS "${CMAKE_MATCH_1}")
     endif()
 endforeach()
 
@@ -84,6 +76,10 @@ endforeach()
 if(PHP_LINK_DIRS)
     link_directories(${PHP_LINK_DIRS})
 endif()
+
+# Note: PHP extensions typically don't need to link PHP libraries directly.
+# The PHP engine provides all necessary symbols when the extension is loaded.
+# We only link against our core library.
 
 # Generate config.h for PHP extension
 configure_file(
@@ -98,8 +94,9 @@ add_library(snobol_php MODULE
     src/snobol_dynamic_pattern_php.c
 )
 
-# Link against core library and PHP
-target_link_libraries(snobol_php PRIVATE snobol4 ${PHP_LINK_LIBS})
+# Link against core library only
+# PHP symbols are resolved when extension is loaded by PHP
+target_link_libraries(snobol_php PRIVATE snobol4)
 
 # PHP extension configuration
 target_include_directories(snobol_php PRIVATE
