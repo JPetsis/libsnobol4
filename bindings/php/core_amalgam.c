@@ -10,6 +10,11 @@
  * Include paths are relative to this file's directory (bindings/php/).
  */
 
+/* Include config.h from the build directory for feature flags */
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 /* Include all core source files */
 #include "../../core/src/lexer.c"
 #include "../../core/src/parser.c"

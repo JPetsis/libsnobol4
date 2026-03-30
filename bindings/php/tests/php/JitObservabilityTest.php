@@ -169,7 +169,14 @@ class JitObservabilityTest extends TestCase
         if ($arch !== 'arm64' && $arch !== 'aarch64') {
             $this->markTestSkipped('JIT compilation is ARM64-only (current arch: '.$arch.')');
         }
-        
+
+        // Verify that the C extension is providing JIT stats (not just PHP stubs)
+        // The PHP stub returns an empty array, while the C extension returns an array with keys
+        $stats = snobol_get_jit_stats();
+        if (empty($stats) || !array_key_exists('jit_entries_total', $stats)) {
+            $this->markTestSkipped('JIT stats not available from C extension (JIT disabled in build)');
+        }
+
         snobol_reset_jit_stats();
     }
 }

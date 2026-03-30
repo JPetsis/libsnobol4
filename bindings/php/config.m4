@@ -55,6 +55,8 @@ if test "$PHP_SNOBOL" != "no"; then
   dnl is empty.  We detect the architecture via `uname -m` instead.
   AC_DEFINE(HAVE_SNOBOL_JIT, 1, [Have libsnobol4 JIT support])
   SNOBOL_HOST_CPU=`uname -m`
+  AC_MSG_NOTICE([Detected host CPU: $SNOBOL_HOST_CPU])
+  AC_MSG_NOTICE([PHP_SNOBOL value: $PHP_SNOBOL])
   case "$SNOBOL_HOST_CPU" in
     aarch64|arm64)
       AC_DEFINE(SNOBOL_JIT, 1, [Enable micro-JIT support (ARM64 only)])
