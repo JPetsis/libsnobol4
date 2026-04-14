@@ -22,9 +22,29 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **Unicode Support**: Full UTF-8 multi-byte character support
   * **Arbno & Bounded Repetition**: Variable-length pattern repetition
   * **Anchors**: Start/end of string anchors
+  * **BREAKX**: Character-set break with O(n) pre-scan optimisation (8× fewer backtracks vs ARB)
+  * **BAL**: Balanced delimiter matching (e.g. nested parentheses)
+  * **FENCE**: Backtracking cut (prevents retrying a choice point)
+  * **REM**: Match remainder of subject string
+  * **RPOS / RTAB**: End-relative position and tab patterns
 * **Captures & Assignments**: Register-based capture and variable assignment
 * **Associative Tables**: Runtime-owned hash tables for key-value storage
 * **Dynamic Pattern Evaluation**: Runtime pattern compilation with caching (`EVAL(...)`)
+* **Built-in String Functions** (v0.2.0): C-native string manipulation on UTF-8 strings:
+  * **SIZE** – Unicode codepoint count (ASCII fast path)
+  * **TRIM** – Remove trailing whitespace
+  * **DUPL** – Repeat a string N times
+  * **REVERSE** – Reverse by codepoints (multi-byte safe)
+  * **SUBSTR** – Codepoint-based substring extraction (1-based)
+  * **REPLACE** – Replace all occurrences (≈ PHP `str_replace` speed)
+  * **REPLACE_CHAR** – Character translation table (like POSIX `tr`)
+  * **LPAD / RPAD** – Pad strings to a Unicode codepoint width
+  * **CHAR / ORD** – Codepoint ↔ UTF-8 character conversions
+  * **UPPER / LOWER** – Case conversion (v1: ASCII; v2: full Unicode planned)
+* **Built-in Comparison Predicates** (v0.2.0): Boolean predicates matching SNOBOL4 semantics:
+  * **IDENT / DIFFER** – String identity / difference
+  * **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
+  * **INTEGER / REAL / NUMERIC** – Numeric type predicates
 * **Optional Micro-JIT**: ARM64 JIT compilation for hot patterns (experimental)
 * **Profiling Support**: Built-in execution profiling for performance analysis
 
@@ -32,7 +52,7 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
 
 | Binding              | Status   | Version |
 |----------------------|----------|---------|
-| [PHP](bindings/php/) | ✅ Stable | v0.1.0  |
+| [PHP](bindings/php/) | ✅ Stable | v0.2.0  |
 
 ## Project Structure
 
@@ -178,8 +198,12 @@ libsnobol4 is designed for high-performance string processing:
 - **Streaming Substitution**: Native C implementation minimizes data copying
 - **Pattern Caching**: Compiled patterns are cached for efficient reuse
 - **Optional JIT**: Hot patterns can be JIT-compiled for maximum performance
+- **Built-in C functions**: `Text::replace` matches PHP `str_replace` within 2%; `Text::upper/lower/trim` within 4-15%
+  of native PHP built-ins
+- **BREAKX optimisation**: 8.3× fewer backtrack operations vs `ARB+NOTANY` for key extraction
+- **Unicode parity**: `Text::size` on Unicode input equals `mb_strlen` performance
 
-See `bench/` directory for benchmark scripts and results.
+See `bench/` directory for benchmark scripts and `bench/results_builtin.json` for detailed results.
 
 ## Architecture
 
@@ -239,7 +263,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 libsnobol4 uses independent versioning for core and each binding:
 
-- **Core**: v0.1.0
-- **PHP Binding**: v0.1.0
+- **Core**: v0.2.0
+- **PHP Binding**: v0.2.0
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.

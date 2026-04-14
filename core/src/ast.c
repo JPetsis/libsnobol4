@@ -191,7 +191,19 @@ void snobol_ast_free(ast_node_t* node) {
         case AST_DYNAMIC_EVAL:
             snobol_ast_free(node->data.dynamic_eval.expr);
             break;
-            
+
+        case AST_BREAKX:
+            free(node->data.breakx.set);
+            break;
+
+        case AST_BAL:
+        case AST_FENCE:
+        case AST_REM:
+        case AST_RPOS:
+        case AST_RTAB:
+            /* no owned pointers */
+            break;
+
         default:
             /* No children to free */
             break;
@@ -222,6 +234,12 @@ const char* snobol_ast_type_name(ast_type_t type) {
         case AST_GOTO:         return "GOTO";
         case AST_TABLE_ACCESS: return "TABLE_ACCESS";
         case AST_TABLE_UPDATE: return "TABLE_UPDATE";
+        case AST_BREAKX:       return "BREAKX";
+        case AST_BAL:          return "BAL";
+        case AST_FENCE:        return "FENCE";
+        case AST_REM:          return "REM";
+        case AST_RPOS:         return "RPOS";
+        case AST_RTAB:         return "RTAB";
         default:               return "UNKNOWN";
     }
 }
@@ -383,3 +401,52 @@ ast_node_t* snobol_ast_create_dynamic_eval(ast_node_t* expr) {
     node->data.dynamic_eval.expr = expr;
     return node;
 }
+
+ast_node_t* snobol_ast_create_breakx(const char* set, size_t len) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return NULL;
+    node->type = AST_BREAKX;
+    node->data.breakx.set = str_dup(set, len);
+    node->data.breakx.len = len;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_bal(uint32_t open_cp, uint32_t close_cp) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return NULL;
+    node->type = AST_BAL;
+    node->data.bal.open_cp  = open_cp;
+    node->data.bal.close_cp = close_cp;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_fence(void) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return NULL;
+    node->type = AST_FENCE;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_rem(void) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return NULL;
+    node->type = AST_REM;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_rpos(int32_t n) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return NULL;
+    node->type = AST_RPOS;
+    node->data.rpos_rtab.n = n;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_rtab(int32_t n) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return NULL;
+    node->type = AST_RTAB;
+    node->data.rpos_rtab.n = n;
+    return node;
+}
+

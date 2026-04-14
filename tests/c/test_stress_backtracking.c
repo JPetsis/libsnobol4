@@ -55,7 +55,6 @@ static bool run_deep_alt_failure(size_t depth) {
         bc[ip++] = OP_LIT;
         // offset = after header
         uint32_t off = (uint32_t)(ip + 4 + 4);
-        uint32_t len = 1;
         bc[ip++] = (off >> 24) & 0xff;
         bc[ip++] = (off >> 16) & 0xff;
         bc[ip++] = (off >> 8) & 0xff;

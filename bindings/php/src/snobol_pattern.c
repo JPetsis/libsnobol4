@@ -717,6 +717,44 @@ static ast_node_t* php_ast_to_c(zval *php_ast) {
             }
         }
     }
+    /* ---- Pattern primitives ---- */
+    else if (strcmp(type, "breakx") == 0) {
+        zval *set_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "set", sizeof("set")-1);
+        if (set_zv && Z_TYPE_P(set_zv) == IS_STRING) {
+            return snobol_ast_create_breakx(Z_STRVAL_P(set_zv), Z_STRLEN_P(set_zv));
+        }
+    }
+    else if (strcmp(type, "bal") == 0) {
+        zval *open_zv  = zend_hash_str_find(Z_ARRVAL_P(php_ast), "open",  sizeof("open")-1);
+        zval *close_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "close", sizeof("close")-1);
+        if (open_zv && close_zv &&
+            Z_TYPE_P(open_zv) == IS_STRING && Z_TYPE_P(close_zv) == IS_STRING) {
+            /* Decode first codepoint of each delimiter string */
+            uint32_t open_cp = 0, close_cp = 0;
+            int bytes = 0;
+            if (!utf8_peek_next(Z_STRVAL_P(open_zv),  Z_STRLEN_P(open_zv),  0, &open_cp,  &bytes)) return NULL;
+            if (!utf8_peek_next(Z_STRVAL_P(close_zv), Z_STRLEN_P(close_zv), 0, &close_cp, &bytes)) return NULL;
+            return snobol_ast_create_bal(open_cp, close_cp);
+        }
+    }
+    else if (strcmp(type, "fence") == 0) {
+        return snobol_ast_create_fence();
+    }
+    else if (strcmp(type, "rem") == 0) {
+        return snobol_ast_create_rem();
+    }
+    else if (strcmp(type, "rpos") == 0) {
+        zval *n_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "n", sizeof("n")-1);
+        if (n_zv && Z_TYPE_P(n_zv) == IS_LONG) {
+            return snobol_ast_create_rpos((int32_t)Z_LVAL_P(n_zv));
+        }
+    }
+    else if (strcmp(type, "rtab") == 0) {
+        zval *n_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "n", sizeof("n")-1);
+        if (n_zv && Z_TYPE_P(n_zv) == IS_LONG) {
+            return snobol_ast_create_rtab((int32_t)Z_LVAL_P(n_zv));
+        }
+    }
 
     return NULL;
 }

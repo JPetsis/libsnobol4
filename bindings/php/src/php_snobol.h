@@ -13,7 +13,7 @@ typedef struct ast_node ast_node_t;
 extern zend_module_entry snobol_module_entry;
 #define phpext_snobol_ptr &snobol_module_entry
 
-#define PHP_SNOBOL_VERSION "0.1.0"
+#define PHP_SNOBOL_VERSION "0.2.0"
 
 PHP_MINIT_FUNCTION(snobol);
 

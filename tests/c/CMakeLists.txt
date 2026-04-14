@@ -19,6 +19,17 @@ add_executable(snobol4_tests
     test_lexer.c
     test_parser.c
     test_ast.c
+    # Built-in functions test suites
+    test_pattern_breakx.c
+    test_pattern_bal.c
+    test_pattern_fence.c
+    test_string_size.c
+    test_string_transform.c
+    test_string_ops.c
+    test_string_char.c
+    test_string_case.c
+    test_comparison.c
+    test_builtin_dispatch.c
 )
 
 # Link against core library

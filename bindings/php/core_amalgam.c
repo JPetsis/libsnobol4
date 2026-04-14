@@ -25,3 +25,6 @@
 #include "../../core/src/dynamic_pattern.c"
 #include "../../core/src/jit.c"
 #include "../../core/src/version.c"
+#include "../../core/src/string_fn.c"
+#include "../../core/src/type_fn.c"
+#include "../../core/src/pattern_build.c"

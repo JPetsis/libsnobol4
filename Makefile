@@ -66,16 +66,19 @@ build-asan:
 
 # Run tests
 test:
-	@echo "==> Running tests..."
-	@if [ -d build ]; then \
-		$(CMAKE_TEST) --output-on-failure; \
+	@echo "==> Running C tests..."
+	@if [ -f build/tests/c/snobol4_tests ]; then \
+		./build/tests/c/snobol4_tests; \
+	elif [ -d build ]; then \
+		echo "Test binary not found. Run 'make build' first."; \
+		exit 1; \
 	else \
 		echo "Build directory not found. Run 'make build' first."; \
 		exit 1; \
 	fi
 
 test-verbose:
-	@echo "==> Running tests (verbose)..."
+	@echo "==> Running tests via CTest (verbose)..."
 	@if [ -d build ]; then \
 		$(CMAKE_TEST) --verbose --output-on-failure; \
 	else \
@@ -112,7 +115,7 @@ clean:
 	rm -rf build/
 	rm -rf build_test/
 	@echo "==> Cleaning benchmark results..."
-	find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' -delete 2>/dev/null || true
+	find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' ! -name 'results_builtin.json' -delete 2>/dev/null || true
 	@echo "==> Clean complete!"
 
 distclean: clean

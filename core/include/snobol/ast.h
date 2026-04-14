@@ -87,7 +87,15 @@ typedef enum {
     
     /* Table operations */
     AST_TABLE_ACCESS, /* Table lookup */
-    AST_TABLE_UPDATE  /* Table assignment */
+    AST_TABLE_UPDATE, /* Table assignment */
+
+    /* Pattern primitives */
+    AST_BREAKX,  /* BREAKX – break with retry choice point */
+    AST_BAL,     /* BAL – balanced delimiter match */
+    AST_FENCE,   /* FENCE – cut choice stack */
+    AST_REM,     /* REM – consume remainder */
+    AST_RPOS,    /* RPOS(n) – cursor n codepoints from end */
+    AST_RTAB     /* RTAB(n) – advance to n codepoints from end */
 } ast_type_t;
 
 /**
@@ -213,6 +221,23 @@ struct ast_node {
             ast_node_t* key;     /* Owned: key expression */
             ast_node_t* value;   /* Owned: value expression */
         } table_update;
+
+        /* AST_BREAKX */
+        struct {
+            char* set;           /* Owned: break character set */
+            size_t len;
+        } breakx;
+
+        /* AST_BAL */
+        struct {
+            uint32_t open_cp;    /* Opening delimiter codepoint */
+            uint32_t close_cp;   /* Closing delimiter codepoint */
+        } bal;
+
+        /* AST_RPOS / AST_RTAB */
+        struct {
+            int32_t n;           /* Distance from end */
+        } rpos_rtab;
     } data;
 };
 
@@ -354,4 +379,22 @@ ast_node_t* snobol_ast_create_emit(const char* text, size_t len, int reg);
 
 /** Create AST_DYNAMIC_EVAL node */
 ast_node_t* snobol_ast_create_dynamic_eval(ast_node_t* expr);
+
+/** Create AST_BREAKX node */
+ast_node_t* snobol_ast_create_breakx(const char* set, size_t len);
+
+/** Create AST_BAL node */
+ast_node_t* snobol_ast_create_bal(uint32_t open_cp, uint32_t close_cp);
+
+/** Create AST_FENCE node (no args) */
+ast_node_t* snobol_ast_create_fence(void);
+
+/** Create AST_REM node (no args) */
+ast_node_t* snobol_ast_create_rem(void);
+
+/** Create AST_RPOS node */
+ast_node_t* snobol_ast_create_rpos(int32_t n);
+
+/** Create AST_RTAB node */
+ast_node_t* snobol_ast_create_rtab(int32_t n);
 

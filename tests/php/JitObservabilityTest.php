@@ -90,7 +90,7 @@ class JitObservabilityTest extends TestCase
     }
 
     /**
-     * Task 4.4: Backtracking-heavy pattern — assert reduced jit_exits_total
+     * Backtracking-heavy pattern — assert reduced jit_exits_total
      *
      * The profitability gate should recognise alternation-dominated patterns
      * (SPLIT immediately at ip=0 with no useful prefix) as unprofitable and

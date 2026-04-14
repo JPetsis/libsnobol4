@@ -17,9 +17,9 @@
 
 /* Version macros */
 #define SNOBOL_VERSION_MAJOR 0
-#define SNOBOL_VERSION_MINOR 1
+#define SNOBOL_VERSION_MINOR 2
 #define SNOBOL_VERSION_PATCH 0
-#define SNOBOL_VERSION_STRING "0.1.0"
+#define SNOBOL_VERSION_STRING "0.2.0"
 
 /**
  * Get library version at runtime
@@ -38,6 +38,8 @@ void snobol_version(int* major, int* minor, int* patch);
 #include "snobol/table.h"
 #include "snobol/dynamic_pattern.h"
 #include "snobol/jit.h"
+#include "snobol/string_fn.h"
+#include "snobol/type_fn.h"
 
 /**
  * @brief Pattern matching context (opaque handle)

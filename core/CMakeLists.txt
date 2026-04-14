@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 # Core libsnobol4 C library
 # This builds the language-agnostic C23 pattern matching engine
 
-project(libsnobol4_core VERSION 0.1.0 LANGUAGES C)
+project(libsnobol4_core VERSION 0.2.0 LANGUAGES C)
 
 # Library target for all core source files
 add_library(snobol4 STATIC
@@ -16,6 +16,9 @@ add_library(snobol4 STATIC
     src/dynamic_pattern.c
     src/jit.c
     src/version.c
+    src/string_fn.c
+    src/type_fn.c
+    src/pattern_build.c
 )
 
 # Set C23 standard

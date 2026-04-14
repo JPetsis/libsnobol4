@@ -6,7 +6,10 @@
  * Compares SNOBOL VM vs PCRE performance.
  */
 
-require __DIR__.'/../vendor/autoload.php';
+$autoload = file_exists(__DIR__.'/../vendor/autoload.php')
+    ? __DIR__.'/../vendor/autoload.php'
+    : __DIR__.'/../html/vendor/autoload.php';
+require $autoload;
 require __DIR__.'/Harness.php';
 
 use Bench\Harness;

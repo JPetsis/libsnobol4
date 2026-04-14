@@ -1,8 +1,5 @@
 #pragma once
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
 
 /* Default to standalone build unless PHP_BUILD is explicitly defined */
 #ifndef PHP_BUILD

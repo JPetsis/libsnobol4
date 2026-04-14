@@ -110,7 +110,51 @@ typedef enum {
     OP_TABLE_SET,  // table_id u16, key_reg u8, value_reg u8 (set table[key] = value)
     OP_DYNAMIC,    // pattern_reg u8 (evaluate dynamic pattern from register)
     OP_DYNAMIC_DEF, // len u32, bytecode... (define dynamic pattern bytecode block)
+
+    /* Pattern primitives */
+    OP_BREAKX,     // charclass id (u16) – like BREAK but pushes retry choice for O(n) tokenization
+    OP_BAL,        // open_cp u32, close_cp u32 – match balanced delimiter pair
+    OP_FENCE,      // no args – cut choice stack (prevent backtracking past this point)
+    OP_REM,        // no args – match remainder of subject to end
+    OP_RPOS,       // n u32 – succeed only when cursor is n codepoints from end
+    OP_RTAB,       // n u32 – advance cursor to n codepoints from end
 } OpCode;
+
+/* --------------------------------------------------------------------------
+ * Built-in function dispatch enumeration
+ *
+ * These IDs are used with OP_EVAL to dispatch directly to C built-in
+ * functions in the VM, bypassing the host eval_fn callback for lower latency.
+ * IDs start at 1 (0 = SNOBOL_FN_NONE = host callback).
+ * -------------------------------------------------------------------------- */
+typedef enum {
+    SNOBOL_FN_NONE       = 0,  /* Not a built-in: use eval_fn host callback */
+    /* String transformation functions */
+    SNOBOL_FN_SIZE       = 1,
+    SNOBOL_FN_TRIM       = 2,
+    SNOBOL_FN_DUPL       = 3,
+    SNOBOL_FN_REVERSE    = 4,
+    SNOBOL_FN_SUBSTR     = 5,
+    SNOBOL_FN_REPLACE    = 6,
+    SNOBOL_FN_REPLACE_CHAR = 7,
+    SNOBOL_FN_LPAD       = 8,
+    SNOBOL_FN_RPAD       = 9,
+    SNOBOL_FN_CHAR       = 10,
+    SNOBOL_FN_ORD        = 11,
+    SNOBOL_FN_UPPER      = 12,
+    SNOBOL_FN_LOWER      = 13,
+    /* Comparison / type-check functions */
+    SNOBOL_FN_IDENT      = 14,
+    SNOBOL_FN_DIFFER     = 15,
+    SNOBOL_FN_LEXEQ      = 16,
+    SNOBOL_FN_LEXLT      = 17,
+    SNOBOL_FN_LEXGT      = 18,
+    SNOBOL_FN_INTEGER    = 19,
+    SNOBOL_FN_REAL       = 20,
+    SNOBOL_FN_NUMERIC    = 21,
+    /* Sentinel – all IDs < SNOBOL_FN_MAX are known built-ins */
+    SNOBOL_FN_MAX        = 22,
+} snobol_builtin_fn_t;
 
 #define MAX_LOOPS 16
 

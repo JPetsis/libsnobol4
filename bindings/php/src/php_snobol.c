@@ -14,6 +14,11 @@
 #include "php_snobol.h"
 #include "ext/standard/info.h"
 
+/* libsnobol4 core built-in function headers */
+#include "snobol/string_fn.h"
+#include "snobol/type_fn.h"
+#include "snobol/vm.h"
+
 #include <stdio.h>
 #include <time.h>
 #include <stdarg.h>
@@ -129,11 +134,245 @@ PHP_FUNCTION(snobol_reset_jit_stats) {
 }
 #endif
 
+/* ============================================================
+ * C function exports for libsnobol4 built-ins
+ *
+ * These PHP_FUNCTION implementations wrap the C built-in functions
+ * from string_fn.h and type_fn.h, exposing them as global PHP
+ * functions (snobol_text_*).  The Snobol\Text PHP class (Text.php)
+ * uses these internally when the C extension is loaded.
+ * ============================================================ */
+
+/* --- STRING FUNCTIONS --- */
+
+PHP_FUNCTION(snobol_text_size) {
+    char  *s; size_t slen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
+    RETURN_LONG((zend_long)snobol_size(s, slen));
+}
+
+PHP_FUNCTION(snobol_text_trim) {
+    char  *s; size_t slen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (snobol_trim(s, slen, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_STRINGL(s, slen);
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_dupl) {
+    char *s; size_t slen; zend_long n;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "sl", &s, &slen, &n) == FAILURE) return;
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (n > 0 && snobol_dupl(s, slen, (size_t)n, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_STRINGL("", 0);
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_reverse) {
+    char *s; size_t slen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (snobol_reverse(s, slen, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_STRINGL(s, slen);
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_substr) {
+    char *s; size_t slen; zend_long pos, len;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "sll", &s, &slen, &pos, &len) == FAILURE) return;
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (pos >= 1 && snobol_substr(s, slen, (size_t)pos, (size_t)len, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_FALSE;
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_replace) {
+    char *s, *f, *t; size_t slen, flen, tlen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "sss", &s, &slen, &f, &flen, &t, &tlen) == FAILURE) return;
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (snobol_replace(s, slen, f, flen, t, tlen, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_STRINGL(s, slen);
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_replace_char) {
+    char *s, *f, *t; size_t slen, flen, tlen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "sss", &s, &slen, &f, &flen, &t, &tlen) == FAILURE) return;
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (snobol_replace_char(s, slen, f, flen, t, tlen, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_STRINGL(s, slen);
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_lpad) {
+    char *s, *pad = " "; size_t slen, padlen = 1; zend_long width;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "sl|s", &s, &slen, &width, &pad, &padlen) == FAILURE) return;
+    uint32_t pad_cp = (padlen > 0) ? (unsigned char)pad[0] : (uint32_t)' ';
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (snobol_lpad(s, slen, (size_t)width, pad_cp, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_STRINGL(s, slen);
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_rpad) {
+    char *s, *pad = " "; size_t slen, padlen = 1; zend_long width;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "sl|s", &s, &slen, &width, &pad, &padlen) == FAILURE) return;
+    uint32_t pad_cp = (padlen > 0) ? (unsigned char)pad[0] : (uint32_t)' ';
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (snobol_rpad(s, slen, (size_t)width, pad_cp, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_STRINGL(s, slen);
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_char) {
+    zend_long cp;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "l", &cp) == FAILURE) return;
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (cp >= 0 && snobol_char_fn((uint32_t)cp, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_FALSE;
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_ord) {
+    char *s; size_t slen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
+    uint32_t cp = 0;
+    if (snobol_ord(s, slen, &cp)) {
+        RETURN_LONG((zend_long)cp);
+    } else {
+        RETURN_FALSE;
+    }
+}
+
+PHP_FUNCTION(snobol_text_upper) {
+    char *s; size_t slen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (snobol_upper(s, slen, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_STRINGL(s, slen);
+    }
+    snobol_buf_free(&b);
+}
+
+PHP_FUNCTION(snobol_text_lower) {
+    char *s; size_t slen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
+    snobol_buf b = {0}; snobol_buf_init(&b);
+    if (snobol_lower(s, slen, &b)) {
+        RETVAL_STRINGL(b.data, b.len);
+    } else {
+        RETVAL_STRINGL(s, slen);
+    }
+    snobol_buf_free(&b);
+}
+
+/* --- COMPARISON / TYPE-CHECK FUNCTIONS --- */
+
+PHP_FUNCTION(snobol_text_ident) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_ident(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_differ) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_differ(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_lexeq) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_lexeq(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_lexlt) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_lexlt(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_lexgt) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_lexgt(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_integer) {
+    char *s; size_t slen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
+    RETURN_BOOL(snobol_integer(s, slen));
+}
+
+PHP_FUNCTION(snobol_text_real) {
+    char *s; size_t slen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
+    RETURN_BOOL(snobol_real(s, slen));
+}
+
+PHP_FUNCTION(snobol_text_numeric) {
+    char *s; size_t slen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
+    RETURN_BOOL(snobol_numeric(s, slen));
+}
+
 static const zend_function_entry snobol_functions[] = {
 #ifdef SNOBOL_JIT
     PHP_FE(snobol_get_jit_stats, ai_snobol_get_jit_stats)
     PHP_FE(snobol_reset_jit_stats, ai_snobol_reset_jit_stats)
 #endif
+    /* C function exports for string/comparison built-ins */
+    PHP_FE(snobol_text_size,         NULL)
+    PHP_FE(snobol_text_trim,         NULL)
+    PHP_FE(snobol_text_dupl,         NULL)
+    PHP_FE(snobol_text_reverse,      NULL)
+    PHP_FE(snobol_text_substr,       NULL)
+    PHP_FE(snobol_text_replace,      NULL)
+    PHP_FE(snobol_text_replace_char, NULL)
+    PHP_FE(snobol_text_lpad,         NULL)
+    PHP_FE(snobol_text_rpad,         NULL)
+    PHP_FE(snobol_text_char,         NULL)
+    PHP_FE(snobol_text_ord,          NULL)
+    PHP_FE(snobol_text_upper,        NULL)
+    PHP_FE(snobol_text_lower,        NULL)
+    PHP_FE(snobol_text_ident,        NULL)
+    PHP_FE(snobol_text_differ,       NULL)
+    PHP_FE(snobol_text_lexeq,        NULL)
+    PHP_FE(snobol_text_lexlt,        NULL)
+    PHP_FE(snobol_text_lexgt,        NULL)
+    PHP_FE(snobol_text_integer,      NULL)
+    PHP_FE(snobol_text_real,         NULL)
+    PHP_FE(snobol_text_numeric,      NULL)
     PHP_FE_END
 };
 

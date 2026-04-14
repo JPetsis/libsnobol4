@@ -19,7 +19,10 @@
  *   1  one or more thresholds failed
  */
 
-require __DIR__.'/../vendor/autoload.php';
+$autoload = file_exists(__DIR__.'/../vendor/autoload.php')
+    ? __DIR__.'/../vendor/autoload.php'
+    : __DIR__.'/../html/vendor/autoload.php';
+require $autoload;
 
 use Snobol\Builder;
 use Snobol\Pattern;

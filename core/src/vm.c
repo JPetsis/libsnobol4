@@ -2,6 +2,8 @@
 #include "snobol/vm.h"
 #include "snobol/table.h"
 #include "snobol/dynamic_pattern.h"
+#include "snobol/string_fn.h"
+#include "snobol/type_fn.h"
 #ifdef SNOBOL_JIT
 #include "snobol/jit.h"
 #endif
@@ -405,9 +407,90 @@ bool vm_run(VM *vm) {
                 uint32_t n = read_u32(vm->bc, vm->bc_len, &vm->ip); size_t p = vm->pos; uint32_t i;
                 for (i = 0; i < n; ++i) { uint32_t cp; int bytes; if (!utf8_peek_next(vm->s, vm->len, p, &cp, &bytes)) break; p += bytes; }
                 if (i != n) { if (!vm_pop_choice(vm)) goto fail_ret; } else vm->pos = p; break; }
-            case OP_EVAL: { uint16_t fn = read_u16(vm->bc, vm->bc_len, &vm->ip); uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
+            case OP_EVAL: {
+                /* Built-in dispatch table.
+                 * If fn_id is a known built-in (< SNOBOL_FN_MAX), dispatch
+                 * directly to the C function.  Otherwise fall back to the
+                 * host eval_fn callback to preserve backward compatibility. */
+                uint16_t fn = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t r   = read_u8 (vm->bc, vm->bc_len, &vm->ip);
                 if (r >= MAX_CAPS) { if (!vm_pop_choice(vm)) goto fail_ret; break; }
-                if (vm->eval_fn && !vm->eval_fn((int)fn, vm->s, vm->cap_start[r], vm->cap_end[r], vm->eval_udata)) { if (!vm_pop_choice(vm)) goto fail_ret; } break; }
+
+                /* Validate capture bounds */
+                bool cap_ok = (vm->cap_end[r] >= vm->cap_start[r]) &&
+                              (vm->cap_end[r] <= vm->len);
+                if (!cap_ok) { if (!vm_pop_choice(vm)) goto fail_ret; break; }
+
+                const char *cap_s = vm->s + vm->cap_start[r];
+                size_t      cap_l = vm->cap_end[r] - vm->cap_start[r];
+                bool ok = true;
+
+                SNOBOL_LOG("OP_EVAL: fn=%u reg=%u cap_len=%zu", fn, r, cap_l);
+
+                if (fn > SNOBOL_FN_NONE && fn < SNOBOL_FN_MAX) {
+                    /* Direct C dispatch (no host callback) */
+                    snobol_buf tmp_out = {0};
+                    snobol_buf_init(&tmp_out);
+
+                    switch ((snobol_builtin_fn_t)fn) {
+                        /* --- string transformations (output to vm->out if set) --- */
+                        case SNOBOL_FN_SIZE: {
+                            /* SIZE: always succeeds, useful as predicate */
+                            (void)snobol_size(cap_s, cap_l);
+                            ok = true;
+                            break;
+                        }
+                        case SNOBOL_FN_TRIM: {
+                            ok = snobol_trim(cap_s, cap_l, &tmp_out);
+                            if (ok && vm->out) snobol_buf_append(vm->out, tmp_out.data, tmp_out.len);
+                            if (ok && vm->emit_fn) vm->emit_fn(tmp_out.data, tmp_out.len, vm->emit_udata);
+                            break;
+                        }
+                        case SNOBOL_FN_REVERSE: {
+                            ok = snobol_reverse(cap_s, cap_l, &tmp_out);
+                            if (ok && vm->out) snobol_buf_append(vm->out, tmp_out.data, tmp_out.len);
+                            if (ok && vm->emit_fn) vm->emit_fn(tmp_out.data, tmp_out.len, vm->emit_udata);
+                            break;
+                        }
+                        case SNOBOL_FN_UPPER: {
+                            ok = snobol_upper(cap_s, cap_l, &tmp_out);
+                            if (ok && vm->out) snobol_buf_append(vm->out, tmp_out.data, tmp_out.len);
+                            if (ok && vm->emit_fn) vm->emit_fn(tmp_out.data, tmp_out.len, vm->emit_udata);
+                            break;
+                        }
+                        case SNOBOL_FN_LOWER: {
+                            ok = snobol_lower(cap_s, cap_l, &tmp_out);
+                            if (ok && vm->out) snobol_buf_append(vm->out, tmp_out.data, tmp_out.len);
+                            if (ok && vm->emit_fn) vm->emit_fn(tmp_out.data, tmp_out.len, vm->emit_udata);
+                            break;
+                        }
+                        /* --- predicates (succeed or fail, no output) --- */
+                        case SNOBOL_FN_INTEGER:   ok = snobol_integer(cap_s, cap_l);     break;
+                        case SNOBOL_FN_REAL:       ok = snobol_real(cap_s, cap_l);        break;
+                        case SNOBOL_FN_NUMERIC:    ok = snobol_numeric(cap_s, cap_l);     break;
+                        /* Multi-arg functions (IDENT, DIFFER, LEX*, REPLACE, DUPL,
+                         * SUBSTR, LPAD, RPAD, CHAR, ORD) require additional context
+                         * not available via single-register OP_EVAL.  Fall back to
+                         * host callback when fn_id reaches these cases. */
+                        default:
+                            /* Fallback to host eval_fn */
+                            ok = !vm->eval_fn ||
+                                 vm->eval_fn((int)fn, vm->s,
+                                             vm->cap_start[r], vm->cap_end[r],
+                                             vm->eval_udata);
+                            break;
+                    }
+                    snobol_buf_free(&tmp_out);
+                } else {
+                    /* Host callback fallback (fn == 0 or unknown >= SNOBOL_FN_MAX) */
+                    ok = !vm->eval_fn ||
+                         vm->eval_fn((int)fn, vm->s,
+                                     vm->cap_start[r], vm->cap_end[r],
+                                     vm->eval_udata);
+                }
+                if (!ok) { if (!vm_pop_choice(vm)) goto fail_ret; }
+                break;
+            }
             case OP_ANCHOR: { uint8_t type = read_u8(vm->bc, vm->bc_len, &vm->ip); bool ok = (type == 0) ? (vm->pos == 0) : (vm->pos == vm->len);
                 if (!ok) { if (!vm_pop_choice(vm)) goto fail_ret; } break; }
             case OP_REPEAT_INIT: {
@@ -889,6 +972,151 @@ bool vm_run(VM *vm) {
             }
 #endif /* SNOBOL_DYNAMIC_PATTERN */
             
+            /* ------------------------------------------------------------------
+             * Pattern primitives
+             * ------------------------------------------------------------------ */
+
+            case OP_BREAKX: {
+                /* BREAKX pre-scan optimization.
+                 *
+                 * Semantics: like BREAK (advance past non-break chars), but also
+                 * push a retry choice point.  When the choice is popped, pos
+                 * advances past the break char so matching resumes after it.
+                 * This is equivalent to BREAK + ARBNO(LEN(1) BREAK) but as a
+                 * single opcode with O(n) complexity (the pre-scan visits each
+                 * subject byte at most twice).
+                 */
+                size_t breakx_ip = vm->ip - 1; /* points to OP_BREAKX opcode */
+                uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint16_t bx_count, bx_ci;
+                const uint8_t *bx_ranges = get_ranges_ptr(vm, set_id, &bx_count, &bx_ci);
+                uint64_t bx_map[2];
+                bool bx_ascii = bx_ranges && ranges_to_ascii_bitmap(bx_ranges, bx_count, bx_map);
+
+                /* Advance past non-break characters (like OP_BREAK) */
+                if (bx_ascii) {
+                    while (vm->pos < vm->len && !bitmap_test(bx_map, (uint8_t)vm->s[vm->pos]))
+                        vm->pos++;
+                } else {
+                    uint32_t bx_cp; int bx_bytes;
+                    while (utf8_peek_next(vm->s, vm->len, vm->pos, &bx_cp, &bx_bytes) &&
+                           (!bx_ranges || !range_contains(bx_ranges, bx_count, bx_cp)))
+                        vm->pos += bx_bytes;
+                }
+
+                /* If we stopped at a break char, push a retry choice that
+                 * re-executes BREAKX from the position AFTER the break char */
+                if (vm->pos < vm->len) {
+                    uint32_t bx_cp2; int bx_skip = 1;
+                    if (utf8_peek_next(vm->s, vm->len, vm->pos, &bx_cp2, &bx_skip))
+                        ; /* bx_skip now holds byte count of break char */
+                    vm_push_choice(vm, breakx_ip, vm->pos + (size_t)bx_skip);
+                }
+                break;
+            }
+
+            case OP_BAL: {
+                /* BAL: match balanced structure.
+                 * Operands: open_cp u32, close_cp u32
+                 * Fails if the subject at vm->pos does not start with open_cp,
+                 * or if the string ends before depth returns to zero.
+                 */
+                uint32_t bal_open  = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                uint32_t bal_close = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                size_t   bal_pos   = vm->pos;
+                int      bal_depth = 0;
+                bool     bal_ok    = false;
+
+                /* Subject must start with the open delimiter */
+                uint32_t bal_first; int bal_fb;
+                if (!utf8_peek_next(vm->s, vm->len, bal_pos, &bal_first, &bal_fb) ||
+                    bal_first != bal_open) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+
+                while (bal_pos < vm->len) {
+                    uint32_t bal_cp; int bal_cb;
+                    if (!utf8_peek_next(vm->s, vm->len, bal_pos, &bal_cp, &bal_cb)) break;
+                    if (bal_cp == bal_open)  { bal_depth++; }
+                    else if (bal_cp == bal_close) {
+                        bal_depth--;
+                        if (bal_depth == 0) { bal_pos += (size_t)bal_cb; bal_ok = true; break; }
+                    }
+                    bal_pos += (size_t)bal_cb;
+                }
+
+                if (!bal_ok) { if (!vm_pop_choice(vm)) goto fail_ret; }
+                else vm->pos = bal_pos;
+                break;
+            }
+
+            case OP_FENCE: {
+                /* FENCE: cut the choice stack.
+                 * Drops all choice points pushed since execution started,
+                 * preventing backtracking past this point.
+                 * This implements "possessive" / atomic behaviour.
+                 */
+                vm->choices_top = 0;
+                break;
+            }
+
+            case OP_REM: {
+                /* REM: match remainder of subject.
+                 * Advances pos to end of string unconditionally.
+                 */
+                vm->pos = vm->len;
+                break;
+            }
+
+            case OP_RPOS: {
+                /* REM: match remainder of subject.
+                 * codepoints from the end of the subject string.
+                 *
+                 * Operand: n u32
+                 * Algorithm: walk [n] codepoints backwards from vm->len to
+                 * determine the target byte offset; fail if vm->pos != target.
+                 */
+                uint32_t rpos_n = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                size_t rpos_target = vm->len;
+                for (uint32_t rpos_i = 0; rpos_i < rpos_n && rpos_target > 0; rpos_i++) {
+                    rpos_target--;
+                    /* Skip past UTF-8 continuation bytes to find codepoint start */
+                    while (rpos_target > 0 &&
+                           ((unsigned char)vm->s[rpos_target] & 0xC0) == 0x80)
+                        rpos_target--;
+                }
+                if (vm->pos != rpos_target) { if (!vm_pop_choice(vm)) goto fail_ret; }
+                break;
+            }
+
+            case OP_RTAB: {
+                /* RTAB(n): advance cursor to the position that is
+                 * n codepoints from the end of the subject string.
+                 * RTAB(0) is equivalent to REM (advance to end).
+                 *
+                 * Operand: n u32
+                 * Fails if vm->pos is already past the target position.
+                 */
+                uint32_t rtab_n = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                size_t rtab_target = vm->len;
+                for (uint32_t rtab_i = 0; rtab_i < rtab_n && rtab_target > 0; rtab_i++) {
+                    rtab_target--;
+                    while (rtab_target > 0 &&
+                           ((unsigned char)vm->s[rtab_target] & 0xC0) == 0x80)
+                        rtab_target--;
+                }
+                if (vm->pos > rtab_target) { if (!vm_pop_choice(vm)) goto fail_ret; }
+                else vm->pos = rtab_target;
+                break;
+            }
+
+            /* Note: ARB is not a separate opcode.
+             * It is implemented at compile time as SPLIT + REPEAT
+             * (equivalent to REPEAT_INIT(0,-1) + REPEAT_STEP on LEN(1)),
+             * matching the spec description "split + LEN(1) loop".
+             * Helper: snobol_emit_arb() in pattern_build.c builds the bytecode. */
+
             default: if (!vm_pop_choice(vm)) goto fail_ret; break;
         }
     }

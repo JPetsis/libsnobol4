@@ -306,6 +306,59 @@ static int emit_notany(zval *set_str, CodeBuf *c) {
     return 0;
 }
 
+/* New primitive emit functions */
+static int emit_breakx(zval *set_str, CodeBuf *c) {
+    if (!set_str || Z_TYPE_P(set_str) != IS_STRING) return -1;
+    zend_string *zs = Z_STR_P(set_str);
+    int setid = add_or_get_charclass(ZSTR_VAL(zs), ZSTR_LEN(zs));
+    cb_emit_u8(c, OP_BREAKX); cb_emit_u16(c, (uint16_t)setid);
+    return 0;
+}
+
+/* Decode first UTF-8 codepoint from a PHP string zval; return -1 on failure */
+static int32_t first_codepoint(zval *str_zv) {
+    if (!str_zv || Z_TYPE_P(str_zv) != IS_STRING) return -1;
+    zend_string *zs = Z_STR_P(str_zv);
+    if (ZSTR_LEN(zs) == 0) return -1;
+    uint32_t cp = 0; int bytes = 0;
+    if (!utf8_peek_next(ZSTR_VAL(zs), ZSTR_LEN(zs), 0, &cp, &bytes)) return -1;
+    return (int32_t)cp;
+}
+
+static int emit_bal(zval *open_zv, zval *close_zv, CodeBuf *c) {
+    int32_t open_cp  = first_codepoint(open_zv);
+    int32_t close_cp = first_codepoint(close_zv);
+    if (open_cp < 0 || close_cp < 0) return -1;
+    cb_emit_u8(c, OP_BAL);
+    cb_emit_u32(c, (uint32_t)open_cp);
+    cb_emit_u32(c, (uint32_t)close_cp);
+    return 0;
+}
+
+static int emit_fence(CodeBuf *c) {
+    cb_emit_u8(c, OP_FENCE);
+    return 0;
+}
+
+static int emit_rem(CodeBuf *c) {
+    cb_emit_u8(c, OP_REM);
+    return 0;
+}
+
+static int emit_rpos(zval *n_zv, CodeBuf *c) {
+    if (!n_zv || Z_TYPE_P(n_zv) != IS_LONG) return -1;
+    cb_emit_u8(c, OP_RPOS);
+    cb_emit_u32(c, (uint32_t)(long)Z_LVAL_P(n_zv));
+    return 0;
+}
+
+static int emit_rtab(zval *n_zv, CodeBuf *c) {
+    if (!n_zv || Z_TYPE_P(n_zv) != IS_LONG) return -1;
+    cb_emit_u8(c, OP_RTAB);
+    cb_emit_u32(c, (uint32_t)(long)Z_LVAL_P(n_zv));
+    return 0;
+}
+
 /* cap/assign/len/eval */
 static int emit_cap(zval *reg_zv, zval *sub, CodeBuf *c) {
     if (!reg_zv || Z_TYPE_P(reg_zv) != IS_LONG) return -1;
@@ -502,17 +555,35 @@ static int emit_node(zval *node, CodeBuf *c) {
     if (zend_string_equals_literal(type, "emit")) {
         return emit_emit(node, c);
     }
+    /* Pattern primitives: breakx, bal, fence, rem, rpos, rtab */
+    if (zend_string_equals_literal(type, "breakx")) {
+        zval *set = zend_hash_str_find(Z_ARRVAL_P(node), "set", sizeof("set")-1);
+        return emit_breakx(set, c);
+    }
+    if (zend_string_equals_literal(type, "bal")) {
+        zval *open  = zend_hash_str_find(Z_ARRVAL_P(node), "open",  sizeof("open")-1);
+        zval *close = zend_hash_str_find(Z_ARRVAL_P(node), "close", sizeof("close")-1);
+        return emit_bal(open, close, c);
+    }
+    if (zend_string_equals_literal(type, "fence")) {
+        return emit_fence(c);
+    }
+    if (zend_string_equals_literal(type, "rem")) {
+        return emit_rem(c);
+    }
+    if (zend_string_equals_literal(type, "rpos")) {
+        zval *n = zend_hash_str_find(Z_ARRVAL_P(node), "n", sizeof("n")-1);
+        return emit_rpos(n, c);
+    }
+    if (zend_string_equals_literal(type, "rtab")) {
+        zval *n = zend_hash_str_find(Z_ARRVAL_P(node), "n", sizeof("n")-1);
+        return emit_rtab(n, c);
+    }
     if (zend_string_equals_literal(type, "dynamic_eval")) {
-        /* dynamic_eval: compile pattern for runtime caching and execution
-         * 
+        /* dynamic_eval: compile pattern for runtime caching and execution.
          * Canonical approach: Store both the compiled bytecode AND the source text.
          * - Source text: Used as cache key for reuse across repeated EVAL(...)
          * - Bytecode: Used for efficient execution in the VM
-         * 
-         * This enables:
-         * - Cache reuse across repeated EVAL(...) calls with the same source
-         * - Full pattern semantics including alternation, backtracking, nested EVAL(...)
-         * - Proper retain/release ownership through the runtime cache
          */
         zval *expr = zend_hash_str_find(Z_ARRVAL_P(node), "expr", sizeof("expr")-1);
         zval *source_text = zend_hash_str_find(Z_ARRVAL_P(node), "source", sizeof("source")-1);
@@ -919,6 +990,43 @@ static int emit_emit_c(const char *text, int reg, CodeBuf *c) {
     return 0;
 }
 
+/* Pattern primitive emit helpers (C-AST path) */
+static int emit_breakx_c(const char *set, size_t len, CodeBuf *c) {
+    int setid = add_or_get_charclass(set, len);
+    cb_emit_u8(c, OP_BREAKX);
+    cb_emit_u16(c, (uint16_t)setid);
+    return 0;
+}
+
+static int emit_bal_c(uint32_t open_cp, uint32_t close_cp, CodeBuf *c) {
+    cb_emit_u8(c, OP_BAL);
+    cb_emit_u32(c, open_cp);
+    cb_emit_u32(c, close_cp);
+    return 0;
+}
+
+static int emit_fence_c(CodeBuf *c) {
+    cb_emit_u8(c, OP_FENCE);
+    return 0;
+}
+
+static int emit_rem_c(CodeBuf *c) {
+    cb_emit_u8(c, OP_REM);
+    return 0;
+}
+
+static int emit_rpos_c(int32_t n, CodeBuf *c) {
+    cb_emit_u8(c, OP_RPOS);
+    cb_emit_u32(c, (uint32_t)n);
+    return 0;
+}
+
+static int emit_rtab_c(int32_t n, CodeBuf *c) {
+    cb_emit_u8(c, OP_RTAB);
+    cb_emit_u32(c, (uint32_t)n);
+    return 0;
+}
+
 /**
  * Compile C AST to bytecode
  * @param ast Root AST node
@@ -1211,6 +1319,24 @@ static int emit_node_c(ast_node_t* node, CodeBuf *c) {
 
         case AST_EMIT:
             return emit_emit_c(node->data.emit.text, node->data.emit.reg, c);
+
+        case AST_BREAKX:
+            return emit_breakx_c(node->data.breakx.set, node->data.breakx.len, c);
+
+        case AST_BAL:
+            return emit_bal_c(node->data.bal.open_cp, node->data.bal.close_cp, c);
+
+        case AST_FENCE:
+            return emit_fence_c(c);
+
+        case AST_REM:
+            return emit_rem_c(c);
+
+        case AST_RPOS:
+            return emit_rpos_c(node->data.rpos_rtab.n, c);
+
+        case AST_RTAB:
+            return emit_rtab_c(node->data.rpos_rtab.n, c);
 
         case AST_LABEL:
         case AST_GOTO:
