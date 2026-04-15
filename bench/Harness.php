@@ -197,4 +197,45 @@ class Harness
         echo "Peak memory: ".number_format(memory_get_peak_usage(true) / 1024 / 1024, 2)." MB\n";
         echo str_repeat('=', 120)."\n\n";
     }
+
+    /**
+     * Print search-mode execution diagnostics for SNOBOL results.
+     *
+     * Shows the layered-search-runtime counters collected by the JIT stats
+     * facility (layered-search-performance change):
+     *   - JIT search entries (how many times the search loop hit a compiled trace)
+     *   - Search candidate rejects (expected early misses attributed to search mode)
+     *   - Search-mode cold skips (JIT skipped due to search_hotness threshold)
+     *   - Search bailout candidates (mismatches attributed to search mode)
+     */
+    public function printSearchDiagnostics(): void
+    {
+        $snobolResults = array_filter($this->results, fn($r) => $r['impl'] === 'snobol');
+        if (empty($snobolResults)) {
+            return;
+        }
+
+        echo "\n".str_repeat('-', 80)."\n";
+        echo "Search-Mode Execution Diagnostics (layered-search-performance)\n";
+        echo str_repeat('-', 80)."\n";
+        printf("%-30s %12s %12s %12s %12s\n",
+            "Scenario", "JIT Entries", "CandRejcts", "ColdSkips", "SearchBail");
+        echo str_repeat('-', 80)."\n";
+
+        foreach ($snobolResults as $result) {
+            $jit = $result['jitStats'] ?? [];
+            printf("%-30s %12s %12s %12s %12s\n",
+                $result['scenario'],
+                isset($jit['jit_search_entries_total'])
+                    ? number_format($jit['jit_search_entries_total']) : '-',
+                isset($jit['jit_search_candidate_rejects'])
+                    ? number_format($jit['jit_search_candidate_rejects']) : '-',
+                isset($jit['jit_skipped_search_cold_total'])
+                    ? number_format($jit['jit_skipped_search_cold_total']) : '-',
+                isset($jit['jit_bailout_search_candidate_total'])
+                    ? number_format($jit['jit_bailout_search_candidate_total']) : '-'
+            );
+        }
+        echo str_repeat('-', 80)."\n\n";
+    }
 }

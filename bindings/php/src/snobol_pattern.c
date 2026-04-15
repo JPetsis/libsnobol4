@@ -6,6 +6,7 @@
 #include "snobol/lexer.h"
 #include "snobol/parser.h"
 #include "snobol/snobol_internal.h"
+#include "snobol/search.h"
 #ifdef SNOBOL_JIT
 #include "snobol/jit.h"
 #endif
@@ -150,6 +151,19 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_setJit, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, enabled, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_searchAll, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_searchSplit, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_searchReplace, 0, 0, 2)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, replacement, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
 /* PHP Methods */
@@ -429,74 +443,50 @@ PHP_METHOD(Snobol_Pattern, subst) {
     snobol_buf out;
     snobol_buf_init(&out);
 
-    size_t offset = 0;
-    size_t subject_len = ZSTR_LEN(subject);
     const char *subject_val = ZSTR_VAL(subject);
+    size_t subject_len = ZSTR_LEN(subject);
     size_t last_match_end = 0;
 
-    while (offset <= subject_len) {
+    /* Derive search metadata once for this pattern */
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+
+    /* Core search loop: one native control loop, no per-offset temporary VMs */
+    size_t search_offset = 0;
+    while (search_offset <= subject_len) {
         VM vm;
         memset(&vm, 0, sizeof(VM));
-        vm.bc = intern->bc;
+        vm.bc     = intern->bc;
         vm.bc_len = intern->bc_len;
-        vm.s = subject_val + offset;
-        vm.len = subject_len - offset;
 
 #ifdef SNOBOL_JIT
-        // IMPORTANT: subst() creates many short-lived VMs while scanning through the subject.
-        // Sharing the per-pattern JIT counters/trace cache across these temporary VMs can lead
-        // to stale trace pointers being executed after memory was freed/reused.
-        // For safety, keep JIT disabled for these per-offset scan VMs.
-        vm.jit.ip_counts = NULL;
-        vm.jit.op_counts = NULL;
-        vm.jit.traces = NULL;
-        vm.jit.enabled = false;
+        if (intern->jit_ctx) {
+            vm.jit.ip_counts = intern->jit_ctx->ip_counts;
+            vm.jit.traces    = intern->jit_ctx->traces;
+            vm.jit.ctx       = intern->jit_ctx;
+        }
+        vm.jit.enabled = intern->jit_enabled;
+        vm.jit.stats   = snobol_jit_get_stats();
 #endif
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
-        /* Initialize dynamic pattern cache for EVAL(...) support */
         dynamic_pattern_cache_t dyn_cache;
         if (dynamic_pattern_cache_init(&dyn_cache, 64)) {
             vm.dyn_cache = &dyn_cache;
         } else {
             vm.dyn_cache = NULL;
         }
-        vm.dyn_pending_source = NULL;
+        vm.dyn_pending_source     = NULL;
         vm.dyn_pending_source_len = 0;
-        vm.dyn_pending_bc = NULL;
-        vm.dyn_pending_bc_len = 0;
+        vm.dyn_pending_bc         = NULL;
+        vm.dyn_pending_bc_len     = 0;
 #endif
 
-        if (vm_exec(&vm)) {
-            // Match found at offset.
-            // 1. Append prefix (before this match)
-            snobol_buf_append(&out, subject_val + last_match_end, offset - last_match_end);
-
-            // 2. Run template BC to append replacement
-            // Template BC needs access to captures from VM.
-            // We can reuse VM state, just change BC.
-            vm.bc = tpl_bc;
-            vm.bc_len = tpl_bc_len;
-            vm.ip = 0;
-            vm.out = &out;
-            vm_run(&vm); // This will execute template ops and append to out.
-
-            // 3. Advance
-            size_t match_len = vm.pos;
-            if (match_len == 0) match_len = 1; // avoid infinite loop
-
-            offset += match_len;
-            last_match_end = offset;
-
-            // Allow matching at the very end (empty string) only once
-            if (offset > subject_len) break;
-        } else {
-            // No match at current offset
-            offset++;
-        }
+        snobol_search_result_t match_result;
+        bool found = snobol_search_exec(&vm, subject_val, subject_len,
+                                         search_offset, &meta, &match_result, NULL);
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
-        /* Clean up dynamic pattern cache for this VM iteration */
         if (vm.dyn_cache) {
             dynamic_pattern_cache_destroy(vm.dyn_cache);
         }
@@ -507,11 +497,34 @@ PHP_METHOD(Snobol_Pattern, subst) {
             efree(vm.dyn_pending_bc);
         }
 #endif
+
+        if (!found) break;
+
+        /* Append prefix (bytes before this match) */
+        snobol_buf_append(&out, subject_val + last_match_end,
+                          match_result.match_start - last_match_end);
+
+        /* Run template BC using the VM's capture state (vm.s is at match_start,
+         * vm.pos is the match length, var_start/var_end hold named captures) */
+        vm.bc     = tpl_bc;
+        vm.bc_len = tpl_bc_len;
+        vm.ip     = 0;
+        vm.out    = &out;
+        vm_run(&vm);
+
+        /* Advance past the match */
+        size_t match_len = match_result.match_end - match_result.match_start;
+        if (match_len == 0) match_len = 1;  /* avoid infinite loop on empty match */
+        search_offset = match_result.match_start + match_len;
+        last_match_end = search_offset;
+
+        if (search_offset > subject_len) break;
     }
 
-    // Append remainder
+    /* Append remainder */
     if (last_match_end < subject_len) {
-        snobol_buf_append(&out, subject_val + last_match_end, subject_len - last_match_end);
+        snobol_buf_append(&out, subject_val + last_match_end,
+                          subject_len - last_match_end);
     }
 
     if (tpl_bc) compiler_free(tpl_bc);
@@ -538,6 +551,263 @@ PHP_METHOD(Snobol_Pattern, setJit) {
     RETURN_TRUE;
 }
 
+/* -------------------------------------------------------------------------
+ * Helper: initialise a VM from a snobol_pattern_t for search operations
+ * (shared setup for searchAll / searchSplit / searchReplace)
+ * ----------------------------------------------------------------------- */
+static void php_snobol_init_vm_for_search(VM *vm,
+                                           snobol_pattern_t *intern,
+                                           EmitBuf *eb) {
+    memset(vm, 0, sizeof(VM));
+    vm->bc     = intern->bc;
+    vm->bc_len = intern->bc_len;
+    if (eb) {
+        vm->emit_fn    = php_snobol_emit_cb;
+        vm->emit_udata = eb;
+    }
+#ifdef SNOBOL_JIT
+    if (intern->jit_ctx) {
+        vm->jit.ip_counts = intern->jit_ctx->ip_counts;
+        vm->jit.traces    = intern->jit_ctx->traces;
+        vm->jit.ctx       = intern->jit_ctx;
+    }
+    vm->jit.enabled = intern->jit_enabled;
+    vm->jit.stats   = snobol_jit_get_stats();
+#endif
+}
+
+/**
+ * Pattern::searchAll(string $subject): array
+ *
+ * Find all non-overlapping matches using one native C search loop.
+ * Returns an array of match-result arrays (same structure as match()).
+ */
+PHP_METHOD(Snobol_Pattern, searchAll) {
+    zend_string *subject;
+    ZEND_PARSE_PARAMETERS_START(1,1)
+        Z_PARAM_STR(subject)
+    ZEND_PARSE_PARAMETERS_END();
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    if (!intern->bc || intern->bc_len == 0) {
+        zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
+        RETURN_FALSE;
+    }
+
+    const char *subject_val = ZSTR_VAL(subject);
+    size_t subject_len      = ZSTR_LEN(subject);
+
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+
+    array_init(return_value);
+    size_t search_offset = 0;
+
+    while (search_offset <= subject_len) {
+        VM vm;
+        EmitBuf eb = {NULL, 0, 0};
+        php_snobol_init_vm_for_search(&vm, intern, &eb);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        dynamic_pattern_cache_t dyn_cache;
+        if (dynamic_pattern_cache_init(&dyn_cache, 64)) vm.dyn_cache = &dyn_cache;
+        vm.dyn_pending_source = NULL; vm.dyn_pending_source_len = 0;
+        vm.dyn_pending_bc     = NULL; vm.dyn_pending_bc_len = 0;
+#endif
+
+        snobol_search_result_t match;
+        bool found = snobol_search_exec(&vm, subject_val, subject_len,
+                                         search_offset, &meta, &match, NULL);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        if (vm.dyn_cache) dynamic_pattern_cache_destroy(vm.dyn_cache);
+        if (vm.dyn_pending_source) efree(vm.dyn_pending_source);
+        if (vm.dyn_pending_bc)     efree(vm.dyn_pending_bc);
+#endif
+
+        if (!found) {
+            if (eb.buf) efree(eb.buf);
+            break;
+        }
+
+        /* Build match result array */
+        zval match_arr;
+        array_init(&match_arr);
+        for (size_t i = 0; i < vm.var_count; ++i) {
+            size_t a = vm.var_start[i];
+            size_t b = vm.var_end[i];
+            char key[32];
+            snprintf(key, sizeof(key), "v%u", (unsigned)i);
+            if (b >= a && b <= vm.len + match.match_start) {
+                add_assoc_stringl(&match_arr, key,
+                    subject_val + match.match_start + a, b - a);
+            } else {
+                add_assoc_null(&match_arr, key);
+            }
+        }
+        /* _match_len relative to subject start */
+        add_assoc_long(&match_arr, "_match_len", (zend_long)match.match_end);
+        add_assoc_long(&match_arr, "_match_start", (zend_long)match.match_start);
+        if (eb.buf) {
+            add_assoc_stringl(&match_arr, "_output", eb.buf, eb.len);
+            efree(eb.buf);
+        } else {
+            add_assoc_string(&match_arr, "_output", "");
+        }
+        add_next_index_zval(return_value, &match_arr);
+
+        /* Advance */
+        size_t match_len = match.match_end - match.match_start;
+        if (match_len == 0) match_len = 1;
+        search_offset = match.match_start + match_len;
+    }
+}
+
+/**
+ * Pattern::searchSplit(string $subject): array
+ *
+ * Split a subject on non-overlapping pattern matches using one native C loop.
+ * Returns an array of string segments between matches (same semantics as
+ * PatternHelper::split).
+ */
+PHP_METHOD(Snobol_Pattern, searchSplit) {
+    zend_string *subject;
+    ZEND_PARSE_PARAMETERS_START(1,1)
+        Z_PARAM_STR(subject)
+    ZEND_PARSE_PARAMETERS_END();
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    if (!intern->bc || intern->bc_len == 0) {
+        zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
+        RETURN_FALSE;
+    }
+
+    const char *subject_val = ZSTR_VAL(subject);
+    size_t subject_len      = ZSTR_LEN(subject);
+
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+
+    array_init(return_value);
+    size_t search_offset  = 0;
+    size_t last_match_end = 0;
+
+    while (search_offset <= subject_len) {
+        VM vm;
+        php_snobol_init_vm_for_search(&vm, intern, NULL);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        dynamic_pattern_cache_t dyn_cache;
+        if (dynamic_pattern_cache_init(&dyn_cache, 64)) vm.dyn_cache = &dyn_cache;
+        vm.dyn_pending_source = NULL; vm.dyn_pending_source_len = 0;
+        vm.dyn_pending_bc     = NULL; vm.dyn_pending_bc_len = 0;
+#endif
+
+        snobol_search_result_t match;
+        bool found = snobol_search_exec(&vm, subject_val, subject_len,
+                                         search_offset, &meta, &match, NULL);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        if (vm.dyn_cache) dynamic_pattern_cache_destroy(vm.dyn_cache);
+        if (vm.dyn_pending_source) efree(vm.dyn_pending_source);
+        if (vm.dyn_pending_bc)     efree(vm.dyn_pending_bc);
+#endif
+
+        if (!found) break;
+
+        /* Add segment before this match */
+        add_next_index_stringl(return_value,
+            subject_val + last_match_end,
+            match.match_start - last_match_end);
+
+        size_t match_len = match.match_end - match.match_start;
+        if (match_len == 0) match_len = 1;
+        search_offset  = match.match_start + match_len;
+        last_match_end = search_offset;
+    }
+
+    /* Add remaining segment after last match */
+    add_next_index_stringl(return_value,
+        subject_val + last_match_end,
+        subject_len - last_match_end);
+}
+
+/**
+ * Pattern::searchReplace(string $subject, string $replacement): string
+ *
+ * Replace non-overlapping pattern matches with a literal replacement using
+ * one native C search loop.  For template-based substitution use subst().
+ */
+PHP_METHOD(Snobol_Pattern, searchReplace) {
+    zend_string *subject, *replacement;
+    ZEND_PARSE_PARAMETERS_START(2,2)
+        Z_PARAM_STR(subject)
+        Z_PARAM_STR(replacement)
+    ZEND_PARSE_PARAMETERS_END();
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    if (!intern->bc || intern->bc_len == 0) {
+        zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
+        RETURN_FALSE;
+    }
+
+    const char *subject_val     = ZSTR_VAL(subject);
+    size_t      subject_len     = ZSTR_LEN(subject);
+    const char *repl_val        = ZSTR_VAL(replacement);
+    size_t      repl_len        = ZSTR_LEN(replacement);
+
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+
+    snobol_buf out;
+    snobol_buf_init(&out);
+
+    size_t search_offset  = 0;
+    size_t last_match_end = 0;
+
+    while (search_offset <= subject_len) {
+        VM vm;
+        php_snobol_init_vm_for_search(&vm, intern, NULL);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        dynamic_pattern_cache_t dyn_cache;
+        if (dynamic_pattern_cache_init(&dyn_cache, 64)) vm.dyn_cache = &dyn_cache;
+        vm.dyn_pending_source = NULL; vm.dyn_pending_source_len = 0;
+        vm.dyn_pending_bc     = NULL; vm.dyn_pending_bc_len = 0;
+#endif
+
+        snobol_search_result_t match;
+        bool found = snobol_search_exec(&vm, subject_val, subject_len,
+                                         search_offset, &meta, &match, NULL);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        if (vm.dyn_cache) dynamic_pattern_cache_destroy(vm.dyn_cache);
+        if (vm.dyn_pending_source) efree(vm.dyn_pending_source);
+        if (vm.dyn_pending_bc)     efree(vm.dyn_pending_bc);
+#endif
+
+        if (!found) break;
+
+        /* Append prefix */
+        snobol_buf_append(&out, subject_val + last_match_end,
+                          match.match_start - last_match_end);
+        /* Append replacement */
+        snobol_buf_append(&out, repl_val, repl_len);
+
+        size_t match_len = match.match_end - match.match_start;
+        if (match_len == 0) match_len = 1;
+        search_offset  = match.match_start + match_len;
+        last_match_end = search_offset;
+    }
+
+    /* Append remainder */
+    snobol_buf_append(&out, subject_val + last_match_end,
+                      subject_len - last_match_end);
+
+    RETVAL_STRINGL(out.data, out.len);
+    snobol_buf_free(&out);
+}
+
 static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, compileFromAst, ai_compileFromAst, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
     PHP_ME(Snobol_Pattern, fromString, ai_fromString, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
@@ -545,6 +815,9 @@ static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, subst, ai_subst, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, setEvalCallbacks, ai_setEval, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, setJit, ai_setJit, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, searchAll, ai_searchAll, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, searchSplit, ai_searchSplit, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, searchReplace, ai_searchReplace, ZEND_ACC_PUBLIC)
     PHP_FE_END
 };
 

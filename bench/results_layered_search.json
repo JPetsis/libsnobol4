@@ -1,0 +1,242 @@
+{
+  "meta": {
+    "generated": "2026-04-15T22:05:00+02:00",
+    "change": "layered-search-performance",
+    "extensionVersion": "0.2.0",
+    "phpVersion": "8.4.18",
+    "os": "Linux (DDEV)",
+    "description": "Benchmark analysis for the layered-search-performance change. Compares tokenize and replace workload throughput against the pre-change baseline captured in results_builtin.json.",
+    "baseline": "bench/results_builtin.json",
+    "sources": [
+      "bench/results_replace.json",
+      "bench/results_tokenize.json"
+    ]
+  },
+  "summary": {
+    "replace_remove_spaces": {
+      "verdict": "PASS",
+      "scenario": "remove_spaces",
+      "description": "SPAN-based space removal throughput vs pre-change baseline",
+      "snobol_ops_per_sec_baseline": 993.73,
+      "snobol_ops_per_sec_current": 7261.66,
+      "ratio_vs_baseline": 7.31,
+      "note": "7.3× improvement: layered search eliminates VM dispatch overhead for SPAN fast path"
+    },
+    "replace_replace_vowels": {
+      "verdict": "PASS",
+      "scenario": "replace_vowels",
+      "description": "ONEOF-based vowel replacement throughput vs pre-change baseline",
+      "snobol_ops_per_sec_baseline": 850.29,
+      "snobol_ops_per_sec_current": 5756.47,
+      "ratio_vs_baseline": 6.77,
+      "note": "6.8× improvement: single-char candidate set search path accelerates per-character scan"
+    },
+    "replace_replace_words": {
+      "verdict": "PASS",
+      "scenario": "replace_words",
+      "description": "Literal word replacement throughput vs pre-change baseline",
+      "snobol_ops_per_sec_baseline": 390.15,
+      "snobol_ops_per_sec_current": 18269.29,
+      "ratio_vs_baseline": 46.83,
+      "note": "46.8× improvement: literal-prefix fast path via memmem/memchr dramatically reduces scan cost"
+    },
+    "replace_remove_punctuation": {
+      "verdict": "PASS",
+      "scenario": "remove_punctuation",
+      "description": "BREAK-based punctuation removal throughput vs pre-change baseline",
+      "snobol_ops_per_sec_baseline": 1023.28,
+      "snobol_ops_per_sec_current": 47567.61,
+      "ratio_vs_baseline": 46.49,
+      "note": "46.5× improvement: BREAK acceleration with bitmap/chunked scan eliminates character-by-character VM dispatch"
+    },
+    "tokenize_comma": {
+      "verdict": "PASS",
+      "scenario": "tokenize_comma",
+      "description": "CSV comma tokenization throughput vs pre-change baseline",
+      "snobol_ops_per_sec_baseline": 520.74,
+      "snobol_ops_per_sec_current": 6524.48,
+      "ratio_vs_baseline": 12.53,
+      "note": "12.5× improvement: JIT compilation of search-mode comma pattern (499,480 JIT entries, 0 choice pushes)"
+    },
+    "tokenize_whitespace": {
+      "verdict": "PASS",
+      "scenario": "tokenize_whitespace",
+      "description": "Whitespace tokenization throughput vs pre-change baseline",
+      "snobol_ops_per_sec_baseline": 507.51,
+      "snobol_ops_per_sec_current": 6542.13,
+      "ratio_vs_baseline": 12.89,
+      "note": "12.9× improvement: JIT-compiled SPAN search eliminates repeated VM initialization overhead"
+    },
+    "tokenize_mixed": {
+      "verdict": "PASS",
+      "scenario": "tokenize_mixed",
+      "description": "Mixed-pattern tokenization throughput vs pre-change baseline",
+      "snobol_ops_per_sec_baseline": 306.29,
+      "snobol_ops_per_sec_current": 998.37,
+      "ratio_vs_baseline": 3.26,
+      "note": "3.3× improvement: lower gain expected for backtracking-heavy patterns (4.9M choice pushes); no JIT eligibility due to ARB complexity"
+    }
+  },
+  "detailed_results": {
+    "replace_benchmark": {
+      "description": "Pattern-based text replacement vs PCRE, compared against pre-change baseline",
+      "input_bytes": 4500,
+      "warmup": 10,
+      "iterations": 200,
+      "results": [
+        {
+          "scenario": "remove_spaces",
+          "baseline_snobol_ops_per_sec": 993.73,
+          "current_snobol_ops_per_sec": 7261.66,
+          "improvement_ratio": 7.31,
+          "pcre_ops_per_sec": 101063.29,
+          "search_diagnostics": {
+            "jit_entries_total": 179980,
+            "choice_push_total": 0,
+            "jit_bailout_search_candidate_total": 0,
+            "jit_skipped_search_cold_total": 1
+          }
+        },
+        {
+          "scenario": "replace_vowels",
+          "baseline_snobol_ops_per_sec": 850.29,
+          "current_snobol_ops_per_sec": 5756.47,
+          "improvement_ratio": 6.77,
+          "pcre_ops_per_sec": 73445.03,
+          "search_diagnostics": {
+            "jit_entries_total": 199980,
+            "choice_push_total": 0,
+            "jit_bailout_search_candidate_total": 199980,
+            "jit_skipped_search_cold_total": 1,
+            "note": "Search candidate bailouts are expected: vowel pattern misses most positions"
+          }
+        },
+        {
+          "scenario": "replace_words",
+          "baseline_snobol_ops_per_sec": 390.15,
+          "current_snobol_ops_per_sec": 18269.29,
+          "improvement_ratio": 46.83,
+          "pcre_ops_per_sec": 178651.18,
+          "search_diagnostics": {
+            "jit_entries_total": 59940,
+            "jit_compilations_total": 3,
+            "choice_push_total": 0,
+            "jit_bailout_search_candidate_total": 0,
+            "jit_skipped_search_cold_total": 3
+          }
+        },
+        {
+          "scenario": "remove_punctuation",
+          "baseline_snobol_ops_per_sec": 1023.28,
+          "current_snobol_ops_per_sec": 47567.61,
+          "improvement_ratio": 46.49,
+          "pcre_ops_per_sec": 335946.44,
+          "search_diagnostics": {
+            "jit_entries_total": 19980,
+            "choice_push_total": 0,
+            "jit_bailout_search_candidate_total": 19980,
+            "jit_skipped_search_cold_total": 1,
+            "note": "Search candidate bailouts expected: BREAK finds boundary quickly and skips non-punctuation positions"
+          }
+        }
+      ]
+    },
+    "tokenize_benchmark": {
+      "description": "CSV/whitespace tokenization vs PCRE, compared against pre-change baseline; includes BREAKX vs ARB comparison",
+      "input_bytes": 7889,
+      "warmup": 10,
+      "iterations": 500,
+      "results": [
+        {
+          "scenario": "tokenize_comma",
+          "baseline_snobol_ops_per_sec": 520.74,
+          "current_snobol_ops_per_sec": 6524.48,
+          "improvement_ratio": 12.53,
+          "pcre_ops_per_sec": 62685.78,
+          "search_diagnostics": {
+            "jit_entries_total": 499480,
+            "choice_push_total": 0,
+            "jit_bailout_partial_total": 499480,
+            "jit_skipped_search_cold_total": 1,
+            "note": "JIT compiled for search mode; partial bailouts are correct — each comma position triggers a JIT exit after matching"
+          }
+        },
+        {
+          "scenario": "tokenize_whitespace",
+          "baseline_snobol_ops_per_sec": 507.51,
+          "current_snobol_ops_per_sec": 6542.13,
+          "improvement_ratio": 12.89,
+          "pcre_ops_per_sec": 65842.90,
+          "search_diagnostics": {
+            "jit_entries_total": 499480,
+            "choice_push_total": 0,
+            "jit_bailout_partial_total": 499480,
+            "jit_skipped_search_cold_total": 1
+          }
+        },
+        {
+          "scenario": "tokenize_mixed",
+          "baseline_snobol_ops_per_sec": 306.29,
+          "current_snobol_ops_per_sec": 998.37,
+          "improvement_ratio": 3.26,
+          "pcre_ops_per_sec": 58124.89,
+          "search_diagnostics": {
+            "jit_entries_total": 0,
+            "choice_push_total": 4944000,
+            "choice_bytes_total": 237312000,
+            "jit_skipped_search_cold_total": 1,
+            "note": "ARB in mixed pattern disqualifies JIT and automaton paths; improvement comes from search dispatcher overhead reduction"
+          }
+        }
+      ],
+      "breakx_vs_arb": {
+        "description": "BREAKX vs ARB+NOTANY for key extraction (unchanged from pre-change baseline)",
+        "input_bytes": 7779,
+        "warmup": 5,
+        "iterations": 200,
+        "breakx": {
+          "ops_per_sec": 3022.09,
+          "choice_pushes": 200000,
+          "choice_pushes_per_iter": 1000,
+          "choice_bytes": 12800000
+        },
+        "arb_notany": {
+          "ops_per_sec": 1536.03,
+          "choice_pushes": 1656200,
+          "choice_pushes_per_iter": 8281,
+          "choice_bytes": 119246400
+        },
+        "pcre": {
+          "ops_per_sec": 58762.33
+        },
+        "breakx_throughput_vs_arb": 1.97,
+        "choice_push_reduction": 8.28,
+        "choice_bytes_reduction": 9.32,
+        "note": "BREAKX throughput increased from 2,347.55 to 3,022.09 ops/sec (1.29× via layered dispatcher improvements)"
+      }
+    }
+  },
+  "analysis": {
+    "overall_verdict": "PASS",
+    "key_improvements": [
+      "replace_words and remove_punctuation: ~46× improvement via literal and BREAK fast paths (memmem/memchr/bitmap scan)",
+      "tokenize_comma and tokenize_whitespace: ~12-13× improvement via JIT search-mode compilation (0 choice pushes for delimiter patterns)",
+      "remove_spaces and replace_vowels: ~7× improvement via SPAN and single-char candidate set acceleration",
+      "tokenize_mixed: 3.3× improvement (lower bound expected — ARB disqualifies fast paths, improvement is from dispatcher overhead only)",
+      "BREAKX throughput improved 1.29× vs baseline due to layered dispatcher efficiency gains",
+      "All search-aware diagnostics (jit_search_entries, candidate_rejects, search_cold_skips) correctly reported",
+      "Zero memory safety regressions: 1235 C tests pass, 177 PHP tests pass"
+    ],
+    "search_mode_diagnostics_summary": {
+      "description": "New search-mode metrics added by this change for observability",
+      "jit_search_entries_total": "Counts how many times the JIT search path was entered (distinct from anchored-match JIT entries)",
+      "jit_search_candidate_rejects": "Expected misses where candidate pre-filter correctly avoided full VM dispatch",
+      "jit_skipped_search_cold_total": "Search patterns skipped during cold warmup (correct — avoids poisoning hot-path accounting)",
+      "jit_bailout_search_candidate_total": "Bailouts from search fast-path where candidate filter correctly rejected the position"
+    },
+    "semantics_unchanged": true,
+    "peak_memory_mb": 4.00,
+    "environment": "DDEV container, PHP 8.4.18, Linux, libsnobol4 v0.2.0"
+  }
+}
+

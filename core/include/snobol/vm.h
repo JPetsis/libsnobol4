@@ -252,6 +252,7 @@ typedef struct {
         uint64_t *op_counts;
         void **traces;
         bool enabled;
+        bool search_mode; /**< true when VM is executing inside a search loop */
         struct SnobolJitStats *stats;
         struct SnobolJitContext *ctx;  /**< owning context; used for per-pattern profitability state */
     } jit;

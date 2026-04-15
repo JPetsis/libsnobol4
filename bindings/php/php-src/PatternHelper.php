@@ -154,6 +154,9 @@ class PatternHelper
     /**
      * Find all non-overlapping matches of a pattern in a subject string.
      *
+     * Delegates repeated-search control flow to the native core search runtime
+     * via Pattern::searchAll() rather than implementing an offset loop in PHP.
+     *
      * @param  string|array|Pattern  $patternOrAst  Pattern specification
      * @param  string  $subject  Subject string to match against
      * @param  array  $options  Optional flags
@@ -163,37 +166,19 @@ class PatternHelper
     {
         $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true, $options);
 
-        $matches = [];
-        $offset = 0;
-        $subjectLen = strlen($subject);
+        /* Delegate the repeated-search control loop to the native core runtime.
+         * Pattern::searchAll() executes one native C scan loop over the full
+         * subject, avoiding PHP-level offset iteration and substring creation. */
+        $raw = $pattern->searchAll($subject);
 
-        // Manual scan because Pattern::match is anchored
-        while ($offset <= $subjectLen) { // Allow matching empty string at end
-            $remaining = substr($subject, $offset);
-            $result = $pattern->match($remaining);
-
-            if ($result === false) {
-                // No match at current offset, advance by 1
-                $offset++;
-                continue;
-            }
-
-            // Clean up metadata
-            $matchLen = 0;
-            if (isset($result['_match_len'])) {
-                $matchLen = $result['_match_len'];
-                unset($result['_match_len']);
-            } else {
-                // Fallback estimate if metadata not available
-                $matchLen = self::estimateMatchLength($remaining, $result);
-            }
-            $matches[] = $result;
-
-            // Advance by match length (min 1 to avoid infinite loop on empty match)
-            $offset += max(1, $matchLen);
+        /* Normalise: remove internal _match_start/_match_len metadata from
+         * each result and keep only named captures (_output kept for compat). */
+        $results = [];
+        foreach ($raw as $entry) {
+            unset($entry['_match_len'], $entry['_match_start']);
+            $results[] = $entry;
         }
-
-        return $matches;
+        return $results;
     }
 
     /**
@@ -220,6 +205,9 @@ class PatternHelper
     /**
      * Split a subject string by pattern matches.
      *
+     * Delegates the repeated-search control loop to the native core runtime
+     * via Pattern::searchSplit() rather than using PHP-level offset retries.
+     *
      * @param  string|array|self  $patternOrAst  Pattern specification (used as delimiter)
      * @param  string  $subject  Subject string to split
      * @param  array  $options  Optional flags
@@ -229,48 +217,21 @@ class PatternHelper
     {
         $pattern = self::resolvePattern($patternOrAst, $options['cache'] ?? true, $options);
 
-        $segments = [];
-        $offset = 0;
-        $lastMatchEnd = 0;
-        $subjectLen = strlen($subject);
-
-        while ($offset <= $subjectLen) {
-            $remaining = substr($subject, $offset);
-            $result = $pattern->match($remaining);
-
-            if ($result === false) {
-                $offset++;
-                continue;
-            }
-
-            // Match found at $offset
-            // Add segment before this match
-            $segments[] = substr($subject, $lastMatchEnd, $offset - $lastMatchEnd);
-
-            $matchLen = 0;
-            if (isset($result['_match_len'])) {
-                $matchLen = $result['_match_len'];
-                unset($result['_match_len']);
-            } else {
-                $matchLen = self::estimateMatchLength($remaining, $result);
-            }
-
-            $offset += max(1, $matchLen);
-            $lastMatchEnd = $offset;
-        }
-
-        // Add remaining segment
-        $segments[] = substr($subject, $lastMatchEnd);
-
-        return $segments;
+        /* Delegate to native C search loop: avoids PHP substring creation and
+         * byte-by-byte offset retries as the primary execution strategy. */
+        return $pattern->searchSplit($subject);
     }
 
 
     /**
      * Replace pattern matches with replacement text.
      *
+     * For template-based replacements (containing '$'), delegates to Pattern::subst()
+     * which uses the core search runtime internally.  For literal replacements,
+     * delegates to Pattern::searchReplace() for a native C scan loop.
+     *
      * @param  string|array|Pattern  $patternOrAst  Pattern specification
-     * @param  string  $replacement  Replacement text (simple string for now)
+     * @param  string  $replacement  Replacement text (supports $v0 template syntax)
      * @param  string  $subject  Subject string
      * @param  array  $options  Optional flags
      * @return string Result with replacements applied
@@ -284,41 +245,9 @@ class PatternHelper
             return $pattern->subst($subject, $replacement);
         }
 
-        $result = '';
-        $offset = 0;
-        $lastMatchEnd = 0;
-
-        while ($offset < strlen($subject)) {
-            $remaining = substr($subject, $offset);
-            $matchResult = $pattern->match($remaining);
-
-            if ($matchResult === false) {
-                $offset++;
-                continue;
-            }
-
-            // Add segment before this match
-            $result .= substr($subject, $lastMatchEnd, $offset - $lastMatchEnd);
-
-            // Add replacement
-            $result .= $replacement;
-
-            $matchLen = 0;
-            if (isset($matchResult['_match_len'])) {
-                $matchLen = $matchResult['_match_len'];
-                unset($matchResult['_match_len']);
-            } else {
-                $matchLen = self::estimateMatchLength($remaining, $matchResult);
-            }
-
-            $offset += max(1, $matchLen);
-            $lastMatchEnd = $offset;
-        }
-
-        // Add remaining segment
-        $result .= substr($subject, $lastMatchEnd);
-
-        return $result;
+        /* Delegate literal replacement to native core search loop — avoids PHP
+         * substring creation and byte-by-byte offset retries. */
+        return $pattern->searchReplace($subject, $replacement);
     }
 
     /**

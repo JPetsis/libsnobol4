@@ -40,6 +40,7 @@ void snobol_version(int* major, int* minor, int* patch);
 #include "snobol/jit.h"
 #include "snobol/string_fn.h"
 #include "snobol/type_fn.h"
+#include "snobol/search.h"
 
 /**
  * @brief Pattern matching context (opaque handle)

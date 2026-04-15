@@ -124,6 +124,11 @@ PHP_FUNCTION(snobol_get_jit_stats) {
     /* Bailout reasons */
     add_assoc_long(return_value, "jit_bailout_match_fail_total", (zend_long)stats->bailout_match_fail_total);
     add_assoc_long(return_value, "jit_bailout_partial_total",    (zend_long)stats->bailout_partial_total);
+    /* Search-mode specific counters */
+    add_assoc_long(return_value, "jit_search_entries_total",              (zend_long)stats->search_entries_total);
+    add_assoc_long(return_value, "jit_search_candidate_rejects",          (zend_long)stats->search_candidate_rejects);
+    add_assoc_long(return_value, "jit_skipped_search_cold_total",         (zend_long)stats->skipped_search_cold_total);
+    add_assoc_long(return_value, "jit_bailout_search_candidate_total",    (zend_long)stats->bailout_search_candidate_total);
 }
 
 PHP_FUNCTION(snobol_reset_jit_stats) {

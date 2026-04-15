@@ -97,19 +97,19 @@ static void test_profitability_cold_skip(void) {
     /* 0 useful ops: just ACCEPT → should_compile must return false */
     bc[0] = OP_ACCEPT;
     VM vm0 = {0}; vm0.bc = bc; vm0.bc_len = 1;
-    test_assert(!snobol_jit_should_compile(&vm0, 0, &cfg),
+    test_assert(!snobol_jit_should_compile(&vm0, 0, &cfg, false),
                 "Cold skip: ACCEPT-only pattern skips JIT");
 
     /* 1 useful op: LIT 'a' ACCEPT → useful=1 < 2 → false */
     size_t len1 = build_lit_accept(bc, "a");
     VM vm1 = {0}; vm1.bc = bc; vm1.bc_len = len1;
-    test_assert(!snobol_jit_should_compile(&vm1, 0, &cfg),
+    test_assert(!snobol_jit_should_compile(&vm1, 0, &cfg, false),
                 "Cold skip: single-literal pattern skips JIT (useful < min_useful_ops)");
 
     /* 2 useful ops: LIT 'ab' LIT 'cd' ACCEPT → useful=2 >= 2 → true */
     size_t len2 = build_two_lits_accept(bc, "ab", "cd");
     VM vm2 = {0}; vm2.bc = bc; vm2.bc_len = len2;
-    test_assert(snobol_jit_should_compile(&vm2, 0, &cfg),
+    test_assert(snobol_jit_should_compile(&vm2, 0, &cfg, false),
                 "Hot pattern: two-literal pattern enables JIT (useful >= min_useful_ops)");
 }
 
@@ -124,7 +124,7 @@ static void test_profitability_hot_enable(void) {
     /* Even 1 useful op is enough when min_useful_ops=1 */
     size_t len = build_lit_accept(bc, "hello");
     VM vm = {0}; vm.bc = bc; vm.bc_len = len;
-    test_assert(snobol_jit_should_compile(&vm, 0, &cfg),
+    test_assert(snobol_jit_should_compile(&vm, 0, &cfg, false),
                 "Hot enable: pattern with min_useful_ops=1 passes gate");
 }
 
@@ -139,13 +139,13 @@ static void test_profitability_backtrack_skip(void) {
     /* SPLIT at ip=0 → has_backtrack=true, useful=0 < 5 → false */
     size_t len = build_split_only(bc);
     VM vm = {0}; vm.bc = bc; vm.bc_len = len;
-    test_assert(!snobol_jit_should_compile(&vm, 0, &cfg),
+    test_assert(!snobol_jit_should_compile(&vm, 0, &cfg, false),
                 "Backtrack skip: SPLIT-dominated pattern skips JIT");
 
     /* Disable both gates → SPLIT-only pattern can pass profitability check */
     cfg.skip_backtrack_heavy = false;
     cfg.min_useful_ops = 0;
-    test_assert(snobol_jit_should_compile(&vm, 0, &cfg),
+    test_assert(snobol_jit_should_compile(&vm, 0, &cfg, false),
                 "Backtrack allow: with skip_backtrack_heavy=false and min_useful_ops=0, SPLIT pattern passes gate");
 }
 
@@ -162,14 +162,14 @@ static void test_profitability_config_adjustable(void) {
     SnobolJitConfig cfg_strict = saved;
     cfg_strict.min_useful_ops = 2;
     snobol_jit_set_config(&cfg_strict);
-    test_assert(!snobol_jit_should_compile(&vm, 0, snobol_jit_get_config()),
+    test_assert(!snobol_jit_should_compile(&vm, 0, snobol_jit_get_config(), false),
                 "Config: min_useful_ops=2 skips single-literal pattern");
 
     /* With min_useful_ops=1, same pattern should compile */
     SnobolJitConfig cfg_loose = saved;
     cfg_loose.min_useful_ops = 1;
     snobol_jit_set_config(&cfg_loose);
-    test_assert(snobol_jit_should_compile(&vm, 0, snobol_jit_get_config()),
+    test_assert(snobol_jit_should_compile(&vm, 0, snobol_jit_get_config(), false),
                 "Config: min_useful_ops=1 allows single-literal pattern");
 
     /* Restore original */
@@ -235,5 +235,4 @@ void test_jit_profitability_suite(void) {
     test_profitability_counter_cold();
 #endif
 }
-
 

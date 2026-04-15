@@ -30,6 +30,8 @@ add_executable(snobol4_tests
     test_string_case.c
     test_comparison.c
     test_builtin_dispatch.c
+    test_search_runtime.c
+    test_search_jit.c
 )
 
 # Link against core library

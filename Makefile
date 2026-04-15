@@ -115,7 +115,7 @@ clean:
 	rm -rf build/
 	rm -rf build_test/
 	@echo "==> Cleaning benchmark results..."
-	find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' ! -name 'results_builtin.json' -delete 2>/dev/null || true
+	find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' ! -name 'results_builtin.json' ! -name 'results_layered_search.json' -delete 2>/dev/null || true
 	@echo "==> Clean complete!"
 
 distclean: clean

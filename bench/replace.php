@@ -150,6 +150,7 @@ $harness->bench(
 
 // Output results
 $harness->printSummary();
+$harness->printSearchDiagnostics();
 
 $outputFile = __DIR__.'/results_replace.json';
 $harness->writeJson($outputFile);

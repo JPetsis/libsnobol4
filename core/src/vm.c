@@ -263,6 +263,11 @@ bool vm_run(VM *vm) {
                 if (vm->ip == current_ip) {
                     vm->jit.stats->bailouts_total++;
                     vm->jit.stats->bailout_match_fail_total++;
+                    /* Attribute quick first-op mismatches in search mode
+                     * to expected candidate rejection so they are distinguishable
+                     * from unsupported control flow or safety fallbacks. */
+                    if (vm->jit.search_mode)
+                        vm->jit.stats->bailout_search_candidate_total++;
                 } else {
                     vm->jit.stats->bailout_partial_total++;
                 }
@@ -289,18 +294,30 @@ bool vm_run(VM *vm) {
         } else if (vm->jit.ip_counts && current_ip < vm->bc_len) {
             uint64_t count = ++vm->jit.ip_counts[current_ip];
 
-            bool should_try = (count == jit_cfg->hotness_threshold) &&
+            /* in search mode, use a lower hotness threshold so
+             * single-op hot search patterns become JIT-eligible sooner. */
+            uint64_t hot_threshold = vm->jit.search_mode
+                ? jit_cfg->search_hotness_threshold
+                : jit_cfg->hotness_threshold;
+
+            bool should_try = (count == hot_threshold) &&
                               vm->jit.traces &&
                               vm->jit.traces[current_ip] == NULL &&
                               !(vm->jit.ctx && vm->jit.ctx->stop_compiling);
 
             if (should_try) {
-                /* Profitability gate (task 2.2) */
-                if (!snobol_jit_should_compile(vm, current_ip, jit_cfg)) {
+                /* Profitability gate: use search_mode flag */
+                if (!snobol_jit_should_compile(vm, current_ip, jit_cfg, vm->jit.search_mode)) {
                     if (vm->jit.ctx) vm->jit.ctx->stop_compiling = true;
-                    if (vm->jit.stats) vm->jit.stats->skipped_cold_total++;
+                    /* attribute cold skip to search-mode counter when appropriate */
+                    if (vm->jit.stats) {
+                        if (vm->jit.search_mode)
+                            vm->jit.stats->skipped_search_cold_total++;
+                        else
+                            vm->jit.stats->skipped_cold_total++;
+                    }
                 } else {
-                    /* Compile budget check (task 3.5) */
+                    /* Compile budget check */
                     uint64_t budget_used = vm->jit.ctx ? vm->jit.ctx->compile_time_ns : 0;
                     if (budget_used >= jit_cfg->compile_budget_ns) {
                         if (vm->jit.ctx) vm->jit.ctx->stop_compiling = true;

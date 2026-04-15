@@ -18,16 +18,20 @@
 static SnobolJitStats  global_jit_stats = {0};
 
 /* ---------------------------------------------------------------------------
- * Configuration  (task 2.1)
+ * Configuration
  * --------------------------------------------------------------------------- */
 
 static SnobolJitConfig global_jit_cfg = {
-    .hotness_threshold    = 50,
-    .max_exit_rate_pct    = 80,
-    .compile_budget_ns    = 500000ULL,   /* 0.5 ms */
-    .cache_max_entries    = 128,
-    .min_useful_ops       = 2,
-    .skip_backtrack_heavy = true,
+    .hotness_threshold        = 50,
+    .max_exit_rate_pct        = 80,
+    .compile_budget_ns        = 500000ULL,   /* 0.5 ms */
+    .cache_max_entries        = 128,
+    .min_useful_ops           = 2,
+    .skip_backtrack_heavy     = true,
+    /* Search-mode defaults (Task 4.1): lower thresholds so hot search
+     * patterns become JIT-eligible without requiring anchored-match volumes. */
+    .search_hotness_threshold = 20,
+    .search_min_useful_ops    = 1,
 };
 
 void snobol_jit_set_config(const SnobolJitConfig *cfg) {
@@ -37,18 +41,20 @@ const SnobolJitConfig *snobol_jit_get_config(void) { return &global_jit_cfg; }
 
 void snobol_jit_load_config_from_env(void) {
     const char *v;
-    if ((v = getenv("SNOBOL_JIT_HOTNESS")))      global_jit_cfg.hotness_threshold    = (uint64_t)strtoull(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_MAX_EXIT_PCT")))  global_jit_cfg.max_exit_rate_pct    = (uint32_t)strtoul(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_BUDGET_NS")))     global_jit_cfg.compile_budget_ns    = (uint64_t)strtoull(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_CACHE_MAX")))     global_jit_cfg.cache_max_entries    = (uint32_t)strtoul(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_MIN_OPS")))       global_jit_cfg.min_useful_ops       = (uint32_t)strtoul(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_SKIP_BT")))       global_jit_cfg.skip_backtrack_heavy = (strtol(v, NULL, 10) != 0);
+    if ((v = getenv("SNOBOL_JIT_HOTNESS")))      global_jit_cfg.hotness_threshold        = (uint64_t)strtoull(v, NULL, 10);
+    if ((v = getenv("SNOBOL_JIT_MAX_EXIT_PCT")))  global_jit_cfg.max_exit_rate_pct        = (uint32_t)strtoul(v, NULL, 10);
+    if ((v = getenv("SNOBOL_JIT_BUDGET_NS")))     global_jit_cfg.compile_budget_ns        = (uint64_t)strtoull(v, NULL, 10);
+    if ((v = getenv("SNOBOL_JIT_CACHE_MAX")))     global_jit_cfg.cache_max_entries        = (uint32_t)strtoul(v, NULL, 10);
+    if ((v = getenv("SNOBOL_JIT_MIN_OPS")))       global_jit_cfg.min_useful_ops           = (uint32_t)strtoul(v, NULL, 10);
+    if ((v = getenv("SNOBOL_JIT_SKIP_BT")))       global_jit_cfg.skip_backtrack_heavy     = (strtol(v, NULL, 10) != 0);
+    if ((v = getenv("SNOBOL_JIT_SEARCH_HOT")))    global_jit_cfg.search_hotness_threshold = (uint64_t)strtoull(v, NULL, 10);
+    if ((v = getenv("SNOBOL_JIT_SEARCH_OPS")))    global_jit_cfg.search_min_useful_ops    = (uint32_t)strtoul(v, NULL, 10);
 }
 
 /* ---------------------------------------------------------------------------
- * LRU compiled-artifact cache  (task 3.2)
+ * LRU compiled-artifact cache
  *
- * Ownership rules (task 3.3):
+ * Ownership rules:
  *  • The cache array owns each SnobolJitContext*.
  *  • Patterns increment ref_count via snobol_jit_acquire_context().
  *  • Eviction is only allowed when ref_count == 0.
@@ -184,10 +190,13 @@ void snobol_jit_reset_stats(void) {
         if (c->ip_counts)   memset(c->ip_counts,   0, c->bc_len * sizeof(uint64_t));
         if (c->traces)      memset(c->traces,       0, c->bc_len * sizeof(void *));
         if (c->trace_sizes) memset(c->trace_sizes,  0, c->bc_len * sizeof(size_t));
-        c->stop_compiling  = false;
-        c->ctx_entries     = 0;
-        c->ctx_exits       = 0;
-        c->compile_time_ns = 0;
+        c->stop_compiling        = false;
+        c->ctx_entries           = 0;
+        c->ctx_exits             = 0;
+        c->compile_time_ns       = 0;
+        c->search_stop_compiling = false;
+        c->search_ctx_entries    = 0;
+        c->search_ctx_exits      = 0;
     }
 }
 
@@ -235,7 +244,7 @@ void snobol_jit_free_code(void *code, size_t size) {
 }
 
 /* ---------------------------------------------------------------------------
- * Profitability gate  (task 2.2)
+ * Profitability gate
  *
  * Scans bytecode from ip to estimate how many useful (non-trivial) ops
  * exist before the first SPLIT, REPEAT_INIT, REPEAT_STEP, ACCEPT, or FAIL.
@@ -246,8 +255,14 @@ void snobol_jit_free_code(void *code, size_t size) {
  *      the first few ops (pattern dominated by backtracking with short prefix).
  * --------------------------------------------------------------------------- */
 
-bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *cfg) {
+bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *cfg,
+                                bool search_mode) {
     if (!cfg) return true;
+
+    /* Choose thresholds based on execution mode:
+     * Search-mode uses lower thresholds so one-op hot search patterns can
+     * become JIT-eligible without requiring anchored-match traffic volumes. */
+    uint32_t min_ops = search_mode ? cfg->search_min_useful_ops : cfg->min_useful_ops;
 
     size_t scan   = ip;
     uint32_t useful = 0;
@@ -289,6 +304,7 @@ bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *c
             case OP_NOTANY:
             case OP_SPAN:
             case OP_BREAK:
+            case OP_BREAKX:  /* BREAKX included in search-aware compiler scan */
                 scan += 2;
                 useful++;
                 break;
@@ -309,12 +325,13 @@ bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *c
         }
     }
 done:
-    /* Skip JIT if too few useful ops (not worth the compilation overhead) */
-    if (useful < cfg->min_useful_ops) return false;
+    /* Skip JIT if too few useful ops using mode-appropriate threshold */
+    if (useful < min_ops) return false;
 
     /* Skip JIT for patterns where backtracking appears immediately after a
-     * short prefix — the JIT↔interp transition cost exceeds any speedup. */
-    if (has_backtrack && cfg->skip_backtrack_heavy && useful < 5) return false;
+     * short prefix — in search mode we only trigger this for anchored-heavy
+     * patterns (search workloads naturally have early-exit structure). */
+    if (has_backtrack && cfg->skip_backtrack_heavy && !search_mode && useful < 5) return false;
 
     return true;
 }
@@ -404,7 +421,7 @@ static void emit_patch_tbz(uint32_t *p, uint32_t *target, uint32_t base_opcode) 
 }
 
 /* ---------------------------------------------------------------------------
- * Compiler  (tasks 3.5, 4.2)
+ * Compiler
  *
  * Changes vs original:
  *  • Two-pass: first build OpInfo[] (following forward JMPs), then emit.
@@ -444,8 +461,14 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
         }
 
         /* Stop at control-flow ops that can't be inlined */
-        if (op == OP_ACCEPT || op == OP_FAIL || op == OP_SPLIT ||
-            op == OP_REPEAT_INIT || op == OP_REPEAT_STEP) break;
+        if (op == OP_ACCEPT || op == OP_FAIL || op == OP_REPEAT_INIT ||
+            op == OP_REPEAT_STEP) break;
+
+        /* OP_SPLIT: limit inclusion in search regions
+         * Single-branch SPLIT structures used in alternation patterns may be
+         * included in search regions if they are followed by single-char ops.
+         * For now, stop at SPLIT to preserve correct backtracking semantics. */
+        if (op == OP_SPLIT) break;
 
         size_t cur_ip  = scan_ip;
         size_t next_ip = scan_ip + 1;
@@ -458,7 +481,9 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
                                 (uint32_t)vm->bc[next_ip+7];
             next_ip += 8 + lit_len;
             worthy = true;
-        } else if (op == OP_ANY || op == OP_NOTANY || op == OP_SPAN || op == OP_BREAK) {
+        } else if (op == OP_ANY || op == OP_NOTANY || op == OP_SPAN ||
+                   op == OP_BREAK || op == OP_BREAKX) {
+            /* BREAKX is now included in compiled regions */
             next_ip += 2;
             worthy = true;
         } else if (op == OP_LEN) {
@@ -533,7 +558,11 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
                 emit_instr(&js, A64_MOV_X_IMM(7, 1));
                 emit_instr(&js, A64_ADD_X_X_X(2, 2, 7));
             }
-        } else if (op == OP_SPAN || op == OP_ANY || op == OP_NOTANY) {
+        } else if (op == OP_SPAN || op == OP_ANY || op == OP_NOTANY ||
+                   op == OP_BREAK || op == OP_BREAKX) {
+            /* BREAK and BREAKX: both compiled using the same bitmap-match
+             * logic.  BREAKX's retry choice point is managed by the VM choice stack
+             * outside the compiled region; the JIT handles the initial scan step. */
             uint16_t set_id = ((uint16_t)vm->bc[operand_ip] << 8) | vm->bc[operand_ip+1];
             uint16_t count, ci;
             const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);

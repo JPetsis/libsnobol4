@@ -325,6 +325,7 @@ $harness->bench(
 
 // Output results
 $harness->printSummary();
+$harness->printSearchDiagnostics();
 
 $outputFile = __DIR__.'/results_tokenize.json';
 $harness->writeJson($outputFile);

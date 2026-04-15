@@ -69,6 +69,7 @@ void test_assert(bool condition, const char *message) {
         test_ctx.failed++;
         printf("     ✗  %s\n", message);
     }
+    fflush(stdout);
 }
 
 /* ── RUN_SUITE macro ─────────────────────────────────────────────────────── */
@@ -129,6 +130,8 @@ void test_string_char_suite(void);
 void test_string_case_suite(void);
 void test_comparison_suite(void);
 void test_builtin_dispatch_suite(void);
+void test_search_runtime_suite(void);
+void test_search_jit_suite(void);
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
@@ -177,6 +180,10 @@ int main(void) {
     RUN_SUITE("String: UPPER/LOWER",        test_string_case_suite);
     RUN_SUITE("Comparison predicates",      test_comparison_suite);
     RUN_SUITE("Built-in dispatch (OP_EVAL)", test_builtin_dispatch_suite);
+
+    /* Search runtime */
+    RUN_SUITE("Search Runtime",             test_search_runtime_suite);
+    RUN_SUITE("Search JIT",                 test_search_jit_suite);
 
     /* Stress test */
     {

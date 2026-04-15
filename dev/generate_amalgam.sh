@@ -29,6 +29,10 @@ CORE_FILES=(
     "dynamic_pattern.c"
     "jit.c"
     "version.c"
+    "string_fn.c"
+    "type_fn.c"
+    "pattern_build.c"
+    "search.c"
 )
 
 # Header for the amalgamation file

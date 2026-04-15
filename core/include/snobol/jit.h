@@ -32,14 +32,19 @@ static inline uint64_t snobol_jit_now_ns(void) {
  *  SNOBOL_JIT_CACHE_MAX     cache_max_entries    (default 128)
  *  SNOBOL_JIT_MIN_OPS       min_useful_ops       (default 2)
  *  SNOBOL_JIT_SKIP_BT       skip_backtrack_heavy (default 1)
+ *  SNOBOL_JIT_SEARCH_HOT   search_hotness_threshold  (default 20)
+ *  SNOBOL_JIT_SEARCH_OPS   search_min_useful_ops     (default 1)
  * --------------------------------------------------------------------------- */
 typedef struct SnobolJitConfig {
-    uint64_t hotness_threshold;     /**< IP hit count before compiling (default 50) */
-    uint32_t max_exit_rate_pct;     /**< % exits/entries before stopping compilation (default 80) */
-    uint64_t compile_budget_ns;     /**< Max compile time per context in ns (default 500 000) */
-    uint32_t cache_max_entries;     /**< Max entries in LRU compiled-artifact cache (default 128) */
-    uint32_t min_useful_ops;        /**< Min non-trivial ops before SPLIT/REPEAT; below → skip JIT (default 2) */
-    bool     skip_backtrack_heavy;  /**< Skip JIT for SPLIT-dominated patterns with short prefix (default true) */
+    uint64_t hotness_threshold;          /**< IP hit count before compiling (default 50) */
+    uint32_t max_exit_rate_pct;          /**< % exits/entries before stopping compilation (default 80) */
+    uint64_t compile_budget_ns;          /**< Max compile time per context in ns (default 500 000) */
+    uint32_t cache_max_entries;          /**< Max entries in LRU compiled-artifact cache (default 128) */
+    uint32_t min_useful_ops;             /**< Min non-trivial ops before SPLIT/REPEAT; below → skip JIT (default 2) */
+    bool     skip_backtrack_heavy;       /**< Skip JIT for SPLIT-dominated patterns with short prefix (default true) */
+    /* Search-mode profitability thresholds */
+    uint64_t search_hotness_threshold;   /**< Hotness threshold for search-mode JIT (default 20) */
+    uint32_t search_min_useful_ops;      /**< Min useful ops in search mode before SPLIT (default 1) */
 } SnobolJitConfig;
 
 void                    snobol_jit_set_config(const SnobolJitConfig *cfg);
@@ -93,6 +98,12 @@ typedef struct SnobolJitStats {
     /* NEW: Bailout reason breakdown */
     uint64_t bailout_match_fail_total;  /* ip == entry_ip after trace returns */
     uint64_t bailout_partial_total;     /* entry_ip < ip < region end */
+
+    /* NEW: Search-mode specific counters */
+    uint64_t search_entries_total;          /**< JIT trace entries via search-mode dispatch */
+    uint64_t search_candidate_rejects;      /**< Expected quick rejects in search-mode traces */
+    uint64_t skipped_search_cold_total;     /**< Search-mode skip: below search_hotness_threshold */
+    uint64_t bailout_search_candidate_total;/**< Bailout attributable to expected candidate rejection (Task 4.4) */
 } SnobolJitStats;
 
 /* ---------------------------------------------------------------------------
@@ -121,10 +132,15 @@ typedef struct SnobolJitContext {
     uint64_t  lru_counter;
 
     /* Profitability state (per pattern) */
-    bool      stop_compiling;  /**< Profitability gate: no more regions for this pattern */
-    uint64_t  ctx_entries;     /**< JIT trace entries for this pattern */
-    uint64_t  ctx_exits;       /**< JIT trace exits for this pattern */
-    uint64_t  compile_time_ns; /**< Cumulative compile time for this context (ns) */
+    bool      stop_compiling;       /**< Profitability gate: no more regions for this pattern */
+    uint64_t  ctx_entries;          /**< JIT trace entries for this pattern */
+    uint64_t  ctx_exits;            /**< JIT trace exits for this pattern */
+    uint64_t  compile_time_ns;      /**< Cumulative compile time for this context (ns) */
+
+    /* Search-mode profitability state */
+    bool      search_stop_compiling; /**< Search-mode profitability gate */
+    uint64_t  search_ctx_entries;    /**< JIT trace entries for this pattern via search mode */
+    uint64_t  search_ctx_exits;      /**< JIT trace exits for this pattern via search mode */
 } SnobolJitContext;
 
 /* ---------------------------------------------------------------------------
@@ -162,8 +178,11 @@ void  snobol_jit_free_code(void *code, size_t size);
  *  compilations_total is incremented by the CALLER before invoking this. */
 jit_trace_fn snobol_jit_compile(VM *vm, size_t ip, size_t *out_code_size);
 
-/** Profitability gate: return false if compiling at this ip is predicted unprofitable. */
-bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *cfg);
+/** Profitability gate: return false if compiling at this ip is predicted unprofitable.
+ *  When search_mode is true, uses separate search-mode thresholds so expected
+ *  early misses do not suppress useful compilation. */
+bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *cfg,
+                                bool search_mode);
 
 
 
