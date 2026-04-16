@@ -156,7 +156,7 @@ jobs:
           # identify which test triggers the bus error.  --verbose adds timings.
           # We intentionally do NOT use --stop-on-failure so we see how far the
           # suite gets even if a crash kills the process mid-run.
-          vendor/bin/phpunit tests/php --testdox --verbose 2>&1 || {
+          vendor/bin/phpunit tests/php --testdox 2>&1 || {
             EXIT=$?
             echo "--- phpunit exited with code $EXIT ---"
             if [ $EXIT -eq 138 ]; then
