@@ -6,14 +6,14 @@ on:
       php-version:
         description: 'PHP version to use'
         required: false
-        default: '8.3'
+        default: '8.5'
   schedule:
     # Run sanitizers weekly on Tuesday at 02:00 UTC
     - cron: '0 2 * * 2'
 
 jobs:
   asan-ubsan:
-    name: ASan + UBSan Tests (PHP ${{ github.event.inputs.php-version || '8.3' }})
+    name: ASan + UBSan Tests (PHP ${{ github.event.inputs.php-version || '8.5' }})
     runs-on: ubuntu-latest
 
     env:
@@ -33,14 +33,14 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ github.event.inputs.php-version || '8.3' }}
+          php-version: ${{ github.event.inputs.php-version || '8.5' }}
           extensions: json
           tools: composer
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential php${{ github.event.inputs.php-version || '8.3' }}-dev autoconf clang
+          sudo apt-get install -y build-essential php${{ github.event.inputs.php-version || '8.5' }}-dev autoconf clang
 
       - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist
@@ -67,7 +67,7 @@ jobs:
 
       - name: Enable extension
         run: |
-          echo "extension=snobol.so" | sudo tee -a /etc/php/${{ github.event.inputs.php-version || '8.3' }}/cli/php.ini
+          echo "extension=snobol.so" | sudo tee -a /etc/php/${{ github.event.inputs.php-version || '8.5' }}/cli/php.ini
           php -m | grep snobol || echo "Warning: Extension not loaded, continuing anyway"
 
       - name: Run C tests with sanitizers
@@ -85,7 +85,7 @@ jobs:
         run: |
           echo "## Sanitizer Run Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**PHP Version:** ${{ github.event.inputs.php-version || '8.3' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**PHP Version:** ${{ github.event.inputs.php-version || '8.5' }}" >> $GITHUB_STEP_SUMMARY
           echo "**Sanitizers:** AddressSanitizer + UndefinedBehaviorSanitizer" >> $GITHUB_STEP_SUMMARY
           echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

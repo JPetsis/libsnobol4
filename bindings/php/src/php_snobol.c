@@ -148,6 +148,69 @@ PHP_FUNCTION(snobol_reset_jit_stats) {
  * uses these internally when the C extension is loaded.
  * ============================================================ */
 
+/* --- ARGINFO for snobol_text_* functions ---
+ * PHP 8.5 warns for any PHP_FE entry registered with NULL arginfo.
+ * Each entry below declares the exact parameter count and types so
+ * the engine can validate calls and suppress the warning.         */
+
+/* string → int */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_text_size, 0, 1, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, s, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+/* string → string */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_text_str1, 0, 1, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, s, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+/* string, int → string */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_text_dupl, 0, 2, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, s, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, n, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+/* string, int, int → string|false */
+ZEND_BEGIN_ARG_INFO_EX(ai_text_substr, 0, 0, 3)
+    ZEND_ARG_TYPE_INFO(0, s,   IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, pos, IS_LONG,   0)
+    ZEND_ARG_TYPE_INFO(0, len, IS_LONG,   0)
+ZEND_END_ARG_INFO()
+
+/* string, string, string → string */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_text_str3, 0, 3, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, s,    IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, from, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, to,   IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+/* string, int [, string] → string  (lpad / rpad) */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_text_pad, 0, 2, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, s,     IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, width, IS_LONG,   0)
+    ZEND_ARG_TYPE_INFO(0, pad,   IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+/* int → string|false */
+ZEND_BEGIN_ARG_INFO_EX(ai_text_char, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, cp, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+/* string → int|false */
+ZEND_BEGIN_ARG_INFO_EX(ai_text_ord, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, s, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+/* string, string → bool */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_text_str2_bool, 0, 2, _IS_BOOL, 0)
+    ZEND_ARG_TYPE_INFO(0, a, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, b, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+/* string → bool */
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_text_str1_bool, 0, 1, _IS_BOOL, 0)
+    ZEND_ARG_TYPE_INFO(0, s, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
 /* --- STRING FUNCTIONS --- */
 
 PHP_FUNCTION(snobol_text_size) {
@@ -357,27 +420,27 @@ static const zend_function_entry snobol_functions[] = {
     PHP_FE(snobol_reset_jit_stats, ai_snobol_reset_jit_stats)
 #endif
     /* C function exports for string/comparison built-ins */
-    PHP_FE(snobol_text_size,         NULL)
-    PHP_FE(snobol_text_trim,         NULL)
-    PHP_FE(snobol_text_dupl,         NULL)
-    PHP_FE(snobol_text_reverse,      NULL)
-    PHP_FE(snobol_text_substr,       NULL)
-    PHP_FE(snobol_text_replace,      NULL)
-    PHP_FE(snobol_text_replace_char, NULL)
-    PHP_FE(snobol_text_lpad,         NULL)
-    PHP_FE(snobol_text_rpad,         NULL)
-    PHP_FE(snobol_text_char,         NULL)
-    PHP_FE(snobol_text_ord,          NULL)
-    PHP_FE(snobol_text_upper,        NULL)
-    PHP_FE(snobol_text_lower,        NULL)
-    PHP_FE(snobol_text_ident,        NULL)
-    PHP_FE(snobol_text_differ,       NULL)
-    PHP_FE(snobol_text_lexeq,        NULL)
-    PHP_FE(snobol_text_lexlt,        NULL)
-    PHP_FE(snobol_text_lexgt,        NULL)
-    PHP_FE(snobol_text_integer,      NULL)
-    PHP_FE(snobol_text_real,         NULL)
-    PHP_FE(snobol_text_numeric,      NULL)
+    PHP_FE(snobol_text_size,         ai_text_size)
+    PHP_FE(snobol_text_trim,         ai_text_str1)
+    PHP_FE(snobol_text_dupl,         ai_text_dupl)
+    PHP_FE(snobol_text_reverse,      ai_text_str1)
+    PHP_FE(snobol_text_substr,       ai_text_substr)
+    PHP_FE(snobol_text_replace,      ai_text_str3)
+    PHP_FE(snobol_text_replace_char, ai_text_str3)
+    PHP_FE(snobol_text_lpad,         ai_text_pad)
+    PHP_FE(snobol_text_rpad,         ai_text_pad)
+    PHP_FE(snobol_text_char,         ai_text_char)
+    PHP_FE(snobol_text_ord,          ai_text_ord)
+    PHP_FE(snobol_text_upper,        ai_text_str1)
+    PHP_FE(snobol_text_lower,        ai_text_str1)
+    PHP_FE(snobol_text_ident,        ai_text_str2_bool)
+    PHP_FE(snobol_text_differ,       ai_text_str2_bool)
+    PHP_FE(snobol_text_lexeq,        ai_text_str2_bool)
+    PHP_FE(snobol_text_lexlt,        ai_text_str2_bool)
+    PHP_FE(snobol_text_lexgt,        ai_text_str2_bool)
+    PHP_FE(snobol_text_integer,      ai_text_str1_bool)
+    PHP_FE(snobol_text_real,         ai_text_str1_bool)
+    PHP_FE(snobol_text_numeric,      ai_text_str1_bool)
     PHP_FE_END
 };
 
