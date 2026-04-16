@@ -9,6 +9,9 @@
 #include <unistd.h>
 #include <stddef.h>
 #include <string.h>
+#ifdef __APPLE__
+#  include <pthread.h>
+#endif
 #include "snobol/snobol_internal.h"
 
 /* ---------------------------------------------------------------------------
@@ -229,14 +232,32 @@ void snobol_jit_shutdown(void) {
  * --------------------------------------------------------------------------- */
 
 void *snobol_jit_alloc_code(size_t size) {
+#ifdef __APPLE__
+    /* On Apple Silicon, MAP_JIT is required for pages that will be executed.
+     * pthread_jit_write_protect_np(0) switches the current thread into "write"
+     * mode so subsequent stores to the JIT page succeed.  snobol_jit_seal_code()
+     * will restore the thread to exec mode before the trace is called. */
+    void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
+    if (ptr == MAP_FAILED) return NULL;
+    pthread_jit_write_protect_np(0);
+    return ptr;
+#else
     void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return (ptr == MAP_FAILED) ? NULL : ptr;
+#endif
 }
 
 void snobol_jit_seal_code(void *code, size_t size) {
+#ifdef __APPLE__
+    /* Switch current thread back to exec mode, then flush the instruction cache. */
+    pthread_jit_write_protect_np(1);
+    __builtin___clear_cache((char *)code, (char *)code + size);
+#else
     mprotect(code, size, PROT_READ | PROT_EXEC);
     __builtin___clear_cache((char *)code, (char *)code + size);
+#endif
 }
 
 void snobol_jit_free_code(void *code, size_t size) {

@@ -43,9 +43,14 @@ target_compile_features(snobol4_tests PRIVATE c_std_23)
 # Enable profiling for tests
 target_compile_definitions(snobol4_tests PRIVATE SNOBOL_PROFILE=1)
 
-# Enable JIT for tests on platforms that support it (requires sys/mman.h)
-if(NOT WIN32)
+# Enable JIT for tests only on ARM64 (micro-JIT emits ARM64 machine code)
+if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     target_compile_definitions(snobol4_tests PRIVATE SNOBOL_JIT=1)
+endif()
+
+# Suppress MSVC safe-CRT deprecation warnings in test sources
+if(MSVC)
+    target_compile_definitions(snobol4_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Register with CTest

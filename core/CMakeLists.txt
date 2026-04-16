@@ -43,6 +43,8 @@ if(MSVC)
         /wd4244  # conversion (possible loss of data)
         /wd4267  # conversion from 'size_t' to smaller type
     )
+    # Suppress deprecation warnings for POSIX names (strcpy, getenv, etc.)
+    target_compile_definitions(snobol4 PRIVATE _CRT_SECURE_NO_WARNINGS)
 else()
     # GCC/Clang warning flags
     # Disable unused variable warnings (placeholders for future functionality)
@@ -64,8 +66,9 @@ if(SNOBOL_PROFILE)
     target_compile_definitions(snobol4 PRIVATE SNOBOL_PROFILE=1)
 endif()
 
-# Enable micro-JIT by default (Unix/macOS only — requires sys/mman.h)
-if(NOT WIN32)
+# Enable micro-JIT only on ARM64 (emits ARM64 machine code; requires sys/mman.h).
+# Enabling it on x86-64 would compile in ARM64 trace execution and crash at runtime.
+if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
 endif()
 

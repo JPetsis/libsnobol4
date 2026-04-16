@@ -6,6 +6,27 @@
 #include <setjmp.h>
 #include <time.h>
 
+/* ---------------------------------------------------------------------------
+ * Portable monotonic clock
+ *
+ * POSIX clock_gettime(CLOCK_MONOTONIC) is not available on Windows/MSVC.
+ * Use QueryPerformanceCounter there; fall back to clock_gettime everywhere else.
+ * --------------------------------------------------------------------------- */
+#ifdef _WIN32
+#  include <windows.h>
+static void snobol_clock_gettime(struct timespec *ts) {
+    LARGE_INTEGER freq, counter;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&counter);
+    ts->tv_sec  = (time_t)(counter.QuadPart / freq.QuadPart);
+    ts->tv_nsec = (long)((counter.QuadPart % freq.QuadPart) * 1000000000LL
+                         / freq.QuadPart);
+}
+#  define SNOBOL_CLOCK_GETTIME(ts)  snobol_clock_gettime(ts)
+#else
+#  define SNOBOL_CLOCK_GETTIME(ts)  clock_gettime(CLOCK_MONOTONIC, ts)
+#endif
+
 /* ── Test framework ──────────────────────────────────────────────────────── */
 
 typedef struct {
@@ -86,9 +107,9 @@ void test_assert(bool condition, const char *message) {
     int _p0 = test_ctx.passed, _f0 = test_ctx.failed;                  \
     struct timespec _t0, _t1;                                           \
     printf("\n▸ %s\n", (display_name));                                 \
-    clock_gettime(CLOCK_MONOTONIC, &_t0);                               \
+    SNOBOL_CLOCK_GETTIME(&_t0);                                         \
     if (setjmp(test_jump) == 0) { fn(); }                               \
-    clock_gettime(CLOCK_MONOTONIC, &_t1);                               \
+    SNOBOL_CLOCK_GETTIME(&_t1);                                         \
     int    _sp = test_ctx.passed - _p0;                                 \
     int    _sf = test_ctx.failed  - _f0;                                \
     double _ms = elapsed_ms(_t0, _t1);                                  \
@@ -190,10 +211,10 @@ int main(void) {
         int _p0 = test_ctx.passed, _f0 = test_ctx.failed;
         struct timespec _t0, _t1;
         printf("\n▸ Stress: Backtracking\n");
-        clock_gettime(CLOCK_MONOTONIC, &_t0);
+        SNOBOL_CLOCK_GETTIME(&_t0);
         int rc = 0;
         if (setjmp(test_jump) == 0) { rc = test_stress_backtracking_main(); }
-        clock_gettime(CLOCK_MONOTONIC, &_t1);
+        SNOBOL_CLOCK_GETTIME(&_t1);
         if (rc == 0) { test_ctx.passed++; } else { test_ctx.failed++; }
         int    _sp = test_ctx.passed - _p0;
         int    _sf = test_ctx.failed  - _f0;
