@@ -505,11 +505,24 @@ PHP_METHOD(Snobol_Pattern, subst) {
                           match_result.match_start - last_match_end);
 
         /* Run template BC using the VM's capture state (vm.s is at match_start,
-         * vm.pos is the match length, var_start/var_end hold named captures) */
+         * vm.pos is the match length, var_start/var_end hold named captures).
+         *
+         * IMPORTANT: clear all JIT profiling state before switching bytecode.
+         * vm.jit.ip_counts was allocated with pattern_bc_len entries; if
+         * tpl_bc_len > pattern_bc_len the JIT hotness counter in vm_exec would
+         * write past the end of the ip_counts array (heap buffer overflow).
+         * Template execution never needs JIT compilation, so it is safe to
+         * zero these pointers. */
         vm.bc     = tpl_bc;
         vm.bc_len = tpl_bc_len;
         vm.ip     = 0;
         vm.out    = &out;
+#ifdef SNOBOL_JIT
+        vm.jit.ip_counts = NULL;
+        vm.jit.traces    = NULL;
+        vm.jit.ctx       = NULL;
+        vm.jit.enabled   = false;
+#endif
         vm_run(&vm);
 
         /* Advance past the match */
