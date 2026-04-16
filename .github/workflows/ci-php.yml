@@ -152,18 +152,24 @@ jobs:
           # Print PHP + extension info for diagnostics
           php -r "echo 'PHP: ' . PHP_VERSION . PHP_EOL . 'Arch: ' . php_uname('m') . PHP_EOL;"
           php -r "if (extension_loaded('snobol')) { echo 'snobol extension loaded' . PHP_EOL; } else { echo 'snobol NOT loaded' . PHP_EOL; }"
-          # Run with --testdox so each test name is printed, making it easy to
-          # identify which test triggers the bus error.  --verbose adds timings.
-          # We intentionally do NOT use --stop-on-failure so we see how far the
-          # suite gets even if a crash kills the process mid-run.
-          vendor/bin/phpunit tests/php --testdox 2>&1 || {
-            EXIT=$?
-            echo "--- phpunit exited with code $EXIT ---"
-            if [ $EXIT -eq 138 ]; then
-              echo "Exit 138 = killed by SIGBUS (signal 10) — JIT bus error on Apple Silicon"
-            fi
-            exit $EXIT
-          }
+          # Run each test file individually so that when a bus error kills the
+          # process we know exactly which class was running.  Each invocation
+          # prints the filename before phpunit starts so it is visible even if
+          # the process is hard-killed mid-test.
+          FAILED=0
+          for f in $(find tests/php -name '*Test.php' | sort); do
+            echo ""
+            echo "====== Running: $f ======"
+            vendor/bin/phpunit "$f" --testdox 2>&1 || {
+              EXIT=$?
+              echo "--- $f exited with code $EXIT ---"
+              if [ $EXIT -eq 138 ]; then
+                echo "Exit 138 = SIGBUS (signal 10) on Apple Silicon — bus error in $f"
+              fi
+              FAILED=$EXIT
+            }
+          done
+          exit $FAILED
 
   php-windows:
     name: PHP ${{ matrix.php-version }} (Windows)
