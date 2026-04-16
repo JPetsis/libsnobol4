@@ -234,14 +234,14 @@ void snobol_jit_shutdown(void) {
 void *snobol_jit_alloc_code(size_t size) {
 #ifdef __APPLE__
     /* On Apple Silicon, MAP_JIT is required for pages that will be executed.
-     * pthread_jit_write_protect_np(0) switches the current thread into "write"
-     * mode so subsequent stores to the JIT page succeed.  snobol_jit_seal_code()
-     * will restore the thread to exec mode before the trace is called. */
+     * The caller (snobol_jit_compile) is responsible for calling
+     * pthread_jit_write_protect_np(0) before writing and
+     * snobol_jit_seal_code() to restore exec mode afterwards.
+     * We do NOT toggle the write-protect here so that every alloc/free path
+     * in snobol_jit_compile can be made symmetric without leaking write mode. */
     void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
-    if (ptr == MAP_FAILED) return NULL;
-    pthread_jit_write_protect_np(0);
-    return ptr;
+    return (ptr == MAP_FAILED) ? NULL : ptr;
 #else
     void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -531,6 +531,14 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
     uint32_t *code = (uint32_t *)snobol_jit_alloc_code(code_size);
     if (!code) return NULL;
 
+#ifdef __APPLE__
+    /* Enable writes to this MAP_JIT page for the current thread.
+     * Every exit path below that does NOT call snobol_jit_seal_code() must
+     * restore exec mode by calling pthread_jit_write_protect_np(1) itself
+     * so the thread is never left stranded in write mode. */
+    pthread_jit_write_protect_np(0);
+#endif
+
     JITState js = { code, code, code_size };
 
     FailPatch fail_patches[512];
@@ -589,7 +597,12 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
             const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
             uint64_t ascii_map[2];
             if (!ranges || !ranges_to_ascii_bitmap(ranges, count, ascii_map)) {
-                /* Can't compile this op — bail and discard partial code */
+                /* Can't compile this op — bail and discard partial code.
+                 * Must restore exec mode before returning on Apple so the
+                 * thread is not left stranded in write mode. */
+#ifdef __APPLE__
+                pthread_jit_write_protect_np(1);
+#endif
                 snobol_jit_free_code(code, code_size);
                 return NULL;
             }
@@ -653,8 +666,12 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
                 uint32_t *span_done = js.p;
                 emit_patch_b_cond(loop_ge_done,  span_done, 0x5400000a);
                 emit_patch_b_cond(loop_hi_done,  span_done, 0x54000008);
-                emit_patch_tbz(loop_bit64_done,  span_done, 0xb6000000);
-                emit_patch_tbz(loop_bit0_done,   span_done, 0xb6000000);
+                /* Preserve the register field (x8) from the original TBZ instruction
+                 * by masking out only the imm14 bits before patching.  Using the
+                 * hardcoded 0xb6000000 base would reset rt to x0, causing the
+                 * branch to always be taken (VM pointer bit-0 is always 0). */
+                emit_patch_tbz(loop_bit64_done,  span_done, *loop_bit64_done & 0xfff8001f);
+                emit_patch_tbz(loop_bit0_done,   span_done, *loop_bit0_done  & 0xfff8001f);
             }
         } else if (op == OP_CAP_START || op == OP_CAP_END) {
             uint8_t r = vm->bc[operand_ip];
