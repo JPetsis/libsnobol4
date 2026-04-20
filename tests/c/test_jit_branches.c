@@ -231,6 +231,178 @@ static void test_jit_split_in_region(void) {
     snobol_jit_set_config(&saved_cfg);
     snobol_jit_shutdown();
 }
+
+/* Task 5.2: backtracking across a JIT/interpreter boundary.
+ * JIT pushes a choice for branch b, taken branch a fails, interpreter pops
+ * the choice and jumps to b — the resulting match must be correct. */
+static void test_jit_split_backtrack_boundary(void) {
+    if (!jit_is_supported()) {
+        test_assert(true, "JIT SPLIT backtrack boundary test skipped (ARM64 only)");
+        return;
+    }
+
+    /* Bytecode:
+     *   SPLIT a, b          ; push choice(b), take a
+     *   a: LIT 'x'          ; will fail on subject "b"
+     *      JMP end
+     *   b: LIT 'b'          ; will succeed
+     *   end: ACCEPT
+     * Subject: "b"
+     * Expected: match succeeds (backtrack from a to b), cap consumed 'b'
+     */
+    uint8_t bc[512] = {0};
+    size_t ip = 0;
+
+    size_t split_ip = ip;
+    bc[ip++] = OP_SPLIT;
+    emit_u32(bc, &ip, 0); /* a placeholder */
+    emit_u32(bc, &ip, 0); /* b placeholder */
+
+    size_t a_ip = ip;
+    bc[ip++] = OP_LIT;
+    emit_u32(bc, &ip, 500); /* literal offset */
+    emit_u32(bc, &ip, 1);   /* literal len */
+    bc[500] = 'x';
+
+    size_t jmp_ip = ip;
+    bc[ip++] = OP_JMP;
+    emit_u32(bc, &ip, 0); /* end placeholder */
+
+    size_t b_ip = ip;
+    bc[ip++] = OP_LIT;
+    emit_u32(bc, &ip, 501);
+    emit_u32(bc, &ip, 1);
+    bc[501] = 'b';
+
+    size_t end_ip = ip;
+    bc[ip++] = OP_ACCEPT;
+
+    /* Patch targets */
+    size_t p = split_ip + 1; emit_u32(bc, &p, (uint32_t)a_ip);
+    p = split_ip + 5;        emit_u32(bc, &p, (uint32_t)b_ip);
+    p = jmp_ip + 1;          emit_u32(bc, &p, (uint32_t)end_ip);
+
+    snobol_jit_init();
+    snobol_jit_reset_stats();
+
+    SnobolJitConfig saved_cfg = *snobol_jit_get_config();
+    SnobolJitConfig cfg = saved_cfg;
+    cfg.min_useful_ops       = 0;
+    cfg.hotness_threshold    = 5;
+    cfg.skip_backtrack_heavy = false;
+    snobol_jit_set_config(&cfg);
+
+    SnobolJitStats *stats = snobol_jit_get_stats();
+    SnobolJitContext *ctx  = snobol_jit_acquire_context(bc, 512);
+
+    VM vm = {0};
+    vm.bc     = bc;
+    vm.bc_len = 512;
+    vm.s      = "b";
+    vm.len    = 1;
+    vm.jit.enabled   = true;
+    vm.jit.ip_counts = ctx->ip_counts;
+    vm.jit.traces    = ctx->traces;
+    vm.jit.stats     = stats;
+    vm.jit.ctx       = ctx;
+
+    /* Warm up to trigger JIT compilation */
+    for (int i = 0; i < 20; i++) {
+        vm.ip = 0; vm.pos = 0;
+        vm_run(&vm);
+    }
+
+    test_assert(stats->compilations_total > 0,
+                "SPLIT backtrack: should have compiled a region");
+
+    /* Final run: JIT executes SPLIT (pushes choice for b), takes a (fails on 'x'),
+     * interpreter backtracks to b (succeeds on 'b'). */
+    snobol_jit_reset_stats();
+    vm.ip = 0; vm.pos = 0;
+    bool ok = vm_run(&vm);
+
+    test_assert(ok, "SPLIT backtrack: match via non-taken branch should succeed");
+    test_assert(vm.pos == 1, "SPLIT backtrack: pos should be 1 after consuming 'b'");
+
+    snobol_jit_release_context(ctx);
+    snobol_jit_set_config(&saved_cfg);
+    snobol_jit_shutdown();
+}
+
+/* Task 5.3: backward SPLIT terminates the region.
+ * A SPLIT whose non-taken branch (b) is a backward offset must NOT be included
+ * in the compiled region.  The region should stop before the SPLIT, and
+ * the overall match result must still be correct (interpreter handles SPLIT). */
+static void test_jit_split_backward_terminates_region(void) {
+    if (!jit_is_supported()) {
+        test_assert(true, "JIT backward SPLIT test skipped (ARM64 only)");
+        return;
+    }
+
+    /* Bytecode layout:
+     *   [0]  OP_LEN 1          ; 5 bytes: opcode + u32
+     *   [5]  OP_SPLIT a=10, b=0 ; 9 bytes: opcode + u32 + u32
+     *   [10] OP_ACCEPT
+     *
+     * b=0 < split_ip=5 → backward branch → guard fires → region ends before SPLIT.
+     * Interpreter processes SPLIT: push choice(0, pos), set ip=10 (ACCEPT) → match.
+     * Subject "a" (len=1): LEN 1 succeeds (pos→1), SPLIT takes a=10 (ACCEPT). */
+    uint8_t bc[32] = {0};
+    size_t ip = 0;
+
+    bc[ip++] = OP_LEN;
+    emit_u32(bc, &ip, 1); /* LEN 1 → advance pos by 1; ip=5 */
+
+    /* SPLIT at ip=5: a=10 (forward), b=0 (backward → <= split_ip=5) */
+    bc[ip++] = OP_SPLIT; /* ip=5 */
+    emit_u32(bc, &ip, 10); /* a = 10 */
+    emit_u32(bc, &ip, 0);  /* b = 0 < 5 → backward → must terminate region */
+    /* ip=14 now; bc[10] was just written as 0 by emit_u32 — overwrite: */
+    bc[10] = OP_ACCEPT;
+
+    snobol_jit_init();
+    snobol_jit_reset_stats();
+
+    SnobolJitConfig saved_cfg = *snobol_jit_get_config();
+    SnobolJitConfig cfg = saved_cfg;
+    cfg.min_useful_ops       = 1;
+    cfg.hotness_threshold    = 5;
+    cfg.skip_backtrack_heavy = false;
+    snobol_jit_set_config(&cfg);
+
+    SnobolJitStats *stats = snobol_jit_get_stats();
+    SnobolJitContext *ctx  = snobol_jit_acquire_context(bc, 32);
+
+    VM vm = {0};
+    vm.bc     = bc;
+    vm.bc_len = 32;
+    vm.s      = "a";
+    vm.len    = 1;
+    vm.jit.enabled   = true;
+    vm.jit.ip_counts = ctx->ip_counts;
+    vm.jit.traces    = ctx->traces;
+    vm.jit.stats     = stats;
+    vm.jit.ctx       = ctx;
+
+    /* Warm up to trigger JIT compilation of the LEN region */
+    for (int i = 0; i < 20; i++) {
+        vm.ip = 0; vm.pos = 0;
+        vm_run(&vm);
+    }
+
+    test_assert(stats->compilations_total > 0,
+                "backward SPLIT: JIT should compile region for LEN before SPLIT");
+
+    /* Correctness check: backward SPLIT handled by interpreter → match */
+    snobol_jit_reset_stats();
+    vm.ip = 0; vm.pos = 0;
+    bool ok = vm_run(&vm);
+    test_assert(ok, "backward SPLIT: match still succeeds via interpreter SPLIT");
+
+    snobol_jit_release_context(ctx);
+    snobol_jit_set_config(&saved_cfg);
+    snobol_jit_shutdown();
+}
 #endif /* SNOBOL_JIT */
 
 void test_jit_branches_suite(void) {
@@ -238,5 +410,7 @@ void test_jit_branches_suite(void) {
     test_suite("JIT Branches");
     test_jit_jmp_in_region();
     test_jit_split_in_region();
+    test_jit_split_backtrack_boundary();
+    test_jit_split_backward_terminates_region();
 #endif
 }

@@ -296,6 +296,27 @@ bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *c
             case OP_REPEAT_INIT:
             case OP_REPEAT_STEP:
                 has_backtrack = true;
+                /* In search mode, allow constrained forward SPLIT to be
+                 * counted as a useful op: teleport the scan to the taken
+                 * branch so the profitability check evaluates what will
+                 * actually run in compiled code. */
+                if (op == OP_SPLIT && search_mode && scan + 8 <= vm->bc_len) {
+                    size_t split_start = scan - 1; /* position of OP_SPLIT byte */
+                    uint32_t pa = ((uint32_t)vm->bc[scan]   << 24) |
+                                  ((uint32_t)vm->bc[scan+1] << 16) |
+                                  ((uint32_t)vm->bc[scan+2] <<  8) |
+                                   (uint32_t)vm->bc[scan+3];
+                    uint32_t pb = ((uint32_t)vm->bc[scan+4] << 24) |
+                                  ((uint32_t)vm->bc[scan+5] << 16) |
+                                  ((uint32_t)vm->bc[scan+6] <<  8) |
+                                   (uint32_t)vm->bc[scan+7];
+                    if ((size_t)pa > split_start && (size_t)pb > split_start &&
+                        (size_t)pa < vm->bc_len   && (size_t)pb < vm->bc_len) {
+                        scan = (size_t)pa; /* teleport: evaluate taken branch */
+                        useful++;          /* SPLIT counts as one useful op   */
+                        break;             /* continue for-loop from pa       */
+                    }
+                }
                 goto done;
             case OP_ACCEPT:
             case OP_FAIL:
@@ -485,11 +506,30 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
         if (op == OP_ACCEPT || op == OP_FAIL || op == OP_REPEAT_INIT ||
             op == OP_REPEAT_STEP) break;
 
-        /* OP_SPLIT: limit inclusion in search regions
-         * Single-branch SPLIT structures used in alternation patterns may be
-         * included in search regions if they are followed by single-char ops.
-         * For now, stop at SPLIT to preserve correct backtracking semantics. */
-        if (op == OP_SPLIT) break;
+        /* OP_SPLIT: allow constrained 2-way SPLIT in compiled regions.
+         * Both branch targets must be forward (> current IP) and within bc_len
+         * so the region is acyclic.  The JIT pushes a choice for the non-taken
+         * branch (b) and falls through to the taken branch (a), which is
+         * inlined into the region by teleporting scan_ip to a below. */
+        if (op == OP_SPLIT) {
+            if (scan_ip + 9 > vm->bc_len) break;
+            uint32_t a = ((uint32_t)vm->bc[scan_ip+1] << 24) |
+                         ((uint32_t)vm->bc[scan_ip+2] << 16) |
+                         ((uint32_t)vm->bc[scan_ip+3] <<  8) |
+                          (uint32_t)vm->bc[scan_ip+4];
+            uint32_t b = ((uint32_t)vm->bc[scan_ip+5] << 24) |
+                         ((uint32_t)vm->bc[scan_ip+6] << 16) |
+                         ((uint32_t)vm->bc[scan_ip+7] <<  8) |
+                          (uint32_t)vm->bc[scan_ip+8];
+            /* Guard: both branches must be strictly forward to keep the
+             * region acyclic.  Backward or equal targets indicate loops. */
+            if ((size_t)a <= scan_ip || (size_t)b <= scan_ip ||
+                (size_t)a >= vm->bc_len || (size_t)b >= vm->bc_len) break;
+            op_seq[op_count++] = (OpInfo){ scan_ip, scan_ip + 9, OP_SPLIT };
+            worthy = true;
+            scan_ip = (size_t)a; /* teleport: inline the taken branch next */
+            continue;
+        }
 
         size_t cur_ip  = scan_ip;
         size_t next_ip = scan_ip + 1;
@@ -713,6 +753,36 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
             uint32_t *lt_skip = js.p; emit_instr(&js, A64_B_GE(0));
             emit_instr(&js, A64_STR_X_X_IMM(8, 0, offsetof(VM, var_count)));
             emit_patch_b_cond(lt_skip, js.p, 0x5400000a);
+        } else if (op == OP_SPLIT) {
+            /* Emit: vm_push_choice(vm, b, current_pos)
+             *
+             * Pass 1 already verified both targets are forward and in-range.
+             * operand layout: a = bc[operand_ip..+3], b = bc[operand_ip+4..+7]
+             *
+             * ARM64 calling convention: x0=vm (unchanged), x1=b, x2=pos.
+             * We must save/restore x1 (vm->s), x2 (pos), x3 (len), x30 (LR)
+             * around the call because they are caller-saved.
+             *
+             * Stack layout (32 bytes, 16-byte aligned):
+             *   [sp+ 0] x1 (vm->s)
+             *   [sp+ 8] x2 (pos)
+             *   [sp+16] x3 (len)
+             *   [sp+24] x30 (LR)
+             */
+            uint32_t b = ((uint32_t)vm->bc[operand_ip+4] << 24) |
+                         ((uint32_t)vm->bc[operand_ip+5] << 16) |
+                         ((uint32_t)vm->bc[operand_ip+6] <<  8) |
+                          (uint32_t)vm->bc[operand_ip+7];
+            emit_instr(&js, 0xa9be0be1u); /* STP x1, x2, [sp, #-32]! */
+            emit_instr(&js, 0xa9017be3u); /* STP x3, x30, [sp, #16]  */
+            /* Load vm_push_choice address into x9, b into x1 */
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)vm_push_choice);
+            emit_mov_x64(&js, 1, (uint64_t)b);
+            /* x0 = vm (unchanged), x1 = b, x2 = current pos */
+            emit_instr(&js, 0xd63f0120u); /* BLR x9 */
+            emit_instr(&js, 0xa9417be3u); /* LDP x3, x30, [sp, #16]  */
+            emit_instr(&js, 0xa8c20be1u); /* LDP x1, x2, [sp], #32   */
+            /* Taken branch (a) is inlined as the next op(s) in op_seq */
         }
     }
 

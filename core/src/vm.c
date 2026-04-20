@@ -266,8 +266,14 @@ bool vm_run(VM *vm) {
                     /* Attribute quick first-op mismatches in search mode
                      * to expected candidate rejection so they are distinguishable
                      * from unsupported control flow or safety fallbacks. */
-                    if (vm->jit.search_mode)
+                    if (vm->jit.search_mode) {
                         vm->jit.stats->bailout_search_candidate_total++;
+                        /* search_candidate_rejects is the canonical per-exit
+                         * counter for expected candidate rejections only.
+                         * It SHALL NOT be incremented for unsupported-op or
+                         * left-region bailouts (those land in bailout_partial). */
+                        vm->jit.stats->search_candidate_rejects++;
+                    }
                 } else {
                     vm->jit.stats->bailout_partial_total++;
                 }
@@ -276,6 +282,9 @@ bool vm_run(VM *vm) {
             /* Per-pattern early-exit rule (task 2.3) */
             if (vm->jit.ctx) {
                 vm->jit.ctx->ctx_exits++;
+                /* Separately track search-mode exits for attribution */
+                if (vm->jit.search_mode)
+                    vm->jit.ctx->search_ctx_exits++;
                 if (!vm->jit.ctx->stop_compiling &&
                     vm->jit.ctx->ctx_entries > 100 &&
                     jit_cfg->max_exit_rate_pct < 100) {

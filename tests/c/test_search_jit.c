@@ -233,6 +233,74 @@ static void test_search_jit_bailout_counter(void) {
     snobol_jit_init();
 }
 
+/* Task 4.4: search_candidate_rejects must NOT be incremented when the JIT
+ * bails out for reasons other than a clean candidate rejection (i.e., partial
+ * progress / left-region bailout).  We verify that a bailout with ip !=
+ * entry_ip does NOT touch search_candidate_rejects. */
+static void test_search_candidate_rejects_attribution(void) {
+    test_suite("JIT: search_candidate_rejects attribution (task 4.4)");
+
+    snobol_jit_init();
+    snobol_jit_reset_stats();
+
+    /* Build: OP_ANY('a') OP_ACCEPT — a simple candidate-rejection workload.
+     * On a subject with no 'a', every candidate bails at ip==entry_ip:
+     *   → bailout_search_candidate_total and search_candidate_rejects increment.
+     * On a subject WITH 'a', the trace SUCCEEDS (ip advances to ACCEPT then returns),
+     * so search_candidate_rejects stays 0 for that execution (not a bailout at all).
+     * We run on "bbb" which has no 'a', so all exits should be candidate rejects. */
+    uint8_t bc[128];
+    size_t bc_len = jt_build_char_class_op(bc, OP_ANY, 'a');
+
+    SnobolJitConfig saved = *snobol_jit_get_config();
+    SnobolJitConfig cfg   = saved;
+    cfg.search_hotness_threshold = 2;
+    cfg.search_min_useful_ops    = 1;
+    snobol_jit_set_config(&cfg);
+
+    SnobolJitContext *ctx  = snobol_jit_acquire_context(bc, bc_len);
+    SnobolJitStats  *stats = snobol_jit_get_stats();
+
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(bc, bc_len, &meta);
+
+    for (int i = 0; i < 5; i++) {
+        VM vm;
+        memset(&vm, 0, sizeof(vm));
+        vm.bc            = bc;
+        vm.bc_len        = bc_len;
+        vm.jit.ip_counts = ctx->ip_counts;
+        vm.jit.traces    = ctx->traces;
+        vm.jit.ctx       = ctx;
+        vm.jit.enabled   = true;
+        vm.jit.stats     = stats;
+
+        snobol_search_result_t result;
+        snobol_search_exec(&vm, "bbb", 3, 0, &meta, &result, NULL);
+    }
+
+    /* All bailouts on "bbb" must be candidate rejects (ip == entry_ip) */
+    uint64_t rejects  = stats->search_candidate_rejects;
+    uint64_t partials = stats->bailout_partial_total;
+
+    /* search_candidate_rejects must be positive (we had bailouts on 'b' positions) */
+    test_assert(rejects > 0,
+                "task4.4: search_candidate_rejects > 0 for pure candidate rejections");
+
+    /* bailout_partial_total must be 0: no bailout with partial progress */
+    test_assert(partials == 0,
+                "task4.4: no partial-progress bailouts for simple ANY pattern");
+
+    /* Verify: search_candidate_rejects == bailout_search_candidate_total */
+    test_assert(rejects == stats->bailout_search_candidate_total,
+                "task4.4: search_candidate_rejects matches bailout_search_candidate_total");
+
+    snobol_jit_release_context(ctx);
+    snobol_jit_shutdown();
+    snobol_jit_set_config(&saved);
+    snobol_jit_init();
+}
+
 #endif /* SNOBOL_JIT */
 
 static void test_search_no_jit_fallback(void) {
@@ -268,6 +336,7 @@ void test_search_jit_suite(void) {
     test_search_jit_correctness_through_hotness();
     test_search_mode_profitability_lower_threshold();
     test_search_jit_bailout_counter();
+    test_search_candidate_rejects_attribution();
 #endif
 }
 
