@@ -239,6 +239,33 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
         }
     }
 
+    /* OP_ANY: fused single-char charclass (e.g. from SPLIT→ANY fusion pass).
+     *
+     * Build the candidate bitmap directly from the charclass ranges so that
+     * snobol_search_exec() can route to the fast bitmap-accelerated Tier 3
+     * path instead of calling vm_exec at every position (Tier 4/5).
+     */
+    else if (op0 == OP_ANY && ip + 3 <= bc_len) {
+        uint16_t set_id = search_read_u16(bc, ip + 1);
+        VM tmp_vm;
+        memset(&tmp_vm, 0, sizeof(tmp_vm));
+        tmp_vm.bc     = bc;
+        tmp_vm.bc_len = bc_len;
+        uint16_t count = 0, ci = 0;
+        const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+        if (ranges && count > 0) {
+            /* Build 4×u64 ASCII bitmap from the charclass ranges */
+            bool ascii_only = ranges_to_ascii_bitmap(ranges, count,
+                                                     out->candidate_bitmap);
+            if (ascii_only) {
+                out->has_candidate_bitmap = true;
+                out->is_single_char_alt   = true;   /* route to bitmap_accelerated */
+                out->always_consumes      = true;
+                out->may_match_empty      = false;
+            }
+        }
+    }
+
     /* OP_SPLIT: try to detect single-char alternation
      *
      * Pattern structure for a two-alternative single-char alternation:
@@ -328,7 +355,7 @@ static inline void search_reset_vm(VM *vm,
     /* Reset choice stack */
     vm->choices_top = 0;
 #ifdef SNOBOL_JIT
-    /* Task 4.2/4.4: mark VM as executing in a search loop so JIT uses
+    /* Mark VM as executing in a search loop so JIT uses
      * search-mode profitability thresholds and attributes bailouts correctly. */
     vm->jit.search_mode = true;
 #endif

@@ -200,8 +200,14 @@ static void test_search_jit_bailout_counter(void) {
     SnobolJitContext *ctx  = snobol_jit_acquire_context(bc, bc_len);
     SnobolJitStats  *stats = snobol_jit_get_stats();
 
+    /* Force automaton/vm_exec path so the JIT fires at each position.
+     * Since snobol_search_derive_meta() now recognises a root OP_ANY with an
+     * ASCII-only charclass and routes it to the fast bitmap path (skipping
+     * vm_exec entirely), we must override the meta to force Tier-4 execution
+     * where vm_exec is called at every candidate position and the JIT can fire. */
     snobol_search_meta_t meta;
-    snobol_search_derive_meta(bc, bc_len, &meta);
+    memset(&meta, 0, sizeof(meta));
+    meta.automaton_eligible = true;   /* Tier 4: call vm_exec at every position */
 
     /* 5 outer searches × ~15 positions each = ~75 vm_exec calls total.
      * After 3 calls JIT fires; every subsequent call bails at ip=0 in search
@@ -261,8 +267,14 @@ static void test_search_candidate_rejects_attribution(void) {
     SnobolJitContext *ctx  = snobol_jit_acquire_context(bc, bc_len);
     SnobolJitStats  *stats = snobol_jit_get_stats();
 
+    /* Force automaton/vm_exec path — same reason as in
+     * test_search_jit_bailout_counter: the bitmap-accelerated Tier 3 path for
+     * OP_ANY would bypass vm_exec, preventing JIT compilation and bailout
+     * counting.  We want vm_exec called at every position so ip_counts[0]
+     * accumulates and the JIT fires. */
     snobol_search_meta_t meta;
-    snobol_search_derive_meta(bc, bc_len, &meta);
+    memset(&meta, 0, sizeof(meta));
+    meta.automaton_eligible = true;   /* Tier 4: vm_exec at every position */
 
     for (int i = 0; i < 5; i++) {
         VM vm;
