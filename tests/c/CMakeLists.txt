@@ -32,6 +32,7 @@ add_executable(snobol4_tests
     test_builtin_dispatch.c
     test_search_runtime.c
     test_search_jit.c
+    test_fusion.c
 )
 
 # Link against core library

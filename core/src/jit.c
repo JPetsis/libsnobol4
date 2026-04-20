@@ -31,7 +31,7 @@ static SnobolJitConfig global_jit_cfg = {
     .cache_max_entries        = 128,
     .min_useful_ops           = 2,
     .skip_backtrack_heavy     = true,
-    /* Search-mode defaults (Task 4.1): lower thresholds so hot search
+    /* Search-mode defaults: lower thresholds so hot search
      * patterns become JIT-eligible without requiring anchored-match volumes. */
     .search_hotness_threshold = 20,
     .search_min_useful_ops    = 1,
@@ -318,6 +318,8 @@ bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *c
                     }
                 }
                 goto done;
+            case OP_NOP:
+                break; /* no operands, no useful work */
             case OP_ACCEPT:
             case OP_FAIL:
                 goto done;
@@ -553,6 +555,10 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
             next_ip += 1;
         } else if (op == OP_ASSIGN) {
             next_ip += 3;
+        } else if (op == OP_NOP) {
+            /* No operands; skip without adding to op_seq */
+            scan_ip = next_ip;
+            continue;
         } else {
             break;
         }

@@ -232,7 +232,7 @@ static void test_jit_split_in_region(void) {
     snobol_jit_shutdown();
 }
 
-/* Task 5.2: backtracking across a JIT/interpreter boundary.
+/* Backtracking across a JIT/interpreter boundary.
  * JIT pushes a choice for branch b, taken branch a fails, interpreter pops
  * the choice and jumps to b — the resulting match must be correct. */
 static void test_jit_split_backtrack_boundary(void) {
@@ -329,7 +329,7 @@ static void test_jit_split_backtrack_boundary(void) {
     snobol_jit_shutdown();
 }
 
-/* Task 5.3: backward SPLIT terminates the region.
+/* Backward SPLIT terminates the region.
  * A SPLIT whose non-taken branch (b) is a backward offset must NOT be included
  * in the compiled region.  The region should stop before the SPLIT, and
  * the overall match result must still be correct (interpreter handles SPLIT). */

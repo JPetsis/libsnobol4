@@ -6,7 +6,7 @@ use PHPUnit\Framework\TestCase;
 use Snobol\PatternHelper;
 
 /**
- * JIT Branch Completeness — PHP-layer regression tests (task 6.1).
+ * JIT Branch Completeness — PHP-layer regression tests.
  *
  * Verifies that alternation / multi-delimiter patterns produce correct token
  * output when cold and when the JIT has warmed up, covering the search-oriented

@@ -279,7 +279,7 @@ bool vm_run(VM *vm) {
                 }
             }
 
-            /* Per-pattern early-exit rule (task 2.3) */
+            /* Per-pattern early-exit rule */
             if (vm->jit.ctx) {
                 vm->jit.ctx->ctx_exits++;
                 /* Separately track search-mode exits for attribution */
@@ -356,6 +356,7 @@ bool vm_run(VM *vm) {
 #endif
         uint8_t op = vm->bc[vm->ip++];
         switch (op) {
+            case OP_NOP: break; /* fusion filler — skip one byte */
             case OP_ACCEPT: if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; } return true;
             case OP_FAIL: if (!vm_pop_choice(vm)) goto fail_ret; break;
             case OP_JMP: { uint32_t tgt = read_u32(vm->bc, vm->bc_len, &vm->ip); vm->ip = (size_t)tgt; break; }

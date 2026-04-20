@@ -132,6 +132,7 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
             case OP_CAP_END:
             case OP_FENCE:
             case OP_REM:
+            case OP_NOP:
                 if (ip > bc_len) return false;
                 break;
             case OP_REPEAT_INIT:

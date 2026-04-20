@@ -225,7 +225,7 @@ static void test_search_jit_bailout_counter(void) {
     test_assert(stats->bailouts_total > 0,
                 "JIT: bailouts recorded after search workloads");
     test_assert(stats->bailout_search_candidate_total > 0,
-                "JIT: search_candidate bailouts attributed (Task 4.4)");
+                "JIT: search_candidate bailouts attributed");
 
     snobol_jit_release_context(ctx);
     snobol_jit_shutdown();
@@ -233,12 +233,12 @@ static void test_search_jit_bailout_counter(void) {
     snobol_jit_init();
 }
 
-/* Task 4.4: search_candidate_rejects must NOT be incremented when the JIT
+/* Search_candidate_rejects must NOT be incremented when the JIT
  * bails out for reasons other than a clean candidate rejection (i.e., partial
  * progress / left-region bailout).  We verify that a bailout with ip !=
  * entry_ip does NOT touch search_candidate_rejects. */
 static void test_search_candidate_rejects_attribution(void) {
-    test_suite("JIT: search_candidate_rejects attribution (task 4.4)");
+    test_suite("JIT: search_candidate_rejects attribution");
 
     snobol_jit_init();
     snobol_jit_reset_stats();
@@ -285,15 +285,15 @@ static void test_search_candidate_rejects_attribution(void) {
 
     /* search_candidate_rejects must be positive (we had bailouts on 'b' positions) */
     test_assert(rejects > 0,
-                "task4.4: search_candidate_rejects > 0 for pure candidate rejections");
+                "search_candidate_rejects > 0 for pure candidate rejections");
 
     /* bailout_partial_total must be 0: no bailout with partial progress */
     test_assert(partials == 0,
-                "task4.4: no partial-progress bailouts for simple ANY pattern");
+                "no partial-progress bailouts for simple ANY pattern");
 
     /* Verify: search_candidate_rejects == bailout_search_candidate_total */
     test_assert(rejects == stats->bailout_search_candidate_total,
-                "task4.4: search_candidate_rejects matches bailout_search_candidate_total");
+                "search_candidate_rejects matches bailout_search_candidate_total");
 
     snobol_jit_release_context(ctx);
     snobol_jit_shutdown();

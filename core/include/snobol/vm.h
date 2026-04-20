@@ -118,6 +118,9 @@ typedef enum {
     OP_REM,        // no args – match remainder of subject to end
     OP_RPOS,       // n u32 – succeed only when cursor is n codepoints from end
     OP_RTAB,       // n u32 – advance cursor to n codepoints from end
+
+    /* Optimizer no-op: emitted by the fusion pass to fill dead bytecode slots */
+    OP_NOP,        // no operands – skip one byte
 } OpCode;
 
 /* --------------------------------------------------------------------------
