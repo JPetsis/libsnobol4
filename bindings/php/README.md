@@ -5,7 +5,7 @@ pattern matching capabilities.
 
 ## Requirements
 
-- PHP 8.0+ (developed with PHP 8.4)
+- PHP 8.0+ (developed with PHP 8.5)
 - CMake 3.16+
 - C compiler (GCC, Clang, or MSVC)
 
@@ -20,9 +20,15 @@ ddev start
 
 This will:
 
-1. Start a PHP 8.4 container
+1. Start a PHP 8.5 container
 2. Build the libsnobol4 extension from the `core/` directory
 3. Enable the extension automatically
+
+> **Tip:** After initial setup, you can rebuild the extension without restarting DDEV by running:
+> ```bash
+> ddev build-snobol-extension
+> ```
+> This command reliably regenerates the amalgam, cleans stale artifacts, and reloads PHP-FPM.
 
 Verify installation:
 
@@ -66,7 +72,7 @@ extension = snobol
 Or create a dedicated ini file:
 
 ```bash
-echo "extension=snobol" | sudo tee /etc/php/8.4/mods-available/snobol.ini
+echo "extension=snobol" | sudo tee /etc/php/8.5/mods-available/snobol.ini
 sudo phpenmod snobol
 ```
 

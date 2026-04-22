@@ -37,9 +37,18 @@ ddev start
 
 This will:
 
-- Start a PHP 8.4 container
+- Start a PHP 8.5 container
 - Build the libsnobol4 extension from `core/`
 - Enable the extension automatically
+
+**Rebuilding:**
+If you make changes to the C core or the PHP binding source, you can rebuild the extension without a full restart:
+
+```bash
+ddev build-snobol-extension
+```
+
+This is the canonical build path that handles amalgamation regeneration and artifact cleanup.
 
 ### Option 2: Native Build
 

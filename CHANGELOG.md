@@ -5,7 +5,7 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.3] - 2026-04-22
 
 ### Added — jit-cfg-split (Phase 1c)
 
@@ -34,7 +34,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `jit_blocks_compiled_total` init, single-block counting, 3-arm SPLIT chain block
   discovery, SPLIT backtrack state restoration, and ARBNO loop compilation.
 
-## [0.2.0] - 2026-04-14
+## [0.2.2] - 2026-04-20
+
+### Added — SPLIT→ANY Fusion & Bitmap Optimization (Phase 1b)
+
+- **Compile-time fusion pass** (`core/src/compiler.c`): `snobol_bc_fuse_split_any()` detects
+  `OP_SPLIT a b` where both arms are a single `OP_LIT`/`OP_ANY`/`OP_NOTANY` followed
+  by `OP_JMP` to the same merge point; rewrites to a single `OP_ANY` with a synthesised
+  union charclass.
+- **N-arm generalisation**: chained SPLIT chains over single-char arms are collapsed
+  iteratively into one `OP_ANY`; `'a'|'b'|'c'` → one `OP_ANY`.
+- **ASCII Bitmap Optimization** (`core/src/search.c`): added `OP_ANY` recognition in
+  `snobol_search_derive_meta()`, routing fused patterns to Tier 3 (bitmap-accelerated)
+  search path for O(match_count) execution.
+- **JIT ARM64 Fusion Support**: `OP_ANY` already had a compiled path; fusion allows the
+  fused op to run in JIT with zero choice-stack pressure.
+- **Benchmark Result**: `tokenize_mixed` achieved ~1,600 ops/sec (≥3.4x baseline) with
+  Choice Pushes reduced to 0.
+
+## [0.2.0] - 2026-04-15
 
 ### Added
 
@@ -139,7 +157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated ELEVATOR_PITCH.md and PITCH.md
 - **CI/CD**:
   - GitHub Actions workflows for core (Linux, macOS, Windows)
-  - PHP binding tests across PHP 8.0-8.4
+  - PHP binding tests across PHP 8.0-8.5
   - AddressSanitizer and UBSan testing
 
 ### Changed

@@ -1,38 +1,151 @@
 #!/bin/bash
 #
 # Command: build-snobol-extension
-# Description: Build and install the snobol PHP extension
+# Description: Reliably build and install the snobol PHP extension.
+#              Regenerates the amalgam, cleans stale artifacts, then builds.
 # Usage: ddev build-snobol-extension
+#
+# This is the SINGLE canonical build path used by both:
+#   - ddev start / ddev restart  (post-start hook calls this script)
+#   - ddev build-snobol-extension  (manual rebuild without restart)
 
-set -e
-set -u
+set -euo pipefail
 
-# Check if the extension needs to be built
-if [ ! -f /usr/src/php/ext/snobol/modules/snobol.so ]; then
-    echo "Building snobol PHP extension..."
-    
-    # Create the extension directory
-    sudo mkdir -p /usr/src/php/ext/snobol
-    
-    # Copy the source from the mounted directory
-    sudo cp -r /var/www/html/snobol4-core/* /usr/src/php/ext/snobol/
-    
-    # Build the extension
-    cd /usr/src/php/ext/snobol
-    phpize
-    ./configure
-    make
-    sudo make install
-    
-    # Enable the extension
-    echo "extension=snobol.so" | sudo tee /etc/php/8.4/mods-available/snobol.ini
-    sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/cli/conf.d/20-snobol.ini
-    sudo ln -sf /etc/php/8.4/mods-available/snobol.ini /etc/php/8.4/fpm/conf.d/20-snobol.ini
-    
-    echo "Snobol extension built and installed successfully!"
+BINDINGS_DIR="/var/www/html"   # = bindings/php/ inside the container
+PROJECT_DIR="/var/www"         # = project root
+
+# --- Locate core directory ---
+if [ -d "/var/www/core/src" ]; then
+    CORE_DIR="/var/www/core"
+elif [ -d "${BINDINGS_DIR}/../core" ]; then
+    CORE_DIR="${BINDINGS_DIR}/../core"
 else
-    echo "Snobol extension already exists, skipping build."
+    echo "❌ Core directory not found!"
+    echo "   Make sure docker-compose.local.yaml mounts the project root."
+    exit 1
 fi
 
-# Restart PHP-FPM to load the extension
-sudo kill -USR2 1 2>/dev/null || echo "Could not restart PHP-FPM, may need to restart container"
+# --- Validate prerequisites ---
+if [ ! -f "${BINDINGS_DIR}/config.m4" ]; then
+    echo "❌ config.m4 not found at ${BINDINGS_DIR}/config.m4"
+    exit 1
+fi
+
+echo "🔨 Building libsnobol4 PHP extension..."
+echo "   core dir: $CORE_DIR"
+
+# --- Step 1: Regenerate amalgam ---
+# Always regenerate so a freshly added/removed core .c file is never missed.
+AMALGAM_GEN="/var/www/dev/generate_amalgam.sh"
+if [ -f "$AMALGAM_GEN" ]; then
+    echo "🔄 Regenerating core_amalgam.c..."
+    bash "$AMALGAM_GEN" generate
+else
+    echo "⚠️  generate_amalgam.sh not found at $AMALGAM_GEN — skipping regeneration"
+fi
+
+# --- Step 2: Clean stale build artifacts ---
+# core_amalgam.dep / core_amalgam.lo encode absolute paths from a previous
+# build run and cause 'make' to fail looking for stale config.h locations.
+echo "🧹 Cleaning stale artifacts from bindings/php/..."
+rm -f \
+    "${BINDINGS_DIR}/core_amalgam.dep" \
+    "${BINDINGS_DIR}/core_amalgam.lo" \
+    "${BINDINGS_DIR}/snobol.lo" \
+    "${BINDINGS_DIR}/php_snobol.lo"
+
+# --- Step 3: Prepare build dir ---
+BUILD_DIR="/tmp/snobol_build"
+sudo rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+
+echo "📂 Staging source in ${BUILD_DIR}..."
+cp -r "${BINDINGS_DIR}/." "$BUILD_DIR/"
+cp -r "$CORE_DIR" "$BUILD_DIR/core"
+
+cd "$BUILD_DIR"
+
+# --- Step 4: Locate phpize / php-config for the RUNTIME PHP version ---
+PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')
+PHP_BIN=$(readlink -f "$(command -v php)" 2>/dev/null || command -v php)
+PHP_BINDIR="$(dirname "$PHP_BIN")"
+
+# Install php-dev if not already present (fast-path: image pre-installs it).
+if [ ! -x "${PHP_BINDIR}/phpize${PHP_VER}" ]; then
+    echo "📦 phpize${PHP_VER} not found – installing php${PHP_VER}-dev..."
+    sudo apt-get update -qq
+    sudo apt-get install -y --no-install-recommends "php${PHP_VER}-dev"
+fi
+
+PHPIZE_BIN=""
+PHP_CONFIG_BIN=""
+for VSUFFIX in "${PHP_VER}" ""; do
+    if [ -x "${PHP_BINDIR}/phpize${VSUFFIX}" ]; then
+        PHPIZE_BIN="${PHP_BINDIR}/phpize${VSUFFIX}"
+        PHP_CONFIG_BIN="${PHP_BINDIR}/php-config${VSUFFIX}"
+        break
+    fi
+done
+
+if [ -z "$PHPIZE_BIN" ]; then
+    echo "❌ Cannot find phpize for PHP ${PHP_VER} (looked in ${PHP_BINDIR})"
+    exit 1
+fi
+
+echo "Using PHP:        ${PHP_VER}"
+echo "Using phpize:     ${PHPIZE_BIN}"
+echo "Using php-config: ${PHP_CONFIG_BIN}"
+
+# --- Step 5: Configure & build ---
+"$PHPIZE_BIN"
+./configure --enable-snobol --with-php-config="$PHP_CONFIG_BIN"
+make -j"$(nproc)"
+
+# --- Step 6: Install .so ---
+EXT_DIR=$(php -r 'echo ini_get("extension_dir");')
+BUILT_SO=$(find "$BUILD_DIR" \( -path '*/modules/snobol.so' -o -path '*/.libs/snobol.so' \) -type f | head -1)
+[ -z "$BUILT_SO" ] && BUILT_SO=$(find "$BUILD_DIR" -name 'snobol.so' -type f | head -1)
+if [ -z "$BUILT_SO" ]; then
+    echo "❌ snobol.so not found after build"
+    exit 1
+fi
+echo "Installing: ${BUILT_SO} → ${EXT_DIR}/snobol.so"
+sudo mkdir -p "$EXT_DIR"
+sudo cp "$BUILT_SO" "$EXT_DIR/snobol.so"
+
+# --- Step 7: Enable extension in PHP ini ---
+PHP_SCAN_DIR=$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;' 2>/dev/null || true)
+if [ -n "$PHP_SCAN_DIR" ]; then
+    sudo mkdir -p "$PHP_SCAN_DIR"
+    echo "extension=snobol.so" | sudo tee "$PHP_SCAN_DIR/20-snobol.ini" > /dev/null
+    echo "INI written to ${PHP_SCAN_DIR}/20-snobol.ini"
+else
+    CLI_CONFD="/etc/php/${PHP_VER}/cli/conf.d"
+    sudo mkdir -p "$CLI_CONFD"
+    echo "extension=snobol.so" | sudo tee "$CLI_CONFD/20-snobol.ini" > /dev/null
+    echo "INI written to ${CLI_CONFD}/20-snobol.ini (fallback)"
+fi
+
+FPM_CONFD="/etc/php/${PHP_VER}/fpm/conf.d"
+if [ -d "$FPM_CONFD" ]; then
+    echo "extension=snobol.so" | sudo tee "$FPM_CONFD/20-snobol.ini" > /dev/null
+fi
+
+# --- Step 8: Reload PHP-FPM so web requests pick up the new .so ---
+FPM_PID=$(pgrep -f "php-fpm: master" 2>/dev/null | head -1 || true)
+if [ -n "$FPM_PID" ]; then
+    echo "🔄 Reloading PHP-FPM (pid ${FPM_PID})..."
+    sudo kill -USR2 "$FPM_PID" 2>/dev/null || true
+fi
+
+# --- Step 9: Cleanup ---
+sudo rm -rf "$BUILD_DIR"
+
+# --- Step 10: Verify ---
+if php -m 2>/dev/null | grep -qx "snobol"; then
+    echo "✅ libsnobol4 PHP extension installed successfully! (PHP ${PHP_VER})"
+else
+    echo "❌ Failed to enable snobol extension"
+    php -m 2>&1 | grep -i snobol || true
+    exit 1
+fi
