@@ -2,8 +2,6 @@
 
 This document describes the SNOBOL4 language features implemented in the engine.
 
-**Status:** Core runtime implementation complete (11/11 tasks from `complete-snobol-toolset` change).
-
 ## Overview
 
 The engine now supports full SNOBOL language compatibility including:
@@ -311,7 +309,15 @@ The micro-JIT remains fully compatible with the new features:
   evaluation
 - **Format opcodes** (`OP_EMIT_FORMAT`) are interpreted - JIT skips patterns with formatting
 
-This is by design - the JIT focuses on optimizing simple, hot patterns. Complex patterns with tables, control flow, or
+**Phase 1c additions (CFG-based multi-block JIT):**
+
+- **Multi-arm alternation** (`'a' | 'b' | 'c'`) — now compiled with the CFG builder; each SPLIT arm is a separate
+  compiled stub, eliminating interpreter round-trips between arms.
+- **ARBNO loops** — backward JMP edges are now compiled with a counted iteration guard (`JIT_LOOP_ITER_MAX` = 1024);
+  the loop body runs fully compiled for up to 1024 iterations before bailing to interpreter.
+- **`jit_blocks_compiled_total`** — new `SnobolJitStats` field counts compiled CFG blocks for observability.
+
+This is by design - the JIT focuses on optimizing hot patterns. Complex patterns with tables, control flow, or
 dynamic evaluation fall back to the interpreter, which is the correct profitability decision.
 
 JIT regression guard results show the profitability gate correctly skips these patterns:
@@ -324,9 +330,9 @@ JIT regression guard results show the profitability gate correctly skips these p
 
 | Suite         | Tests | Assertions | Status   |
 |---------------|-------|------------|----------|
-| C Tests       | 896   | -          | ✅ Pass   |
-| PHP Tests     | 158   | 410        | ✅ Pass   |
+| C Tests       | 1,265 | -          | ✅ Pass   |
+| PHP Tests     | 183   | 410        | ✅ Pass   |
 | Compatibility | 21    | -          | ✅ Pass   |
 | Skipped       | 4     | -          | Expected |
 
-**Total:** 1075 tests passing
+**Total:** 1,469 tests passing

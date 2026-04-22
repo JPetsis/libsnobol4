@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — jit-cfg-split (Phase 1c)
+
+- **CFG-based multi-block JIT** (`core/src/jit.c`): replaced the single-basic-block
+  linear pass-1 with a BFS CFG builder (`jit_cfg_build()`) that discovers up to
+  `JIT_CFG_MAX_BLOCKS` (64) reachable blocks per compilation, following both SPLIT
+  arms and forward JMPs.
+- **Per-block stub emitter** (`snobol_jit_compile_cfg()`): allocates one contiguous
+  ARM64 code buffer and emits a separate stub per CFG block in BFS order; stubs
+  branch directly to each other via ARM64 `B imm26` — zero interpreter round-trips
+  between blocks.
+- **Forward-branch fixup pass**: after all stubs are emitted, resolves all
+  placeholder `B(0)` instructions to their target stub addresses.
+- **ARBNO / backward-edge loop guard**: backward JMP edges get a counted iteration
+  guard using callee-saved register `x19` (initialised to `JIT_LOOP_ITER_MAX` = 1024
+  per JIT entry); bails out to interpreter when the counter reaches zero, preventing
+  infinite compiled loops.
+- **`jit_blocks_compiled_total`** counter added to `SnobolJitStats`: cumulative count
+  of CFG blocks emitted across all compilations; accessible via `snobol_jit_get_stats()`.
+- **Zero-SPLIT fast path**: patterns with a single linear block and no backward edges
+  continue to use the existing `op_seq[]` linear compiler path, preserving compile
+  latency for straight-line regions.
+- **Benchmark scenario** (`bench/tokenize.php`): added 3-arm delimiter scenario
+  `',' | ';' | '|'` to exercise the new multi-block SPLIT chain path.
+- **CFG unit tests** (`tests/c/test_jit_cfg.c`): 5 new test cases covering
+  `jit_blocks_compiled_total` init, single-block counting, 3-arm SPLIT chain block
+  discovery, SPLIT backtrack state restoration, and ARBNO loop compilation.
+
 ## [0.2.0] - 2026-04-14
 
 ### Added

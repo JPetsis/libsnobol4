@@ -249,7 +249,10 @@ bool vm_run(VM *vm) {
              * the interpreter without paying profiling overhead each dispatch. */
         } else if (vm->jit.enabled && vm->jit.traces && vm->jit.traces[current_ip]) {
             /* ---- Execute compiled trace ---- */
-            if (vm->jit.stats) vm->jit.stats->entries_total++;
+            if (vm->jit.stats) {
+                vm->jit.stats->entries_total++;
+                if (vm->jit.search_mode) vm->jit.stats->search_entries_total++;
+            }
             if (vm->jit.ctx)   vm->jit.ctx->ctx_entries++;
 
             uint64_t t_exec = (vm->jit.stats) ? snobol_jit_now_ns() : 0;

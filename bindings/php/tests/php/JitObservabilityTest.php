@@ -179,4 +179,33 @@ class JitObservabilityTest extends TestCase
 
         snobol_reset_jit_stats();
     }
+
+    public function testJitBlocksCompiledTotalIsAccessibleAndNonZero(): void
+    {
+        if (!function_exists('snobol_get_jit_stats')) {
+            $this->markTestSkipped('snobol_get_jit_stats() not available');
+        }
+
+        $stats = snobol_get_jit_stats();
+        if (empty($stats)) {
+            $this->markTestSkipped('JIT stats not available (JIT disabled in build)');
+        }
+
+        $this->assertArrayHasKey('jit_blocks_compiled_total', $stats,
+            'jit_blocks_compiled_total must be exposed by snobol_get_jit_stats()');
+
+        snobol_reset_jit_stats();
+
+        // Warm the JIT with enough iterations to trigger compilation of a multi-arm pattern.
+        // PatternHelper::split() runs in search-mode (lower hotness threshold = 20),
+        // so 150 calls reliably causes one JIT compilation.
+        $subject = str_repeat('word,test;foo|bar', 5);
+        for ($i = 0; $i < 150; $i++) {
+            \Snobol\PatternHelper::split("',' | ';' | '|'", $subject);
+        }
+
+        $stats = snobol_get_jit_stats();
+        $this->assertGreaterThan(0, $stats['jit_blocks_compiled_total'],
+            'jit_blocks_compiled_total must be > 0 after JIT compilation of a multi-arm pattern');
+    }
 }

@@ -323,7 +323,81 @@ $harness->bench(
     $mixedSize
 );
 
-// Output results
+// ------------------------------------------------------------------------
+// Scenario 4: 3-arm single-char delimiter alternation ',' | ';' | '|'
+// NOTE: single-char arms are fused by Phase 1b SPLIT→ANY fusion into a
+// single OP_ANY at compile time.  The JIT compiles 1 block (linear path).
+// This is handled efficiently without the CFG multi-block path.
+// ------------------------------------------------------------------------
+$triWords = [];
+for ($i = 0; $i < 1000; $i++) {
+    $triWords[] = 'word'.$i;
+    if ($i % 3 === 0) {
+        $triWords[] = ',';
+    } elseif ($i % 3 === 1) {
+        $triWords[] = ';';
+    } else {
+        $triWords[] = '|';
+    }
+}
+$triData = implode('', $triWords);
+$triSize = strlen($triData);
+
+$harness->bench(
+    'tokenize_3arm_delim',
+    'snobol',
+    function () use ($triData) {
+        $tokens = PatternHelper::split("',' | ';' | '|'", $triData);
+    },
+    $warmup,
+    $iterations,
+    $triSize
+);
+
+$harness->bench(
+    'tokenize_3arm_delim',
+    'pcre',
+    function () use ($triData) {
+        $tokens = preg_split('/[,;|]/', $triData);
+    },
+    $warmup,
+    $iterations,
+    $triSize
+);
+
+// ------------------------------------------------------------------------
+// Scenario 5 (Phase 1c CFG): multi-char keyword alternation
+// Pattern: 'OR' | 'AND' | 'NOT' — multi-char arms cannot be fused by
+// Phase 1b, so the JIT uses the CFG multi-block path (3+ compiled stubs).
+// ------------------------------------------------------------------------
+$kwWords = [
+    'alpha OR beta', 'x AND y', 'NOT z', 'foo OR bar AND baz',
+    'hello NOT world', 'a OR b OR c AND d NOT e'
+];
+$kwData = implode(' ', array_merge(...array_fill(0, 50, $kwWords)));
+$kwSize = strlen($kwData);
+
+$harness->bench(
+    'tokenize_kw_cfg',
+    'snobol',
+    function () use ($kwData) {
+        $tokens = PatternHelper::split("'OR' | 'AND' | 'NOT'", $kwData);
+    },
+    $warmup,
+    $iterations,
+    $kwSize
+);
+
+$harness->bench(
+    'tokenize_kw_cfg',
+    'pcre',
+    function () use ($kwData) {
+        $tokens = preg_split('/OR|AND|NOT/', $kwData);
+    },
+    $warmup,
+    $iterations,
+    $kwSize
+);
 $harness->printSummary();
 $harness->printSearchDiagnostics();
 
