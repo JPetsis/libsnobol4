@@ -66,7 +66,7 @@ cp -r "$CORE_DIR" "$BUILD_DIR/core"
 cd "$BUILD_DIR"
 
 # --- Step 4: Locate phpize / php-config for the RUNTIME PHP version ---
-PHP_VER=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')
+PHP_VER=$(php -n -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null)
 PHP_BIN=$(readlink -f "$(command -v php)" 2>/dev/null || command -v php)
 PHP_BINDIR="$(dirname "$PHP_BIN")"
 
@@ -102,7 +102,7 @@ echo "Using php-config: ${PHP_CONFIG_BIN}"
 make -j"$(nproc)"
 
 # --- Step 6: Install .so ---
-EXT_DIR=$(php -r 'echo ini_get("extension_dir");')
+EXT_DIR=$(php -n -r 'echo ini_get("extension_dir");' 2>/dev/null)
 BUILT_SO=$(find "$BUILD_DIR" \( -path '*/modules/snobol.so' -o -path '*/.libs/snobol.so' \) -type f | head -1)
 [ -z "$BUILT_SO" ] && BUILT_SO=$(find "$BUILD_DIR" -name 'snobol.so' -type f | head -1)
 if [ -z "$BUILT_SO" ]; then
@@ -146,6 +146,6 @@ if php -m 2>/dev/null | grep -qx "snobol"; then
     echo "✅ libsnobol4 PHP extension installed successfully! (PHP ${PHP_VER})"
 else
     echo "❌ Failed to enable snobol extension"
-    php -m 2>&1 | grep -i snobol || true
+    php -d error_reporting=0 -m 2>&1 | grep -i snobol || true
     exit 1
 fi

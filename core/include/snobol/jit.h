@@ -103,9 +103,9 @@ typedef struct SnobolJitStats {
     uint64_t search_entries_total;          /**< JIT trace entries via search-mode dispatch */
     uint64_t search_candidate_rejects;      /**< Expected quick rejects in search-mode traces */
     uint64_t skipped_search_cold_total;     /**< Search-mode skip: below search_hotness_threshold */
-    uint64_t bailout_search_candidate_total;/**< Bailout attributable to expected candidate rejection (Task 4.4) */
+    uint64_t bailout_search_candidate_total;/**< Bailout attributable to expected candidate rejection */
 
-    /* NEW: CFG multi-block compilation counter (Phase 1c) */
+    /* CFG multi-block compilation counter */
     uint64_t jit_blocks_compiled_total;     /**< Cumulative count of CFG blocks emitted across all compilations */
 } SnobolJitStats;
 

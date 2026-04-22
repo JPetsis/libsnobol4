@@ -143,7 +143,7 @@ $harness->bench(
 //
 // Both patterns capture the token before the delimiter.
 // ========================================================================
-echo "\n--- BREAKX vs ARB comparison (Task 8.2) ---\n\n";
+echo "\n--- BREAKX vs ARB comparison ---\n\n";
 
 $warmupBx = 5;
 $itersBx = 200;
@@ -325,7 +325,7 @@ $harness->bench(
 
 // ------------------------------------------------------------------------
 // Scenario 4: 3-arm single-char delimiter alternation ',' | ';' | '|'
-// NOTE: single-char arms are fused by Phase 1b SPLIT→ANY fusion into a
+// NOTE: single-char arms are fused by SPLIT→ANY fusion into a
 // single OP_ANY at compile time.  The JIT compiles 1 block (linear path).
 // This is handled efficiently without the CFG multi-block path.
 // ------------------------------------------------------------------------
@@ -366,9 +366,9 @@ $harness->bench(
 );
 
 // ------------------------------------------------------------------------
-// Scenario 5 (Phase 1c CFG): multi-char keyword alternation
+// Scenario 5 (CFG): multi-char keyword alternation
 // Pattern: 'OR' | 'AND' | 'NOT' — multi-char arms cannot be fused by
-// Phase 1b, so the JIT uses the CFG multi-block path (3+ compiled stubs).
+// SPLIT→ANY fusion, so the JIT uses the CFG multi-block path (3+ compiled stubs).
 // ------------------------------------------------------------------------
 $kwWords = [
     'alpha OR beta', 'x AND y', 'NOT z', 'foo OR bar AND baz',

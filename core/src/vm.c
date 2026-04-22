@@ -100,10 +100,174 @@ bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp) {
     return false;
 }
 
-typedef struct {
-    uint32_t total_size; size_t ip; size_t pos; size_t var_count;
-    uint8_t num_caps; uint8_t num_counters; uint8_t max_cap_used; uint8_t max_counter_used;
-} CompactChoiceHeader;
+/* ========== Write-log management for compact choice stack ========== */
+
+void vm_write_log_init(VM *vm) {
+    vm->write_log = NULL;
+    vm->write_log_cap = 0;
+    vm->write_log_next = 0;
+    vm->write_log_bitmap = 0;
+    vm->write_log_compressed_count = 0;
+    vm->write_log_dirty = false;
+}
+
+void vm_write_log_free(VM *vm) {
+    if (vm->write_log) {
+        snobol_free(vm->write_log);
+        vm->write_log = NULL;
+    }
+    vm->write_log_cap = 0;
+    vm->write_log_next = 0;
+    vm->write_log_bitmap = 0;
+    vm->write_log_compressed_count = 0;
+    vm->write_log_dirty = false;
+}
+
+void vm_write_log_clear(VM *vm) {
+    vm->write_log_next = 0;
+    vm->write_log_bitmap = 0;
+    vm->write_log_dirty = false;
+}
+
+void vm_write_log_track_cap_start(VM *vm, uint8_t cap, size_t old_start) {
+    if (!vm->use_compact_choice || !vm->write_log) return;
+    /* Look for existing entry for this cap (most recent first) */
+    size_t slot = (vm->write_log_next > 0) ? vm->write_log_next - 1 : vm->write_log_cap - 1;
+    for (size_t i = 0; i < vm->write_log_cap; i++) {
+        if (vm->write_log_bitmap & (1ULL << slot)) {
+            if (vm->write_log[slot].cap_index == cap) {
+                vm->write_log[slot].old_start = old_start;
+                return;
+            }
+        }
+        if (slot == 0) slot = vm->write_log_cap - 1;
+        else slot--;
+    }
+    /* No existing entry: create new */
+    slot = vm->write_log_next++;
+    if (slot >= vm->write_log_cap) {
+        vm->write_log_next = 0;
+        slot = 0;
+    }
+    vm->write_log[slot].cap_index = cap;
+    vm->write_log[slot].old_start = old_start;
+    vm->write_log[slot].old_end = (size_t)-1;  /* sentinel: end not changed */
+    vm->write_log_bitmap |= (1ULL << slot);
+    vm->write_log_dirty = true;
+}
+
+void vm_write_log_track_cap_end(VM *vm, uint8_t cap, size_t old_end) {
+    if (!vm->use_compact_choice || !vm->write_log) return;
+    /* Look for existing entry for this cap (most recent first) */
+    size_t slot = (vm->write_log_next > 0) ? vm->write_log_next - 1 : vm->write_log_cap - 1;
+    for (size_t i = 0; i < vm->write_log_cap; i++) {
+        if (vm->write_log_bitmap & (1ULL << slot)) {
+            if (vm->write_log[slot].cap_index == cap) {
+                vm->write_log[slot].old_end = old_end;
+                return;
+            }
+        }
+        if (slot == 0) slot = vm->write_log_cap - 1;
+        else slot--;
+    }
+    /* No existing entry: create new */
+    slot = vm->write_log_next++;
+    if (slot >= vm->write_log_cap) {
+        vm->write_log_next = 0;
+        slot = 0;
+    }
+    vm->write_log[slot].cap_index = cap;
+    vm->write_log[slot].old_start = (size_t)-1;  /* sentinel: start not changed */
+    vm->write_log[slot].old_end = old_end;
+    vm->write_log_bitmap |= (1ULL << slot);
+    vm->write_log_dirty = true;
+}
+
+size_t vm_write_log_count_entries(const VM *vm) {
+    size_t count = 0;
+    for (size_t i = 0; i < vm->write_log_cap; i++) {
+        if (vm->write_log_bitmap & (1ULL << i)) {
+            const WriteLogEntry *e = &vm->write_log[i];
+            if (e->old_start != (size_t)-1 || e->old_end != (size_t)-1) {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+void vm_write_log_copy_entries(const VM *vm, WriteLogEntry *dst, size_t dst_cap) {
+    size_t copied = 0;
+    for (size_t i = 0; i < vm->write_log_cap; i++) {
+        if (vm->write_log_bitmap & (1ULL << i)) {
+            const WriteLogEntry *e = &vm->write_log[i];
+            if (e->old_start != (size_t)-1 || e->old_end != (size_t)-1) {
+                if (copied < dst_cap) {
+                    dst[copied] = *e;
+                    copied++;
+                }
+            }
+        }
+    }
+}
+
+void vm_write_log_restore(VM *vm, const CompactChoiceHeader *hdr) {
+    const uint8_t *p = (const uint8_t *)(hdr + 1);
+    if (hdr->max_counter_used > 0) {
+        p += hdr->max_counter_used * (sizeof(uint32_t) + sizeof(size_t));
+    }
+    for (uint8_t i = 0; i < hdr->write_log_count; i++) {
+        const WriteLogEntry *e = (const WriteLogEntry *)p;
+        if (e->cap_index < MAX_CAPS) {
+            vm->cap_start[e->cap_index] = e->old_start;
+            vm->cap_end[e->cap_index] = e->old_end;
+        }
+        p += sizeof(WriteLogEntry);
+    }
+}
+
+size_t vm_compact_choice_record_size(const CompactChoiceHeader *hdr) {
+    size_t sz = sizeof(CompactChoiceHeader);
+    if (hdr->max_counter_used > 0) {
+        sz += hdr->max_counter_used * (sizeof(uint32_t) + sizeof(size_t));
+    }
+    sz += hdr->write_log_count * sizeof(WriteLogEntry);
+    return sz;
+}
+
+/* Choice stack statistics */
+size_t vm_choice_stack_memory_usage(VM *vm) {
+    return vm->choices_top;
+}
+
+size_t vm_choice_stack_depth(VM *vm) {
+    /* Depth = number of choice records on stack.
+     * We can estimate by dividing total bytes by average record size,
+     * or we can walk the stack counting records. Walking is O(n) but accurate.
+     * For simplicity, we walk the stack.
+     */
+    size_t depth = 0;
+    size_t pos = 0;
+    while (pos < vm->choices_top) {
+        CompactChoiceHeader *h = (CompactChoiceHeader *)((uint8_t *)vm->choices + pos);
+        size_t rec_size = h->total_size;
+        pos += rec_size;
+        depth++;
+    }
+    return depth;
+}
+
+size_t vm_choice_record_average_size(VM *vm) {
+    if (vm->choice_push_count > 0) {
+        return vm->choice_allocated / vm->choice_push_count;
+    }
+#ifdef SNOBOL_JIT
+    if (vm->jit.stats && vm->jit.stats->choice_push_total > 0) {
+        return vm->jit.stats->choice_bytes_total / vm->jit.stats->choice_push_total;
+    }
+#endif
+    return 0;
+}
 
 void vm_push_choice(VM *vm, size_t ip, size_t pos) {
     if (!vm->choices) return;
@@ -111,9 +275,15 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
     vm->profile.push_count++;
 #endif
     if (vm->use_compact_choice) {
-        uint8_t num_caps = vm->max_cap_used; uint8_t num_counters = vm->max_counter_used;
-        uint32_t data_size = sizeof(CompactChoiceHeader) + (num_caps * sizeof(size_t) * 2) + (num_counters * (sizeof(uint32_t) + sizeof(size_t)));
-        uint32_t record_size = (data_size + sizeof(uint32_t) + 7) & ~7;
+        uint8_t num_counters = vm->max_counter_used;
+        size_t wl_entries = vm_write_log_count_entries(vm);
+        size_t data_size = sizeof(CompactChoiceHeader);
+        if (num_counters > 0) {
+            data_size += num_counters * (sizeof(uint32_t) + sizeof(size_t));
+        }
+        data_size += wl_entries * sizeof(WriteLogEntry);
+        uint32_t record_size = (uint32_t)(data_size + sizeof(uint32_t));
+        record_size = (record_size + 7) & ~7;
         if (vm->choices_top + record_size >= vm->choices_cap) {
             size_t new_cap = vm->choices_cap ? vm->choices_cap * 2 : 4096;
             while (vm->choices_top + record_size >= new_cap) new_cap *= 2;
@@ -122,22 +292,30 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
             vm->choices = new_choices; vm->choices_cap = new_cap;
         }
         CompactChoiceHeader *h = (CompactChoiceHeader *)((uint8_t *)vm->choices + vm->choices_top);
-        h->total_size = record_size; h->ip = ip; h->pos = pos; h->var_count = vm->var_count;
-        h->num_caps = num_caps; h->num_counters = num_counters; h->max_cap_used = vm->max_cap_used; h->max_counter_used = vm->max_counter_used;
+        h->total_size = record_size;
+        h->ip = ip;
+        h->pos = pos;
+        h->var_count = vm->var_count;
+        h->max_cap_used = vm->max_cap_used;
+        h->max_counter_used = num_counters;
+        h->write_log_count = (uint8_t)wl_entries;
+        h->pad = 0;
         uint8_t *p = (uint8_t *)(h + 1);
-        if (num_caps > 0) {
-            size_t cap_size = num_caps * sizeof(size_t);
-            memcpy(p, vm->cap_start, cap_size); p += cap_size;
-            memcpy(p, vm->cap_end, cap_size); p += cap_size;
-        }
         if (num_counters > 0) {
-            size_t pos_size = num_counters * sizeof(size_t);
-            memcpy(p, vm->loop_last_pos, pos_size); p += pos_size;
-            memcpy(p, vm->counters, num_counters * sizeof(uint32_t));
+            memcpy(p, vm->counters, num_counters * sizeof(uint32_t)); p += num_counters * sizeof(uint32_t);
+            memcpy(p, vm->loop_last_pos, num_counters * sizeof(size_t)); p += num_counters * sizeof(size_t);
         }
-        uint8_t *size_ptr = (uint8_t *)h + record_size - sizeof(uint32_t);
-        memcpy(size_ptr, &record_size, sizeof(uint32_t));
+        vm_write_log_copy_entries(vm, (WriteLogEntry *)p, wl_entries);
+        uint32_t *size_ptr = (uint32_t *)((uint8_t *)h + record_size - sizeof(uint32_t));
+        *size_ptr = record_size;
         vm->choices_top += record_size;
+        vm->choice_allocated += record_size;
+        vm->choice_push_count++;
+        vm->choice_live_depth++;
+        /* Track peak values */
+        if (vm->choices_top > vm->choice_peak_memory) vm->choice_peak_memory = vm->choices_top;
+        if (vm->choice_live_depth > vm->choice_peak_depth) vm->choice_peak_depth = vm->choice_live_depth;
+        vm_write_log_clear(vm);
 #ifdef SNOBOL_JIT
         if (vm->jit.stats) { vm->jit.stats->choice_push_total++; vm->jit.stats->choice_bytes_total += record_size; }
 #endif
@@ -162,6 +340,12 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
             memcpy(c->loop_last_pos_snapshot, vm->loop_last_pos, vm->max_counter_used * sizeof(size_t));
         }
         vm->choices_top += record_size;
+        vm->choice_allocated += record_size;
+        vm->choice_push_count++;
+        vm->choice_live_depth++;
+        /* Track peak values */
+        if (vm->choices_top > vm->choice_peak_memory) vm->choice_peak_memory = vm->choices_top;
+        if (vm->choice_live_depth > vm->choice_peak_depth) vm->choice_peak_depth = vm->choice_live_depth;
 #ifdef SNOBOL_JIT
         if (vm->jit.stats) { vm->jit.stats->choice_push_total++; vm->jit.stats->choice_bytes_total += record_size; }
 #endif
@@ -184,15 +368,18 @@ bool vm_pop_choice(VM *vm) {
         vm->ip = h->ip; vm->pos = h->pos; vm->var_count = h->var_count;
         vm->max_cap_used = h->max_cap_used; vm->max_counter_used = h->max_counter_used;
         uint8_t *p = (uint8_t *)(h + 1);
-        if (h->num_caps > 0) {
-            size_t cap_size = h->num_caps * sizeof(size_t);
-            memcpy(vm->cap_start, p, cap_size); p += cap_size;
-            memcpy(vm->cap_end, p, cap_size); p += cap_size;
+        if (h->max_counter_used > 0) {
+            memcpy(vm->counters, p, h->max_counter_used * sizeof(uint32_t)); p += h->max_counter_used * sizeof(uint32_t);
+            memcpy(vm->loop_last_pos, p, h->max_counter_used * sizeof(size_t)); p += h->max_counter_used * sizeof(size_t);
         }
-        if (h->num_counters > 0) {
-            size_t pos_size = h->num_counters * sizeof(size_t);
-            memcpy(vm->loop_last_pos, p, pos_size); p += pos_size;
-            memcpy(vm->counters, p, h->num_counters * sizeof(uint32_t));
+        /* Restore captures from write-log entries (delta) */
+        for (uint8_t i = 0; i < h->write_log_count; i++) {
+            const WriteLogEntry *e = (const WriteLogEntry *)p;
+            if (e->cap_index < MAX_CAPS) {
+                vm->cap_start[e->cap_index] = e->old_start;
+                vm->cap_end[e->cap_index] = e->old_end;
+            }
+            p += sizeof(WriteLogEntry);
         }
     } else {
         vm->choices_top -= sizeof(struct choice);
@@ -209,6 +396,7 @@ bool vm_pop_choice(VM *vm) {
             memcpy(vm->loop_last_pos, c->loop_last_pos_snapshot, vm->max_counter_used * sizeof(size_t));
         }
     }
+    if (vm->choice_live_depth > 0) vm->choice_live_depth--;
     return true;
 }
 
@@ -231,6 +419,16 @@ bool vm_run(VM *vm) {
     if (!vm->choices) return false;
     vm->choices_cap = initial_cap; vm->choices_top = 0;
     vm->use_compact_choice = (getenv("SNOBOL_LEGACY_CHOICE") == NULL);
+    if (vm->use_compact_choice) {
+        vm_write_log_init(vm);
+        vm->write_log_cap = MAX_CAPS;
+        vm->write_log = snobol_malloc(vm->write_log_cap * sizeof(WriteLogEntry));
+        if (!vm->write_log) {
+            snobol_free(vm->choices);
+            vm->choices = NULL;
+            return false;
+        }
+    }
 
     while (1) {
 #ifdef SNOBOL_PROFILE
@@ -360,7 +558,10 @@ bool vm_run(VM *vm) {
         uint8_t op = vm->bc[vm->ip++];
         switch (op) {
             case OP_NOP: break; /* fusion filler — skip one byte */
-            case OP_ACCEPT: if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; } return true;
+            case OP_ACCEPT:
+                if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; }
+                if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+                return true;
             case OP_FAIL: if (!vm_pop_choice(vm)) goto fail_ret; break;
             case OP_JMP: { uint32_t tgt = read_u32(vm->bc, vm->bc_len, &vm->ip); vm->ip = (size_t)tgt; break; }
             case OP_SPLIT: { uint32_t a = read_u32(vm->bc, vm->bc_len, &vm->ip); uint32_t b = read_u32(vm->bc, vm->bc_len, &vm->ip);
@@ -429,8 +630,28 @@ bool vm_run(VM *vm) {
                 else { uint32_t cp; int bytes; while (utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes) && (!ranges || !range_contains(ranges, count, cp))) vm->pos += bytes; }
                 break;
             }
-            case OP_CAP_START: { uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip); if (r < MAX_CAPS) { vm->cap_start[r] = vm->pos; if (r >= vm->max_cap_used) vm->max_cap_used = r + 1; } break; }
-            case OP_CAP_END: { uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip); if (r < MAX_CAPS) { vm->cap_end[r] = vm->pos; if (r >= vm->max_cap_used) vm->max_cap_used = r + 1; } break; }
+            case OP_CAP_START: {
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                if (r < MAX_CAPS) {
+                    if (vm->use_compact_choice) {
+                        vm_write_log_track_cap_start(vm, r, vm->cap_start[r]);
+                    }
+                    vm->cap_start[r] = vm->pos;
+                    if (r >= vm->max_cap_used) vm->max_cap_used = r + 1;
+                }
+                break;
+            }
+            case OP_CAP_END: {
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                if (r < MAX_CAPS) {
+                    if (vm->use_compact_choice) {
+                        vm_write_log_track_cap_end(vm, r, vm->cap_end[r]);
+                    }
+                    vm->cap_end[r] = vm->pos;
+                    if (r >= vm->max_cap_used) vm->max_cap_used = r + 1;
+                }
+                break;
+            }
             case OP_ASSIGN: { uint16_t var = read_u16(vm->bc, vm->bc_len, &vm->ip); uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 if (var < MAX_VARS && r < MAX_CAPS) { if (var >= vm->var_count) vm->var_count = (size_t)var + 1; vm->var_start[var] = vm->cap_start[r]; vm->var_end[var] = vm->cap_end[r]; } break; }
             case OP_LEN: {
@@ -1150,8 +1371,13 @@ bool vm_run(VM *vm) {
             default: if (!vm_pop_choice(vm)) goto fail_ret; break;
         }
     }
-    if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; } return false;
- fail_ret: if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; } return false;
+    if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; }
+    if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+    return false;
+ fail_ret:
+    if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; }
+    if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+    return false;
 }
 
 bool vm_exec(VM *vm) {

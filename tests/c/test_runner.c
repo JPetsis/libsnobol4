@@ -155,6 +155,7 @@ void test_builtin_dispatch_suite(void);
 void test_search_runtime_suite(void);
 void test_search_jit_suite(void);
 void test_fusion_suite(void);
+void test_compact_choice_suite(void);
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
@@ -209,6 +210,7 @@ int main(void) {
     RUN_SUITE("Search Runtime",             test_search_runtime_suite);
     RUN_SUITE("Search JIT",                 test_search_jit_suite);
     RUN_SUITE("Fusion: SPLIT/ANY",          test_fusion_suite);
+    RUN_SUITE("Compact Choice Stack",       test_compact_choice_suite);
 
     /* Stress test */
     {

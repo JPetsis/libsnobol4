@@ -34,6 +34,7 @@ add_executable(snobol4_tests
     test_search_runtime.c
     test_search_jit.c
     test_fusion.c
+    test_compact_choice.c
 )
 
 # Link against core library

@@ -405,6 +405,15 @@ PHP_METHOD(Snobol_Pattern, match) {
         add_assoc_string(return_value, "_output", "");
     }
 
+    /* Attach VM metrics for observability */
+    zval metrics;
+    array_init(&metrics);
+    add_assoc_long(&metrics, "choice_push_count", (zend_long)vm.choice_push_count);
+    add_assoc_long(&metrics, "choice_allocated", (zend_long)vm.choice_allocated);
+    add_assoc_long(&metrics, "choice_peak_depth", (zend_long)vm.choice_peak_depth);
+    add_assoc_long(&metrics, "choice_peak_memory", (zend_long)vm.choice_peak_memory);
+    add_assoc_zval(return_value, "_metrics", &metrics);
+
 #ifdef SNOBOL_DYNAMIC_PATTERN
     if (vm.dyn_cache) {
         dynamic_pattern_cache_destroy(vm.dyn_cache);
@@ -667,6 +676,16 @@ PHP_METHOD(Snobol_Pattern, searchAll) {
         } else {
             add_assoc_string(&match_arr, "_output", "");
         }
+
+        /* Attach VM metrics for observability */
+        zval metrics;
+        array_init(&metrics);
+        add_assoc_long(&metrics, "choice_push_count", (zend_long)vm.choice_push_count);
+        add_assoc_long(&metrics, "choice_allocated", (zend_long)vm.choice_allocated);
+        add_assoc_long(&metrics, "choice_peak_depth", (zend_long)vm.choice_peak_depth);
+        add_assoc_long(&metrics, "choice_peak_memory", (zend_long)vm.choice_peak_memory);
+        add_assoc_zval(&match_arr, "_metrics", &metrics);
+
         add_next_index_zval(return_value, &match_arr);
 
         /* Advance */

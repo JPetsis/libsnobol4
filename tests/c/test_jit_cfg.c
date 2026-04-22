@@ -1,11 +1,11 @@
-/* test_jit_cfg.c — Unit tests for the CFG-based multi-block JIT (Phase 1c)
+/* test_jit_cfg.c — Unit tests for the CFG-based multi-block JIT
  *
  * Covers:
- *   Task 1.3  – jit_blocks_compiled_total zero on init, increments after compile
- *   Task 2.5  – 3-arm SPLIT chain: CFG discovers ≥ 4 blocks
- *   Task 3.5  – 3-block pattern → jit_blocks_compiled_total == 3
- *   Task 4.4  – SPLIT backtrack boundary: JIT-pushed choice restores state correctly
- *   Task 5.5  – ARBNO loop compiles compiled; loop guard bails at overflow
+ *   jit_blocks_compiled_total zero on init, increments after compile
+ *   3-arm SPLIT chain: CFG discovers ≥ 4 blocks
+ *   3-block pattern → jit_blocks_compiled_total == 3
+ *   SPLIT backtrack boundary: JIT-pushed choice restores state correctly
+ *   ARBNO loop compiles compiled; loop guard bails at overflow
  */
 #include <stdio.h>
 #include <stdbool.h>
@@ -78,7 +78,7 @@ static void setup_charclasses(uint8_t *bc, size_t bc_len) {
     bc[ce+3] = (uint8_t)(class_count);
 }
 
-/* ---- Task 1.3: jit_blocks_compiled_total zero on init ---- */
+/* ---- jit_blocks_compiled_total zero on init ---- */
 static void test_cfg_stats_init_zero(void) {
     if (!jit_is_supported()) {
         test_assert(true, "CFG stats init: skipped (ARM64 only)");
@@ -92,7 +92,7 @@ static void test_cfg_stats_init_zero(void) {
     snobol_jit_shutdown();
 }
 
-/* ---- Task 1.3 + 3.5: single-block pattern → counter increments ---- */
+/* ---- single-block pattern → counter increments ---- */
 static void test_cfg_single_block_counter(void) {
     if (!jit_is_supported()) {
         test_assert(true, "CFG single-block counter: skipped (ARM64 only)");
@@ -141,7 +141,7 @@ static void test_cfg_single_block_counter(void) {
     snobol_jit_shutdown();
 }
 
-/* ---- Task 3.5 / 2.5: SPLIT chain produces multiple blocks ---- */
+/* ---- SPLIT chain produces multiple blocks ---- */
 static void test_cfg_split_chain_blocks(void) {
     if (!jit_is_supported()) {
         test_assert(true, "CFG SPLIT chain: skipped (ARM64 only)");
@@ -257,7 +257,7 @@ static void test_cfg_split_chain_blocks(void) {
     snobol_jit_shutdown();
 }
 
-/* ---- Task 4.4: SPLIT backtrack restores state correctly ---- */
+/* ---- SPLIT backtrack restores state correctly ---- */
 static void test_cfg_split_backtrack_restores_state(void) {
     if (!jit_is_supported()) {
         test_assert(true, "CFG SPLIT backtrack: skipped (ARM64 only)");
@@ -325,7 +325,7 @@ static void test_cfg_split_backtrack_restores_state(void) {
     snobol_jit_shutdown();
 }
 
-/* ---- Task 5.5: ARBNO-style loop runs compiled ---- */
+/* ---- ARBNO-style loop runs compiled ---- */
 static void test_cfg_arbno_loop_compiled(void) {
     if (!jit_is_supported()) {
         test_assert(true, "CFG ARBNO loop: skipped (ARM64 only)");

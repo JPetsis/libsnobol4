@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+## Description: Run PHP tests inside DDEV
+## Usage: test [args]
+## Example: ddev test
+## Example: ddev test --filter MyTest
+
+# In ddev, the bindings/php directory is usually /var/www/html
+# Run phpunit from vendor/bin
+./vendor/bin/phpunit "$@"
+

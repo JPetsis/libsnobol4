@@ -171,7 +171,34 @@ typedef struct {
 /* Callback for emission */
 typedef void (*emit_cb)(const char *data, size_t len, void *udata);
 
-// choice stack for backtracking (Legacy format)
+/* --------------------------------------------------------------------------
+ * Compact Choice Stack (delta/write-log based)
+ * -------------------------------------------------------------------------- */
+
+/* Write-log entry: records a single capture modification */
+typedef struct {
+    uint8_t cap_index;        /* Which capture register was modified */
+    size_t  old_start;        /* Previous cap_start value */
+    size_t  old_end;          /* Previous cap_end value */
+} WriteLogEntry;
+
+/* Compact choice record with delta data */
+typedef struct {
+    uint32_t total_size;      /* Total size of this record including trailing size */
+    size_t  ip;               /* Instruction pointer to restore */
+    size_t  pos;              /* Subject position to restore */
+    size_t  var_count;        /* Snapshot of vm->var_count */
+    uint8_t max_cap_used;     /* Number of captures tracked */
+    uint8_t max_counter_used; /* Number of counters tracked */
+    uint8_t write_log_count;  /* Number of write-log entries */
+    uint8_t pad;              /* Padding for alignment */
+    /* Followed by: counter snapshots (if max_counter_used > 0)
+     * Followed by: loop_last_pos snapshots (max_counter_used * size_t)
+     * Followed by: write-log entries (write_log_count entries)
+     * Followed by: trailing uint32_t total_size */
+} CompactChoiceHeader;
+
+/* Legacy choice stack (full snapshots) */
 struct choice {
     size_t ip;
     size_t pos;
@@ -225,6 +252,19 @@ typedef struct {
     size_t choices_cap;
     size_t choices_top;
     bool use_compact_choice;
+    size_t choice_allocated;   /* Total bytes allocated for choice records (for stats) */
+    size_t choice_push_count;  /* Total number of choice records pushed (for stats) */
+    size_t choice_peak_depth;  /* Peak number of simultaneous choice points */
+    size_t choice_peak_memory; /* Peak bytes used by the choice stack simultaneously */
+    size_t choice_live_depth;  /* Current number of live (not yet popped) choice points */
+
+    /* Write-log for compact choice stack: tracks capture modifications */
+    WriteLogEntry *write_log;          /* Circular buffer of modification entries */
+    size_t write_log_cap;              /* Allocated capacity (>= MAX_CAPS) */
+    size_t write_log_next;             /* Next slot to use (circular) */
+    uint64_t write_log_bitmap;         /* Bitmap: bit i set => entry i has valid data */
+    size_t write_log_compressed_count; /* Count of entries when compressed at choice point */
+    bool write_log_dirty;              /* True if write-log has un-compressed entries */
 
     // callback for EVAL: returns true if ok, false to cause fail
     bool (*eval_fn)(int fn_id, const char *s, size_t start, size_t end, void *udata);
@@ -308,4 +348,20 @@ void snobol_buf_free(snobol_buf *b);
 /* helpers */
 void vm_push_choice(VM *vm, size_t ip, size_t pos);
 bool vm_pop_choice(VM *vm);
+
+/* Write-log management for compact choice stack */
+void vm_write_log_init(VM *vm);
+void vm_write_log_free(VM *vm);
+void vm_write_log_clear(VM *vm);
+void vm_write_log_track_cap_start(VM *vm, uint8_t cap, size_t old_start);
+void vm_write_log_track_cap_end(VM *vm, uint8_t cap, size_t old_end);
+size_t vm_write_log_count_entries(const VM *vm);
+void vm_write_log_copy_entries(const VM *vm, WriteLogEntry *dst, size_t dst_cap);
+void vm_write_log_restore(VM *vm, const CompactChoiceHeader *hdr);
+size_t vm_compact_choice_record_size(const CompactChoiceHeader *hdr);
+
+/* Choice stack statistics */
+size_t vm_choice_stack_memory_usage(VM *vm);          /* Current bytes used by choice stack */
+size_t vm_choice_record_average_size(VM *vm);         /* Average record size in bytes (from stats) */
+size_t vm_choice_stack_depth(VM *vm);                 /* Number of choice points on stack */
 

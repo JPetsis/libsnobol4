@@ -5,6 +5,25 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - unreleased
+
+### Added — Compact Backtracking (Phase 2)
+
+- **Compact choice stack** (`core/src/vm.c`): default choice-stack mode now uses
+  delta/write-log records storing only `(ip, pos, changed-capture-diff)` instead
+  of full capture-array snapshots. Reduces per-choice memory by ≥50% for patterns
+  with ≥10 choice points.
+- **Write-log mechanism**: 64-entry circular buffer tracks capture modifications
+  (`CAP_START`/`CAP_END`) with deduplication; entries compressed at choice point
+  creation and replayed in reverse on backtrack.
+- **Choice-stack statistics**: `vm_choice_stack_memory_usage()`,
+  `vm_choice_stack_depth()`, `vm_choice_record_average_size()` expose runtime
+  metrics for observability and testing.
+- **Legacy mode**: set `SNOBOL_LEGACY_CHOICE=1` environment variable to restore
+  full-snapshot behaviour for compatibility or benchmarking.
+- **Test coverage**: all 1,265 C tests + 183 PHP tests pass in both compact and
+  legacy modes; no regressions.
+
 ## [0.2.3] - 2026-04-22
 
 ### Added — jit-cfg-split (Phase 1c)

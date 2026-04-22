@@ -19,7 +19,7 @@ static bool jit_is_supported(void) {
 
 #ifdef SNOBOL_JIT
 /* -----------------------------------------------------------------------
- * Task 3.4: LRU cache eviction stress tests
+ * LRU cache eviction stress tests
  * Validates:
  *   - Cache evicts LRU entries with ref_count == 0 when full
  *   - Entries with ref_count > 0 are never evicted
@@ -98,7 +98,7 @@ static void test_cache_eviction_stress(void) {
 }
 
 /* -----------------------------------------------------------------------
- * Task 4.3: Backtracking fixture — alternation/repetition/nested
+ * Backtracking fixture — alternation/repetition/nested
  * Validates correctness + that the system doesn't crash on backtrack-heavy
  * patterns even when the profitability gate skips JIT for them.
  * ----------------------------------------------------------------------- */

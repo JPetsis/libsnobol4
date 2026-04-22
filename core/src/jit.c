@@ -424,7 +424,7 @@ typedef struct {
 } OpInfo;
 
 /* ---------------------------------------------------------------------------
- * CFG-based multi-block JIT structures (Phase 1c)
+ * CFG-based multi-block JIT structures
  * --------------------------------------------------------------------------- */
 
 #define JIT_CFG_MAX_BLOCKS   64   /* BFS expansion limit */

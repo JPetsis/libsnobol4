@@ -49,6 +49,30 @@ if (!function_exists('snobol_get_jit_stats')) {
     }
 }
 
+if (!function_exists('snobol_get_choice_stats')) {
+    /**
+     * Retrieve choice-point statistics from the VM.
+     *
+     * Returns an associative array of metrics related to backtracking and
+     * memory usage of the choice-stack.
+     * Note: Global counters are currently best-effort; per-match metrics
+     * are available in the `_metrics` key of any match result.
+     *
+     * Available keys:
+     *   - choice_push_count         Total choice points pushed
+     *   - choice_allocated         Total choice points allocated
+     *   - choice_stack_depth       Current/maximum stack depth
+     *   - choice_stack_memory_usage Bytes currently used by the stack
+     *
+     * @return array<string, int>
+     */
+    function snobol_get_choice_stats(): array
+    {
+        // Native implementation in C extension
+        return [];
+    }
+}
+
 if (!function_exists('snobol_reset_jit_stats')) {
     /**
      * Reset all JIT statistics counters to zero.

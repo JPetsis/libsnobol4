@@ -14,6 +14,8 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
 * **Robust Backtracking Engine**:
   * **Catastrophic Backtracking Protection**: Detects and prevents infinite loops in nested zero-width matches
   * **Deep Recursion**: Dynamically growable choice stack handles deeply nested patterns without crashing
+  * **Compact Choice Stack**: Write-log delta encoding stores only changed capture registers per choice point, reducing
+    memory footprint by ≥50% for patterns with ≥10 choice points (default; legacy mode via `SNOBOL_LEGACY_CHOICE=1`)
 * **Rich Pattern Primitives**:
   * **Literals**: Exact string matching
   * **Concatenation & Alternation**: Sequential and alternative pattern composition

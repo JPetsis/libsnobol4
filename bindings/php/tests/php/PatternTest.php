@@ -378,8 +378,8 @@ class PatternTest extends TestCase
     public function testBacktrackingDoesNotLeakOutputAcrossAlternation(): void
     {
         // Output is currently NOT backtrackable in the VM, so emits from failing branches can remain.
-        // This test documents the current behavior as a baseline; once Task 2 decides output
-        // backtrack semantics, we can tighten this to assert "Y" only.
+        // This test documents the current behavior as a baseline; once output
+        // backtrack semantics are decided, we can tighten this to assert "Y" only.
         $ast = Builder::alt(
             Builder::concat([
                 Builder::emit('X'),
@@ -425,7 +425,7 @@ class PatternTest extends TestCase
         $table->set("key", "value_from_table");
 
         // Note: Full table-backed template syntax ($TABLE[key]) requires
-        // integration with the table registry which is part of task 2.3
+        // integration with the table registry
         // For now, test the underlying table lookup mechanism
         $this->assertEquals("value_from_table", $table->get("key"));
     }

@@ -292,7 +292,7 @@ class PatternHelper
         /* Compile the key-capturing pattern using C parser */
         /*
          * Note: Full table-backed substitution requires:
-         * 1. Registering the table with the VM runtime (task 4.2)
+         * 1. Registering the table with the VM runtime
          * 2. Template compilation with structured table references (done in 3.1)
          *
          * For now, use the Pattern's native subst() which will execute

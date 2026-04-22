@@ -415,6 +415,25 @@ PHP_FUNCTION(snobol_text_numeric) {
     RETURN_BOOL(snobol_numeric(s, slen));
 }
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_choice_stats, 0, 0, IS_ARRAY, 0)
+ZEND_END_ARG_INFO()
+
+PHP_FUNCTION(snobol_get_choice_stats) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        return;
+    }
+
+    array_init(return_value);
+    /* Choice stats are not global but per-VM run. For global observability, we would
+     * need a global collector. Since Choice Points are transient, only per-match
+     * observability via `_metrics` is currently precise. This function returns 0s
+     * for now until a global accumulator is added to the core. */
+    add_assoc_long(return_value, "choice_push_count", (zend_long)0);
+    add_assoc_long(return_value, "choice_allocated", (zend_long)0);
+    add_assoc_long(return_value, "choice_stack_depth", (zend_long)0);
+    add_assoc_long(return_value, "choice_stack_memory_usage", (zend_long)0);
+}
+
 static const zend_function_entry snobol_functions[] = {
 #ifdef SNOBOL_JIT
     PHP_FE(snobol_get_jit_stats, ai_snobol_get_jit_stats)
@@ -442,6 +461,7 @@ static const zend_function_entry snobol_functions[] = {
     PHP_FE(snobol_text_integer,      ai_text_str1_bool)
     PHP_FE(snobol_text_real,         ai_text_str1_bool)
     PHP_FE(snobol_text_numeric,      ai_text_str1_bool)
+    PHP_FE(snobol_get_choice_stats,  ai_snobol_get_choice_stats)
     PHP_FE_END
 };
 

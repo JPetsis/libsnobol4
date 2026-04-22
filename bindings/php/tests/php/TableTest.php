@@ -181,7 +181,7 @@ class TableTest extends TestCase
     public function testTableBackedTemplateCompilation(): void
     {
         /* Test that table-backed templates compile correctly
-         * Note: Runtime table registration is task 4.1
+         * Note: Runtime table registration must be completed first.
          * This test verifies the template compilation produces correct bytecode */
         $table = new Table('STATE');
         $table->set('CA', 'California');
@@ -208,7 +208,7 @@ class TableTest extends TestCase
         ]);
 
         /* Template: $STATE[$v0] - capture-derived key lookup */
-        /* Note: This requires proper table registration which is task 4.1 */
+        /* Note: This requires proper table registration */
         /* For now, test basic table functionality */
         $this->assertEquals('California', $table->get('CA'));
         $this->assertEquals('New York', $table->get('NY'));
