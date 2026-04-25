@@ -12,7 +12,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <unistd.h>  // for setenv/unsetenv
+#ifdef _WIN32
+#  include <stdlib.h>   /* _putenv_s */
+static int setenv(const char *name, const char *value, int overwrite) {
+    (void)overwrite;
+    return _putenv_s(name, value);
+}
+static int unsetenv(const char *name) {
+    return _putenv_s(name, "");
+}
+#else
+#  include <unistd.h>  /* setenv/unsetenv */
+#endif
 
 #include "snobol/vm.h"
 
