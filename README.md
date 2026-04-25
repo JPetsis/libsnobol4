@@ -58,7 +58,7 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
 
 | Binding              | Status   | Version |
 |----------------------|----------|---------|
-| [PHP](bindings/php/) | ✅ Stable | v0.2.0  |
+| [PHP](bindings/php/) | ✅ Stable | v0.4.0  |
 
 ## Project Structure
 
@@ -272,7 +272,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 libsnobol4 uses independent versioning for core and each binding:
 
-- **Core**: v0.2.0
-- **PHP Binding**: v0.2.0
+- **Core**: v0.4.0
+- **PHP Binding**: v0.4.0
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.

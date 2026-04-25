@@ -190,8 +190,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Version Status
 
-- **Core Library**: v0.2.0
-- **PHP Binding**: v0.2.0
+- **Core Library**: v0.4.0
+- **PHP Binding**: v0.4.0
 - **AST API**: v1.1.0 (new primitive nodes added, backwards compatible)
 
 ---
