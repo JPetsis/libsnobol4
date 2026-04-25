@@ -314,6 +314,13 @@ ast_node_t* snobol_ast_create_repeat(ast_node_t* sub, int32_t min, int32_t max);
 ast_node_t* snobol_ast_create_label(char* name, ast_node_t* target);
 
 /**
+ * Create a goto AST node
+ * @param label Target label name (copied)
+ * @return New AST node (caller owns)
+ */
+ast_node_t* snobol_ast_create_goto(const char* label);
+
+/**
  * Free an AST node and all children recursively
  * @param node Node to free (NULL is safe)
  */

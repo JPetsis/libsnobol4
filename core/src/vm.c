@@ -53,15 +53,48 @@ static int vm_emit_lit_bytes(VmCodeBuf *c, const char *s, size_t len) {
     return 0;
 }
 
+/* Magic that compiler appends after the label table (last 4 bytes of new-format bc).
+ * Old-format bytecodes have charclass_count at bc_len-4 (typically < 65536).
+ * 0x534E424C = "SNBL" — safely outside any realistic charclass_count range. */
+#define SNOBOL_LABEL_TABLE_MAGIC  0x534E424Cu
+
 const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count, uint16_t *out_case) {
     if (set_id == 0) return NULL;
     size_t tail_ip = vm->bc_len;
     if (tail_ip < 4) return NULL;
-    uint32_t class_count = ((uint32_t)vm->bc[tail_ip-4] << 24) | ((uint32_t)vm->bc[tail_ip-3] << 16) | ((uint32_t)vm->bc[tail_ip-2] << 8) | (uint32_t)vm->bc[tail_ip-1];
+
+    /* Detect bytecode format:
+     *   NEW format (compiler-produced): last 4 bytes == SNOBOL_LABEL_TABLE_MAGIC
+     *     layout (from end): MAGIC | label_count | label_offsets[] | charclass_count | ...
+     *   OLD format (hand-built tests): last 4 bytes == charclass_count
+     *
+     * For charclass lookup we only need to find charclass_count; in new format
+     * we skip past the label table first. */
+    uint32_t last4 = ((uint32_t)vm->bc[tail_ip-4] << 24) | ((uint32_t)vm->bc[tail_ip-3] << 16) |
+                     ((uint32_t)vm->bc[tail_ip-2] << 8) | (uint32_t)vm->bc[tail_ip-1];
+
+    size_t cc_tail; /* position just after charclass_count field */
+    if (last4 == SNOBOL_LABEL_TABLE_MAGIC) {
+        /* New format: read label_count from the u32 before the MAGIC */
+        if (tail_ip < 8) return NULL;
+        uint32_t label_count = ((uint32_t)vm->bc[tail_ip-8] << 24) | ((uint32_t)vm->bc[tail_ip-7] << 16) |
+                               ((uint32_t)vm->bc[tail_ip-6] << 8) | (uint32_t)vm->bc[tail_ip-5];
+        /* charclass_count sits just before: [label_offsets…][label_count][MAGIC] */
+        size_t skip = 8 + (size_t)label_count * 4; /* 4 (label_count) + 4 (MAGIC) + N*4 */
+        if (tail_ip < skip + 4) return NULL;
+        cc_tail = tail_ip - skip;
+    } else {
+        /* Old format: charclass_count IS at bc_len-4 */
+        cc_tail = tail_ip;
+    }
+
+    if (cc_tail < 4) return NULL;
+    uint32_t class_count = ((uint32_t)vm->bc[cc_tail-4] << 24) | ((uint32_t)vm->bc[cc_tail-3] << 16) |
+                           ((uint32_t)vm->bc[cc_tail-2] << 8) | (uint32_t)vm->bc[cc_tail-1];
     if (set_id > class_count) return NULL;
     size_t table_size = (size_t)class_count * 4;
-    if (tail_ip < 4 + table_size) return NULL;
-    size_t table_start = tail_ip - 4 - table_size;
+    if (cc_tail < 4 + table_size) return NULL;
+    size_t table_start = cc_tail - 4 - table_size;
     size_t offset_pos = table_start + (size_t)(set_id - 1) * 4;
     uint32_t offset = ((uint32_t)vm->bc[offset_pos+0] << 24) | ((uint32_t)vm->bc[offset_pos+1] << 16) | ((uint32_t)vm->bc[offset_pos+2] << 8) | (uint32_t)vm->bc[offset_pos+3];
     if (offset >= vm->bc_len) return NULL;
@@ -1386,7 +1419,29 @@ bool vm_exec(VM *vm) {
     
     /* Initialize control flow state */
     vm_init_labels(vm);
-    
+
+    /* Pre-register labels from bytecode tail (compiler-produced bytecodes only).
+     * Detection: last 4 bytes == SNOBOL_LABEL_TABLE_MAGIC (0x534E424C = "SNBL").
+     * Layout (from end): MAGIC | label_count | label_offsets[N] | ...charclass...
+     * Hand-built test bytecodes have charclass_count there instead → no labels. */
+    if (vm->bc_len >= 8) {
+        uint32_t last4 = ((uint32_t)vm->bc[vm->bc_len-4] << 24) | ((uint32_t)vm->bc[vm->bc_len-3] << 16) |
+                         ((uint32_t)vm->bc[vm->bc_len-2] << 8) | (uint32_t)vm->bc[vm->bc_len-1];
+        if (last4 == SNOBOL_LABEL_TABLE_MAGIC) {
+            uint32_t lc = ((uint32_t)vm->bc[vm->bc_len-8] << 24) | ((uint32_t)vm->bc[vm->bc_len-7] << 16) |
+                          ((uint32_t)vm->bc[vm->bc_len-6] << 8) | (uint32_t)vm->bc[vm->bc_len-5];
+            if (lc > 0 && vm->bc_len >= 8 + (size_t)lc * 4) {
+                size_t table_base = vm->bc_len - 8 - (size_t)lc * 4;
+                for (uint32_t i = 0; i < lc; i++) {
+                    size_t op = table_base + (size_t)i * 4;
+                    uint32_t offset = ((uint32_t)vm->bc[op] << 24) | ((uint32_t)vm->bc[op+1] << 16) |
+                                      ((uint32_t)vm->bc[op+2] << 8) | (uint32_t)vm->bc[op+3];
+                    vm_register_label(vm, (uint16_t)i, offset);
+                }
+            }
+        }
+    }
+
 #ifdef SNOBOL_DYNAMIC_PATTERN
     /* Initialize table registry */
     vm_init_tables(vm);

@@ -150,6 +150,37 @@ $result = PatternHelper::replace($pattern, "NAME:\${v1.upper()}", "name:alice");
 // Returns: "NAME:ALICE"
 ```
 
+### Labelled Control Flow
+
+Labels and forward gotos allow non-backtracking control-flow inside a pattern:
+
+```php
+<?php
+use Snobol\Builder;
+use Snobol\PatternHelper;
+
+// Label wrapping a sub-pattern
+$ast = Builder::label('start', Builder::span('A-Za-z'));
+$result = PatternHelper::matchOnce($ast, 'hello');
+// Returns: ['_match_len' => 5, '_output' => '']
+
+// Forward goto — jumps past a sub-pattern to a later label
+// Pattern: lit(">>") :(content) content: SPAN('A-Za-z')
+$ast = Builder::concat([
+    Builder::lit('>>'),
+    Builder::goto('content'),
+    Builder::label('content', Builder::span('A-Za-z')),
+]);
+$result = PatternHelper::matchOnce($ast, '>>hello');
+// Returns: ['_match_len' => 7, '_output' => '']
+
+// Compile-time validation: duplicate labels or undefined gotos are
+// rejected before execution; no runtime failure possible.
+```
+
+> **Note:** Duplicate label names or a goto referencing an undefined label
+> are caught at compile time, not at runtime.
+
 ### Using Tables
 
 ```php
@@ -202,6 +233,8 @@ Fluent API for constructing patterns:
 | `alt($left, $right)`       | Alternation (OR)               |
 | `emit($text)`              | Emit literal to output         |
 | `emitRef($reg)`            | Emit capture to output         |
+| `label($name, $sub)`       | Named label wrapping a pattern |
+| `goto($label)`             | Unconditional goto label       |
 
 ### Pattern
 

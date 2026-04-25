@@ -1060,6 +1060,23 @@ static ast_node_t* php_ast_to_c(zval *php_ast) {
             return snobol_ast_create_rtab((int32_t)Z_LVAL_P(n_zv));
         }
     }
+    /* ---- Control flow ---- */
+    else if (strcmp(type, "label") == 0) {
+        zval *name_zv   = zend_hash_str_find(Z_ARRVAL_P(php_ast), "name",   sizeof("name")-1);
+        zval *target_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "target", sizeof("target")-1);
+        if (name_zv && target_zv && Z_TYPE_P(name_zv) == IS_STRING) {
+            ast_node_t *target = php_ast_to_c(target_zv);
+            if (target) {
+                return snobol_ast_create_label(Z_STRVAL_P(name_zv), target);
+            }
+        }
+    }
+    else if (strcmp(type, "goto") == 0) {
+        zval *label_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "label", sizeof("label")-1);
+        if (label_zv && Z_TYPE_P(label_zv) == IS_STRING) {
+            return snobol_ast_create_goto(Z_STRVAL_P(label_zv));
+        }
+    }
 
     return NULL;
 }

@@ -16,6 +16,10 @@
  */
 struct snobol_parser {
     parser_error_t error;
+    /* Duplicate label tracking */
+    char **seen_labels;
+    size_t seen_label_count;
+    size_t seen_label_capacity;
 };
 
 /* Forward declarations for recursive descent */
@@ -42,6 +46,9 @@ snobol_parser_t* snobol_parser_create(void) {
         parser->error.message[0] = '\0';
         parser->error.line = 0;
         parser->error.column = 0;
+        parser->seen_labels = NULL;
+        parser->seen_label_count = 0;
+        parser->seen_label_capacity = 0;
     }
     return parser;
 }
@@ -95,7 +102,13 @@ ast_node_t* snobol_parser_parse(snobol_parser_t* parser, snobol_lexer_t* lexer) 
     
     /* Clear any previous error */
     parser->error.has_error = false;
-    
+
+    /* Clear seen labels from previous parse */
+    for (size_t i = 0; i < parser->seen_label_count; i++) {
+        free(parser->seen_labels[i]);
+    }
+    parser->seen_label_count = 0;
+
     /* Parse the pattern */
     ast_node_t* ast = parse_pattern(parser, lexer);
     
@@ -130,11 +143,37 @@ static ast_node_t* parse_statement(snobol_parser_t* parser, snobol_lexer_t* lexe
             /* This is a label */
             advance(lexer);  /* Consume ':' */
 
-            /* Create label node - we'll wrap the pattern later */
+            /* Create label name */
             char* label_name = (char*)malloc(tok.data.string.len + 1);
             if (label_name) {
                 memcpy(label_name, tok.data.string.text, tok.data.string.len);
                 label_name[tok.data.string.len] = '\0';
+            }
+
+            /* Duplicate label detection */
+            for (size_t i = 0; i < parser->seen_label_count; i++) {
+                if (parser->seen_labels[i] && strcmp(parser->seen_labels[i], label_name) == 0) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Duplicate label: '%s'", label_name);
+                    set_error(parser, msg, snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+                    free(label_name);
+                    return NULL;
+                }
+            }
+
+            /* Record label name */
+            if (parser->seen_label_count >= parser->seen_label_capacity) {
+                size_t new_cap = parser->seen_label_capacity ? parser->seen_label_capacity * 2 : 4;
+                char **new_labels = (char**)realloc(parser->seen_labels, new_cap * sizeof(char*));
+                if (new_labels) {
+                    parser->seen_labels = new_labels;
+                    parser->seen_label_capacity = new_cap;
+                }
+            }
+            if (parser->seen_label_count < parser->seen_label_capacity) {
+                char *copy = (char*)malloc(strlen(label_name) + 1);
+                if (copy) strcpy(copy, label_name);
+                parser->seen_labels[parser->seen_label_count++] = copy;
             }
 
             /* Parse the target pattern */
@@ -172,15 +211,38 @@ static ast_node_t* parse_statement(snobol_parser_t* parser, snobol_lexer_t* lexe
             snobol_ast_free(pattern);
             return NULL;
         }
+
+        /* Capture label name for goto */
+        char* goto_label = (char*)malloc(tok.data.string.len + 1);
+        if (goto_label) {
+            memcpy(goto_label, tok.data.string.text, tok.data.string.len);
+            goto_label[tok.data.string.len] = '\0';
+        }
         advance(lexer);
         
         if (!expect(parser, lexer, TOKEN_RPAREN)) {
+            free(goto_label);
             snobol_ast_free(pattern);
             return NULL;
         }
-        
-        /* For now, we don't have a goto AST node in the same way */
-        /* The goto is handled at the statement level */
+
+        /* Create a concat of the pattern and the goto node */
+        ast_node_t* goto_node = snobol_ast_create_goto(goto_label);
+        free(goto_label);
+        if (!goto_node) {
+            snobol_ast_free(pattern);
+            return NULL;
+        }
+
+        ast_node_t** parts = (ast_node_t**)malloc(2 * sizeof(ast_node_t*));
+        if (!parts) {
+            snobol_ast_free(pattern);
+            snobol_ast_free(goto_node);
+            return NULL;
+        }
+        parts[0] = pattern;
+        parts[1] = goto_node;
+        return snobol_ast_create_concat(parts, 2);
     }
     
     return pattern;
@@ -549,6 +611,10 @@ void snobol_parser_clear_error(snobol_parser_t* parser) {
 
 void snobol_parser_destroy(snobol_parser_t* parser) {
     if (parser) {
+        for (size_t i = 0; i < parser->seen_label_count; i++) {
+            free(parser->seen_labels[i]);
+        }
+        free(parser->seen_labels);
         free(parser);
     }
 }

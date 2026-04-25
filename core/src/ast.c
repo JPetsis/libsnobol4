@@ -106,6 +106,23 @@ ast_node_t* snobol_ast_create_repeat(ast_node_t* sub, int32_t min, int32_t max) 
     return node;
 }
 
+ast_node_t* snobol_ast_create_goto(const char* label) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return NULL;
+
+    node->type = AST_GOTO;
+    if (label) {
+        size_t len = strlen(label);
+        node->data.goto_stmt.label = (char*)malloc(len + 1);
+        if (node->data.goto_stmt.label) {
+            strcpy(node->data.goto_stmt.label, label);
+        }
+    } else {
+        node->data.goto_stmt.label = NULL;
+    }
+    return node;
+}
+
 ast_node_t* snobol_ast_create_label(char* name, ast_node_t* target) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
     if (!node) {

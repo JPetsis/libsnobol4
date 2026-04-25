@@ -109,10 +109,30 @@ static int add_or_get_charclass(const char *s, size_t len) {
     
     size_t pos = 0;
     while (pos < len) {
-        uint32_t cp; int bytes;
-        if (!utf8_peek_next(s, len, pos, &cp, &bytes)) break;
+        uint32_t cp; int cp_bytes;
+        if (!utf8_peek_next(s, len, pos, &cp, &cp_bytes)) break;
+
+        /* Check for range notation: X-Y where X < Y */
+        uint32_t dash_cp; int dash_bytes;
+        uint32_t end_cp; int end_bytes;
+        if (utf8_peek_next(s, len, pos + cp_bytes, &dash_cp, &dash_bytes) && dash_cp == '-' &&
+            utf8_peek_next(s, len, pos + cp_bytes + dash_bytes, &end_cp, &end_bytes) && end_cp > cp) {
+            /* Expand X-Y range */
+            add_range(ne, cp, end_cp);
+            if (compiler_case_insensitive) {
+                /* Add case-folded partner range for ASCII alpha ranges */
+                if (cp >= 'A' && end_cp <= 'Z') {
+                    add_range(ne, cp + 32, end_cp + 32);     /* A-Z -> a-z */
+                } else if (cp >= 'a' && end_cp <= 'z') {
+                    add_range(ne, cp - 32, end_cp - 32);     /* a-z -> A-Z */
+                }
+            }
+            pos += cp_bytes + dash_bytes + end_bytes;
+            continue;
+        }
+
+        /* Single codepoint */
         add_range(ne, cp, cp);
-        
         if (compiler_case_insensitive) {
             if (cp >= 'A' && cp <= 'Z') {
                 add_range(ne, cp + 32, cp + 32);
@@ -124,8 +144,8 @@ static int add_or_get_charclass(const char *s, size_t len) {
                  add_range(ne, cp - 0x20, cp - 0x20);
             }
         }
-        
-        pos += bytes;
+
+        pos += cp_bytes;
     }
     normalize_ranges(ne);
     
@@ -1115,6 +1135,94 @@ void compiler_free(uint8_t *bc) {
     }
 }
 
+/* ---------------------------------------------------------------------------
+ * Label tracking for C-AST compilation (tasks 2.1-2.5)
+ * ---------------------------------------------------------------------------
+ * Labels are assigned sequential numeric IDs (0, 1, 2, ...).
+ * The label offset table is appended to the end of the bytecode after the
+ * charclass section:
+ *   [label offsets: u32 * label_count] [label_count: u32]
+ * vm_exec reads this table and pre-registers labels before running.
+ * ---------------------------------------------------------------------------*/
+typedef struct {
+    char *name;       /* Owned: label name string */
+    uint16_t id;      /* Numeric ID (== index in table) */
+    uint32_t offset;  /* Bytecode offset immediately after OP_LABEL+id */
+    bool defined;     /* Was this label defined (not just referenced)? */
+    bool referenced;  /* Was this label referenced by a goto? */
+} LabelEntry;
+
+static LabelEntry *label_table_c = NULL;
+static uint16_t label_table_count_c = 0;
+static uint16_t label_table_capacity_c = 0;
+static char label_error_c[256];
+static bool label_has_error_c = false;
+
+static void free_label_table_c(void) {
+    for (uint16_t i = 0; i < label_table_count_c; i++) {
+        if (label_table_c[i].name) snobol_free(label_table_c[i].name);
+    }
+    if (label_table_c) snobol_free(label_table_c);
+    label_table_c = NULL;
+    label_table_count_c = 0;
+    label_table_capacity_c = 0;
+    label_has_error_c = false;
+    label_error_c[0] = '\0';
+}
+
+/* Find label by name. Returns index (==id), or -1 if not found. */
+static int find_label_c(const char *name) {
+    for (uint16_t i = 0; i < label_table_count_c; i++) {
+        if (label_table_c[i].name && strcmp(label_table_c[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* Get or create label entry. Returns index (==id), or -1 on error. */
+static int get_or_create_label_c(const char *name) {
+    int idx = find_label_c(name);
+    if (idx >= 0) return idx;
+
+    if (label_table_count_c >= label_table_capacity_c) {
+        uint16_t new_cap = label_table_capacity_c ? (uint16_t)(label_table_capacity_c * 2) : 8;
+        LabelEntry *new_tbl = snobol_realloc(label_table_c, new_cap * sizeof(LabelEntry));
+        if (!new_tbl) return -1;
+        label_table_c = new_tbl;
+        label_table_capacity_c = new_cap;
+    }
+    uint16_t new_idx = label_table_count_c++;
+    label_table_c[new_idx].name = snobol_malloc(strlen(name) + 1);
+    if (!label_table_c[new_idx].name) { label_table_count_c--; return -1; }
+    strcpy(label_table_c[new_idx].name, name);
+    label_table_c[new_idx].id = new_idx;
+    label_table_c[new_idx].offset = 0;
+    label_table_c[new_idx].defined = false;
+    label_table_c[new_idx].referenced = false;
+    return (int)new_idx;
+}
+
+/* Magic sentinel that marks a bytecode as having the label-table extension.
+ * "SNBL" in ASCII: 0x534E424C
+ * get_ranges_ptr and vm_exec check for this value at bc_len-4 to distinguish
+ * compiler-produced bytecodes (new format) from hand-built test bytecodes
+ * (old format: charclass_count lives at bc_len-4, no label table present).
+ */
+#define SNOBOL_LABEL_TABLE_MAGIC  0x534E424Cu
+
+/* Emit label offset table at end of bytecode (after charclass section).
+ * Format: [offset_0 u32] ... [offset_{N-1} u32] [label_count u32] [MAGIC u32]
+ * The MAGIC at bc_len-4 lets readers distinguish this new format from the
+ * old format where charclass_count was the last u32. */
+static void emit_label_table(CodeBuf *c) {
+    for (uint16_t i = 0; i < label_table_count_c; i++) {
+        cb_emit_u32(c, label_table_c[i].defined ? label_table_c[i].offset : 0);
+    }
+    cb_emit_u32(c, (uint32_t)label_table_count_c);
+    cb_emit_u32(c, SNOBOL_LABEL_TABLE_MAGIC);
+}
+
 /* ============================================================================
  * C AST-based compilation
  * ============================================================================
@@ -1256,6 +1364,7 @@ static int emit_rtab_c(int32_t n, CodeBuf *c) {
 int compile_ast_to_bytecode_c(ast_node_t* ast, bool case_insensitive, uint8_t **out_bc, size_t *out_len) {
     SNOBOL_LOG("compile_ast_to_bytecode_c START");
     free_charclass_list();
+    free_label_table_c();
     next_loop_id = 0;
     compiler_case_insensitive = case_insensitive;
 
@@ -1266,8 +1375,21 @@ int compile_ast_to_bytecode_c(ast_node_t* ast, bool case_insensitive, uint8_t **
         SNOBOL_LOG("compile_ast_to_bytecode_c FAILED at emit_node_c");
         cb_free(&cb);
         free_charclass_list();
+        free_label_table_c();
         return -1;
     }
+
+    /* Validate unknown labels - all referenced labels must be defined */
+    for (uint16_t i = 0; i < label_table_count_c; i++) {
+        if (label_table_c[i].referenced && !label_table_c[i].defined) {
+            SNOBOL_LOG("compile_ast_to_bytecode_c FAILED: undefined label '%s'", label_table_c[i].name);
+            cb_free(&cb);
+            free_charclass_list();
+            free_label_table_c();
+            return -1;
+        }
+    }
+
     cb_emit_u8(&cb, OP_ACCEPT);
 
     /* Fusion pass: fuse eligible SPLIT/LIT|ANY pairs into a single OP_ANY */
@@ -1307,10 +1429,14 @@ int compile_ast_to_bytecode_c(ast_node_t* ast, bool case_insensitive, uint8_t **
 
     cb_emit_u32(&cb, charclass_count);
 
+    /* Emit label offset table (always, even if empty - label_count=0 is valid) */
+    emit_label_table(&cb);
+
     uint8_t *out = snobol_malloc(cb.len);
     if (!out) {
         SNOBOL_LOG("compile_ast_to_bytecode_c FAILED to allocate final bc");
         cb_free(&cb);
+        free_label_table_c();
         return -1;
     }
     memcpy(out, cb.buf, cb.len);
@@ -1319,6 +1445,7 @@ int compile_ast_to_bytecode_c(ast_node_t* ast, bool case_insensitive, uint8_t **
 
     cb_free(&cb);
     free_charclass_list();
+    free_label_table_c();
     SNOBOL_LOG("compile_ast_to_bytecode_c SUCCESS, len=%zu", *out_len);
     return 0;
 }
@@ -1563,8 +1690,53 @@ static int emit_node_c(ast_node_t* node, CodeBuf *c) {
         case AST_RTAB:
             return emit_rtab_c(node->data.rpos_rtab.n, c);
 
-        case AST_LABEL:
-        case AST_GOTO:
+        case AST_LABEL: {
+            /* Emit OP_LABEL opcode, register offset, detect duplicates */
+            const char *name = node->data.label.name;
+            if (!name) return -1;
+
+            /* Duplicate label check */
+            int existing = find_label_c(name);
+            if (existing >= 0 && label_table_c[existing].defined) {
+                snprintf(label_error_c, sizeof(label_error_c), "Duplicate label: '%s'", name);
+                label_has_error_c = true;
+                SNOBOL_LOG("emit_node_c: duplicate label '%s'", name);
+                return -1;
+            }
+
+            int idx = get_or_create_label_c(name);
+            if (idx < 0) return -1;
+
+            /* Emit OP_LABEL with numeric label ID */
+            cb_emit_u8(c, OP_LABEL);
+            cb_emit_u16(c, (uint16_t)idx);
+
+            /* Record the offset AFTER OP_LABEL+id - this is where OP_GOTO will transfer to */
+            label_table_c[idx].offset = (uint32_t)cb_pos(c);
+            label_table_c[idx].defined = true;
+
+            /* Compile the target pattern (code that runs at/after this label) */
+            if (node->data.label.target) {
+                return emit_node_c(node->data.label.target, c);
+            }
+            return 0;
+        }
+
+        case AST_GOTO: {
+            /* Emit OP_GOTO for goto statement */
+            const char *label_name = node->data.goto_stmt.label;
+            if (!label_name) return -1;
+
+            int idx = get_or_create_label_c(label_name);
+            if (idx < 0) return -1;
+
+            label_table_c[idx].referenced = true;
+
+            cb_emit_u8(c, OP_GOTO);
+            cb_emit_u16(c, (uint16_t)idx);
+            return 0;
+        }
+
         case AST_TABLE_ACCESS:
         case AST_TABLE_UPDATE:
             /* These are handled at statement level, not pattern compilation */

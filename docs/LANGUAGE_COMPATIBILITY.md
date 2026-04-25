@@ -232,11 +232,14 @@ key_type (1 byte, u8):
 
 The `tests/compat/` directory contains reference programs demonstrating the features:
 
-| Fixture               | Features Used                                       | Runtime-Backed |
-|-----------------------|-----------------------------------------------------|----------------|
-| `WordCounter.php`     | Tables for counting                                 | ✅ Yes          |
-| `TextTransformer.php` | Dynamic patterns via `PatternHelper::evalPattern()` | ✅ Yes          |
-| `TemplateEngine.php`  | Table-backed variables                              | ✅ Yes          |
+| Fixture                       | Features Used                                                            | Runtime-Backed |
+|-------------------------------|--------------------------------------------------------------------------|----------------|
+| `WordCounter.php`             | Tables for counting                                                      | ✅ Yes          |
+| `TextTransformer.php`         | Dynamic patterns via `PatternHelper::evalPattern()`                      | ✅ Yes          |
+| `TemplateEngine.php`          | Table-backed variables                                                   | ✅ Yes          |
+| `WordCounterWithGoto.php`     | `Builder::label` / `Builder::goto` for labelled control flow             | ✅ Yes          |
+| `TextTransformerWithGoto.php` | Labelled classification patterns + forward goto via `Builder` API        | ✅ Yes          |
+| `TemplateEngineWithGoto.php`  | Label-wrapped variable detection + forward `goto` for structure checking | ✅ Yes          |
 
 Run compatibility tests with:
 
@@ -246,7 +249,43 @@ make test
 ./vendor/bin/phpunit tests/compat
 ```
 
-**Results:** All 21 compatibility tests pass.
+**Results:** All 34 compatibility tests pass (21 existing + 13 new labelled control flow tests).
+
+### Labelled Control Flow in Compatibility Fixtures
+
+The three `*WithGoto` fixtures (v0.4.0) demonstrate:
+
+1. **`Builder::label(name, pattern)`** — wraps a sub-pattern with a named label.
+   The compiler emits `OP_LABEL label_id` followed by the body bytecode.
+   The label's registered offset points to the first instruction of the body.
+
+2. **`Builder::goto(label)`** — emits `OP_GOTO label_id` unconditionally.
+   Control transfers to the target without popping the backtracking choice stack,
+   distinguishing it from backtracking.
+
+3. **Forward goto** — a goto that references a label defined later in the same
+   concat sequence. The VM pre-registers all labels from the bytecode tail table
+   before execution begins, so forward references always resolve.
+
+4. **Compile-time validation** — duplicate label names and goto references to
+   undefined labels are rejected at compile time (not at runtime).
+
+#### Example: Forward Goto Pattern
+
+```php
+use Snobol\Builder;
+use Snobol\PatternHelper;
+
+// Pattern: lit(">>") :(content) content: SPAN('A-Za-z')
+// Bytecode: LIT(">>"), GOTO(content), LABEL(content), SPAN, ACCEPT
+// On ">>hello": match ">>", GOTO jumps to SPAN body → matches "hello"
+$ast = Builder::concat([
+    Builder::lit('>>'),
+    Builder::goto('content'),
+    Builder::label('content', Builder::span('A-Za-z')),
+]);
+$result = PatternHelper::matchOnce($ast, '>>hello'); // array with _match_len
+```
 
 ## API Reference
 

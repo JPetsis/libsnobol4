@@ -15,6 +15,9 @@ use PHPUnit\Framework\TestCase;
 require_once __DIR__.'/fixtures/WordCounter.php';
 require_once __DIR__.'/fixtures/TextTransformer.php';
 require_once __DIR__.'/fixtures/TemplateEngine.php';
+require_once __DIR__.'/fixtures/WordCounterWithGoto.php';
+require_once __DIR__.'/fixtures/TextTransformerWithGoto.php';
+require_once __DIR__.'/fixtures/TemplateEngineWithGoto.php';
 
 class CompatibilityTest extends TestCase
 {
@@ -172,5 +175,109 @@ class CompatibilityTest extends TestCase
         $this->assertEquals("value ", $result);
         $transformed = $transformer->transform($result, "upper");
         $this->assertEquals("VALUE ", $transformed);
+    }
+
+    /*
+     * Test 5: Labelled Control Flow – WordCounterWithGoto
+     */
+    public function testLabeledWordMatch(): void
+    {
+        $counter = new WordCounterWithGoto();
+        $result = $counter->matchLabeledWord("hello world");
+
+        $this->assertNotFalse($result, 'labeled span matches a word');
+    }
+
+    public function testLabeledWordCount(): void
+    {
+        $counter = new WordCounterWithGoto();
+        $count = $counter->countWords("one two three 42");
+
+        /* Three alphabetic word spans: "one", "two", "three" */
+        $this->assertEquals(3, $count);
+    }
+
+    public function testForwardGotoPrefix(): void
+    {
+        $counter = new WordCounterWithGoto();
+
+        /* ">>" prefix followed by letters: should match */
+        $this->assertNotFalse($counter->matchPrefixedWord(">>hello"));
+
+        /* No ">>" prefix: should NOT match */
+        $this->assertFalse($counter->matchPrefixedWord("hello"));
+    }
+
+    /*
+     * Test 6: Labelled Control Flow – TextTransformerWithGoto
+     */
+    public function testClassifyNumber(): void
+    {
+        $transformer = new TextTransformerWithGoto();
+        $this->assertEquals('number', $transformer->classifyFirstToken('123abc'));
+    }
+
+    public function testClassifyWord(): void
+    {
+        $transformer = new TextTransformerWithGoto();
+        $this->assertEquals('word', $transformer->classifyFirstToken('hello'));
+    }
+
+    public function testTaggedSegmentMatch(): void
+    {
+        $transformer = new TextTransformerWithGoto();
+        /* "[intro]" tag followed by alpha content */
+        $result = $transformer->matchTaggedSegment('[intro]hello world', 'intro');
+        $this->assertNotFalse($result, 'tagged segment forward-goto matches');
+    }
+
+    public function testTaggedSegmentNoMatch(): void
+    {
+        $transformer = new TextTransformerWithGoto();
+        /* Wrong tag */
+        $result = $transformer->matchTaggedSegment('[other]hello', 'intro');
+        $this->assertFalse($result, 'tagged segment does not match wrong tag');
+    }
+
+    /*
+     * Test 7: Labelled Control Flow – TemplateEngineWithGoto
+     */
+    public function testDetectTemplateVariable(): void
+    {
+        $engine = new TemplateEngineWithGoto();
+        $result = $engine->detectVariable('{name} rest');
+
+        $this->assertNotFalse($result);
+        $this->assertEquals('name', $result['v0']);
+    }
+
+    public function testFindTemplateVariables(): void
+    {
+        $engine = new TemplateEngineWithGoto();
+        $vars = $engine->findVariables('{first} and {second} and {third}');
+
+        $this->assertCount(3, $vars);
+        $this->assertContains('first', $vars);
+        $this->assertContains('second', $vars);
+        $this->assertContains('third', $vars);
+    }
+
+    public function testValidateVariableWithGoto(): void
+    {
+        $engine = new TemplateEngineWithGoto();
+
+        /* Valid variable tokens */
+        $this->assertTrue($engine->validateVariable('{hello}'));
+        $this->assertTrue($engine->validateVariable('{ABC}'));
+
+        /* Invalid: no closing brace - should not match */
+        $this->assertFalse($engine->validateVariable('{missing'));
+    }
+
+    public function testCountTemplateVariables(): void
+    {
+        $engine = new TemplateEngineWithGoto();
+        $this->assertEquals(2, $engine->countVariables('{a} plain text {b}'));
+        $this->assertEquals(0, $engine->countVariables('no variables here'));
     }
 }

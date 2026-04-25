@@ -5,6 +5,55 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-25
+
+### Added — Labelled Control Flow (complete-labelled-control-flow)
+
+- **`snobol_ast_create_goto`** (`core/src/ast.c`, `core/include/snobol/ast.h`):
+  New AST creation function for `AST_GOTO` nodes, symmetrical with
+  `snobol_ast_create_label`.
+- **Parser: AST_GOTO emission** (`core/src/parser.c`): `parse_statement` now
+  constructs an `AST_GOTO` node for `:(LABEL)` goto syntax and wraps it in a
+  `concat([pattern, goto_node])` structure, making goto visible to the compiler.
+- **Parser: duplicate-label detection** (`core/src/parser.c`): A `seen_labels`
+  array tracks label names within each `snobol_parser_parse()` call; nested
+  duplicate labels produce a parse error immediately.
+- **Compiler: `AST_LABEL` emission** (`core/src/compiler.c`): `emit_node_c` now
+  emits `OP_LABEL label_id` for label nodes, records the bytecode offset
+  immediately after the instruction (the label's execution target), and detects
+  duplicate definitions at compile time.
+- **Compiler: `AST_GOTO` emission** (`core/src/compiler.c`): `emit_node_c` emits
+  `OP_GOTO label_id` for goto nodes and marks the referenced label as needing a
+  definition.
+- **Compiler: unknown-label validation** (`core/src/compiler.c`): after all nodes
+  are emitted, `compile_ast_to_bytecode_c` rejects any referenced label that was
+  never defined.
+- **Bytecode label table** (`core/src/compiler.c`, `core/src/vm.c`): a label
+  offset table `[u32 × label_count, u32 label_count]` is appended to the end of
+  the bytecode. `vm_exec` reads this table before `vm_run` and pre-registers
+  all labels via `vm_register_label`, enabling forward goto references.
+- **`get_ranges_ptr` updated** (`core/src/vm.c`): skips the new label table when
+  computing the charclass section position so existing charclass-based patterns
+  are unaffected.
+- **C tests** (`tests/c/test_control_flow.c`): five new test functions covering
+  duplicate-label detection via parser, duplicate-label detection via compiler,
+  unknown-label detection via compiler, simple label pattern execution, and
+  forward goto execution through the full pipeline.
+- **PHP compatibility fixtures** (`tests/compat/fixtures/`):
+  `WordCounterWithGoto`, `TextTransformerWithGoto`, `TemplateEngineWithGoto` —
+  three new fixture classes demonstrating labelled control flow (`Builder::label`,
+  `Builder::goto`) via the PHP binding API.
+- **PHP compatibility tests** (`tests/compat/CompatibilityTest.php`): thirteen
+  new test methods covering all three WithGoto fixtures.
+- **PHP binding: `label`/`goto` AST conversion** (`bindings/php/src/snobol_pattern.c`):
+  `php_ast_to_c` now handles `"label"` and `"goto"` array nodes from `Builder::label()`
+  and `Builder::goto()`, wiring PHP-side construction to `snobol_ast_create_label` /
+  `snobol_ast_create_goto` in the C core.
+- **PHP Builder tests** (`bindings/php/tests/php/BuilderTest.php`): two additional
+  test methods verifying the `label` and `goto` AST node shapes.
+- **Test coverage**: 1,300 C tests (35 net-new in Control Flow suite) + 211 PHP tests
+  pass; zero regressions.
+
 ## [0.3.0] - unreleased
 
 ### Added — Compact Backtracking (Phase 2)

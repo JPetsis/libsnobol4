@@ -13,6 +13,10 @@
 
 #include "../../core/include/snobol/snobol_internal.h"
 #include "snobol/vm.h"
+#include "snobol/parser.h"
+#include "snobol/lexer.h"
+#include "snobol/ast.h"
+#include "snobol/compiler.h"
 
 /* External test framework functions */
 extern void test_suite(const char *name);
@@ -241,6 +245,140 @@ static void test_label_zero_is_valid(void) {
     vm_free_labels(&vm);
 }
 
+/* ---------------------------------------------------------------------------
+ * Task 3.1: Duplicate label detection (via parser)
+ * ---------------------------------------------------------------------------*/
+static void test_duplicate_label_detection(void) {
+    test_suite("Control Flow: duplicate label detection via parser");
+
+    /* Pattern "dup: dup: 'a'" has nested duplicate labels.
+     * The outer "dup:" label calls parse_statement recursively, which will
+     * encounter "dup:" again and detect the duplicate, setting a parse error. */
+    const char *src = "dup: dup: 'a'";
+    snobol_parser_t *parser = snobol_parser_create();
+    snobol_lexer_t  *lexer  = snobol_lexer_create(src, strlen(src));
+
+    ast_node_t *ast = snobol_parser_parse(parser, lexer);
+
+    test_assert(snobol_parser_has_error(parser), "parser detects duplicate label");
+    test_assert(ast == NULL, "parser returns NULL AST for duplicate label");
+
+    if (ast) snobol_ast_free(ast);
+    snobol_lexer_destroy(lexer);
+    snobol_parser_destroy(parser);
+}
+
+/* Also test duplicate detection at the compiler level (AST_LABEL duplicate) */
+static void test_duplicate_label_compiler(void) {
+    test_suite("Control Flow: duplicate label detection via compiler");
+
+    /* Build AST manually: concat([label("x", lit("A")), label("x", lit("B"))]) */
+    ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+    parts[0] = snobol_ast_create_label("x", snobol_ast_create_lit("A", 1));
+    parts[1] = snobol_ast_create_label("x", snobol_ast_create_lit("B", 1));
+    ast_node_t *root = snobol_ast_create_concat(parts, 2);
+
+    uint8_t *bc = NULL;
+    size_t   bc_len = 0;
+    int rc = compile_ast_to_bytecode_c(root, false, &bc, &bc_len);
+
+    test_assert(rc == -1, "compiler rejects duplicate label definition");
+    test_assert(bc == NULL, "no bytecode produced on duplicate label error");
+
+    if (bc) compiler_free(bc);
+    snobol_ast_free(root);
+}
+
+/* ---------------------------------------------------------------------------
+ * Task 3.2: Unknown label detection (via compiler)
+ * ---------------------------------------------------------------------------*/
+static void test_unknown_label_detection(void) {
+    test_suite("Control Flow: unknown label detection via compiler");
+
+    /* Build AST: goto("nonexistent") with no matching label definition */
+    ast_node_t *goto_node = snobol_ast_create_goto("nonexistent");
+
+    uint8_t *bc = NULL;
+    size_t   bc_len = 0;
+    int rc = compile_ast_to_bytecode_c(goto_node, false, &bc, &bc_len);
+
+    test_assert(rc == -1, "compiler rejects goto to undefined label");
+    test_assert(bc == NULL, "no bytecode produced for undefined label reference");
+
+    if (bc) compiler_free(bc);
+    snobol_ast_free(goto_node);
+}
+
+/* ---------------------------------------------------------------------------
+ * Task 3.3: Label/goto execution (full pipeline)
+ * ---------------------------------------------------------------------------*/
+static void test_label_pattern_execution(void) {
+    test_suite("Control Flow: simple label pattern executes correctly");
+
+    /* Pattern: done: 'hello'   (label wrapping a literal - must match "hello") */
+    ast_node_t *body       = snobol_ast_create_lit("hello", 5);
+    ast_node_t *label_node = snobol_ast_create_label("done", body);
+
+    uint8_t *bc = NULL;
+    size_t   bc_len = 0;
+    int rc = compile_ast_to_bytecode_c(label_node, false, &bc, &bc_len);
+
+    test_assert(rc == 0, "simple label pattern compiles successfully");
+
+    if (rc == 0 && bc) {
+        VM vm = {0};
+        vm.bc     = bc;
+        vm.bc_len = bc_len;
+        vm.s      = "hello world";
+        vm.len    = 11;
+        bool matched = vm_exec(&vm);
+        test_assert(matched, "simple label pattern matches 'hello' in subject");
+        compiler_free(bc);
+    }
+    snobol_ast_free(label_node);
+}
+
+static void test_forward_goto_execution(void) {
+    test_suite("Control Flow: forward goto execution");
+
+    /* Build AST: concat([lit("A"), goto("done"), label("done", lit("B"))])
+     * Compiles to: LIT("A"), GOTO(done), LABEL(done), LIT("B"), ACCEPT
+     * On "AB": match A at pos=0, GOTO jumps past LIT("B") preamble to LABEL body,
+     * match B at pos=1 → ACCEPT. */
+    ast_node_t **parts = (ast_node_t **)malloc(3 * sizeof(ast_node_t *));
+    parts[0] = snobol_ast_create_lit("A", 1);
+    parts[1] = snobol_ast_create_goto("done");
+    parts[2] = snobol_ast_create_label("done", snobol_ast_create_lit("B", 1));
+    ast_node_t *root = snobol_ast_create_concat(parts, 3);
+
+    uint8_t *bc = NULL;
+    size_t   bc_len = 0;
+    int rc = compile_ast_to_bytecode_c(root, false, &bc, &bc_len);
+
+    test_assert(rc == 0, "forward goto pattern compiles successfully");
+
+    if (rc == 0 && bc) {
+        VM vm = {0};
+
+        /* Should match "AB" */
+        vm.bc     = bc;
+        vm.bc_len = bc_len;
+        vm.s      = "AB";
+        vm.len    = 2;
+        bool matched = vm_exec(&vm);
+        test_assert(matched, "forward goto pattern matches 'AB'");
+
+        /* Should not match "AC" (B expected after goto) */
+        vm.s   = "AC";
+        vm.len = 2;
+        matched = vm_exec(&vm);
+        test_assert(!matched, "forward goto pattern rejects 'AC'");
+
+        compiler_free(bc);
+    }
+    snobol_ast_free(root);
+}
+
 void test_control_flow_suite(void) {
     test_label_registration();
     test_label_capacity_growth();
@@ -250,4 +388,12 @@ void test_control_flow_suite(void) {
     test_goto_does_not_restore_backtracking();
     test_goto_fail_flag();
     test_label_zero_is_valid();
+    /* Task 3.1 */
+    test_duplicate_label_detection();
+    test_duplicate_label_compiler();
+    /* Task 3.2 */
+    test_unknown_label_detection();
+    /* Task 3.3 */
+    test_label_pattern_execution();
+    test_forward_goto_execution();
 }

@@ -43,5 +43,23 @@ class BuilderTest extends TestCase
         $this->assertEquals('span', $ast['type']);
         $this->assertEquals("0123456789", $ast['set']);
     }
+
+    public function testLabelNode(): void
+    {
+        $ast = Builder::label('start', Builder::span('A-Za-z'));
+        $this->assertIsArray($ast);
+        $this->assertEquals('label', $ast['type']);
+        $this->assertEquals('start', $ast['name']);
+        $this->assertIsArray($ast['target']);
+        $this->assertEquals('span', $ast['target']['type']);
+    }
+
+    public function testGotoNode(): void
+    {
+        $ast = Builder::goto('start');
+        $this->assertIsArray($ast);
+        $this->assertEquals('goto', $ast['type']);
+        $this->assertEquals('start', $ast['label']);
+    }
 }
 

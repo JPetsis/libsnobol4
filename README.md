@@ -24,11 +24,15 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **Unicode Support**: Full UTF-8 multi-byte character support
   * **Arbno & Bounded Repetition**: Variable-length pattern repetition
   * **Anchors**: Start/end of string anchors
-  * **BREAKX**: Character-set break with O(n) pre-scan optimisation (8× fewer backtracks vs ARB)
+  * **BREAKX**: Character-set break with O(n) pre-scan optimisation (8 fewer backtracks vs ARB)
   * **BAL**: Balanced delimiter matching (e.g. nested parentheses)
   * **FENCE**: Backtracking cut (prevents retrying a choice point)
   * **REM**: Match remainder of subject string
   * **RPOS / RTAB**: End-relative position and tab patterns
+  * **Labelled Control Flow** (v0.4.0): Named labels and `goto` transfers within a pattern.
+    Labels are compile-time names that resolve to bytecode offsets; `goto` is explicit control
+    flow that does **not** pop the backtracking choice stack (distinguishing it from backtracking).
+    Duplicate-label and unknown-label references are detected at compile time.
 * **Captures & Assignments**: Register-based capture and variable assignment
 * **Associative Tables**: Runtime-owned hash tables for key-value storage
 * **Dynamic Pattern Evaluation**: Runtime pattern compilation with caching (`EVAL(...)`)
