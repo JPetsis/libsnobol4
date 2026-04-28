@@ -51,9 +51,21 @@ if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     target_compile_definitions(snobol4_tests PRIVATE SNOBOL_JIT=1)
 endif()
 
-# Suppress MSVC safe-CRT deprecation warnings in test sources
+# Warning flags for test sources - mirror core library settings
 if(MSVC)
+    target_compile_options(snobol4_tests PRIVATE /W4)
+    # Suppress MSVC safe-CRT deprecation warnings in test sources
     target_compile_definitions(snobol4_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+else ()
+    target_compile_options(snobol4_tests PRIVATE
+            -Wall -Wextra
+            -Wno-unused-variable
+            -Wno-unused-but-set-variable
+            -Wno-unused-function
+            -Wno-sign-conversion
+            -Wno-implicit-int-conversion
+            -Wno-shorten-64-to-32
+    )
 endif()
 
 # Register with CTest

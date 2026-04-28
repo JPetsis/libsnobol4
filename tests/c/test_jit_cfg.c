@@ -120,7 +120,7 @@ static void test_cfg_single_block_counter(void) {
 
     VM vm = {0};
     vm.bc = bc; vm.bc_len = sizeof(bc);
-    vm.s  = (const uint8_t *)"a";
+    vm.s = "a";
     vm.len = 1;
 
     SnobolJitStats *stats = snobol_jit_get_stats();
@@ -232,7 +232,7 @@ static void test_cfg_split_chain_blocks(void) {
 
     VM vm = {0};
     vm.bc = bc; vm.bc_len = sizeof(bc);
-    vm.s   = (const uint8_t *)"b";
+    vm.s = "b";
     vm.len = 1;
 
     SnobolJitStats   *stats = snobol_jit_get_stats();
@@ -300,7 +300,7 @@ static void test_cfg_split_backtrack_restores_state(void) {
 
     VM vm = {0};
     vm.bc  = bc; vm.bc_len = sizeof(bc);
-    vm.s   = (const uint8_t *)"b";
+    vm.s = "b";
     vm.len = 1;
 
     SnobolJitStats   *stats = snobol_jit_get_stats();
@@ -378,7 +378,7 @@ static void test_cfg_arbno_loop_compiled(void) {
 
     VM vm = {0};
     vm.bc  = bc; vm.bc_len = sizeof(bc);
-    vm.s   = (const uint8_t *)"aaab";
+    vm.s = "aaab";
     vm.len = 4;
 
     SnobolJitStats   *stats = snobol_jit_get_stats();
