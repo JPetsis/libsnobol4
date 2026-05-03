@@ -810,24 +810,51 @@ bool vm_run(VM *vm) {
                 } break;
             }
             case OP_EMIT_EXPR: {
-                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip); uint8_t expr_type = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                /* LEGACY alias: old discriminants 1=upper, 2=length.
+                 * Map to SNBL_FMT_* and fall through to the same logic
+                 * as OP_EMIT_FORMAT. */
+                uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t expr_type = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t mapped_type;
+                if (expr_type == 1)      mapped_type = SNBL_FMT_UPPER;
+                else if (expr_type == 2) mapped_type = SNBL_FMT_LENGTH;
+                else                     mapped_type = 0; /* unknown → emit raw */
+
                 if (r < MAX_CAPS && vm->cap_end[r] >= vm->cap_start[r] && vm->cap_end[r] <= vm->len) {
-                    const char *data = vm->s + vm->cap_start[r]; size_t len = vm->cap_end[r] - vm->cap_start[r];
-                    if (expr_type == 1) { char *tmp = snobol_malloc(len + 1); for (size_t i = 0; i < len; ++i) tmp[i] = (data[i] >= 'a' && data[i] <= 'z') ? data[i] - 32 : data[i]; if (vm->out) snobol_buf_append(vm->out, tmp, len); if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata); snobol_free(tmp); }
-                    else if (expr_type == 2) { char tmp[32]; int n = snprintf(tmp, sizeof(tmp), "%zu", len); if (vm->out) snobol_buf_append(vm->out, tmp, (size_t)n); if (vm->emit_fn) vm->emit_fn(tmp, (size_t)n, vm->emit_udata); }
-                    else { if (vm->out) snobol_buf_append(vm->out, data, len); if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata); }
+                    const char *data = vm->s + vm->cap_start[r];
+                    size_t len = vm->cap_end[r] - vm->cap_start[r];
+                    if (mapped_type == SNBL_FMT_UPPER) {
+                        char *tmp = snobol_malloc(len + 1);
+                        for (size_t i = 0; i < len; ++i) tmp[i] = (data[i] >= 'a' && data[i] <= 'z') ? data[i] - 32 : data[i];
+                        if (vm->out) snobol_buf_append(vm->out, tmp, len);
+                        if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
+                        snobol_free(tmp);
+                    } else if (mapped_type == SNBL_FMT_LENGTH) {
+                        char tmp[32]; int n = snprintf(tmp, sizeof(tmp), "%zu", len);
+                        if (vm->out) snobol_buf_append(vm->out, tmp, (size_t)n);
+                        if (vm->emit_fn) vm->emit_fn(tmp, (size_t)n, vm->emit_udata);
+                    } else {
+                        if (vm->out) snobol_buf_append(vm->out, data, len);
+                        if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata);
+                    }
                 } break;
             }
             
             /* Table-backed and formatted replacement opcodes */
             case OP_EMIT_TABLE: {
                 /* Lookup table[key] and emit the value
-                 * Format: table_id u16, key_type u8, then:
+                 * Format: table_id u16 (SNBL_TABLE_ID_UNBOUND=unbound),
+                 *         key_type u8,
+                 *         name_len u8, name_bytes[name_len]  ← skip at runtime
+                 *   then key payload:
                  *   - key_type=0 (literal): key_len u16, key_bytes[key_len]
                  *   - key_type=1 (capture): key_reg u8
                  * If key not found, emit empty string (graceful degradation) */
                 uint16_t table_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint8_t key_type = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                /* skip embedded table name (resolved at bind time) */
+                uint8_t name_len = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                vm->ip += name_len;
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
                 snobol_table_t *table = vm_get_table(vm, table_id);
@@ -881,14 +908,21 @@ bool vm_run(VM *vm) {
                     if (vm->emit_fn) vm->emit_fn(value, val_len, vm->emit_udata);
                 }
 #else
-                (void)table_id; (void)key_type; /* Table support not enabled */
+                (void)table_id; (void)key_type; (void)name_len; /* Table support not enabled */
+                /* Still need to advance ip past key payload to avoid misalignment */
+                if (key_type == 0) {
+                    uint16_t skip_len = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                    vm->ip += skip_len;
+                } else if (key_type == 1) {
+                    vm->ip += 1;
+                }
 #endif
                 break;
             }
             case OP_EMIT_FORMAT: {
                 /* Format capture with specified format type
-                 * Format: reg u8, format_type u8
-                 * format_type: 1=upper, 2=lower, 3=length */
+                 * Format: reg u8, format_type u8 (SNBL_FMT_*)
+                 * SNBL_FMT_LPAD / SNBL_FMT_RPAD also read: width u16, fill_char u8 */
                 uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 uint8_t format_type = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 
@@ -896,7 +930,7 @@ bool vm_run(VM *vm) {
                     const char *data = vm->s + vm->cap_start[r];
                     size_t len = vm->cap_end[r] - vm->cap_start[r];
                     
-                    if (format_type == 1) {
+                    if (format_type == SNBL_FMT_UPPER) {
                         /* Uppercase */
                         char *tmp = (char *)snobol_malloc(len + 1);
                         for (size_t i = 0; i < len; ++i) {
@@ -906,7 +940,7 @@ bool vm_run(VM *vm) {
                         if (vm->out) snobol_buf_append(vm->out, tmp, len);
                         if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
                         snobol_free(tmp);
-                    } else if (format_type == 2) {
+                    } else if (format_type == SNBL_FMT_LOWER) {
                         /* Lowercase */
                         char *tmp = (char *)snobol_malloc(len + 1);
                         for (size_t i = 0; i < len; ++i) {
@@ -916,19 +950,50 @@ bool vm_run(VM *vm) {
                         if (vm->out) snobol_buf_append(vm->out, tmp, len);
                         if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
                         snobol_free(tmp);
-                    } else if (format_type == 3) {
+                    } else if (format_type == SNBL_FMT_LENGTH) {
                         /* Length as string */
                         char tmp[32];
                         int n = snprintf(tmp, sizeof(tmp), "%zu", len);
                         if (vm->out) snobol_buf_append(vm->out, tmp, (size_t)n);
                         if (vm->emit_fn) vm->emit_fn(tmp, (size_t)n, vm->emit_udata);
+                    } else if (format_type == SNBL_FMT_LPAD || format_type == SNBL_FMT_RPAD) {
+                        /* Padding: read width (u16, big-endian) and fill_char (u8) */
+                        uint16_t width = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                        uint8_t  fill  = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                        if (width > 1024) width = 1024; /* cap */
+                        if (len >= width) {
+                            /* No padding needed - emit as-is */
+                            if (vm->out) snobol_buf_append(vm->out, data, len);
+                            if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata);
+                        } else {
+                            size_t pad = width - len;
+                            size_t total = (size_t)width;
+                            char *buf = (char *)snobol_malloc(total);
+                            if (buf) {
+                                if (format_type == SNBL_FMT_LPAD) {
+                                    memset(buf, fill, pad);
+                                    memcpy(buf + pad, data, len);
+                                } else {
+                                    memcpy(buf, data, len);
+                                    memset(buf + len, fill, pad);
+                                }
+                                if (vm->out) snobol_buf_append(vm->out, buf, total);
+                                if (vm->emit_fn) vm->emit_fn(buf, total, vm->emit_udata);
+                                snobol_free(buf);
+                            }
+                        }
                     } else {
                         /* Unknown format - emit raw */
                         if (vm->out) snobol_buf_append(vm->out, data, len);
                         if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata);
                     }
                 } else {
-                    /* Missing capture - emit empty (graceful degradation) */
+                    /* Missing capture or LPAD/RPAD: read and discard extra operands */
+                    if (format_type == SNBL_FMT_LPAD || format_type == SNBL_FMT_RPAD) {
+                        read_u16(vm->bc, vm->bc_len, &vm->ip); /* width */
+                        read_u8(vm->bc, vm->bc_len, &vm->ip);  /* fill */
+                    }
+                    /* emit empty (graceful degradation) */
                 }
                 break;
             }

@@ -5,6 +5,93 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-03
+
+### Added — Template & Substitution Completeness (template-substitution-completeness)
+
+- **`SNBL_FMT_*` named constants** (`core/include/snobol/vm.h`): five `#define`
+  constants replace bare integer discriminants in all template opcode handling:
+  `SNBL_FMT_UPPER=1`, `SNBL_FMT_LOWER=2`, `SNBL_FMT_LENGTH=3`,
+  `SNBL_FMT_LPAD=4`, `SNBL_FMT_RPAD=5`.  Also adds `SNBL_TABLE_ID_UNBOUND
+  (0xFFFF)` sentinel and documents the extended `OP_EMIT_FORMAT` encoding for
+  `SNBL_FMT_LPAD` / `SNBL_FMT_RPAD` (`reg u8, format_type u8, width u16,
+  fill_char u8`) and the new `OP_EMIT_TABLE` name-bytes encoding.
+
+- **`.lower()` template expression** (`core/src/compiler.c`): `${vN.lower()}`
+  compiles to `OP_EMIT_FORMAT, reg, SNBL_FMT_LOWER`, enabling ASCII lowercase
+  transformation entirely in the C runtime.
+
+- **`.lpad(W[,'c'])` template expression** (`core/src/compiler.c`): `${vN.lpad(W)}`
+  / `${vN.lpad(W,'c')}` compile to `OP_EMIT_FORMAT, reg, SNBL_FMT_LPAD, width_hi,
+  width_lo, fill_char`.  Width is capped at 1024 in the VM.
+
+- **`.rpad(W[,'c'])` template expression** (`core/src/compiler.c`): same as above
+  but emits `SNBL_FMT_RPAD` for right-padding.
+
+- **`snobol_template_bind_tables` API** (`core/include/snobol/compiler.h`,
+  `core/src/compiler.c`): new public function that walks compiled template
+  bytecode looking for `OP_EMIT_TABLE` entries with `table_id == 0xFFFF`
+  (unbound), resolves the embedded name against a caller-supplied `names`/`ids`
+  array, and patches the ID in-place.  Returns 0 on full success, -1 if any name
+  is unresolvable.
+
+- **`OP_EMIT_TABLE` name-encoding** (`core/src/compiler.c`, `core/src/vm.c`):
+  `compile_template_to_bytecode` now writes `table_id=0xFFFF, key_type,
+  name_len:u8, name_bytes[name_len]` before the key payload; the VM dispatch
+  skips name bytes at runtime after `snobol_template_bind_tables` has resolved
+  IDs; previously the table_id was always emitted as 0 with no name.
+
+- **`OP_EMIT_EXPR` legacy alias** (`core/src/vm.c`): `OP_EMIT_EXPR` bytecode
+  (old discriminants: 1=upper, 2=length) is mapped to the `OP_EMIT_FORMAT` path
+  in the VM dispatch, preserving backward compatibility for any serialised
+  patterns compiled with the previous compiler.
+
+- **`Pattern::subst()` table binding** (`bindings/php/src/snobol_pattern.c`):
+  `subst(subject, template, tables)` now accepts an optional array of
+  `\Snobol\Table` objects; their names are resolved via `snobol_template_bind_tables`
+  before execution, and they are registered in the VM table registry for
+  `OP_EMIT_TABLE` dispatch.  Throws `\Exception` if any template
+  table reference cannot be resolved.
+
+- **PHP test suite** (`bindings/php/tests/php/TemplateOpsTest.php`): eight new
+  integration tests covering `.lower()`, `.lpad(5,'0')`, `.rpad(8,'.')`, table-backed
+  substitution, unregistered-table exception, and regression tests for `.length()`,
+  `.upper()`, plain capture, and literal template.
+
+- **C test suite** (`tests/c/test_template_ops.c`): ten new unit tests
+  covering `.lower()`, `.lpad()`, `.rpad()`, no-op padding, graceful
+  degradation for missing captures, `snobol_template_bind_tables` patching,
+  unresolvable-name return value, end-to-end literal-key and capture-key table
+  lookups, and legacy `OP_EMIT_EXPR` alias.
+
+### Changed
+
+- **`compile_template_to_bytecode` now uses `OP_EMIT_FORMAT`** instead of the
+  legacy `OP_EMIT_EXPR` opcode for `.upper()` and `.length()` expressions.
+  Any code that inspects raw template bytecode must recompile.  The VM still
+  accepts old `OP_EMIT_EXPR` bytecode via the legacy alias.
+
+- **`OP_EMIT_TABLE` bytecode layout changed**: a `name_len:u8 + name_bytes[]`
+  field is now inserted between `key_type` and the key payload, and `table_id`
+  is always written as `0xFFFF` (unbound) by the compiler.  Any previously
+  serialised template bytecode that contains `OP_EMIT_TABLE` must be recompiled.
+
+### Removed
+
+- **Duplicate `compile_template_to_bytecode` in PHP binding**
+  (`bindings/php/src/snobol_pattern.c`): the old PHP-side implementation (which
+  lacked `.lower()`, `.lpad()`, `.rpad()` support and used the old
+  `OP_EMIT_TABLE` encoding) has been removed.  All calls now route to the
+  canonical core implementation via `compiler.h`.
+
+### Versioning
+
+- **Core library**: `SNOBOL_VERSION_MINOR` bumped from 2 → 3;
+  `SNOBOL_VERSION_STRING` is now `"0.3.0"` (`core/include/snobol/snobol.h`).
+- **CMake project**: bumped from `0.1.0` → `0.5.0` (`CMakeLists.txt`).
+- **PHP binding**: `PHP_SNOBOL_VERSION` bumped from `"0.2.0"` → `"0.5.0"`
+  (`bindings/php/src/php_snobol.h`).
+
 ## [0.4.0] - 2026-04-25
 
 ### Added — Labelled Control Flow (complete-labelled-control-flow)

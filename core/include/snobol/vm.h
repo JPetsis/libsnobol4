@@ -96,12 +96,19 @@ typedef enum {
     OP_REPEAT_STEP, // loop_id u8, jmp_target u32
     OP_EMIT_LITERAL, // offset u32, len u32 (Renamed from OP_EMIT_LIT)
     OP_EMIT_CAPTURE, // reg u8 (Renamed from OP_EMIT_REF)
-    OP_EMIT_EXPR,    // reg u8, expr_type u8 (New: for .upper(), .length() etc)
-    
+    OP_EMIT_EXPR,    // LEGACY: reg u8, expr_type u8 (1=upper, 2=length) — use OP_EMIT_FORMAT in new code
+
     /* Table-backed replacement opcodes */
-    OP_EMIT_TABLE,   // table_id u16, key_reg u8 (lookup table[key] and emit)
-    OP_EMIT_FORMAT,  // reg u8, format_type u8 (format capture: 1=upper, 2=lower, 3=length)
-    
+    /* OP_EMIT_TABLE encoding: table_id u16 (0xFFFF=unbound), key_type u8,
+     *   name_len u8, name_bytes[name_len], then key payload:
+     *     key_type=0 (literal): key_len u16, key_bytes[key_len]
+     *     key_type=1 (capture): key_reg u8
+     * Use snobol_template_bind_tables() to resolve 0xFFFF -> runtime table_id. */
+    OP_EMIT_TABLE,
+    /* OP_EMIT_FORMAT encoding: reg u8, format_type u8 (see SNBL_FMT_* constants)
+     *   SNBL_FMT_LPAD and SNBL_FMT_RPAD also read: width u16, fill_char u8 */
+    OP_EMIT_FORMAT,
+
     /* Control flow opcodes for labelled patterns and goto-like transfers */
     OP_LABEL,      // label_id u16 (define a label target)
     OP_GOTO,       // label_id u16 (unconditional transfer to label)
@@ -122,6 +129,24 @@ typedef enum {
     /* Optimizer no-op: emitted by the fusion pass to fill dead bytecode slots */
     OP_NOP,        // no operands – skip one byte
 } OpCode;
+
+/* --------------------------------------------------------------------------
+ * OP_EMIT_FORMAT format_type discriminants (SNBL_FMT_*)
+ *
+ * Used by compile_template_to_bytecode() and the VM dispatch.
+ * SNBL_FMT_LPAD and SNBL_FMT_RPAD have two extra operands:
+ *   width:u16 (big-endian, capped at 1024) and fill_char:u8.
+ * -------------------------------------------------------------------------- */
+#define SNBL_FMT_UPPER   1  /**< ASCII uppercase                              */
+#define SNBL_FMT_LOWER   2  /**< ASCII lowercase                              */
+#define SNBL_FMT_LENGTH  3  /**< length as decimal string                     */
+#define SNBL_FMT_LPAD    4  /**< left-pad to width with fill_char             */
+#define SNBL_FMT_RPAD    5  /**< right-pad to width with fill_char            */
+
+/** Sentinel table_id written by compile_template_to_bytecode() for any
+ *  table reference that has not yet been bound to a runtime ID.
+ *  Call snobol_template_bind_tables() to resolve these to real IDs. */
+#define SNBL_TABLE_ID_UNBOUND  0xFFFFu
 
 /* --------------------------------------------------------------------------
  * Built-in function dispatch enumeration

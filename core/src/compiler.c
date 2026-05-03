@@ -937,6 +937,8 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *
     return 0;
 }
 
+#endif /* !STANDALONE_BUILD — PHP-specific AST compilation above only */
+
 int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, size_t *out_len) {
     SNOBOL_LOG("compile_template_to_bytecode START: tpl='%.*s'", (int)len, tpl);
     CodeBuf cb;
@@ -975,22 +977,67 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
                     continue;
                 }
 
-                uint8_t expr_type = 0;
+                uint8_t fmt_type = 0;
+                uint16_t fmt_width = 0;
+                uint8_t  fmt_fill  = ' ';
+                bool     fmt_has_width = false;
                 if (braced) {
                     if (i < len && tpl[i] == '.') {
                         i++;
                         if (len - i >= 7 && memcmp(tpl + i, "upper()", 7) == 0) {
-                            expr_type = 1; i += 7;
+                            fmt_type = SNBL_FMT_UPPER; i += 7;
+                        } else if (len - i >= 7 && memcmp(tpl + i, "lower()", 7) == 0) {
+                            fmt_type = SNBL_FMT_LOWER; i += 7;
                         } else if (len - i >= 8 && memcmp(tpl + i, "length()", 8) == 0) {
-                            expr_type = 2; i += 8;
+                            fmt_type = SNBL_FMT_LENGTH; i += 8;
+                        } else if (len - i >= 4 &&
+                                   (memcmp(tpl + i, "lpad", 4) == 0 ||
+                                    memcmp(tpl + i, "rpad", 4) == 0)) {
+                            uint8_t pad_type = (tpl[i] == 'l') ? SNBL_FMT_LPAD : SNBL_FMT_RPAD;
+                            i += 4;
+                            if (i < len && tpl[i] == '(') {
+                                i++;
+                                /* parse mandatory width integer */
+                                if (i < len && tpl[i] >= '1' && tpl[i] <= '9') {
+                                    uint16_t w = 0;
+                                    while (i < len && tpl[i] >= '0' && tpl[i] <= '9') {
+                                        w = (uint16_t)(w * 10 + (tpl[i] - '0'));
+                                        i++;
+                                    }
+                                    /* optional fill char: ,'c' */
+                                    if (i < len && tpl[i] == ',') {
+                                        i++;
+                                        if (i < len && tpl[i] == '\'') {
+                                            i++;
+                                            if (i < len) {
+                                                fmt_fill = (uint8_t)tpl[i];
+                                                i++;
+                                                if (i < len && tpl[i] == '\'') i++;
+                                            }
+                                        }
+                                    }
+                                    if (i < len && tpl[i] == ')') {
+                                        i++;
+                                        fmt_type = pad_type;
+                                        fmt_width = w;
+                                        fmt_has_width = true;
+                                    }
+                                }
+                            }
                         }
                     }
                     if (i < len && tpl[i] == '}') {
                         i++;
-                        if (expr_type == 0) {
+                        if (fmt_type == 0) {
                             cb_emit_u8(&cb, OP_EMIT_CAPTURE); cb_emit_u8(&cb, reg);
                         } else {
-                            cb_emit_u8(&cb, OP_EMIT_EXPR); cb_emit_u8(&cb, reg); cb_emit_u8(&cb, expr_type);
+                            cb_emit_u8(&cb, OP_EMIT_FORMAT);
+                            cb_emit_u8(&cb, reg);
+                            cb_emit_u8(&cb, fmt_type);
+                            if (fmt_has_width) {
+                                cb_emit_u16(&cb, fmt_width); /* big-endian width */
+                                cb_emit_u8(&cb, fmt_fill);   /* fill char */
+                            }
                         }
                     } else {
                         i = start_of_dollar + 1;
@@ -1022,7 +1069,13 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
                     /* For now, table name must be a literal identifier */
                     /* Extract table name */
                     const char *table_name = tpl + table_name_start;
-                    
+
+                    /* Reject overlong table names (name_len field is 1 byte) */
+                    if (table_name_len > 255) {
+                        cb_free(&cb);
+                        return -1;
+                    }
+
                     /* Skip '[' and parse key */
                     i++; /* skip '[' */
                     size_t key_start = i;
@@ -1056,21 +1109,29 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
                             continue;
                         }
                         i++; /* skip ']' */
+                        if (i < len && tpl[i] == ']') i++; /* consume outer ']' if present */
 
-                        /* Emit OP_EMIT_TABLE with literal key stored in bytecode
-                         * Format: opcode u8, table_id u16, key_type u8 (0=literal), key_len u16, key_bytes...
-                         * Table ID 0 means "resolve by name at runtime" - for now use placeholder */
+                        /* Emit OP_EMIT_TABLE with name encoded and literal key
+                         * Format: opcode u8, table_id u16 (0xFFFF=unbound),
+                         *         key_type u8 (0=literal),
+                         *         name_len u8, name_bytes[name_len],
+                         *         key_len u16, key_bytes[key_len] */
                         cb_emit_u8(&cb, OP_EMIT_TABLE);
-                        cb_emit_u16(&cb, 0); /* table_id placeholder - resolved at runtime */
+                        cb_emit_u16(&cb, (uint16_t)SNBL_TABLE_ID_UNBOUND);
                         cb_emit_u8(&cb, 0);  /* key_type: 0 = literal key */
+                        cb_emit_u8(&cb, (uint8_t)table_name_len);
+                        cb_emit_bytes(&cb, (const uint8_t*)table_name, table_name_len);
                         cb_emit_u16(&cb, (uint16_t)key_len); /* literal key length */
                         cb_emit_bytes(&cb, (const uint8_t*)(tpl + key_start), key_len);
                     } else {
-                        /* Identifier key (capture-derived) */
+                        /* Capture-derived key: accept vN or bare digit(s) */
+                        bool has_v_prefix = (i < len && tpl[i] == 'v');
+                        if (has_v_prefix) i++; /* skip optional 'v' */
+                        size_t key_reg_start = i;
                         while (i < len && tpl[i] >= '0' && tpl[i] <= '9') {
                             i++;
                         }
-                        if (i >= len || tpl[i] != ']') {
+                        if (i == key_reg_start || i >= len || tpl[i] != ']') {
                             i = start_of_dollar + 1;
                             cb_emit_u8(&cb, OP_EMIT_LITERAL);
                             size_t off = cb_pos(&cb) + 4 + 4;
@@ -1078,18 +1139,22 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
                             continue;
                         }
                         size_t key_reg = 0;
-                        /* Parse register number from identifier like v0, v1, etc. */
-                        if (key_start > 0 && tpl[key_start - 1] == 'v') {
-                            const char *reg_start = tpl + key_start;
-                            key_reg = (uint8_t)(reg_start[0] - '0');
+                        for (size_t ki = key_reg_start; ki < i; ki++) {
+                            key_reg = key_reg * 10 + (uint8_t)(tpl[ki] - '0');
                         }
-                        i++; /* skip ']' */
+                        i++; /* skip inner ']' */
+                        if (i < len && tpl[i] == ']') i++; /* consume outer ']' if present */
 
-                        /* Emit OP_EMIT_TABLE with capture-derived key
-                         * Format: opcode u8, table_id u16, key_type u8 (1=capture), key_reg u8 */
+                        /* Emit OP_EMIT_TABLE with name encoded and capture key
+                         * Format: opcode u8, table_id u16 (0xFFFF=unbound),
+                         *         key_type u8 (1=capture),
+                         *         name_len u8, name_bytes[name_len],
+                         *         key_reg u8 */
                         cb_emit_u8(&cb, OP_EMIT_TABLE);
-                        cb_emit_u16(&cb, 0); /* table_id placeholder - needs resolution */
+                        cb_emit_u16(&cb, (uint16_t)SNBL_TABLE_ID_UNBOUND);
                         cb_emit_u8(&cb, 1);  /* key_type: 1 = capture-derived key */
+                        cb_emit_u8(&cb, (uint8_t)table_name_len);
+                        cb_emit_bytes(&cb, (const uint8_t*)table_name, table_name_len);
                         cb_emit_u8(&cb, (uint8_t)key_reg);
                     }
                 } else {
@@ -1126,7 +1191,97 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
     SNOBOL_LOG("compile_template_to_bytecode SUCCESS, len=%zu", *out_len);
     return 0;
 }
-#endif
+
+int snobol_template_bind_tables(uint8_t *bc, size_t bc_len,
+                                 const char **names, const uint16_t *ids,
+                                 size_t n) {
+    if (!bc || bc_len == 0) return 0;
+    /* Allow n==0: still scan so we can detect and report any unbound table IDs */
+
+    int result = 0;
+    size_t ip = 0;
+
+    while (ip < bc_len) {
+        uint8_t op = bc[ip++];
+
+        switch (op) {
+            case OP_ACCEPT:
+                return result; /* end of template bytecode */
+
+            case OP_EMIT_LITERAL: {
+                /* off:u32(4) + len:u32(4) + data[len] */
+                if (ip + 8 > bc_len) return result;
+                uint32_t lit_len = ((uint32_t)bc[ip+4] << 24) | ((uint32_t)bc[ip+5] << 16)
+                                 | ((uint32_t)bc[ip+6] << 8)  | (uint32_t)bc[ip+7];
+                ip += 8 + lit_len;
+                break;
+            }
+
+            case OP_EMIT_CAPTURE:
+                ip += 1; /* reg:u8 */
+                break;
+
+            case OP_EMIT_EXPR:
+                ip += 2; /* reg:u8, expr_type:u8 (legacy) */
+                break;
+
+            case OP_EMIT_FORMAT: {
+                /* reg:u8, format_type:u8 [+ width:u16, fill:u8 for LPAD/RPAD] */
+                if (ip + 2 > bc_len) return result;
+                uint8_t fmt = bc[ip + 1];
+                ip += 2;
+                if (fmt == SNBL_FMT_LPAD || fmt == SNBL_FMT_RPAD) {
+                    ip += 3; /* width:u16 + fill:u8 */
+                }
+                break;
+            }
+
+            case OP_EMIT_TABLE: {
+                /* table_id:u16, key_type:u8, name_len:u8, name_bytes[name_len], <key payload> */
+                if (ip + 4 > bc_len) return result;
+                uint16_t tid      = ((uint16_t)bc[ip] << 8) | bc[ip+1];
+                uint8_t  key_type = bc[ip+2];
+                uint8_t  nm_len   = bc[ip+3];
+
+                if (ip + 4 + nm_len > bc_len) return result;
+
+                if (tid == (uint16_t)SNBL_TABLE_ID_UNBOUND) {
+                    const char *name_ptr = (const char *)bc + ip + 4;
+                    bool resolved = false;
+                    for (size_t k = 0; k < n; k++) {
+                        if (names[k] && strlen(names[k]) == nm_len &&
+                            memcmp(names[k], name_ptr, nm_len) == 0) {
+                            bc[ip]   = (uint8_t)((ids[k] >> 8) & 0xFF);
+                            bc[ip+1] = (uint8_t)(ids[k] & 0xFF);
+                            resolved = true;
+                            break;
+                        }
+                    }
+                    if (!resolved) result = -1;
+                }
+
+                ip += 2 + 1 + 1 + nm_len; /* table_id + key_type + name_len + name_bytes */
+
+                /* skip key payload */
+                if (key_type == 0) {
+                    /* literal key: key_len:u16, key_bytes[key_len] */
+                    if (ip + 2 > bc_len) return result;
+                    uint16_t key_len = ((uint16_t)bc[ip] << 8) | bc[ip+1];
+                    ip += 2 + key_len;
+                } else if (key_type == 1) {
+                    /* capture key: key_reg:u8 */
+                    ip += 1;
+                }
+                break;
+            }
+
+            default:
+                return result; /* unknown op — stop walking safely */
+        }
+    }
+
+    return result;
+}
 
 void compiler_free(uint8_t *bc) {
     if (bc) {
@@ -1136,7 +1291,7 @@ void compiler_free(uint8_t *bc) {
 }
 
 /* ---------------------------------------------------------------------------
- * Label tracking for C-AST compilation (tasks 2.1-2.5)
+ * Label tracking for C-AST compilation
  * ---------------------------------------------------------------------------
  * Labels are assigned sequential numeric IDs (0, 1, 2, ...).
  * The label offset table is appended to the end of the bytecode after the

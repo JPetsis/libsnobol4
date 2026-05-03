@@ -7,6 +7,7 @@
 #include "snobol/parser.h"
 #include "snobol/snobol_internal.h"
 #include "snobol/search.h"
+#include "snobol/table.h"
 #ifdef SNOBOL_JIT
 #include "snobol/jit.h"
 #endif
@@ -15,37 +16,8 @@
 #include <time.h>
 #include <stdarg.h>
 
-/* Code buffer for template compilation */
-typedef struct {
-    uint8_t *buf;
-    size_t cap;
-    size_t len;
-} CodeBuf;
-
-static void cb_init(CodeBuf *c) {
-    c->cap = 4096;
-    c->buf = snobol_malloc(c->cap);
-    c->len = 0;
-}
-static void cb_free(CodeBuf *c) {
-    if (c->buf) {
-        snobol_free(c->buf);
-        c->buf = NULL;
-    }
-    c->cap = c->len = 0;
-}
-static void cb_ensure(CodeBuf *c, size_t need) {
-    if (c->len + need <= c->cap) return;
-    size_t newcap = c->cap ? c->cap * 2 : 4096;
-    while (c->len + need > newcap) newcap *= 2;
-    c->buf = snobol_realloc(c->buf, newcap);
-    c->cap = newcap;
-}
-static size_t cb_pos(CodeBuf *c) { return c->len; }
-static void cb_emit_u8(CodeBuf *c, uint8_t v) { cb_ensure(c,1); c->buf[c->len++] = v; }
-static void cb_emit_u16(CodeBuf *c, uint16_t v) { cb_ensure(c,2); c->buf[c->len++] = (v >> 8) & 0xff; c->buf[c->len++] = v & 0xff; }
-static void cb_emit_u32(CodeBuf *c, uint32_t v) { cb_ensure(c,4); c->buf[c->len++] = (v >> 24) & 0xff; c->buf[c->len++] = (v >> 16) & 0xff; c->buf[c->len++] = (v >> 8) & 0xff; c->buf[c->len++] = v & 0xff; }
-static void cb_emit_bytes(CodeBuf *c, const uint8_t *b, size_t n) { if (n==0) return; cb_ensure(c,n); memcpy(c->buf + c->len, b, n); c->len += n; }
+/* Forward declaration: extract C table pointer from a PHP Snobol\Table zval */
+extern snobol_table_t *php_snobol_get_table_from_zval(zval *zv);
 
 /* DEBUG LOGGING DISABLED
 static inline void snobol_log_impl(const char *file, int line, const char *fmt, ...) {
@@ -143,6 +115,7 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(ai_subst, 0, 0, 2)
     ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
     ZEND_ARG_TYPE_INFO(0, template, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, tables, IS_ARRAY, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_setEval, 0, 0, 1)
@@ -430,10 +403,13 @@ PHP_METHOD(Snobol_Pattern, match) {
 }
 
 PHP_METHOD(Snobol_Pattern, subst) {
-    zend_string *subject, *template;
-    ZEND_PARSE_PARAMETERS_START(2,2)
+    zend_string *subject, *tpl_str;
+    zval *tables_zval = NULL;
+    ZEND_PARSE_PARAMETERS_START(2, 3)
         Z_PARAM_STR(subject)
-        Z_PARAM_STR(template)
+        Z_PARAM_STR(tpl_str)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_EX(tables_zval, 1, 0)
     ZEND_PARSE_PARAMETERS_END();
 
     snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
@@ -444,10 +420,55 @@ PHP_METHOD(Snobol_Pattern, subst) {
 
     uint8_t *tpl_bc = NULL;
     size_t tpl_bc_len = 0;
-    if (compile_template_to_bytecode(ZSTR_VAL(template), ZSTR_LEN(template), &tpl_bc, &tpl_bc_len) != 0) {
+    if (compile_template_to_bytecode(ZSTR_VAL(tpl_str), ZSTR_LEN(tpl_str), &tpl_bc, &tpl_bc_len) != 0) {
         zend_throw_exception(zend_ce_exception, "Failed to compile template", 0);
         RETURN_FALSE;
     }
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    /* Collect tables from the optional third parameter and bind by name */
+    snobol_table_t **php_tables = NULL;
+    const char     **tbl_names  = NULL;
+    uint16_t        *tbl_ids    = NULL;
+    size_t           tbl_count  = 0;
+
+    if (tables_zval && Z_TYPE_P(tables_zval) == IS_ARRAY) {
+        HashTable *ht = Z_ARRVAL_P(tables_zval);
+        size_t raw_count = zend_hash_num_elements(ht);
+        if (raw_count > 0) {
+            php_tables = (snobol_table_t **)emalloc(raw_count * sizeof(snobol_table_t *));
+            tbl_names  = (const char **)emalloc(raw_count * sizeof(const char *));
+            tbl_ids    = (uint16_t *)emalloc(raw_count * sizeof(uint16_t));
+            zend_string *tbl_key;
+            zval *entry;
+            ZEND_HASH_FOREACH_STR_KEY_VAL(ht, tbl_key, entry) {
+                if (!tbl_key) continue; /* skip integer-keyed entries */
+                snobol_table_t *ct = php_snobol_get_table_from_zval(entry);
+                if (ct) {
+                    php_tables[tbl_count] = ct;
+                    tbl_names[tbl_count]  = ZSTR_VAL(tbl_key); /* use PHP array key as binding name */
+                    tbl_ids[tbl_count]    = (uint16_t)tbl_count;
+                    tbl_count++;
+                }
+            } ZEND_HASH_FOREACH_END();
+        }
+    }
+
+    /* Always bind (even with tbl_count==0) so unresolved table refs are detected */
+    {
+        int bind_rc = snobol_template_bind_tables(tpl_bc, tpl_bc_len,
+                                                  tbl_names, tbl_ids, tbl_count);
+        if (bind_rc != 0) {
+            if (php_tables) { efree(php_tables); php_tables = NULL; }
+            if (tbl_names)  { efree(tbl_names);  tbl_names  = NULL; }
+            if (tbl_ids)    { efree(tbl_ids);    tbl_ids    = NULL; }
+            compiler_free(tpl_bc);
+            zend_throw_exception(zend_ce_exception,
+                "Template references an unregistered table name", 0);
+            RETURN_FALSE;
+        }
+    }
+#endif /* SNOBOL_DYNAMIC_PATTERN */
 
     snobol_buf out;
     snobol_buf_init(&out);
@@ -460,7 +481,7 @@ PHP_METHOD(Snobol_Pattern, subst) {
     snobol_search_meta_t meta;
     snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
 
-    /* Core search loop: one native control loop, no per-offset temporary VMs */
+    /* Core search loop */
     size_t search_offset = 0;
     while (search_offset <= subject_len) {
         VM vm;
@@ -496,32 +517,18 @@ PHP_METHOD(Snobol_Pattern, subst) {
                                          search_offset, &meta, &match_result, NULL);
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
-        if (vm.dyn_cache) {
-            dynamic_pattern_cache_destroy(vm.dyn_cache);
-        }
-        if (vm.dyn_pending_source) {
-            efree(vm.dyn_pending_source);
-        }
-        if (vm.dyn_pending_bc) {
-            efree(vm.dyn_pending_bc);
-        }
+        if (vm.dyn_cache) dynamic_pattern_cache_destroy(vm.dyn_cache);
+        if (vm.dyn_pending_source) efree(vm.dyn_pending_source);
+        if (vm.dyn_pending_bc)     efree(vm.dyn_pending_bc);
 #endif
 
         if (!found) break;
 
-        /* Append prefix (bytes before this match) */
+        /* Append prefix */
         snobol_buf_append(&out, subject_val + last_match_end,
                           match_result.match_start - last_match_end);
 
-        /* Run template BC using the VM's capture state (vm.s is at match_start,
-         * vm.pos is the match length, var_start/var_end hold named captures).
-         *
-         * IMPORTANT: clear all JIT profiling state before switching bytecode.
-         * vm.jit.ip_counts was allocated with pattern_bc_len entries; if
-         * tpl_bc_len > pattern_bc_len the JIT hotness counter in vm_exec would
-         * write past the end of the ip_counts array (heap buffer overflow).
-         * Template execution never needs JIT compilation, so it is safe to
-         * zero these pointers. */
+        /* Switch VM to template bytecode */
         vm.bc     = tpl_bc;
         vm.bc_len = tpl_bc_len;
         vm.ip     = 0;
@@ -532,11 +539,28 @@ PHP_METHOD(Snobol_Pattern, subst) {
         vm.jit.ctx       = NULL;
         vm.jit.enabled   = false;
 #endif
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        /* Register tables in the same sequential order as the bind step */
+        if (tbl_count > 0) {
+            vm_init_tables(&vm);
+            for (size_t k = 0; k < tbl_count; k++) {
+                uint16_t assigned_id;
+                vm_register_table(&vm, php_tables[k], &assigned_id);
+                (void)assigned_id;
+            }
+        }
+#endif
+
         vm_run(&vm);
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+        if (tbl_count > 0) vm_free_tables(&vm);
+#endif
 
         /* Advance past the match */
         size_t match_len = match_result.match_end - match_result.match_start;
-        if (match_len == 0) match_len = 1;  /* avoid infinite loop on empty match */
+        if (match_len == 0) match_len = 1;
         search_offset = match_result.match_start + match_len;
         last_match_end = search_offset;
 
@@ -548,6 +572,12 @@ PHP_METHOD(Snobol_Pattern, subst) {
         snobol_buf_append(&out, subject_val + last_match_end,
                           subject_len - last_match_end);
     }
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    if (php_tables) efree(php_tables);
+    if (tbl_names)  efree(tbl_names);
+    if (tbl_ids)    efree(tbl_ids);
+#endif
 
     if (tpl_bc) compiler_free(tpl_bc);
 
@@ -1108,8 +1138,11 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *
     return result;
 }
 
-/* Stub for template compilation - not yet implemented */
-int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, size_t *out_len) {
+/* compile_template_to_bytecode is provided by the core (compiler.c / core_amalgam.c).
+ * The old PHP-side duplicate has been removed: see task 5.1 of the
+ * template-substitution-completeness change. */
+#if 0 /* REMOVED: duplicate template compiler – delegate to core */
+int compile_template_to_bytecode_REMOVED(const char *tpl, size_t len, uint8_t **out_bc, size_t *out_len) {
     SNOBOL_LOG("compile_template_to_bytecode START: tpl='%.*s'", (int)len, tpl);
     CodeBuf cb;
     cb_init(&cb);
@@ -1298,3 +1331,4 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, 
     SNOBOL_LOG("compile_template_to_bytecode SUCCESS, len=%zu", *out_len);
     return 0;
 }
+#endif /* REMOVED */

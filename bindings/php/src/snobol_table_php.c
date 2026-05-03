@@ -249,6 +249,19 @@ static const zend_function_entry snobol_table_methods[] = {
 
 zend_class_entry *snobol_table_ce;
 
+/**
+ * Public helper: extract the underlying C snobol_table_t from a PHP zval
+ * that holds a \\Snobol\\Table object.  Returns NULL if the zval is not a
+ * Table object or if the internal pointer has not been initialised.
+ */
+snobol_table_t *php_snobol_get_table_from_zval(zval *zv) {
+    if (!zv || Z_TYPE_P(zv) != IS_OBJECT) return NULL;
+    zend_object *obj = Z_OBJ_P(zv);
+    if (!obj || obj->ce != snobol_table_ce) return NULL;
+    snobol_table_php_t *intern = php_snobol_table_fetch(obj);
+    return intern ? intern->table : NULL;
+}
+
 void snobol_table_php_minit(void) {
     SNOBOL_LOG("snobol_table_php_minit: START");
     zend_class_entry ce;

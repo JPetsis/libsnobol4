@@ -2,7 +2,8 @@
  * @file test_template_ops.c
  * @brief Tests for template operations including formatting and table-backed replacements
  * 
- * Tests OP_EMIT_FORMAT (upper, lower, length) and OP_EMIT_TABLE operations.
+ * Tests OP_EMIT_FORMAT (upper, lower, length, lpad, rpad), OP_EMIT_TABLE,
+ * snobol_template_bind_tables, and the OP_EMIT_EXPR legacy alias.
  */
 
 #include <stdio.h>
@@ -13,6 +14,7 @@
 
 #include "../../core/include/snobol/snobol_internal.h"
 #include "snobol/vm.h"
+#include "snobol/compiler.h"
 #include "snobol/table.h"
 
 /* External test framework functions */
@@ -403,6 +405,279 @@ static void test_table_backed_template_missing_key_fallback(void) {
     snobol_buf_free(&out);
 }
 
+/* ── Template compiler and VM integration tests ──────────────────────────── */
+
+/* Helper: run a compiled template bytecode over a subject string */
+static void run_template(const char *tpl_src, const char *subject,
+                         size_t cap0_start, size_t cap0_end, /* capture register 0 */
+                         snobol_buf *out)
+{
+    uint8_t *bc = NULL; size_t bc_len = 0;
+    compile_template_to_bytecode(tpl_src, strlen(tpl_src), &bc, &bc_len);
+    VM vm;
+    snobol_buf_init(out);
+    memset(&vm, 0, sizeof(VM));
+    vm.bc = bc; vm.bc_len = bc_len;
+    vm.s  = subject; vm.len = strlen(subject);
+    vm.cap_start[0] = cap0_start; vm.cap_end[0] = cap0_end;
+    vm.max_cap_used = 1;
+    vm.out = out;
+    vm_init_labels(&vm);
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    vm_init_tables(&vm);
+#endif
+    vm_run(&vm);
+    vm_free_labels(&vm);
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    vm_free_tables(&vm);
+#endif
+    if (bc) compiler_free(bc);
+}
+
+/* compile-and-run .lower() */
+static void test_compile_lower(void) {
+    test_suite("Template Ops: compile-and-run .lower()");
+    snobol_buf out;
+    run_template("${v0.lower()}", "HELLO", 0, 5, &out);
+    test_assert(out.len == 5 && memcmp(out.data, "hello", 5) == 0, "lower output is 'hello'");
+    snobol_buf_free(&out);
+}
+
+/* compile-and-run .lpad(5,'0') */
+static void test_compile_lpad_fill(void) {
+    test_suite("Template Ops: compile-and-run .lpad(5,'0')");
+    snobol_buf out;
+    run_template("${v0.lpad(5,'0')}", "42", 0, 2, &out);
+    test_assert(out.len == 5 && memcmp(out.data, "00042", 5) == 0, "lpad output is '00042'");
+    snobol_buf_free(&out);
+}
+
+/* compile-and-run .rpad(6) default fill=space */
+static void test_compile_rpad_default(void) {
+    test_suite("Template Ops: compile-and-run .rpad(6)");
+    snobol_buf out;
+    run_template("${v0.rpad(6)}", "hi", 0, 2, &out);
+    test_assert(out.len == 6, "rpad output length is 6");
+    test_assert(memcmp(out.data, "hi    ", 6) == 0, "rpad output is 'hi    '");
+    snobol_buf_free(&out);
+}
+
+/* lpad/rpad are no-ops when capture >= width */
+static void test_pad_noop_when_long(void) {
+    test_suite("Template Ops: lpad/rpad no-op when capture >= width");
+    snobol_buf out;
+    run_template("${v0.lpad(3)}", "hello", 0, 5, &out);
+    test_assert(out.len == 5 && memcmp(out.data, "hello", 5) == 0, "lpad no-op for long capture");
+    snobol_buf_free(&out);
+
+    run_template("${v0.rpad(2,'.')}", "hi", 0, 2, &out);
+    test_assert(out.len == 2 && memcmp(out.data, "hi", 2) == 0, "rpad no-op exactly at width");
+    snobol_buf_free(&out);
+}
+
+/* graceful degradation: missing capture with lower/lpad/rpad */
+static void test_missing_capture_degradation(void) {
+    test_suite("Template Ops: missing capture graceful degradation");
+
+    uint8_t *bc = NULL; size_t bc_len = 0;
+    /* .lower() with cap_end <= cap_start (missing) */
+    compile_template_to_bytecode("${v0.lower()}", 13, &bc, &bc_len);
+    snobol_buf out; snobol_buf_init(&out);
+
+    VM vm; memset(&vm, 0, sizeof(VM));
+    vm.bc = bc; vm.bc_len = bc_len;
+    vm.s = ""; vm.len = 0;
+    /* cap_end == 0, cap_start == 0: empty (treated as missing) */
+    vm.out = &out;
+    vm_init_labels(&vm);
+    vm_run(&vm);
+    vm_free_labels(&vm);
+    compiler_free(bc);
+
+    test_assert(out.len == 0, "missing capture with lower emits empty string");
+    snobol_buf_free(&out);
+
+    /* .lpad() with missing capture (cap_end < cap_start signals missing) */
+    compile_template_to_bytecode("${v0.lpad(4)}", 13, &bc, &bc_len);
+    snobol_buf_init(&out);
+    memset(&vm, 0, sizeof(VM));
+    vm.bc = bc; vm.bc_len = bc_len;
+    vm.s = "hello"; vm.len = 5;
+    vm.cap_start[0] = 5; vm.cap_end[0] = 0; /* cap_end < cap_start = missing */
+    vm.out = &out;
+    vm_init_labels(&vm);
+    vm_run(&vm);
+    vm_free_labels(&vm);
+    compiler_free(bc);
+    test_assert(out.len == 0, "missing capture with lpad emits empty string");
+    snobol_buf_free(&out);
+}
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+
+/* snobol_template_bind_tables: compile, bind, verify table_id patched */
+static void test_bind_tables_patch(void) {
+    test_suite("Template Ops: snobol_template_bind_tables patches table_id");
+
+    uint8_t *bc = NULL; size_t bc_len = 0;
+    const char *tpl = "$v0[mydict['hello']]";
+    int rc = compile_template_to_bytecode(tpl, strlen(tpl), &bc, &bc_len);
+    test_assert(rc == 0, "template compiles successfully");
+    if (rc != 0) return;
+
+    /* Bytecode should contain 0xFFFF (unbound sentinel) */
+    /* Find OP_EMIT_TABLE in bytecode */
+    bool found_unbound = false;
+    for (size_t i = 0; i + 1 < bc_len; ) {
+        if (bc[i] == OP_EMIT_TABLE && i + 2 < bc_len) {
+            uint16_t tid = ((uint16_t)bc[i+1] << 8) | bc[i+2];
+            if (tid == SNBL_TABLE_ID_UNBOUND) { found_unbound = true; break; }
+        }
+        i++;
+    }
+    test_assert(found_unbound, "OP_EMIT_TABLE initialized with SNBL_TABLE_ID_UNBOUND");
+
+    /* Bind: map "mydict" -> id 42 */
+    const char *names[] = { "mydict" };
+    uint16_t   ids[]    = { 42 };
+    int bind_rc = snobol_template_bind_tables(bc, bc_len, names, ids, 1);
+    test_assert(bind_rc == 0, "bind_tables returns 0 on success");
+
+    /* table_id in bytecode should now be 42 */
+    bool found_bound = false;
+    for (size_t i = 0; i + 1 < bc_len; ) {
+        if (bc[i] == OP_EMIT_TABLE && i + 2 < bc_len) {
+            uint16_t tid = ((uint16_t)bc[i+1] << 8) | bc[i+2];
+            if (tid == 42) { found_bound = true; break; }
+        }
+        i++;
+    }
+    test_assert(found_bound, "OP_EMIT_TABLE table_id patched to 42");
+
+    compiler_free(bc);
+}
+
+/* snobol_template_bind_tables returns -1 for unresolvable name */
+static void test_bind_tables_unresolvable(void) {
+    test_suite("Template Ops: snobol_template_bind_tables returns -1 for unknown name");
+
+    uint8_t *bc = NULL; size_t bc_len = 0;
+    compile_template_to_bytecode("$v0[unknown['key']]", 19, &bc, &bc_len);
+
+    const char *names[] = { "otherDict" };
+    uint16_t   ids[]    = { 7 };
+    int bind_rc = snobol_template_bind_tables(bc, bc_len, names, ids, 1);
+    test_assert(bind_rc == -1, "bind_tables returns -1 for unresolvable name");
+
+    /* unresolved entry should still have 0xFFFF */
+    bool still_unbound = false;
+    for (size_t i = 0; i + 1 < bc_len; ) {
+        if (bc[i] == OP_EMIT_TABLE && i + 2 < bc_len) {
+            uint16_t tid = ((uint16_t)bc[i+1] << 8) | bc[i+2];
+            if (tid == SNBL_TABLE_ID_UNBOUND) { still_unbound = true; break; }
+        }
+        i++;
+    }
+    test_assert(still_unbound, "unresolved OP_EMIT_TABLE retains SNBL_TABLE_ID_UNBOUND");
+
+    compiler_free(bc);
+}
+
+/* end-to-end: compile template with OP_EMIT_TABLE (literal key), bind, execute */
+static void test_e2e_table_literal_key(void) {
+    test_suite("Template Ops: end-to-end table lookup with literal key");
+
+    snobol_table_t *table = table_create("colors");
+    table_set(table, "sky",  "blue");
+    table_set(table, "sun",  "yellow");
+
+    uint8_t *bc = NULL; size_t bc_len = 0;
+    compile_template_to_bytecode("$v0[colors['sky']]", 18, &bc, &bc_len);
+
+    const char *names[] = { "colors" };
+    uint16_t   ids[]    = { 0 };  /* will be assigned ID 0 when registered */
+    snobol_template_bind_tables(bc, bc_len, names, ids, 1);
+
+    VM vm; snobol_buf out; snobol_buf_init(&out);
+    memset(&vm, 0, sizeof(VM));
+    vm.bc = bc; vm.bc_len = bc_len;
+    vm.s = ""; vm.len = 0;
+    vm.out = &out;
+    vm_init_labels(&vm);
+    vm_init_tables(&vm);
+    uint16_t assigned; vm_register_table(&vm, table, &assigned);
+    vm_run(&vm);
+    vm_free_tables(&vm); vm_free_labels(&vm);
+
+    test_assert(out.len == 4 && memcmp(out.data, "blue", 4) == 0,
+                "literal key table lookup returns 'blue'");
+
+    snobol_buf_free(&out);
+    compiler_free(bc);
+    table_release(table);
+}
+
+/* end-to-end: compile template with OP_EMIT_TABLE (capture-derived key), bind, execute */
+static void test_e2e_table_capture_key(void) {
+    test_suite("Template Ops: end-to-end table lookup with capture-derived key");
+
+    snobol_table_t *table = table_create("words");
+    table_set(table, "cat",  "gato");
+    table_set(table, "dog",  "perro");
+
+    const char *tpl = "$v0[words[v0]]";
+    uint8_t *bc = NULL; size_t bc_len = 0;
+    compile_template_to_bytecode(tpl, strlen(tpl), &bc, &bc_len);
+
+    const char *names[] = { "words" };
+    uint16_t   ids[]    = { 0 };
+    snobol_template_bind_tables(bc, bc_len, names, ids, 1);
+
+    VM vm; snobol_buf out; snobol_buf_init(&out);
+    memset(&vm, 0, sizeof(VM));
+    vm.bc = bc; vm.bc_len = bc_len;
+    const char *subject = "cat";
+    vm.s   = subject; vm.len = 3;
+    vm.cap_start[0] = 0; vm.cap_end[0] = 3; vm.max_cap_used = 1;
+    vm.out = &out;
+    vm_init_labels(&vm);
+    vm_init_tables(&vm);
+    uint16_t assigned; vm_register_table(&vm, table, &assigned);
+    vm_run(&vm);
+    vm_free_tables(&vm); vm_free_labels(&vm);
+
+    test_assert(out.len == 4 && memcmp(out.data, "gato", 4) == 0,
+                "capture-key table lookup returns 'gato' for 'cat'");
+
+    snobol_buf_free(&out);
+    compiler_free(bc);
+    table_release(table);
+}
+
+#endif /* SNOBOL_DYNAMIC_PATTERN */
+
+/* legacy OP_EMIT_EXPR bytecode (discriminant 1=upper) still works */
+static void test_legacy_emit_expr(void) {
+    test_suite("Template Ops: legacy OP_EMIT_EXPR alias (discriminant 1=upper)");
+
+    VM vm; snobol_buf out; snobol_buf_init(&out);
+    /* Manually construct bytecode: OP_EMIT_EXPR, reg=0, expr_type=1 (legacy upper) */
+    uint8_t bc[] = { OP_EMIT_EXPR, 0x00, 0x01, OP_ACCEPT };
+    memset(&vm, 0, sizeof(VM));
+    vm.bc = bc; vm.bc_len = sizeof(bc);
+    vm.s  = "hello"; vm.len = 5;
+    vm.cap_start[0] = 0; vm.cap_end[0] = 5; vm.max_cap_used = 1;
+    vm.out = &out;
+    vm_init_labels(&vm);
+    vm_run(&vm);
+    vm_free_labels(&vm);
+
+    test_assert(out.len == 5 && memcmp(out.data, "HELLO", 5) == 0,
+                "legacy OP_EMIT_EXPR discriminant 1 uppercases 'hello' to 'HELLO'");
+
+    snobol_buf_free(&out);
+}
+
 void test_template_ops_suite(void) {
     test_format_upper();
     test_format_lower();
@@ -414,4 +689,16 @@ void test_template_ops_suite(void) {
     test_format_unknown_type();
     test_table_backed_template_literal_key();
     test_table_backed_template_missing_key_fallback();
+    test_compile_lower();
+    test_compile_lpad_fill();
+    test_compile_rpad_default();
+    test_pad_noop_when_long();
+    test_missing_capture_degradation();
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    test_bind_tables_patch();
+    test_bind_tables_unresolvable();
+    test_e2e_table_literal_key();
+    test_e2e_table_capture_key();
+#endif
+    test_legacy_emit_expr();
 }

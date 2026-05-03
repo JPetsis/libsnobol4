@@ -215,18 +215,56 @@ The following opcodes support these features:
 | `OP_TABLE_SET`   | table_id (u16), key_reg (u8), value_reg (u8) | Set table[key] = value                             |
 | `OP_DYNAMIC_DEF` | len (u32), bytecode[len]                     | Define dynamic pattern bytecode block              |
 | `OP_DYNAMIC`     | (uses pending bytecode from OP_DYNAMIC_DEF)  | Execute stored dynamic pattern                     |
-| `OP_EMIT_TABLE`  | table_id (u16), key_type (u8), ...           | Emit table lookup (key_type: 0=literal, 1=capture) |
-| `OP_EMIT_FORMAT` | reg (u8), format_type (u8)                   | Format capture (1=upper, 2=lower, 3=length)        |
+| `OP_EMIT_TABLE`  | table_id (u16), key_type (u8), name_len (u8), name_bytes[name_len], ... | Emit table lookup (key_type: 0=literal, 1=capture); name resolved by `snobol_template_bind_tables()` |
+| `OP_EMIT_FORMAT` | reg (u8), format_type (u8) [+ width u16, fill_char u8 for LPAD/RPAD]   | Format capture: `SNBL_FMT_UPPER=1`, `SNBL_FMT_LOWER=2`, `SNBL_FMT_LENGTH=3`, `SNBL_FMT_LPAD=4`, `SNBL_FMT_RPAD=5` |
+| `OP_EMIT_EXPR`   | reg (u8), expr_type (u8)                                                | **Deprecated** legacy opcode. VM maps old discriminants (1→UPPER, 2→LENGTH) to `OP_EMIT_FORMAT`. New compilation always emits `OP_EMIT_FORMAT`. |
 
 ### OP_EMIT_TABLE Bytecode Format
 
 ```
 OP_EMIT_TABLE (1 byte)
-table_id (2 bytes, u16)
+table_id (2 bytes, u16) — 0xFFFF (SNBL_TABLE_ID_UNBOUND) until snobol_template_bind_tables() is called
 key_type (1 byte, u8):
-  - 0 = literal key: key_len (2 bytes, u16), key_bytes[key_len]
-  - 1 = capture key: key_reg (1 byte, u8)
+name_len (1 byte, u8) — byte length of the embedded table name
+name_bytes[name_len] — UTF-8 table name (resolved by snobol_template_bind_tables, skipped at runtime)
+  then key payload:
+  - key_type=0 (literal key): key_len (2 bytes, u16), key_bytes[key_len]
+  - key_type=1 (capture key): key_reg (1 byte, u8)
 ```
+
+Call `snobol_template_bind_tables(bc, bc_len, names, ids, n)` after compilation
+to patch all `0xFFFF` table_id entries to runtime-assigned IDs.
+
+### Template Expression Syntax
+
+Inside `${vN.expr()}` braces the following expression forms are supported:
+
+| Expression         | Emitted opcode                                   | Effect                              |
+|--------------------|--------------------------------------------------|-------------------------------------|
+| `${vN}`            | `OP_EMIT_CAPTURE reg`                            | Emit raw capture                    |
+| `${vN.upper()}`    | `OP_EMIT_FORMAT reg SNBL_FMT_UPPER`              | ASCII uppercase                     |
+| `${vN.lower()}`    | `OP_EMIT_FORMAT reg SNBL_FMT_LOWER`              | ASCII lowercase                     |
+| `${vN.length()}`   | `OP_EMIT_FORMAT reg SNBL_FMT_LENGTH`             | Decimal codepoint count             |
+| `${vN.lpad(W)}`    | `OP_EMIT_FORMAT reg SNBL_FMT_LPAD width 0x20`   | Left-pad to width W with spaces     |
+| `${vN.lpad(W,'c')}` | `OP_EMIT_FORMAT reg SNBL_FMT_LPAD width fill`  | Left-pad to width W with char `c`   |
+| `${vN.rpad(W)}`    | `OP_EMIT_FORMAT reg SNBL_FMT_RPAD width 0x20`   | Right-pad to width W with spaces    |
+| `${vN.rpad(W,'c')}` | `OP_EMIT_FORMAT reg SNBL_FMT_RPAD width fill`  | Right-pad to width W with char `c`  |
+
+Width is a 1–1024 decimal integer; it is capped at 1024 in the VM dispatch.
+
+### C API: snobol_template_bind_tables
+
+```c
+int snobol_template_bind_tables(uint8_t *bc, size_t bc_len,
+                                 const char **names, const uint16_t *ids,
+                                 size_t n);
+```
+
+Walks `bc` for `OP_EMIT_TABLE` entries with `table_id == SNBL_TABLE_ID_UNBOUND`.
+For each such entry the embedded name is matched against `names[0..n-1]`; on a
+match, `table_id` is patched in-place to `ids[k]`.  Returns 0 if all names were
+resolved, -1 if any entry could not be resolved.  Unresolvable entries retain
+`SNBL_TABLE_ID_UNBOUND`.
 
 ## Compatibility Fixtures
 

@@ -33,6 +33,16 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
     Labels are compile-time names that resolve to bytecode offsets; `goto` is explicit control
     flow that does **not** pop the backtracking choice stack (distinguishing it from backtracking).
     Duplicate-label and unknown-label references are detected at compile time.
+* **Template Substitution** (v0.5.0): `Pattern::subst(subject, template[, tables])` replaces
+  every match in `subject` using a template string where capture references and formatting
+  expressions are compiled entirely to C VM instructions.  Supported expressions inside `${vN...}`:
+  * `${vN}` — raw capture
+  * `${vN.upper()}` — ASCII uppercase
+  * `${vN.lower()}` — ASCII lowercase
+  * `${vN.length()}` — decimal codepoint count
+  * `${vN.lpad(W[,'c'])}` — left-pad to width W (fill char defaults to space)
+  * `${vN.rpad(W[,'c'])}` — right-pad to width W (fill char defaults to space)
+  * `$TABLE['key']` / `$TABLE[vN]` — table-backed lookup (fully compiled; no PHP post-processing)
 * **Captures & Assignments**: Register-based capture and variable assignment
 * **Associative Tables**: Runtime-owned hash tables for key-value storage
 * **Dynamic Pattern Evaluation**: Runtime pattern compilation with caching (`EVAL(...)`)
@@ -58,7 +68,7 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
 
 | Binding              | Status   | Version |
 |----------------------|----------|---------|
-| [PHP](bindings/php/) | ✅ Stable | v0.4.0  |
+| [PHP](bindings/php/) | ✅ Stable | v0.5.0  |
 
 ## Project Structure
 
