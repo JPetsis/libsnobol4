@@ -1,6 +1,6 @@
 # libsnobol4
 
-A high-performance C23 library implementing [SNOBOL4](https://en.wikipedia.org/wiki/SNOBOL)-style string pattern
+A high-performance C library implementing [SNOBOL4](https://en.wikipedia.org/wiki/SNOBOL)-style string pattern
 matching and manipulation.
 
 libsnobol4 provides a powerful, expressive alternative to PCRE (Perl Compatible Regular Expressions) for complex string
@@ -8,9 +8,9 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
 
 ## Features
 
-### Core Library (C23)
+### Core Library (C)
 
-* **Language-Agnostic Core**: Pure C23 implementation with no external dependencies
+* **Language-Agnostic Core**: Pure C implementation with no external dependencies
 * **Robust Backtracking Engine**:
   * **Catastrophic Backtracking Protection**: Detects and prevents infinite loops in nested zero-width matches
   * **Deep Recursion**: Dynamically growable choice stack handles deeply nested patterns without crashing
@@ -74,7 +74,7 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
 
 ```
 libsnobol4/
-├── core/                    # Language-agnostic C23 core library
+├── core/                    # Language-agnostic C core library
 │   ├── CMakeLists.txt       # Core build configuration
 │   ├── include/snobol/      # Public API headers
 │   ├── src/                 # Core implementation
@@ -240,7 +240,7 @@ See `bench/` directory for benchmark scripts and `bench/results_builtin.json` fo
 └──────────────────────────┼──────────────────────────────┘
                            │
 ┌──────────────────────────┼──────────────────────────────┐
-│              Language-Agnostic Core (C23)               │
+│              Language-Agnostic Core (C)               │
 │                          │                              │
 │  ┌──────────────┐  ┌─────▼──────┐  ┌──────────────┐     │
 │  │ Lexer (C)    │─▶│ Parser (C) │─▶│  Compiler    │     │

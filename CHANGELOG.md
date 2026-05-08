@@ -286,7 +286,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Monorepo Structure**: Language-agnostic core with separate bindings directories
-- **Core C23 Library** (`core/`):
+- **Core C Library** (`core/`):
   - Complete lexer, parser, AST, compiler, VM implementation
   - Public API headers in `core/include/snobol/`
   - CMake build system with proper installation rules

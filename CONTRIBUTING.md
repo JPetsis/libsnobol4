@@ -5,11 +5,11 @@ your development environment, building the project, and submitting changes.
 
 ## Project Structure
 
-libsnobol4 uses a **monorepo** structure with a language-agnostic C23 core and language-specific bindings:
+libsnobol4 uses a **monorepo** structure with a language-agnostic C core and language-specific bindings:
 
 ```
 libsnobol4/
-├── core/                    # Core C23 library (language-agnostic)
+├── core/                    # Core C library (language-agnostic)
 │   ├── include/snobol/      # Public API headers
 │   ├── src/                 # Core implementation
 │   └── grammar/             # SNOBOL pattern grammar

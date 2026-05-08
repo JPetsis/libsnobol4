@@ -4,7 +4,7 @@
  * @file snobol.h
  * @brief Main API entry point for libsnobol4
  *
- * libsnobol4 is a high-performance C23 library implementing SNOBOL4-style
+ * libsnobol4 is a high-performance C library implementing SNOBOL4-style
  * pattern matching. This header provides the main API entry point,
  * re-exporting common types and functions for convenient single-include usage.
  *
