@@ -178,7 +178,7 @@ static void test_table_emit_success(void) {
 #ifdef SNOBOL_DYNAMIC_PATTERN
     /* Create a table */
     snobol_table_t *table = table_create("test");
-    table_set(table, "key1", "value1");
+    (void)table_set(table, "key1", "value1");
     
     /* Register the table */
     uint16_t table_id;
@@ -221,7 +221,7 @@ static void test_table_emit_missing_key(void) {
     
 #ifdef SNOBOL_DYNAMIC_PATTERN
     snobol_table_t *table = table_create("test");
-    table_set(table, "key1", "value1");
+    (void)table_set(table, "key1", "value1");
     
     uint16_t table_id;
     vm_register_table(&vm, table, &table_id);
@@ -258,8 +258,8 @@ static void test_table_multiple_lookups(void) {
     
 #ifdef SNOBOL_DYNAMIC_PATTERN
     snobol_table_t *table = table_create("test");
-    table_set(table, "name", "Alice");
-    table_set(table, "city", "Boston");
+    (void)table_set(table, "name", "Alice");
+    (void)table_set(table, "city", "Boston");
     
     uint16_t table_id;
     vm_register_table(&vm, table, &table_id);
@@ -332,7 +332,7 @@ static void test_table_backed_template_literal_key(void) {
 #ifdef SNOBOL_DYNAMIC_PATTERN
     /* Create a table */
     snobol_table_t *table = table_create("test");
-    table_set(table, "key", "value_from_table");
+    (void)table_set(table, "key", "value_from_table");
 
     /* Register the table */
     uint16_t table_id;
@@ -375,7 +375,7 @@ static void test_table_backed_template_missing_key_fallback(void) {
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
     snobol_table_t *table = table_create("test");
-    table_set(table, "existing", "value");
+    (void)table_set(table, "existing", "value");
 
     uint16_t table_id;
     vm_register_table(&vm, table, &table_id);
@@ -588,8 +588,8 @@ static void test_e2e_table_literal_key(void) {
     test_suite("Template Ops: end-to-end table lookup with literal key");
 
     snobol_table_t *table = table_create("colors");
-    table_set(table, "sky",  "blue");
-    table_set(table, "sun",  "yellow");
+    (void)table_set(table, "sky",  "blue");
+    (void)table_set(table, "sun",  "yellow");
 
     uint8_t *bc = NULL; size_t bc_len = 0;
     compile_template_to_bytecode("$v0[colors['sky']]", 18, &bc, &bc_len);
@@ -622,8 +622,8 @@ static void test_e2e_table_capture_key(void) {
     test_suite("Template Ops: end-to-end table lookup with capture-derived key");
 
     snobol_table_t *table = table_create("words");
-    table_set(table, "cat",  "gato");
-    table_set(table, "dog",  "perro");
+    (void)table_set(table, "cat",  "gato");
+    (void)table_set(table, "dog",  "perro");
 
     const char *tpl = "$v0[words[v0]]";
     uint8_t *bc = NULL; size_t bc_len = 0;

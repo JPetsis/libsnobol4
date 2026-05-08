@@ -72,6 +72,27 @@ if test "$PHP_SNOBOL" != "no"; then
   dnl for macOS where PHP_NEW_EXTENSION sometimes omits it).
   AC_DEFINE([COMPILE_DL_SNOBOL], [1], [Build snobol as a dynamically-loaded module])
 
+  dnl Require C23 for nullptr, constexpr variables, and [[attributes]].
+  dnl GCC 13+ uses -std=c23; GCC 9-12 / older Clang use the draft alias -std=c2x.
+  dnl NOTE: use AC_LANG_PROGRAM so the test body lands inside main(), not at
+  dnl       file scope.  Do NOT use AC_LANG_SOURCE([[...]]) — double brackets
+  dnl       in M4 expand to literal [ ] in the compiled snippet, making it
+  dnl       syntactically invalid and causing a false "no C23 support" result.
+  AC_MSG_CHECKING([for C23 compiler support])
+  snobol_saved_cflags="$CFLAGS"
+  SNOBOL_C23_FLAG=""
+  CFLAGS="$snobol_saved_cflags -std=c23"
+  AC_COMPILE_IFELSE(
+    [AC_LANG_PROGRAM([], [void *p = nullptr; (void)p;])],
+    [AC_MSG_RESULT([yes (-std=c23)]); SNOBOL_C23_FLAG="-std=c23"],
+    [CFLAGS="$snobol_saved_cflags -std=c2x"
+     AC_COMPILE_IFELSE(
+       [AC_LANG_PROGRAM([], [void *p = nullptr; (void)p;])],
+       [AC_MSG_RESULT([yes (-std=c2x)]); SNOBOL_C23_FLAG="-std=c2x"],
+       [CFLAGS="$snobol_saved_cflags"
+        AC_MSG_ERROR([libsnobol4 requires a C23-capable compiler (GCC 13+ or Clang 17+)])])])
+  CFLAGS="$snobol_saved_cflags"
+
   dnl Create the extension
-  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [-I$CORE_DIR/include])
+  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [$SNOBOL_C23_FLAG -I$CORE_DIR/include])
 fi

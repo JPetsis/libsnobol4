@@ -37,7 +37,7 @@ static void pb_init(PbCodeBuf *c) {
 }
 
 static void pb_free(PbCodeBuf *c) {
-    if (c->buf) { snobol_free(c->buf); c->buf = NULL; }
+    if (c->buf) { snobol_free(c->buf); c->buf = nullptr; }
     c->cap = c->len = 0;
 }
 
@@ -219,7 +219,7 @@ bool snobol_emit_arb(uint8_t **out_buf, size_t *out_len) {
     (void)len_off;
     *out_buf = c.buf;
     *out_len = c.len;
-    c.buf = NULL; /* caller owns the buffer */
+    c.buf = nullptr; /* caller owns the buffer */
     return true;
 }
 

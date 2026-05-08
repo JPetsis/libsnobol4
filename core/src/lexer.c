@@ -37,10 +37,10 @@ static bool is_ident_start(char c);
 static bool is_ident_continue(char c);
 
 snobol_lexer_t* snobol_lexer_create(const char* source, size_t len) {
-    if (!source) return NULL;
+    if (!source) return nullptr;
 
     snobol_lexer_t* lexer = (snobol_lexer_t*)calloc(1, sizeof(snobol_lexer_t));
-    if (!lexer) return NULL;
+    if (!lexer) return nullptr;
 
     lexer->source = source;
     lexer->len = len;

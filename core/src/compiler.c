@@ -23,7 +23,7 @@ static void cb_init(CodeBuf *c) {
 static void cb_free(CodeBuf *c) {
     if (c->buf) {
         snobol_free(c->buf);
-        c->buf = NULL;
+        c->buf = nullptr;
     }
     c->cap = c->len = 0;
 }
@@ -48,7 +48,7 @@ typedef struct cc_entry {
     uint16_t case_insensitive;
     struct cc_entry *next;
 } CCEntry;
-static CCEntry *charclass_head = NULL;
+static CCEntry *charclass_head = nullptr;
 static uint32_t charclass_count = 0;
 static uint8_t next_loop_id = 0;
 static bool compiler_case_insensitive = false;
@@ -61,7 +61,7 @@ static void free_charclass_list(void) {
         snobol_free(e);
         e = next;
     }
-    charclass_head = NULL;
+    charclass_head = nullptr;
     charclass_count = 0;
     compiler_case_insensitive = false;
 }
@@ -162,7 +162,7 @@ static int add_or_get_charclass(const char *s, size_t len) {
         id++; e = e->next;
     }
     
-    ne->next = NULL;
+    ne->next = nullptr;
     if (!charclass_head) {
         charclass_head = ne;
     } else {
@@ -211,12 +211,12 @@ static CCEntry *get_cc_entry(uint32_t id) {
     CCEntry *e = charclass_head;
     uint32_t i = 1;
     while (e && i < id) { e = e->next; i++; }
-    return (e && i == id) ? e : NULL;
+    return (e && i == id) ? e : nullptr;
 }
 
 /*
  * Register a new charclass that is the union of two CCEntry ranges.
- * ea / eb may be NULL; in that case cp_a / cp_b is a single codepoint.
+ * ea / eb may be nullptr; in that case cp_a / cp_b is a single codepoint.
  */
 static int fuse_add_union_cc(CCEntry *ea, uint32_t cp_a,
                               CCEntry *eb, uint32_t cp_b,
@@ -258,7 +258,7 @@ static int fuse_add_union_cc(CCEntry *ea, uint32_t cp_a,
         }
         id++; e = e->next;
     }
-    ne->next = NULL;
+    ne->next = nullptr;
     if (!charclass_head) {
         charclass_head = ne;
     } else {
@@ -367,8 +367,8 @@ static void snobol_bc_fuse_split_any(CodeBuf *cb) {
         size_t merge = arm_a.merge;
 
         /* Determine union charclass */
-        CCEntry *ea = (arm_a.type == 2) ? get_cc_entry(arm_a.cc_id) : NULL;
-        CCEntry *eb = (arm_b.type == 2) ? get_cc_entry(arm_b.cc_id) : NULL;
+        CCEntry *ea = (arm_a.type == 2) ? get_cc_entry(arm_a.cc_id) : nullptr;
+        CCEntry *eb = (arm_b.type == 2) ? get_cc_entry(arm_b.cc_id) : nullptr;
         uint32_t cp_a = (arm_a.type == 1) ? arm_a.cp : 0;
         uint32_t cp_b = (arm_b.type == 1) ? arm_b.cp : 0;
         uint8_t ci = (ea && ea->case_insensitive) || (eb && eb->case_insensitive) ? 1 : 0;
@@ -885,8 +885,8 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *
     /* Fusion pass: fuse eligible SPLIT/LIT|ANY pairs into a single OP_ANY */
     snobol_bc_fuse_split_any(&cb);
 
-    CCEntry *rev = NULL;
-    for (CCEntry *it = charclass_head; it != NULL; ) {
+    CCEntry *rev = nullptr;
+    for (CCEntry *it = charclass_head; it != nullptr; ) {
         CCEntry *next = it->next;
         it->next = rev;
         rev = it;
@@ -894,9 +894,9 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *
     }
     charclass_head = rev;
 
-    size_t *offsets = charclass_count > 0 ? snobol_malloc(charclass_count * sizeof(size_t)) : NULL;
+    size_t *offsets = charclass_count > 0 ? snobol_malloc(charclass_count * sizeof(size_t)) : nullptr;
     int idx = 0;
-    for (CCEntry *it = charclass_head; it != NULL; it = it->next) {
+    for (CCEntry *it = charclass_head; it != nullptr; it = it->next) {
         if (offsets) offsets[idx++] = cb_pos(&cb);
         cb_emit_u16(&cb, it->range_count);
         cb_emit_u16(&cb, it->case_insensitive);
@@ -1307,7 +1307,7 @@ typedef struct {
     bool referenced;  /* Was this label referenced by a goto? */
 } LabelEntry;
 
-static LabelEntry *label_table_c = NULL;
+static LabelEntry *label_table_c = nullptr;
 static uint16_t label_table_count_c = 0;
 static uint16_t label_table_capacity_c = 0;
 static char label_error_c[256];
@@ -1318,7 +1318,7 @@ static void free_label_table_c(void) {
         if (label_table_c[i].name) snobol_free(label_table_c[i].name);
     }
     if (label_table_c) snobol_free(label_table_c);
-    label_table_c = NULL;
+    label_table_c = nullptr;
     label_table_count_c = 0;
     label_table_capacity_c = 0;
     label_has_error_c = false;
@@ -1364,7 +1364,12 @@ static int get_or_create_label_c(const char *name) {
  * compiler-produced bytecodes (new format) from hand-built test bytecodes
  * (old format: charclass_count lives at bc_len-4, no label table present).
  */
-#define SNOBOL_LABEL_TABLE_MAGIC  0x534E424Cu
+/* Guard prevents a redefinition error in the amalgam build (single TU)
+ * where vm.c—included after compiler.c—declares the same constexpr. */
+#ifndef SNOBOL_LABEL_TABLE_MAGIC_DEFINED
+#define SNOBOL_LABEL_TABLE_MAGIC_DEFINED
+constexpr uint32_t SNOBOL_LABEL_TABLE_MAGIC = 0x534E424Cu;
+#endif
 
 /* Emit label offset table at end of bytecode (after charclass section).
  * Format: [offset_0 u32] ... [offset_{N-1} u32] [label_count u32] [MAGIC u32]
@@ -1455,7 +1460,7 @@ static int emit_anchor_c(const char *type, CodeBuf *c) {
     return 0;
 }
 static int emit_emit_c(const char *text, int reg, CodeBuf *c) {
-    if (text != NULL) {
+    if (text != nullptr) {
         /* Emit literal text */
         size_t len = strlen(text);
         size_t off_of_payload = cb_pos(c) + 1 + 4 + 4;
@@ -1550,8 +1555,8 @@ int compile_ast_to_bytecode_c(ast_node_t* ast, bool case_insensitive, uint8_t **
     /* Fusion pass: fuse eligible SPLIT/LIT|ANY pairs into a single OP_ANY */
     snobol_bc_fuse_split_any(&cb);
 
-    CCEntry *rev = NULL;
-    for (CCEntry *it = charclass_head; it != NULL; ) {
+    CCEntry *rev = nullptr;
+    for (CCEntry *it = charclass_head; it != nullptr; ) {
         CCEntry *next = it->next;
         it->next = rev;
         rev = it;
@@ -1559,9 +1564,9 @@ int compile_ast_to_bytecode_c(ast_node_t* ast, bool case_insensitive, uint8_t **
     }
     charclass_head = rev;
 
-    size_t *offsets = charclass_count > 0 ? snobol_malloc(charclass_count * sizeof(size_t)) : NULL;
+    size_t *offsets = charclass_count > 0 ? snobol_malloc(charclass_count * sizeof(size_t)) : nullptr;
     int idx = 0;
-    for (CCEntry *it = charclass_head; it != NULL; it = it->next) {
+    for (CCEntry *it = charclass_head; it != nullptr; it = it->next) {
         if (offsets) offsets[idx++] = cb_pos(&cb);
         cb_emit_u16(&cb, it->range_count);
         cb_emit_u16(&cb, it->case_insensitive);

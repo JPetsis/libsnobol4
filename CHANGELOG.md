@@ -5,6 +5,60 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — C23 Code-Quality Adoption (adopt-c23-features)
+
+### Changed
+
+- **`nullptr` throughout `core/src/*.c`**: all `NULL` pointer literals replaced
+  with the typed C23 `nullptr` keyword. The single surviving `NULL` in the
+  codebase is the string literal `"(NULL)\n"` in `ast.c` (intentional).
+
+- **`[[nodiscard]]` on public headers**: annotated in `core/include/snobol/`:
+  - `search.h` — `snobol_search_exec()`
+  - `table.h` — `table_create()`, `table_retain()`, `table_set()`, `table_delete()`
+  - `string_fn.h` — all twelve `bool`-returning functions (`snobol_trim`,
+    `snobol_dupl`, `snobol_reverse`, `snobol_substr`, `snobol_replace`,
+    `snobol_replace_char`, `snobol_lpad`, `snobol_rpad`, `snobol_char_fn`,
+    `snobol_ord`, `snobol_upper`, `snobol_lower`)
+  - All previously-silently-discarded return values in `core/src/vm.c` and the
+    C test suite wrapped with explicit `(void)` casts.
+
+- **`[[maybe_unused]]` on intentionally-unused parameters**: `snobol_jit_compile()`
+  parameters `vm` and `start_ip` are `[[maybe_unused]]` on non-ARM64 builds,
+  replacing the old `(void)vm; (void)start_ip;` suppression casts.
+
+- **`constexpr` variables replacing typed `#define` constants**:
+  - `core/src/table.c` — `FNV_OFFSET_BASIS`, `FNV_PRIME` → `constexpr uint32_t`
+  - `core/src/vm.c` — `SNOBOL_LABEL_TABLE_MAGIC` → `constexpr uint32_t`
+  - `core/src/jit.c` — `JIT_CACHE_MAX_HARD`, `JIT_CFG_MAX_BLOCKS`,
+    `JIT_LOOP_ITER_MAX`, `MAX_OPS_IN_REGION` → `constexpr int`
+  - `core/include/snobol/vm.h` — `MAX_CAPS`, `MAX_VARS`, `MAX_LOOPS` →
+    `constexpr int`
+  - Duplicate-definition guards (`#ifndef … #define … #endif`) added for
+    constants shared across translation units (`SNOBOL_LABEL_TABLE_MAGIC`,
+    `FNV_OFFSET_BASIS`, `FNV_PRIME`) so both standalone and amalgam builds work.
+
+- **JIT A64 macros → typed `static inline` functions** (`core/src/jit.c`):
+  - Four pure-constant `A64_*` macros converted to `constexpr uint32_t`
+    (`A64_RET`, `A64_STP_X19_X30_PRE16`, `A64_LDP_X19_X30_POST16`,
+    `A64_SUBS_X19_X19_1`).
+  - Twenty-one argument-taking `A64_*` macros converted to
+    `static inline uint32_t` functions with typed `uint32_t` parameters
+    for register fields and immediates, catching argument-type errors at
+    compile time. Call-site syntax is unchanged.
+
+- **PHP binding `config.m4`**: `./configure` now probes for C23 support
+  (`-std=c23`, falling back to `-std=c2x`) using a correct `AC_LANG_PROGRAM`
+  test and passes the detected flag to `PHP_NEW_EXTENSION`. Requires GCC 13+
+  or Clang 17+; fails with a descriptive error on older toolchains.
+
+### Verified
+
+- All 220 PHP tests pass (`ddev test`) ✅
+- All C tests pass ✅
+- Zero `NULL` remaining in `core/src/*.c` ✅
+- Zero `__typeof__` or `_Static_assert` in `core/` ✅
+
 ## [0.5.0] - 2026-05-03
 
 ### Added — Template & Substitution Completeness (template-substitution-completeness)

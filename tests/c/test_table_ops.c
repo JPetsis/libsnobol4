@@ -24,7 +24,7 @@ static void test_table_get_success(void) {
     
     /* Create a table with one entry */
     snobol_table_t *table = table_create("test");
-    table_set(table, "key1", "value1");
+    (void)table_set(table, "key1", "value1");
     
     /* Verify lookup works */
     const char *result = table_get(table, "key1");
@@ -38,7 +38,7 @@ static void test_table_get_missing_key(void) {
     test_suite("Table Ops: TABLE_GET missing key");
     
     snobol_table_t *table = table_create("test");
-    table_set(table, "key1", "value1");
+    (void)table_set(table, "key1", "value1");
     
     /* Missing key should return NULL */
     const char *result = table_get(table, "nonexistent");
@@ -53,8 +53,8 @@ static void test_table_set_and_get(void) {
     snobol_table_t *table = table_create("test");
     
     /* Set multiple values */
-    table_set(table, "name", "Alice");
-    table_set(table, "city", "Boston");
+    (void)table_set(table, "name", "Alice");
+    (void)table_set(table, "city", "Boston");
     
     test_assert(table_size(table) == 2, "table has 2 entries");
     
@@ -74,10 +74,10 @@ static void test_table_update_existing_key(void) {
     
     snobol_table_t *table = table_create("test");
     
-    table_set(table, "count", "1");
+    (void)table_set(table, "count", "1");
     test_assert(table_size(table) == 1, "size is 1");
     
-    table_set(table, "count", "2");
+    (void)table_set(table, "count", "2");
     test_assert(table_size(table) == 1, "size still 1 after update");
     
     const char *result = table_get(table, "count");
@@ -91,10 +91,10 @@ static void test_table_delete_via_set_null(void) {
     
     snobol_table_t *table = table_create("test");
     
-    table_set(table, "key", "value");
+    (void)table_set(table, "key", "value");
     test_assert(table_has(table, "key") == true, "key exists");
     
-    table_set(table, "key", NULL);
+    (void)table_set(table, "key", NULL);
     test_assert(table_has(table, "key") == false, "key deleted");
     test_assert(table_size(table) == 0, "size is 0");
     
@@ -107,8 +107,8 @@ static void test_table_multiple_tables(void) {
     snobol_table_t *table1 = table_create("t1");
     snobol_table_t *table2 = table_create("t2");
     
-    table_set(table1, "key", "from_t1");
-    table_set(table2, "key", "from_t2");
+    (void)table_set(table1, "key", "from_t1");
+    (void)table_set(table2, "key", "from_t2");
     
     const char *v1 = table_get(table1, "key");
     const char *v2 = table_get(table2, "key");
@@ -126,12 +126,12 @@ static void test_table_with_special_characters(void) {
     snobol_table_t *table = table_create("test");
     
     /* Test with spaces */
-    table_set(table, "hello world", "foo bar");
+    (void)table_set(table, "hello world", "foo bar");
     const char *result = table_get(table, "hello world");
     test_assert(strcmp(result, "foo bar") == 0, "spaces preserved");
     
     /* Test with numbers */
-    table_set(table, "key123", "value456");
+    (void)table_set(table, "key123", "value456");
     result = table_get(table, "key123");
     test_assert(strcmp(result, "value456") == 0, "numbers preserved");
     
@@ -143,7 +143,7 @@ static void test_table_empty_string_value(void) {
     
     snobol_table_t *table = table_create("test");
     
-    table_set(table, "empty", "");
+    (void)table_set(table, "empty", "");
     test_assert(table_has(table, "empty") == true, "empty value exists");
     
     const char *result = table_get(table, "empty");
@@ -165,7 +165,7 @@ static void test_table_rapid_create_use_release(void) {
         snprintf(key, sizeof(key), "key_%d", i);
         snprintf(value, sizeof(value), "val_%d", i);
         
-        table_set(table, key, value);
+        (void)table_set(table, key, value);
         
         const char *result = table_get(table, key);
         test_assert(result != NULL, "iteration: lookup succeeds");
@@ -188,7 +188,7 @@ static void test_table_memory_no_leak(void) {
             char key[32], value[32];
             snprintf(key, sizeof(key), "k%d", j);
             snprintf(value, sizeof(value), "v%d", j);
-            table_set(table, key, value);
+            (void)table_set(table, key, value);
         }
         
         /* Clear and reuse */
@@ -199,7 +199,7 @@ static void test_table_memory_no_leak(void) {
             char key[32], value[32];
             snprintf(key, sizeof(key), "new%d", j);
             snprintf(value, sizeof(value), "val%d", j);
-            table_set(table, key, value);
+            (void)table_set(table, key, value);
         }
         
         table_release(table);

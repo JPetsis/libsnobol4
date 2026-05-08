@@ -224,7 +224,7 @@ static void test_search_jit_bailout_counter(void) {
         vm.jit.stats     = stats;
 
         snobol_search_result_t result;
-        snobol_search_exec(&vm, "aabbccddeeffgg", 14, 0, &meta, &result, NULL);
+        (void)snobol_search_exec(&vm, "aabbccddeeffgg", 14, 0, &meta, &result, NULL);
         /* No match expected — every position fails */
     }
 
@@ -288,7 +288,7 @@ static void test_search_candidate_rejects_attribution(void) {
         vm.jit.stats     = stats;
 
         snobol_search_result_t result;
-        snobol_search_exec(&vm, "bbb", 3, 0, &meta, &result, NULL);
+        (void)snobol_search_exec(&vm, "bbb", 3, 0, &meta, &result, NULL);
     }
 
     /* All bailouts on "bbb" must be candidate rejects (ip == entry_ip) */

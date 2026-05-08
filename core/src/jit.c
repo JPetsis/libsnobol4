@@ -44,14 +44,14 @@ const SnobolJitConfig *snobol_jit_get_config(void) { return &global_jit_cfg; }
 
 void snobol_jit_load_config_from_env(void) {
     const char *v;
-    if ((v = getenv("SNOBOL_JIT_HOTNESS")))      global_jit_cfg.hotness_threshold        = (uint64_t)strtoull(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_MAX_EXIT_PCT")))  global_jit_cfg.max_exit_rate_pct        = (uint32_t)strtoul(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_BUDGET_NS")))     global_jit_cfg.compile_budget_ns        = (uint64_t)strtoull(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_CACHE_MAX")))     global_jit_cfg.cache_max_entries        = (uint32_t)strtoul(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_MIN_OPS")))       global_jit_cfg.min_useful_ops           = (uint32_t)strtoul(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_SKIP_BT")))       global_jit_cfg.skip_backtrack_heavy     = (strtol(v, NULL, 10) != 0);
-    if ((v = getenv("SNOBOL_JIT_SEARCH_HOT")))    global_jit_cfg.search_hotness_threshold = (uint64_t)strtoull(v, NULL, 10);
-    if ((v = getenv("SNOBOL_JIT_SEARCH_OPS")))    global_jit_cfg.search_min_useful_ops    = (uint32_t)strtoul(v, NULL, 10);
+    if ((v = getenv("SNOBOL_JIT_HOTNESS")))      global_jit_cfg.hotness_threshold        = (uint64_t)strtoull(v, nullptr, 10);
+    if ((v = getenv("SNOBOL_JIT_MAX_EXIT_PCT")))  global_jit_cfg.max_exit_rate_pct        = (uint32_t)strtoul(v, nullptr, 10);
+    if ((v = getenv("SNOBOL_JIT_BUDGET_NS")))     global_jit_cfg.compile_budget_ns        = (uint64_t)strtoull(v, nullptr, 10);
+    if ((v = getenv("SNOBOL_JIT_CACHE_MAX")))     global_jit_cfg.cache_max_entries        = (uint32_t)strtoul(v, nullptr, 10);
+    if ((v = getenv("SNOBOL_JIT_MIN_OPS")))       global_jit_cfg.min_useful_ops           = (uint32_t)strtoul(v, nullptr, 10);
+    if ((v = getenv("SNOBOL_JIT_SKIP_BT")))       global_jit_cfg.skip_backtrack_heavy     = (strtol(v, nullptr, 10) != 0);
+    if ((v = getenv("SNOBOL_JIT_SEARCH_HOT")))    global_jit_cfg.search_hotness_threshold = (uint64_t)strtoull(v, nullptr, 10);
+    if ((v = getenv("SNOBOL_JIT_SEARCH_OPS")))    global_jit_cfg.search_min_useful_ops    = (uint32_t)strtoul(v, nullptr, 10);
 }
 
 /* ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ void snobol_jit_load_config_from_env(void) {
  *    is destroyed.  Eviction never frees code that is still referenced.
  * --------------------------------------------------------------------------- */
 
-#define JIT_CACHE_MAX_HARD 512   /* absolute upper bound regardless of config */
+constexpr int JIT_CACHE_MAX_HARD = 512;  /* absolute upper bound regardless of config */
 
 static SnobolJitContext *jit_cache[JIT_CACHE_MAX_HARD];
 static int   jit_cache_count = 0;
@@ -86,7 +86,7 @@ static void jit_context_destroy(SnobolJitContext *ctx) {
         for (size_t i = 0; i < ctx->bc_len; i++) {
             if (ctx->traces[i] && ctx->trace_sizes[i]) {
                 snobol_jit_free_code(ctx->traces[i], ctx->trace_sizes[i]);
-                ctx->traces[i] = NULL;
+                ctx->traces[i] = nullptr;
             }
         }
     }
@@ -116,7 +116,7 @@ static int jit_cache_evict(void) {
     jit_context_destroy(jit_cache[victim]);
     /* Compact array */
     jit_cache[victim] = jit_cache[--jit_cache_count];
-    jit_cache[jit_cache_count] = NULL;
+    jit_cache[jit_cache_count] = nullptr;
     return victim;
 }
 
@@ -136,7 +136,7 @@ SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len) {
 
     /* Create new context */
     SnobolJitContext *ctx = snobol_calloc(1, sizeof(SnobolJitContext));
-    if (!ctx) return NULL;
+    if (!ctx) return nullptr;
     ctx->bc_len      = bc_len;
     ctx->hash        = hash;
     ctx->ref_count   = 1;
@@ -146,12 +146,12 @@ SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len) {
     ctx->trace_sizes = snobol_calloc(bc_len, sizeof(size_t));
 
     if (!ctx->ip_counts || !ctx->traces || !ctx->trace_sizes) {
-        /* Allocation failure: clean up and return NULL */
+        /* Allocation failure: clean up and return nullptr */
         if (ctx->ip_counts)   snobol_free(ctx->ip_counts);
         if (ctx->traces)      snobol_free(ctx->traces);
         if (ctx->trace_sizes) snobol_free(ctx->trace_sizes);
         snobol_free(ctx);
-        return NULL;
+        return nullptr;
     }
 
     /* Insert into cache */
@@ -221,7 +221,7 @@ void snobol_jit_shutdown(void) {
             /* Force-destroy even if ref_count > 0 (process teardown) */
             jit_cache[i]->ref_count = 0;
             jit_context_destroy(jit_cache[i]);
-            jit_cache[i] = NULL;
+            jit_cache[i] = nullptr;
         }
     }
     jit_cache_count = 0;
@@ -239,13 +239,13 @@ void *snobol_jit_alloc_code(size_t size) {
      * snobol_jit_seal_code() to restore exec mode afterwards.
      * We do NOT toggle the write-protect here so that every alloc/free path
      * in snobol_jit_compile can be made symmetric without leaking write mode. */
-    void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+    void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
-    return (ptr == MAP_FAILED) ? NULL : ptr;
+    return (ptr == MAP_FAILED) ? nullptr : ptr;
 #else
-    void *ptr = mmap(NULL, size, PROT_READ | PROT_WRITE,
+    void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return (ptr == MAP_FAILED) ? NULL : ptr;
+    return (ptr == MAP_FAILED) ? nullptr : ptr;
 #endif
 }
 
@@ -382,28 +382,71 @@ done:
 
 /* ---------------------------------------------------------------------------
  * ARM64 instruction helpers
+ * Pure-constant instructions → constexpr uint32_t
+ * Argument-taking encoders   → static inline uint32_t functions (typed, no macro hazards)
  * --------------------------------------------------------------------------- */
-#define A64_RET 0xd65f03c0
-#define A64_LDR_X_X_IMM(rt, rn, imm) (0xf9400000 | ((rt) & 31) | (((rn) & 31) << 5) | (((imm) / 8) << 10))
-#define A64_STR_X_X_IMM(rt, rn, imm) (0xf9000000 | ((rt) & 31) | (((rn) & 31) << 5) | (((imm) / 8) << 10))
-#define A64_ADD_X_X_X(rd, rn, rm)    (0x8b000000 | ((rd) & 31) | (((rn) & 31) << 5) | (((rm) & 31) << 16))
-#define A64_CMP_X_X(rn, rm)          (0xeb00001f | (((rn) & 31) << 5) | (((rm) & 31) << 16))
-#define A64_CMP_W_W(rn, rm)          (0x6b00001f | (((rn) & 31) << 5) | (((rm) & 31) << 16))
-#define A64_B_GE(imm)                (0x5400000a | (((imm) & 0x3ffff) << 5))
-#define A64_B(imm)                   (0x14000000 | ((imm) & 0x3ffffff))
-#define A64_LDRB_W_X_X(rt, rn, rm)   (0x38606800 | ((rt) & 31) | (((rn) & 31) << 5) | (((rm) & 31) << 16))
-#define A64_MOV_X_IMM(rd, imm)       (0xd2800000 | ((rd) & 31) | (((imm) & 0xffff) << 5))
-#define A64_MOV_W_IMM(rd, imm)       (0x52800000 | ((rd) & 31) | (((imm) & 0xffff) << 5))
-#define A64_MOVK_X_IMM_LSL16(rd, imm) (0xf2a00000 | ((rd) & 31) | (((imm) & 0xffff) << 5))
-#define A64_MOVK_X_IMM_LSL32(rd, imm) (0xf2c00000 | ((rd) & 31) | (((imm) & 0xffff) << 5))
-#define A64_MOVK_X_IMM_LSL48(rd, imm) (0xf2e00000 | ((rd) & 31) | (((imm) & 0xffff) << 5))
-#define A64_TBZ(rt, bit, imm)        (0xb6000000 | ((rt) & 31) | (((bit) & 0x1f) << 19) | ((((bit) >> 5) & 1) << 31) | (((imm) & 0x3fff) << 5))
-#define A64_TBNZ(rt, bit, imm)       (0xb7000000 | ((rt) & 31) | (((bit) & 0x1f) << 19) | ((((bit) >> 5) & 1) << 31) | (((imm) & 0x3fff) << 5))
-#define A64_AND_W_W_W(rd, rn, rm)    (0x0a000000 | ((rd) & 31) | (((rn) & 31) << 5) | (((rm) & 31) << 16))
-#define A64_LSR_X_X_X(rd, rn, rm)    (0x9ac02000 | ((rd) & 31) | (((rn) & 31) << 5) | (((rm) & 31) << 16))
-#define A64_B_EQ(imm)                (0x54000000 | (((imm) & 0x3ffff) << 5))
-#define A64_B_NE(imm)                (0x54000001 | (((imm) & 0x3ffff) << 5))
-#define A64_B_HI(imm)                (0x54000008 | (((imm) & 0x3ffff) << 5))
+constexpr uint32_t A64_RET = 0xd65f03c0u;
+
+static inline uint32_t A64_LDR_X_X_IMM(uint32_t rt, uint32_t rn, uint32_t imm) {
+    return 0xf9400000u | (rt & 31u) | ((rn & 31u) << 5) | ((imm / 8u) << 10);
+}
+static inline uint32_t A64_STR_X_X_IMM(uint32_t rt, uint32_t rn, uint32_t imm) {
+    return 0xf9000000u | (rt & 31u) | ((rn & 31u) << 5) | ((imm / 8u) << 10);
+}
+static inline uint32_t A64_ADD_X_X_X(uint32_t rd, uint32_t rn, uint32_t rm) {
+    return 0x8b000000u | (rd & 31u) | ((rn & 31u) << 5) | ((rm & 31u) << 16);
+}
+static inline uint32_t A64_CMP_X_X(uint32_t rn, uint32_t rm) {
+    return 0xeb00001fu | ((rn & 31u) << 5) | ((rm & 31u) << 16);
+}
+static inline uint32_t A64_CMP_W_W(uint32_t rn, uint32_t rm) {
+    return 0x6b00001fu | ((rn & 31u) << 5) | ((rm & 31u) << 16);
+}
+static inline uint32_t A64_B_GE(uint32_t imm) {
+    return 0x5400000au | ((imm & 0x3ffffu) << 5);
+}
+static inline uint32_t A64_B(uint32_t imm) {
+    return 0x14000000u | (imm & 0x3ffffffu);
+}
+static inline uint32_t A64_LDRB_W_X_X(uint32_t rt, uint32_t rn, uint32_t rm) {
+    return 0x38606800u | (rt & 31u) | ((rn & 31u) << 5) | ((rm & 31u) << 16);
+}
+static inline uint32_t A64_MOV_X_IMM(uint32_t rd, uint32_t imm) {
+    return 0xd2800000u | (rd & 31u) | ((imm & 0xffffu) << 5);
+}
+static inline uint32_t A64_MOV_W_IMM(uint32_t rd, uint32_t imm) {
+    return 0x52800000u | (rd & 31u) | ((imm & 0xffffu) << 5);
+}
+static inline uint32_t A64_MOVK_X_IMM_LSL16(uint32_t rd, uint32_t imm) {
+    return 0xf2a00000u | (rd & 31u) | ((imm & 0xffffu) << 5);
+}
+static inline uint32_t A64_MOVK_X_IMM_LSL32(uint32_t rd, uint32_t imm) {
+    return 0xf2c00000u | (rd & 31u) | ((imm & 0xffffu) << 5);
+}
+static inline uint32_t A64_MOVK_X_IMM_LSL48(uint32_t rd, uint32_t imm) {
+    return 0xf2e00000u | (rd & 31u) | ((imm & 0xffffu) << 5);
+}
+static inline uint32_t A64_TBZ(uint32_t rt, uint32_t bit, uint32_t imm) {
+    return 0xb6000000u | (rt & 31u) | ((bit & 0x1fu) << 19) | (((bit >> 5) & 1u) << 31) | ((imm & 0x3fffu) << 5);
+}
+static inline uint32_t A64_TBNZ(uint32_t rt, uint32_t bit, uint32_t imm) {
+    return 0xb7000000u | (rt & 31u) | ((bit & 0x1fu) << 19) | (((bit >> 5) & 1u) << 31) | ((imm & 0x3fffu) << 5);
+}
+static inline uint32_t A64_AND_W_W_W(uint32_t rd, uint32_t rn, uint32_t rm) {
+    return 0x0a000000u | (rd & 31u) | ((rn & 31u) << 5) | ((rm & 31u) << 16);
+}
+static inline uint32_t A64_LSR_X_X_X(uint32_t rd, uint32_t rn, uint32_t rm) {
+    return 0x9ac02000u | (rd & 31u) | ((rn & 31u) << 5) | ((rm & 31u) << 16);
+}
+static inline uint32_t A64_B_EQ(uint32_t imm) {
+    return 0x54000000u | ((imm & 0x3ffffu) << 5);
+}
+static inline uint32_t A64_B_NE(uint32_t imm) {
+    return 0x54000001u | ((imm & 0x3ffffu) << 5);
+}
+static inline uint32_t A64_B_HI(uint32_t imm) {
+    return 0x54000008u | ((imm & 0x3ffffu) << 5);
+}
 
 typedef struct {
     uint32_t *p;
@@ -427,8 +470,8 @@ typedef struct {
  * CFG-based multi-block JIT structures
  * --------------------------------------------------------------------------- */
 
-#define JIT_CFG_MAX_BLOCKS   64   /* BFS expansion limit */
-#define JIT_LOOP_ITER_MAX    1024 /* max iterations before bailing to interpreter */
+constexpr int JIT_CFG_MAX_BLOCKS = 64;   /* BFS expansion limit */
+constexpr int JIT_LOOP_ITER_MAX  = 1024; /* max iterations before bailing to interpreter */
 
 typedef enum {
     BLOCK_TERM_SPLIT,    /* SPLIT opcode — two outgoing edges (succ_a, succ_b) */
@@ -484,9 +527,9 @@ typedef struct {
  * SUBS X19, X19, #1          — decrement loop counter and set flags
  *   Encoding: 0xF1000000 | (1<<10) | (19<<5) | 19 = 0xF1000673
  */
-#define A64_STP_X19_X30_PRE16   0xA9BF7BF3u
-#define A64_LDP_X19_X30_POST16  0xA8C17BF3u
-#define A64_SUBS_X19_X19_1      0xF1000673u
+constexpr uint32_t A64_STP_X19_X30_PRE16  = 0xA9BF7BF3u;
+constexpr uint32_t A64_LDP_X19_X30_POST16 = 0xA8C17BF3u;
+constexpr uint32_t A64_SUBS_X19_X19_1     = 0xF1000673u;
 
 static void emit_instr(JITState *js, uint32_t ins) { *(js->p)++ = ins; }
 
@@ -559,7 +602,7 @@ static int jit_find_block(const JitCfg *cfg, size_t ip) {
 static void jit_cfg_scan_block(const VM *vm, size_t start_ip, JitBlock *blk) {
     blk->start_ip   = start_ip;
     blk->worthy     = false;
-    blk->stub_start = NULL;
+    blk->stub_start = nullptr;
     blk->succ_a_blk = -1;
     blk->succ_b_blk = -1;
     blk->succ_a     = 0;
@@ -902,7 +945,7 @@ static jit_trace_fn snobol_jit_compile_cfg(VM *vm, JitCfg *cfg,
                                             size_t *out_code_size) {
     size_t code_size = 32768; /* larger buffer for multi-block regions */
     uint32_t *code = (uint32_t *)snobol_jit_alloc_code(code_size);
-    if (!code) return NULL;
+    if (!code) return nullptr;
 
 #ifdef __APPLE__
     pthread_jit_write_protect_np(0);
@@ -1045,16 +1088,15 @@ static jit_trace_fn snobol_jit_compile_cfg(VM *vm, JitCfg *cfg,
 }
 
 
-#define MAX_OPS_IN_REGION 64
+constexpr int MAX_OPS_IN_REGION = 64;
 
-jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) {
+jit_trace_fn snobol_jit_compile([[maybe_unused]] VM *vm, [[maybe_unused]] size_t start_ip, size_t *out_code_size) {
     if (out_code_size) *out_code_size = 0;
 
 #if !defined(__aarch64__) && !defined(__arm64__)
     /* JIT code generation is ARM64-only. On all other architectures, return
-     * NULL so the interpreter is used unconditionally. */
-    (void)vm; (void)start_ip;
-    return NULL;
+     * nullptr so the interpreter is used unconditionally. */
+    return nullptr;
 #endif
 
     /* ---- Try CFG-based multi-block compilation first ---- *
@@ -1160,12 +1202,12 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
     /* scan_ip now points to the first op NOT compiled into this region */
     size_t region_end_ip = scan_ip;
 
-    if (op_count < 1 || !worthy) return NULL;
+    if (op_count < 1 || !worthy) return nullptr;
 
     /* ---- Pass 2: code emission ---- */
     size_t code_size = 16384;
     uint32_t *code = (uint32_t *)snobol_jit_alloc_code(code_size);
-    if (!code) return NULL;
+    if (!code) return nullptr;
 
 #ifdef __APPLE__
     /* Enable writes to this MAP_JIT page for the current thread.
@@ -1240,7 +1282,7 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
                 pthread_jit_write_protect_np(1);
 #endif
                 snobol_jit_free_code(code, code_size);
-                return NULL;
+                return nullptr;
             }
             emit_mov_x64(&js, 5, ascii_map[0]);
             emit_mov_x64(&js, 6, ascii_map[1]);

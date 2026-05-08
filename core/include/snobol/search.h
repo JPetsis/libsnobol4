@@ -162,7 +162,7 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
  * @param diag          Optional diagnostics output (may be NULL)
  * @return true if a match was found; false if no match in [start_offset, subject_len]
  */
-bool snobol_search_exec(VM *vm,
+[[nodiscard]] bool snobol_search_exec(VM *vm,
                         const char *subject, size_t subject_len,
                         size_t start_offset,
                         const snobol_search_meta_t *meta,

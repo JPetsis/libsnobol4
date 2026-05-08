@@ -15,8 +15,11 @@
  * FNV-1a hash function for strings
  * Constants for 32-bit FNV-1a
  */
-#define FNV_OFFSET_BASIS 2166136261u
-#define FNV_PRIME 16777619u
+#ifndef SNOBOL_FNV_CONSTANTS_DEFINED
+#define SNOBOL_FNV_CONSTANTS_DEFINED
+constexpr uint32_t FNV_OFFSET_BASIS = 2166136261u;
+constexpr uint32_t FNV_PRIME        = 16777619u;
+#endif
 
 uint32_t table_hash_string(const char *str) {
     uint32_t hash = FNV_OFFSET_BASIS;
@@ -43,7 +46,7 @@ static bool table_resize(snobol_table_t *table, size_t new_capacity) {
     /* Rehash all active entries */
     for (size_t i = 0; i < old_capacity; i++) {
         table_entry_t *entry = &old_entries[i];
-        if (entry->active && entry->value != NULL) {
+        if (entry->active && entry->value != nullptr) {
             /* Find slot in new table */
             uint32_t mask = (uint32_t)(new_capacity - 1);
             uint32_t idx = entry->hash & mask;
@@ -86,21 +89,21 @@ static bool table_maybe_resize(snobol_table_t *table) {
 snobol_table_t *table_create(const char *name) {
     snobol_table_t *table = (snobol_table_t *)snobol_calloc(1, sizeof(snobol_table_t));
     if (!table) {
-        return NULL;
+        return nullptr;
     }
     
     table->entries = (table_entry_t *)snobol_calloc(TABLE_INITIAL_CAPACITY, sizeof(table_entry_t));
     if (!table->entries) {
         snobol_free(table);
-        return NULL;
+        return nullptr;
     }
     
     table->capacity = TABLE_INITIAL_CAPACITY;
     table->size = 0;
     table->tombstones = 0;
     table->refcount = 1;
-    table->name = NULL;
-    
+    table->name = nullptr;
+
     if (name) {
         table->name = (char *)snobol_malloc(strlen(name) + 1);
         if (table->name) {
@@ -114,7 +117,7 @@ snobol_table_t *table_create(const char *name) {
 
 snobol_table_t *table_retain(snobol_table_t *table) {
     if (!table) {
-        return NULL;
+        return nullptr;
     }
     table->refcount++;
     SNOBOL_LOG("table_retain: table=%p refcount=%u", (void*)table, table->refcount);
@@ -195,8 +198,8 @@ bool table_set(snobol_table_t *table, const char *key, const char *value) {
                 /* Delete entry (tombstone) */
                 snobol_free(table->entries[idx].key);
                 snobol_free(table->entries[idx].value);
-                table->entries[idx].key = NULL;
-                table->entries[idx].value = NULL;
+                table->entries[idx].key = nullptr;
+                table->entries[idx].value = nullptr;
                 table->entries[idx].active = false;
                 table->size--;
                 table->tombstones++;
@@ -223,7 +226,7 @@ bool table_set(snobol_table_t *table, const char *key, const char *value) {
     strcpy(key_copy, key);
     
     /* Copy value if provided */
-    char *value_copy = NULL;
+    char *value_copy = nullptr;
     if (value) {
         value_copy = (char *)snobol_malloc(strlen(value) + 1);
         if (!value_copy) {
@@ -250,7 +253,7 @@ bool table_set(snobol_table_t *table, const char *key, const char *value) {
 
 const char *table_get(const snobol_table_t *table, const char *key) {
     if (!table || !key) {
-        return NULL;
+        return nullptr;
     }
     
     uint32_t hash = table_hash_string(key);
@@ -267,11 +270,11 @@ const char *table_get(const snobol_table_t *table, const char *key) {
         idx = (idx + 1) & mask;
     }
     
-    return NULL;
+    return nullptr;
 }
 
 bool table_has(const snobol_table_t *table, const char *key) {
-    return table_get(table, key) != NULL;
+    return table_get(table, key) != nullptr;
 }
 
 bool table_delete(snobol_table_t *table, const char *key) {
@@ -291,8 +294,8 @@ bool table_delete(snobol_table_t *table, const char *key) {
             /* Found - mark as tombstone */
             snobol_free(table->entries[idx].key);
             snobol_free(table->entries[idx].value);
-            table->entries[idx].key = NULL;
-            table->entries[idx].value = NULL;
+            table->entries[idx].key = nullptr;
+            table->entries[idx].value = nullptr;
             table->entries[idx].active = false;
             table->size--;
             table->tombstones++;
@@ -314,8 +317,8 @@ void table_clear(snobol_table_t *table) {
         if (entry->active) {
             if (entry->key) snobol_free(entry->key);
             if (entry->value) snobol_free(entry->value);
-            entry->key = NULL;
-            entry->value = NULL;
+            entry->key = nullptr;
+            entry->value = nullptr;
             entry->active = false;
         }
     }
@@ -329,5 +332,5 @@ size_t table_size(const snobol_table_t *table) {
 }
 
 const char *table_name(const snobol_table_t *table) {
-    return table ? table->name : NULL;
+    return table ? table->name : nullptr;
 }

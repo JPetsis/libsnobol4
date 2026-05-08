@@ -12,7 +12,7 @@
  * Internal helper: duplicate a string
  */
 static char* str_dup(const char* s, size_t len) {
-    if (!s) return NULL;
+    if (!s) return nullptr;
     char* dup = (char*)malloc(len + 1);
     if (dup) {
         memcpy(dup, s, len);
@@ -23,7 +23,7 @@ static char* str_dup(const char* s, size_t len) {
 
 ast_node_t* snobol_ast_create_lit(const char* text, size_t len) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     
     node->type = AST_LITERAL;
     node->data.literal.text = str_dup(text, len);
@@ -33,7 +33,7 @@ ast_node_t* snobol_ast_create_lit(const char* text, size_t len) {
 
 ast_node_t* snobol_ast_create_concat(ast_node_t** parts, size_t count) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     
     node->type = AST_CONCAT;
     node->data.concat.parts = parts;
@@ -43,7 +43,7 @@ ast_node_t* snobol_ast_create_concat(ast_node_t** parts, size_t count) {
 
 ast_node_t* snobol_ast_create_alt(ast_node_t* left, ast_node_t* right) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     
     node->type = AST_ALT;
     node->data.alt.left = left;
@@ -53,7 +53,7 @@ ast_node_t* snobol_ast_create_alt(ast_node_t* left, ast_node_t* right) {
 
 ast_node_t* snobol_ast_create_arbno(ast_node_t* sub) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     
     node->type = AST_ARBNO;
     node->data.arbno.sub = sub;
@@ -62,7 +62,7 @@ ast_node_t* snobol_ast_create_arbno(ast_node_t* sub) {
 
 ast_node_t* snobol_ast_create_cap(int reg, ast_node_t* sub) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     
     node->type = AST_CAP;
     node->data.cap.reg = reg;
@@ -72,7 +72,7 @@ ast_node_t* snobol_ast_create_cap(int reg, ast_node_t* sub) {
 
 ast_node_t* snobol_ast_create_span(const char* set, size_t len) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     
     node->type = AST_SPAN;
     node->data.charclass.set = str_dup(set, len);
@@ -82,14 +82,14 @@ ast_node_t* snobol_ast_create_span(const char* set, size_t len) {
 
 ast_node_t* snobol_ast_create_any(const char* set, size_t len) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     
     node->type = AST_ANY;
     if (set) {
         node->data.charclass.set = str_dup(set, len);
         node->data.charclass.len = len;
     } else {
-        node->data.charclass.set = NULL;
+        node->data.charclass.set = nullptr;
         node->data.charclass.len = 0;
     }
     return node;
@@ -97,7 +97,7 @@ ast_node_t* snobol_ast_create_any(const char* set, size_t len) {
 
 ast_node_t* snobol_ast_create_repeat(ast_node_t* sub, int32_t min, int32_t max) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     
     node->type = AST_REPETITION;
     node->data.repetition.sub = sub;
@@ -108,7 +108,7 @@ ast_node_t* snobol_ast_create_repeat(ast_node_t* sub, int32_t min, int32_t max) 
 
 ast_node_t* snobol_ast_create_goto(const char* label) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
 
     node->type = AST_GOTO;
     if (label) {
@@ -118,7 +118,7 @@ ast_node_t* snobol_ast_create_goto(const char* label) {
             strcpy(node->data.goto_stmt.label, label);
         }
     } else {
-        node->data.goto_stmt.label = NULL;
+        node->data.goto_stmt.label = nullptr;
     }
     return node;
 }
@@ -126,7 +126,7 @@ ast_node_t* snobol_ast_create_goto(const char* label) {
 ast_node_t* snobol_ast_create_label(char* name, ast_node_t* target) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
     if (!node) {
-        return NULL;
+        return nullptr;
     }
 
     node->type = AST_LABEL;
@@ -141,7 +141,7 @@ ast_node_t* snobol_ast_create_label(char* name, ast_node_t* target) {
          * If caller passed a malloc'd string, they should free it.
          * If caller passed a string literal, we have our own copy. */
     } else {
-        node->data.label.name = NULL;
+        node->data.label.name = nullptr;
     }
     node->data.label.target = target;
     return node;
@@ -361,7 +361,7 @@ ast_node_t* snobol_ast_create_literal(const char* text, size_t len) {
 
 ast_node_t* snobol_ast_create_break(const char* set, size_t len) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_BREAK;
     node->data.charclass.set = str_dup(set, len);
     node->data.charclass.len = len;
@@ -370,7 +370,7 @@ ast_node_t* snobol_ast_create_break(const char* set, size_t len) {
 
 ast_node_t* snobol_ast_create_notany(const char* set, size_t len) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_NOTANY;
     node->data.charclass.set = str_dup(set, len);
     node->data.charclass.len = len;
@@ -379,7 +379,7 @@ ast_node_t* snobol_ast_create_notany(const char* set, size_t len) {
 
 ast_node_t* snobol_ast_create_assign(int var, int reg) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_ASSIGN;
     node->data.assign.var = var;
     node->data.assign.reg = reg;
@@ -388,7 +388,7 @@ ast_node_t* snobol_ast_create_assign(int var, int reg) {
 
 ast_node_t* snobol_ast_create_len(int32_t n) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_LEN;
     node->data.len.n = n;
     return node;
@@ -396,7 +396,7 @@ ast_node_t* snobol_ast_create_len(int32_t n) {
 
 ast_node_t* snobol_ast_create_anchor(anchor_type_t atype) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_ANCHOR;
     node->data.anchor.atype = atype;
     return node;
@@ -404,7 +404,7 @@ ast_node_t* snobol_ast_create_anchor(anchor_type_t atype) {
 
 ast_node_t* snobol_ast_create_emit(const char* text, size_t len, int reg) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_EMIT;
     node->data.emit.text = str_dup(text, len);
     node->data.emit.reg = reg;
@@ -413,7 +413,7 @@ ast_node_t* snobol_ast_create_emit(const char* text, size_t len, int reg) {
 
 ast_node_t* snobol_ast_create_dynamic_eval(ast_node_t* expr) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_DYNAMIC_EVAL;
     node->data.dynamic_eval.expr = expr;
     return node;
@@ -421,7 +421,7 @@ ast_node_t* snobol_ast_create_dynamic_eval(ast_node_t* expr) {
 
 ast_node_t* snobol_ast_create_breakx(const char* set, size_t len) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_BREAKX;
     node->data.breakx.set = str_dup(set, len);
     node->data.breakx.len = len;
@@ -430,7 +430,7 @@ ast_node_t* snobol_ast_create_breakx(const char* set, size_t len) {
 
 ast_node_t* snobol_ast_create_bal(uint32_t open_cp, uint32_t close_cp) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_BAL;
     node->data.bal.open_cp  = open_cp;
     node->data.bal.close_cp = close_cp;
@@ -439,21 +439,21 @@ ast_node_t* snobol_ast_create_bal(uint32_t open_cp, uint32_t close_cp) {
 
 ast_node_t* snobol_ast_create_fence(void) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_FENCE;
     return node;
 }
 
 ast_node_t* snobol_ast_create_rem(void) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_REM;
     return node;
 }
 
 ast_node_t* snobol_ast_create_rpos(int32_t n) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_RPOS;
     node->data.rpos_rtab.n = n;
     return node;
@@ -461,7 +461,7 @@ ast_node_t* snobol_ast_create_rpos(int32_t n) {
 
 ast_node_t* snobol_ast_create_rtab(int32_t n) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
-    if (!node) return NULL;
+    if (!node) return nullptr;
     node->type = AST_RTAB;
     node->data.rpos_rtab.n = n;
     return node;

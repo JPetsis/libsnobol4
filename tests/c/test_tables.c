@@ -68,10 +68,10 @@ static void test_table_update(void) {
     
     snobol_table_t *table = table_create("test");
     
-    table_set(table, "key", "original");
+    (void)table_set(table, "key", "original");
     test_assert(table_size(table) == 1, "size is 1 after first insert");
     
-    table_set(table, "key", "updated");
+    (void)table_set(table, "key", "updated");
     test_assert(table_size(table) == 1, "size is still 1 after update");
     
     const char *value = table_get(table, "key");
@@ -85,8 +85,8 @@ static void test_table_delete(void) {
     
     snobol_table_t *table = table_create("test");
     
-    table_set(table, "key1", "value1");
-    table_set(table, "key2", "value2");
+    (void)table_set(table, "key1", "value1");
+    (void)table_set(table, "key2", "value2");
     test_assert(table_size(table) == 2, "size is 2");
     
     bool deleted = table_delete(table, "key1");
@@ -108,10 +108,10 @@ static void test_table_set_null_deletes(void) {
     
     snobol_table_t *table = table_create("test");
     
-    table_set(table, "key", "value");
+    (void)table_set(table, "key", "value");
     test_assert(table_has(table, "key") == true, "key exists");
     
-    table_set(table, "key", NULL);
+    (void)table_set(table, "key", NULL);
     test_assert(table_has(table, "key") == false, "key is deleted after set NULL");
     test_assert(table_size(table) == 0, "size is 0");
     
@@ -125,10 +125,10 @@ static void test_table_has(void) {
     
     test_assert(table_has(table, "key") == false, "has returns false for missing key");
     
-    table_set(table, "key", "value");
+    (void)table_set(table, "key", "value");
     test_assert(table_has(table, "key") == true, "has returns true for existing key");
     
-    table_delete(table, "key");
+    (void)table_delete(table, "key");
     test_assert(table_has(table, "key") == false, "has returns false after delete");
     
     table_release(table);
@@ -139,9 +139,9 @@ static void test_table_clear(void) {
     
     snobol_table_t *table = table_create("test");
     
-    table_set(table, "key1", "value1");
-    table_set(table, "key2", "value2");
-    table_set(table, "key3", "value3");
+    (void)table_set(table, "key1", "value1");
+    (void)table_set(table, "key2", "value2");
+    (void)table_set(table, "key3", "value3");
     test_assert(table_size(table) == 3, "size is 3");
     
     table_clear(table);
@@ -151,7 +151,7 @@ static void test_table_clear(void) {
     test_assert(table_has(table, "key3") == false, "key3 is gone");
     
     /* Can re-use cleared table */
-    table_set(table, "newkey", "newvalue");
+    (void)table_set(table, "newkey", "newvalue");
     test_assert(table_size(table) == 1, "can insert after clear");
     
     table_release(table);
@@ -182,12 +182,12 @@ static void test_table_multiple_references(void) {
     snobol_table_t *table = table_create("shared");
     
     /* Multiple owners */
-    table_retain(table);
-    table_retain(table);
-    table_retain(table);
+    (void)table_retain(table);
+    (void)table_retain(table);
+    (void)table_retain(table);
     
     /* Modify through original */
-    table_set(table, "key", "value");
+    (void)table_set(table, "key", "value");
     test_assert(table_size(table) == 1, "size is 1");
     
     /* Release three times */
@@ -248,9 +248,9 @@ static void test_table_collision_handling(void) {
     snobol_table_t *table = table_create("test");
     
     /* Insert keys that might collide */
-    table_set(table, "a", "1");
-    table_set(table, "b", "2");
-    table_set(table, "c", "3");
+    (void)table_set(table, "a", "1");
+    (void)table_set(table, "b", "2");
+    (void)table_set(table, "c", "3");
     
     test_assert(table_size(table) == 3, "size is 3");
     test_assert(atoi(table_get(table, "a")) == 1, "value a is correct");
@@ -268,14 +268,14 @@ static void test_table_create_use_release_cycle(void) {
         snobol_table_t *table = table_create("cycle");
         
         /* Use the table */
-        table_set(table, "key1", "value1");
-        table_set(table, "key2", "value2");
+        (void)table_set(table, "key1", "value1");
+        (void)table_set(table, "key2", "value2");
         test_assert(table_size(table) == 2, "cycle: size is 2");
         
         const char *v1 = table_get(table, "key1");
         test_assert(strcmp(v1, "value1") == 0, "cycle: value1 is correct");
         
-        table_delete(table, "key1");
+        (void)table_delete(table, "key1");
         test_assert(table_size(table) == 1, "cycle: size is 1 after delete");
         
         table_clear(table);

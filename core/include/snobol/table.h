@@ -45,7 +45,7 @@ typedef struct snobol_table {
  * 
  * Ownership: Caller owns the returned table and must call table_release()
  */
-snobol_table_t *table_create(const char *name);
+[[nodiscard]] snobol_table_t *table_create(const char *name);
 
 /**
  * @brief Increment table reference count
@@ -54,7 +54,7 @@ snobol_table_t *table_create(const char *name);
  * 
  * Use when sharing table ownership with another owner
  */
-snobol_table_t *table_retain(snobol_table_t *table);
+[[nodiscard]] snobol_table_t *table_retain(snobol_table_t *table);
 
 /**
  * @brief Decrement table reference count and free if zero
@@ -73,7 +73,7 @@ void table_release(snobol_table_t *table);
  * 
  * Ownership: Table takes ownership of copies of key and value
  */
-bool table_set(snobol_table_t *table, const char *key, const char *value);
+[[nodiscard]] bool table_set(snobol_table_t *table, const char *key, const char *value);
 
 /**
  * @brief Look up a value by key
@@ -100,7 +100,7 @@ bool table_has(const snobol_table_t *table, const char *key);
  * @param key Key to delete
  * @return true if key was found and deleted
  */
-bool table_delete(snobol_table_t *table, const char *key);
+[[nodiscard]] bool table_delete(snobol_table_t *table, const char *key);
 
 /**
  * @brief Clear all entries from the table

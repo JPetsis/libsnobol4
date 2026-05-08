@@ -19,8 +19,13 @@
 /**
  * FNV-1a hash for pattern sources
  */
-#define FNV_OFFSET_BASIS 2166136261u
-#define FNV_PRIME 16777619u
+/* Guard keeps the amalgam (single-TU) build clean: table.c (included before
+ * this file) already defines these as constexpr uint32_t. */
+#ifndef SNOBOL_FNV_CONSTANTS_DEFINED
+#define SNOBOL_FNV_CONSTANTS_DEFINED
+constexpr uint32_t FNV_OFFSET_BASIS = 2166136261u;
+constexpr uint32_t FNV_PRIME        = 16777619u;
+#endif
 
 uint32_t dynamic_pattern_hash_source(const char *source, size_t len) {
     uint32_t hash = FNV_OFFSET_BASIS;
@@ -34,14 +39,14 @@ uint32_t dynamic_pattern_hash_source(const char *source, size_t len) {
 dynamic_pattern_t *dynamic_pattern_create(const char *source, uint8_t *bc, size_t bc_len) {
     dynamic_pattern_t *pattern = (dynamic_pattern_t *)snobol_calloc(1, sizeof(dynamic_pattern_t));
     if (!pattern) {
-        return NULL;
+        return nullptr;
     }
     
     pattern->bc = bc;
     pattern->bc_len = bc_len;
     pattern->refcount = 1;
-    pattern->is_valid = (bc != NULL && bc_len > 0);
-    pattern->source = NULL;
+    pattern->is_valid = (bc != nullptr && bc_len > 0);
+    pattern->source = nullptr;
     pattern->hash = 0;
     
     if (source) {
@@ -61,7 +66,7 @@ dynamic_pattern_t *dynamic_pattern_create(const char *source, uint8_t *bc, size_
 
 dynamic_pattern_t *dynamic_pattern_retain(dynamic_pattern_t *pattern) {
     if (!pattern) {
-        return NULL;
+        return nullptr;
     }
     pattern->refcount++;
     SNOBOL_LOG("dynamic_pattern_retain: pattern=%p refcount=%u", (void*)pattern, pattern->refcount);
@@ -108,7 +113,7 @@ const dynamic_pattern_cache_key_t *dynamic_pattern_compute_key(
     dynamic_pattern_cache_key_t *out_key
 ) {
     if (!source || !out_key) {
-        return NULL;
+        return nullptr;
     }
     
     size_t len = (source_len < 0) ? strlen(source) : (size_t)source_len;
@@ -166,7 +171,7 @@ void dynamic_pattern_cache_destroy(dynamic_pattern_cache_t *cache) {
     }
     
     snobol_free(cache->buckets);
-    cache->buckets = NULL;
+    cache->buckets = nullptr;
     cache->size = 0;
     cache->bucket_count = 0;
 }
@@ -190,7 +195,7 @@ static dynamic_pattern_cache_entry_t *cache_find_entry(
         entry = entry->next;
     }
     
-    return NULL;
+    return nullptr;
 }
 
 dynamic_pattern_t *dynamic_pattern_cache_get(
@@ -199,7 +204,7 @@ dynamic_pattern_t *dynamic_pattern_cache_get(
     int source_len
 ) {
     if (!cache || !source) {
-        return NULL;
+        return nullptr;
     }
 
     size_t len = (source_len < 0) ? strlen(source) : (size_t)source_len;
@@ -213,7 +218,7 @@ dynamic_pattern_t *dynamic_pattern_cache_get(
     }
 
     SNOBOL_LOG("dynamic_pattern_cache_get: cache=%p source='%s' MISS", (void*)cache, source);
-    return NULL;
+    return nullptr;
 }
 
 static bool cache_evict_one(dynamic_pattern_cache_t *cache) {
@@ -283,7 +288,7 @@ bool dynamic_pattern_cache_put(
     
     entry->hash = hash;
     entry->pattern = dynamic_pattern_retain(pattern);
-    entry->next = NULL;
+    entry->next = nullptr;
     
     /* Insert into bucket */
     size_t bucket = hash % cache->bucket_count;
@@ -311,7 +316,7 @@ bool dynamic_pattern_cache_remove(
     
     size_t bucket = hash % cache->bucket_count;
     dynamic_pattern_cache_entry_t *entry = cache->buckets[bucket];
-    dynamic_pattern_cache_entry_t *prev = NULL;
+    dynamic_pattern_cache_entry_t *prev = nullptr;
     
     while (entry) {
         if (entry->hash == hash &&
@@ -370,7 +375,7 @@ void dynamic_pattern_cache_clear(dynamic_pattern_cache_t *cache) {
             
             entry = next;
         }
-        cache->buckets[i] = NULL;
+        cache->buckets[i] = nullptr;
     }
     
     cache->size = 0;

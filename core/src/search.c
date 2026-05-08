@@ -33,14 +33,14 @@
 static const void *snobol_memmem(const void *hay, size_t hlen,
                                   const void *needle, size_t nlen) {
     if (nlen == 0) return hay;
-    if (hlen < nlen) return NULL;
+    if (hlen < nlen) return nullptr;
     const char *h = (const char *)hay;
     const char *n = (const char *)needle;
     size_t limit = hlen - nlen;
     for (size_t i = 0; i <= limit; i++) {
         if (memcmp(h + i, n, nlen) == 0) return h + i;
     }
-    return NULL;
+    return nullptr;
 }
 #  define memmem snobol_memmem
 #endif
@@ -477,7 +477,7 @@ static bool search_literal_accelerated(VM *vm,
         size_t      haylen = subject_len - offset;
 
         /* Find next candidate position */
-        const char *found = NULL;
+        const char *found = nullptr;
         size_t      skipped = 0;
 
         if (meta->literal_prefix_len == 1) {

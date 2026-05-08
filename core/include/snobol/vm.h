@@ -23,8 +23,8 @@ typedef struct SnobolJitConfig SnobolJitConfig;
 /* jit_trace_fn will be defined in jit.h */
 #endif
 
-#define MAX_CAPS 64
-#define MAX_VARS 64
+constexpr int MAX_CAPS = 64;
+constexpr int MAX_VARS = 64;
 
 typedef struct cp_range {
     uint32_t start;  // Start codepoint (inclusive)
@@ -184,7 +184,7 @@ typedef enum {
     SNOBOL_FN_MAX        = 22,
 } snobol_builtin_fn_t;
 
-#define MAX_LOOPS 16
+constexpr int MAX_LOOPS = 16;
 
 /* Generic dynamic buffer */
 typedef struct {

@@ -35,7 +35,7 @@ size_t snobol_size(const char *str, size_t len);
  * @param out     Output buffer (cleared and filled)
  * @return        true always (function cannot fail on valid input)
  */
-bool snobol_trim(const char *in, size_t in_len, snobol_buf *out);
+[[nodiscard]] bool snobol_trim(const char *in, size_t in_len, snobol_buf *out);
 
 /**
  * DUPL: duplicate a string n times.
@@ -46,7 +46,7 @@ bool snobol_trim(const char *in, size_t in_len, snobol_buf *out);
  * @param out      Output buffer
  * @return         true on success
  */
-bool snobol_dupl(const char *str, size_t str_len, size_t n, snobol_buf *out);
+[[nodiscard]] bool snobol_dupl(const char *str, size_t str_len, size_t n, snobol_buf *out);
 
 /**
  * REVERSE: reverse a string by Unicode codepoints (not bytes).
@@ -56,7 +56,7 @@ bool snobol_dupl(const char *str, size_t str_len, size_t n, snobol_buf *out);
  * @param out      Output buffer
  * @return         true on success
  */
-bool snobol_reverse(const char *str, size_t str_len, snobol_buf *out);
+[[nodiscard]] bool snobol_reverse(const char *str, size_t str_len, snobol_buf *out);
 
 /**
  * SUBSTR: extract substring by 1-based codepoint position and codepoint length.
@@ -67,7 +67,7 @@ bool snobol_reverse(const char *str, size_t str_len, snobol_buf *out);
  * @param out      Output buffer
  * @return         true on success, false if pos is out of range
  */
-bool snobol_substr(const char *str, size_t str_len, size_t pos, size_t len,
+[[nodiscard]] bool snobol_substr(const char *str, size_t str_len, size_t pos, size_t len,
                    snobol_buf *out);
 
 /**
@@ -82,7 +82,7 @@ bool snobol_substr(const char *str, size_t str_len, size_t pos, size_t len,
  * @param out       Output buffer
  * @return          true on success
  */
-bool snobol_replace(const char *str, size_t str_len,
+[[nodiscard]] bool snobol_replace(const char *str, size_t str_len,
                     const char *from, size_t from_len,
                     const char *to, size_t to_len,
                     snobol_buf *out);
@@ -102,7 +102,7 @@ bool snobol_replace(const char *str, size_t str_len,
  * @param out       Output buffer
  * @return          true on success
  */
-bool snobol_replace_char(const char *str, size_t str_len,
+[[nodiscard]] bool snobol_replace_char(const char *str, size_t str_len,
                          const char *from, size_t from_len,
                          const char *to, size_t to_len,
                          snobol_buf *out);
@@ -117,7 +117,7 @@ bool snobol_replace_char(const char *str, size_t str_len,
  * @param out      Output buffer
  * @return         true on success
  */
-bool snobol_lpad(const char *str, size_t str_len, size_t width, uint32_t pad_cp,
+[[nodiscard]] bool snobol_lpad(const char *str, size_t str_len, size_t width, uint32_t pad_cp,
                  snobol_buf *out);
 
 /**
@@ -130,7 +130,7 @@ bool snobol_lpad(const char *str, size_t str_len, size_t width, uint32_t pad_cp,
  * @param out      Output buffer
  * @return         true on success
  */
-bool snobol_rpad(const char *str, size_t str_len, size_t width, uint32_t pad_cp,
+[[nodiscard]] bool snobol_rpad(const char *str, size_t str_len, size_t width, uint32_t pad_cp,
                  snobol_buf *out);
 
 /**
@@ -139,7 +139,7 @@ bool snobol_rpad(const char *str, size_t str_len, size_t width, uint32_t pad_cp,
  * @param out  Output buffer
  * @return     true on success, false if cp > 0x10FFFF or is a surrogate
  */
-bool snobol_char_fn(uint32_t cp, snobol_buf *out);
+[[nodiscard]] bool snobol_char_fn(uint32_t cp, snobol_buf *out);
 
 /**
  * ORD: get the Unicode codepoint of the first character in a string.
@@ -148,7 +148,7 @@ bool snobol_char_fn(uint32_t cp, snobol_buf *out);
  * @param out_cp  Output codepoint
  * @return        true on success, false if string is empty or invalid UTF-8
  */
-bool snobol_ord(const char *str, size_t str_len, uint32_t *out_cp);
+[[nodiscard]] bool snobol_ord(const char *str, size_t str_len, uint32_t *out_cp);
 
 /**
  * UPPER: convert string to uppercase.
@@ -159,7 +159,7 @@ bool snobol_ord(const char *str, size_t str_len, uint32_t *out_cp);
  * @param out      Output buffer
  * @return         true on success
  */
-bool snobol_upper(const char *str, size_t str_len, snobol_buf *out);
+[[nodiscard]] bool snobol_upper(const char *str, size_t str_len, snobol_buf *out);
 
 /**
  * LOWER: convert string to lowercase.
@@ -170,5 +170,5 @@ bool snobol_upper(const char *str, size_t str_len, snobol_buf *out);
  * @param out      Output buffer
  * @return         true on success
  */
-bool snobol_lower(const char *str, size_t str_len, snobol_buf *out);
+[[nodiscard]] bool snobol_lower(const char *str, size_t str_len, snobol_buf *out);
 

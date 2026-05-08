@@ -28,7 +28,7 @@ static void vm_cb_init(VmCodeBuf *c) {
 static void vm_cb_free(VmCodeBuf *c) {
     if (c->buf) {
         snobol_free(c->buf);
-        c->buf = NULL;
+        c->buf = nullptr;
     }
     c->cap = c->len = 0;
 }
@@ -55,13 +55,18 @@ static int vm_emit_lit_bytes(VmCodeBuf *c, const char *s, size_t len) {
 
 /* Magic that compiler appends after the label table (last 4 bytes of new-format bc).
  * Old-format bytecodes have charclass_count at bc_len-4 (typically < 65536).
- * 0x534E424C = "SNBL" — safely outside any realistic charclass_count range. */
-#define SNOBOL_LABEL_TABLE_MAGIC  0x534E424Cu
+ * 0x534E424C = "SNBL" — safely outside any realistic charclass_count range.
+ * Guard prevents a redefinition error in the amalgam build where compiler.c
+ * (included before vm.c) already declares this constant. */
+#ifndef SNOBOL_LABEL_TABLE_MAGIC_DEFINED
+#define SNOBOL_LABEL_TABLE_MAGIC_DEFINED
+constexpr uint32_t SNOBOL_LABEL_TABLE_MAGIC = 0x534E424Cu;
+#endif
 
 const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count, uint16_t *out_case) {
-    if (set_id == 0) return NULL;
+    if (set_id == 0) return nullptr;
     size_t tail_ip = vm->bc_len;
-    if (tail_ip < 4) return NULL;
+    if (tail_ip < 4) return nullptr;
 
     /* Detect bytecode format:
      *   NEW format (compiler-produced): last 4 bytes == SNOBOL_LABEL_TABLE_MAGIC
@@ -76,28 +81,28 @@ const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count
     size_t cc_tail; /* position just after charclass_count field */
     if (last4 == SNOBOL_LABEL_TABLE_MAGIC) {
         /* New format: read label_count from the u32 before the MAGIC */
-        if (tail_ip < 8) return NULL;
+        if (tail_ip < 8) return nullptr;
         uint32_t label_count = ((uint32_t)vm->bc[tail_ip-8] << 24) | ((uint32_t)vm->bc[tail_ip-7] << 16) |
                                ((uint32_t)vm->bc[tail_ip-6] << 8) | (uint32_t)vm->bc[tail_ip-5];
         /* charclass_count sits just before: [label_offsets…][label_count][MAGIC] */
         size_t skip = 8 + (size_t)label_count * 4; /* 4 (label_count) + 4 (MAGIC) + N*4 */
-        if (tail_ip < skip + 4) return NULL;
+        if (tail_ip < skip + 4) return nullptr;
         cc_tail = tail_ip - skip;
     } else {
         /* Old format: charclass_count IS at bc_len-4 */
         cc_tail = tail_ip;
     }
 
-    if (cc_tail < 4) return NULL;
+    if (cc_tail < 4) return nullptr;
     uint32_t class_count = ((uint32_t)vm->bc[cc_tail-4] << 24) | ((uint32_t)vm->bc[cc_tail-3] << 16) |
                            ((uint32_t)vm->bc[cc_tail-2] << 8) | (uint32_t)vm->bc[cc_tail-1];
-    if (set_id > class_count) return NULL;
+    if (set_id > class_count) return nullptr;
     size_t table_size = (size_t)class_count * 4;
-    if (cc_tail < 4 + table_size) return NULL;
+    if (cc_tail < 4 + table_size) return nullptr;
     size_t table_start = cc_tail - 4 - table_size;
     size_t offset_pos = table_start + (size_t)(set_id - 1) * 4;
     uint32_t offset = ((uint32_t)vm->bc[offset_pos+0] << 24) | ((uint32_t)vm->bc[offset_pos+1] << 16) | ((uint32_t)vm->bc[offset_pos+2] << 8) | (uint32_t)vm->bc[offset_pos+3];
-    if (offset >= vm->bc_len) return NULL;
+    if (offset >= vm->bc_len) return nullptr;
     size_t ip = (size_t)offset;
     *out_count = read_u16(vm->bc, vm->bc_len, &ip);
     *out_case = read_u16(vm->bc, vm->bc_len, &ip);
@@ -136,7 +141,7 @@ bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp) {
 /* ========== Write-log management for compact choice stack ========== */
 
 void vm_write_log_init(VM *vm) {
-    vm->write_log = NULL;
+    vm->write_log = nullptr;
     vm->write_log_cap = 0;
     vm->write_log_next = 0;
     vm->write_log_bitmap = 0;
@@ -147,7 +152,7 @@ void vm_write_log_init(VM *vm) {
 void vm_write_log_free(VM *vm) {
     if (vm->write_log) {
         snobol_free(vm->write_log);
-        vm->write_log = NULL;
+        vm->write_log = nullptr;
     }
     vm->write_log_cap = 0;
     vm->write_log_next = 0;
@@ -444,21 +449,21 @@ void snobol_buf_append(snobol_buf *b, const char *data, size_t len) {
     memcpy(b->data + b->len, data, len); b->len += len; b->data[b->len] = '\0';
 }
 void snobol_buf_clear(snobol_buf *b) { b->len = 0; if (b->data) b->data[0] = '\0'; }
-void snobol_buf_free(snobol_buf *b) { if (b->data) { snobol_free(b->data); b->data = NULL; } b->len = b->cap = 0; }
+void snobol_buf_free(snobol_buf *b) { if (b->data) { snobol_free(b->data); b->data = nullptr; } b->len = b->cap = 0; }
 
 bool vm_run(VM *vm) {
     size_t initial_cap = 4096;
     vm->choices = snobol_malloc(initial_cap);
     if (!vm->choices) return false;
     vm->choices_cap = initial_cap; vm->choices_top = 0;
-    vm->use_compact_choice = (getenv("SNOBOL_LEGACY_CHOICE") == NULL);
+    vm->use_compact_choice = (getenv("SNOBOL_LEGACY_CHOICE") == nullptr);
     if (vm->use_compact_choice) {
         vm_write_log_init(vm);
         vm->write_log_cap = MAX_CAPS;
         vm->write_log = snobol_malloc(vm->write_log_cap * sizeof(WriteLogEntry));
         if (!vm->write_log) {
             snobol_free(vm->choices);
-            vm->choices = NULL;
+            vm->choices = nullptr;
             return false;
         }
     }
@@ -474,7 +479,7 @@ bool vm_run(VM *vm) {
         const SnobolJitConfig *jit_cfg = snobol_jit_get_config();
 
         if (vm->jit.ctx && vm->jit.ctx->stop_compiling &&
-            (!vm->jit.traces || vm->jit.traces[current_ip] == NULL)) {
+            (!vm->jit.traces || vm->jit.traces[current_ip] == nullptr)) {
             /* Profitability gate permanently disabled JIT for this pattern and
              * there is no trace at the current IP.  Fall straight through to
              * the interpreter without paying profiling overhead each dispatch. */
@@ -545,7 +550,7 @@ bool vm_run(VM *vm) {
 
             bool should_try = (count == hot_threshold) &&
                               vm->jit.traces &&
-                              vm->jit.traces[current_ip] == NULL &&
+                              vm->jit.traces[current_ip] == nullptr &&
                               !(vm->jit.ctx && vm->jit.ctx->stop_compiling);
 
             if (should_try) {
@@ -592,7 +597,7 @@ bool vm_run(VM *vm) {
         switch (op) {
             case OP_NOP: break; /* fusion filler — skip one byte */
             case OP_ACCEPT:
-                if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; }
+                if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
                 if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
                 return true;
             case OP_FAIL: if (!vm_pop_choice(vm)) goto fail_ret; break;
@@ -858,7 +863,7 @@ bool vm_run(VM *vm) {
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
                 snobol_table_t *table = vm_get_table(vm, table_id);
-                const char *value = NULL;
+                const char *value = nullptr;
 
                 if (key_type == 0) {
                     /* Literal key: read key_len and key_bytes from bytecode */
@@ -1154,8 +1159,8 @@ bool vm_run(VM *vm) {
                 value[val_len] = '\0';
                 
                 /* Set in table */
-                table_set(table, key, value);
-                
+                (void)table_set(table, key, value);
+
                 snobol_free(key);
                 snobol_free(value);
                 break;
@@ -1469,11 +1474,11 @@ bool vm_run(VM *vm) {
             default: if (!vm_pop_choice(vm)) goto fail_ret; break;
         }
     }
-    if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; }
+    if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
     if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
     return false;
  fail_ret:
-    if (vm->choices) { snobol_free(vm->choices); vm->choices = NULL; }
+    if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
     if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
     return false;
 }
@@ -1531,7 +1536,7 @@ bool vm_exec(VM *vm) {
 /* Control flow initialization and cleanup */
 
 void vm_init_labels(VM *vm) {
-    vm->label_offsets = NULL;
+    vm->label_offsets = nullptr;
     vm->label_count = 0;
     vm->label_capacity = 0;
     vm->current_label = 0;
@@ -1541,7 +1546,7 @@ void vm_init_labels(VM *vm) {
 void vm_free_labels(VM *vm) {
     if (vm->label_offsets) {
         snobol_free(vm->label_offsets);
-        vm->label_offsets = NULL;
+        vm->label_offsets = nullptr;
     }
     vm->label_count = 0;
     vm->label_capacity = 0;
@@ -1575,7 +1580,7 @@ uint32_t vm_get_label_offset(VM *vm, uint16_t label_id) {
 /* Table registry functions */
 
 void vm_init_tables(VM *vm) {
-    vm->tables = NULL;
+    vm->tables = nullptr;
     vm->table_count = 0;
     vm->table_capacity = 0;
 }
@@ -1588,7 +1593,7 @@ void vm_free_tables(VM *vm) {
             }
         }
         snobol_free(vm->tables);
-        vm->tables = NULL;
+        vm->tables = nullptr;
     }
     vm->table_count = 0;
     vm->table_capacity = 0;
@@ -1612,6 +1617,6 @@ snobol_table_t *vm_get_table(VM *vm, uint16_t table_id) {
     if (table_id < vm->table_count && vm->tables) {
         return vm->tables[table_id];
     }
-    return NULL;
+    return nullptr;
 }
 #endif
