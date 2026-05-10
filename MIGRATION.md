@@ -5,6 +5,52 @@ monorepo structure.
 
 ---
 
+## v0.5.x → v0.6.0 (C23 Adoption + PHP Binding Cleanup)
+
+### C23 compiler requirement (PHP extension builders only)
+
+The PHP binding `config.m4` now probes for C23 language support and passes
+`-std=c23` (or the `-std=c2x` fallback) to the extension compiler. Building
+the PHP extension from source now **requires GCC 13+ or Clang 17+**.
+
+If `./configure` fails with a message like `C23 support required`, upgrade
+your toolchain:
+
+```bash
+# macOS — upgrade via Homebrew
+brew install gcc@13   # or: brew install llvm
+
+# Ubuntu 24.04+
+sudo apt install gcc-13
+```
+
+**Users who install a pre-built `.so`** from a package manager or CI artefact
+are not affected — this requirement only applies to contributors who build the
+extension from source.
+
+### No API changes
+
+There are **no breaking API changes** in v0.6.0.
+
+- All PHP public APIs (`Pattern`, `PatternHelper`, `Text`, `Table`, etc.) are
+  unchanged.
+- All C public APIs (`core/include/snobol/*.h`) are unchanged in signature and
+  semantics; only annotation keywords (`[[nodiscard]]`, `[[maybe_unused]]`) were
+  added — these are backward-compatible with any C23-capable compiler.
+- `nullptr` replaces `NULL` internally in `core/src/` but is not visible at
+  the public API level.
+
+### ArchitecturalConstraintsTest (PHPUnit test suite)
+
+A new test class `ArchitecturalConstraintsTest` was added to
+`bindings/php/tests/php/`. It enforces that no PHP-native `Lexer.php` /
+`Parser.php` files exist and that no `new Lexer(` / `new Parser(` calls are
+present in `php-src/`. If you maintain a fork with custom PHP-side parsing
+code, these tests will now fail — migrate any such code to call the C extension
+directly.
+
+---
+
 ## v0.4.x → v0.5.0 (Template & Substitution Completeness)
 
 ### Template Bytecode Format Change

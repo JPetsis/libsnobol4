@@ -62,13 +62,14 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
   * **INTEGER / REAL / NUMERIC** – Numeric type predicates
 * **Optional Micro-JIT**: ARM64 JIT compilation for hot patterns (experimental)
+* **C23 Code Quality** (v0.6.0): Core adopts `nullptr`, `[[nodiscard]]`, `[[maybe_unused]]`, and `constexpr` throughout. JIT A64 macro helpers converted to typed `static inline` functions. Requires GCC 13+ or Clang 17+.
 * **Profiling Support**: Built-in execution profiling for performance analysis
 
 ### Available Bindings
 
 | Binding              | Status   | Version |
 |----------------------|----------|---------|
-| [PHP](bindings/php/) | ✅ Stable | v0.5.0  |
+| [PHP](bindings/php/) | ✅ Stable | v0.6.0  |
 
 ## Project Structure
 
@@ -282,7 +283,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 libsnobol4 uses independent versioning for core and each binding:
 
-- **Core**: v0.4.0
-- **PHP Binding**: v0.4.0
+- **Core**: v0.6.0 (C23 language features adopted throughout)
+- **PHP Binding**: v0.6.0
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.
