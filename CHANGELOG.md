@@ -5,7 +5,46 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — C23 Code-Quality Adoption (adopt-c23-features)
+## [0.6.0] - 2026-05-10
+
+### PHP Binding Cleanup (`php-binding-cleanup`)
+
+### Verified / Enforced
+
+- **No PHP-native lexer or parser in `bindings/php/php-src/`**: confirmed that
+  `Lexer.php` and `Parser.php` do not exist; the "C core owns all parsing"
+  architectural goal is now formally verified and permanently guarded.
+
+- **`Pattern::fromString()` fully C-backed**: the C extension method
+  (`snobol_pattern.c`) routes through `snobol_lexer_create()` →
+  `snobol_parser_parse()` → `compile_ast_to_bytecode_c()`. C-side parse errors
+  are caught with `snobol_parser_has_error()` / `snobol_parser_get_error_location()`
+  and thrown as PHP `\Exception` with a message of the form
+  `"Parse error at line N, column M: <detail>"`.
+
+- **`PatternHelper::fromAst()` fully C-backed**: the helper validates
+  `isset($ast['type'])` then delegates the entire compilation to
+  `Pattern::compileFromAst()` (C extension `compile_ast_to_bytecode_c()`).
+  Zero PHP-side AST traversal.
+
+### Added
+
+- **`ArchitecturalConstraintsTest`** (`bindings/php/tests/php/ArchitecturalConstraintsTest.php`):
+  new PHPUnit test class that enforces the no-native-parsing rule permanently:
+  - `testNoPhpNativeLexerInstantiation()` — asserts zero `new Lexer(` under `php-src/`
+  - `testNoPhpNativeParserInstantiation()` — asserts zero `new Parser(` under `php-src/`
+  - `testLexerPhpFileDoesNotExist()` — asserts `php-src/Lexer.php` is absent
+  - `testParserPhpFileDoesNotExist()` — asserts `php-src/Parser.php` is absent
+
+### Verified
+
+- All 198 PHP tests pass (`ddev exec vendor/bin/phpunit tests/`) ✅
+- Zero regressions in `PatternTest`, `BuilderTest`, `PatternHelper`-exercising tests ✅
+- New architectural constraints: 4/4 tests pass ✅
+
+---
+
+### C23 Code-Quality Adoption (`adopt-c23-features`)
 
 ### Changed
 

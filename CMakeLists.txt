@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(libsnobol4 VERSION 0.5.0 LANGUAGES C)
+project(libsnobol4 VERSION 0.6.0 LANGUAGES C)
 
 # Options
 option(BUILD_TESTS "Build C test suite" ON)
