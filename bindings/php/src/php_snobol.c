@@ -13,11 +13,13 @@
 #include "php.h"
 #include "php_snobol.h"
 #include "ext/standard/info.h"
+#include "zend_exceptions.h"
 
 /* libsnobol4 core built-in function headers */
 #include "snobol/string_fn.h"
 #include "snobol/type_fn.h"
 #include "snobol/vm.h"
+#include "snobol/snobol.h"
 
 #include <stdio.h>
 #include <time.h>
@@ -78,6 +80,20 @@ PHP_MINFO_FUNCTION(snobol) {
 
 PHP_MINIT_FUNCTION(snobol) {
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): START");
+
+    /* Verify that the linked libsnobol4 major version matches what this binding
+     * was compiled against.  A major version mismatch means incompatible ABI. */
+    uint32_t api_ver = snobol_get_api_version();
+    uint32_t got_major = api_ver >> 16;
+    if (got_major != (uint32_t)SNOBOL_VERSION_MAJOR) {
+        zend_throw_exception_ex(
+            zend_ce_exception, 0,
+            "libsnobol4 API version mismatch: expected major %d, got %d",
+            (int)SNOBOL_VERSION_MAJOR, (int)got_major
+        );
+        return FAILURE;
+    }
+
 #ifdef SNOBOL_JIT
     snobol_jit_init();
 #endif
@@ -415,6 +431,16 @@ PHP_FUNCTION(snobol_text_numeric) {
     RETURN_BOOL(snobol_numeric(s, slen));
 }
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_api_version, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+PHP_FUNCTION(snobol_get_api_version) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        return;
+    }
+    RETURN_LONG((zend_long)snobol_get_api_version());
+}
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_choice_stats, 0, 0, IS_ARRAY, 0)
 ZEND_END_ARG_INFO()
 
@@ -461,6 +487,7 @@ static const zend_function_entry snobol_functions[] = {
     PHP_FE(snobol_text_integer,      ai_text_str1_bool)
     PHP_FE(snobol_text_real,         ai_text_str1_bool)
     PHP_FE(snobol_text_numeric,      ai_text_str1_bool)
+    PHP_FE(snobol_get_api_version,   ai_snobol_get_api_version)
     PHP_FE(snobol_get_choice_stats,  ai_snobol_get_choice_stats)
     PHP_FE_END
 };

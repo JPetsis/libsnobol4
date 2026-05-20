@@ -246,7 +246,7 @@ static void test_label_zero_is_valid(void) {
 }
 
 /* ---------------------------------------------------------------------------
- * Task 3.1: Duplicate label detection (via parser)
+ * Duplicate label detection (via parser)
  * ---------------------------------------------------------------------------*/
 static void test_duplicate_label_detection(void) {
     test_suite("Control Flow: duplicate label detection via parser");
@@ -290,7 +290,7 @@ static void test_duplicate_label_compiler(void) {
 }
 
 /* ---------------------------------------------------------------------------
- * Task 3.2: Unknown label detection (via compiler)
+ * Unknown label detection (via compiler)
  * ---------------------------------------------------------------------------*/
 static void test_unknown_label_detection(void) {
     test_suite("Control Flow: unknown label detection via compiler");
@@ -310,7 +310,7 @@ static void test_unknown_label_detection(void) {
 }
 
 /* ---------------------------------------------------------------------------
- * Task 3.3: Label/goto execution (full pipeline)
+ * Label/goto execution (full pipeline)
  * ---------------------------------------------------------------------------*/
 static void test_label_pattern_execution(void) {
     test_suite("Control Flow: simple label pattern executes correctly");
@@ -388,12 +388,9 @@ void test_control_flow_suite(void) {
     test_goto_does_not_restore_backtracking();
     test_goto_fail_flag();
     test_label_zero_is_valid();
-    /* Task 3.1 */
     test_duplicate_label_detection();
     test_duplicate_label_compiler();
-    /* Task 3.2 */
     test_unknown_label_detection();
-    /* Task 3.3 */
     test_label_pattern_execution();
     test_forward_goto_execution();
 }

@@ -1398,6 +1398,33 @@ static int emit_cap_c(ast_node_t* reg_node, ast_node_t* sub, CodeBuf *c);
 static int emit_repeat_c(ast_node_t* sub, ast_node_t* min_node, ast_node_t* max_node, CodeBuf *c);
 
 /* C-only helper implementations */
+
+/**
+ * Emit case-insensitive literal: each codepoint in [s, len) is matched as
+ * OP_ANY with a charclass containing both its cases.  Used when
+ * compiler_case_insensitive is true for AST_LITERAL nodes.
+ */
+static int emit_lit_case_insensitive_c(CodeBuf *c, const char *s, size_t len) {
+    size_t pos = 0;
+    while (pos < len) {
+        uint32_t cp;
+        int cp_bytes;
+        if (!utf8_peek_next(s, len, pos, &cp, &cp_bytes)) {
+            /* Invalid / truncated byte — emit as raw literal */
+            if (emit_lit_bytes(c, s + pos, 1) != 0) return -1;
+            pos++;
+            continue;
+        }
+        /* add_or_get_charclass will expand the codepoint's case peer when
+         * compiler_case_insensitive is set. */
+        int setid = add_or_get_charclass(s + pos, (size_t)cp_bytes);
+        cb_emit_u8(c, OP_ANY);
+        cb_emit_u16(c, (uint16_t)setid);
+        pos += (size_t)cp_bytes;
+    }
+    return 0;
+}
+
 static int emit_span_c(const char *set, size_t len, CodeBuf *c) {
     int setid = add_or_get_charclass(set, len);
     cb_emit_u8(c, OP_SPAN);
@@ -1766,6 +1793,10 @@ static int emit_node_c(ast_node_t* node, CodeBuf *c) {
 
     switch (node->type) {
         case AST_LITERAL:
+            if (compiler_case_insensitive) {
+                return emit_lit_case_insensitive_c(c, node->data.literal.text,
+                                                   node->data.literal.len);
+            }
             return emit_lit_bytes(c, node->data.literal.text, node->data.literal.len);
 
         case AST_CONCAT:

@@ -242,8 +242,8 @@ Inside `${vN.expr()}` braces the following expression forms are supported:
 | Expression         | Emitted opcode                                   | Effect                              |
 |--------------------|--------------------------------------------------|-------------------------------------|
 | `${vN}`            | `OP_EMIT_CAPTURE reg`                            | Emit raw capture                    |
-| `${vN.upper()}`    | `OP_EMIT_FORMAT reg SNBL_FMT_UPPER`              | ASCII uppercase                     |
-| `${vN.lower()}`    | `OP_EMIT_FORMAT reg SNBL_FMT_LOWER`              | ASCII lowercase                     |
+| `${vN.upper()}`    | `OP_EMIT_FORMAT reg SNBL_FMT_UPPER`              | Unicode uppercase (Latin-1 + Latin Extended-A, ß→SS) |
+| `${vN.lower()}`    | `OP_EMIT_FORMAT reg SNBL_FMT_LOWER`              | Unicode lowercase (Latin-1 + Latin Extended-A) |
 | `${vN.length()}`   | `OP_EMIT_FORMAT reg SNBL_FMT_LENGTH`             | Decimal codepoint count             |
 | `${vN.lpad(W)}`    | `OP_EMIT_FORMAT reg SNBL_FMT_LPAD width 0x20`   | Left-pad to width W with spaces     |
 | `${vN.lpad(W,'c')}` | `OP_EMIT_FORMAT reg SNBL_FMT_LPAD width fill`  | Left-pad to width W with char `c`   |
@@ -407,9 +407,17 @@ JIT regression guard results show the profitability gate correctly skips these p
 
 | Suite         | Tests | Assertions | Status   |
 |---------------|-------|------------|----------|
-| C Tests       | 1,265 | -          | ✅ Pass   |
+| C Tests       | 1,359 | -          | ✅ Pass   |
 | PHP Tests     | 183   | 410        | ✅ Pass   |
 | Compatibility | 21    | -          | ✅ Pass   |
 | Skipped       | 4     | -          | Expected |
 
-**Total:** 1,469 tests passing
+**Total:** 1,563 tests passing
+
+## Case-Insensitive Matching
+
+Available via `snobol_pattern_compile_ex()` with `SNOBOL_FLAG_CASE_INSENSITIVE` (C API)
+or `Pattern::fromString($src, ['caseInsensitive' => true])` (PHP API).
+
+Covers ASCII, Latin-1 Supplement (U+00C0–U+00FF), and Latin Extended-A (U+0100–U+017F).
+Captured text always preserves the original case of the subject.

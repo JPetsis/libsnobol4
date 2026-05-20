@@ -49,6 +49,27 @@ if (!function_exists('snobol_get_jit_stats')) {
     }
 }
 
+if (!function_exists('snobol_get_api_version')) {
+    /**
+     * Return the libsnobol4 API version as a packed integer.
+     *
+     * Encoding: (MAJOR << 16) | (MINOR << 8) | PATCH
+     *
+     * For v0.7.0 this returns 0x00000700 (1792).
+     * Extract components:
+     *   $major = ($v >> 16) & 0xFF;
+     *   $minor = ($v >>  8) & 0xFF;
+     *   $patch = $v & 0xFF;
+     *
+     * @return int Packed version integer
+     */
+    function snobol_get_api_version(): int
+    {
+        // Native implementation in C extension
+        return 0;
+    }
+}
+
 if (!function_exists('snobol_get_choice_stats')) {
     /**
      * Retrieve choice-point statistics from the VM.

@@ -20,6 +20,8 @@ add_library(snobol4 STATIC
     src/type_fn.c
     src/pattern_build.c
     src/search.c
+    src/unicode_fold.c
+    src/api.c
 )
 
 # Set C23 standard

@@ -5,6 +5,51 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-05-20
+
+### Unicode Completeness (`unicode-completeness`)
+
+### Added
+
+- **UPPER / LOWER v2** (`core/src/unicode_fold.c`): Full Unicode case conversion
+  covering Latin-1 Supplement (U+00C0–U+00FF), Latin Extended-A (U+0100–U+017F),
+  and multi-character expansion for German sharp-s (ß → SS). `snobol_upper()` and
+  `snobol_lower()` now decode UTF-8 codepoints with `utf8_peek_next()` and use a
+  self-contained static fold table; ASCII fast-path is preserved.
+
+- **`SNOBOL_FLAG_CASE_INSENSITIVE` (0x0001u)** in `core/include/snobol/snobol.h`:
+  Compile-time flag enabling case-folded pattern matching.
+
+- **`snobol_pattern_compile_ex(ctx, source, len, flags, error)`**: New public API
+  function that accepts a `flags` bitmask. Pass `SNOBOL_FLAG_CASE_INSENSITIVE` to
+  enable case-insensitive matching; unknown flag bits are silently ignored. The
+  existing `snobol_pattern_compile()` now delegates to `compile_ex` with `flags=0`.
+
+- **`snobol_get_api_version()`**: Returns `(MAJOR << 16) | (MINOR << 8) | PATCH` as
+  `uint32_t`. For v0.7.0 this returns `0x00000700u`. Intended for binding load-time
+  compatibility checks. Declared in `snobol.h`, implemented in `core/src/version.c`.
+
+- **PHP binding load-time version check**: `PHP_MINIT_FUNCTION(snobol)` now calls
+  `snobol_get_api_version()`, extracts the major version, and throws a PHP
+  `RuntimeException` (returning `FAILURE`) if the linked library's major version
+  does not match the compile-time constant.
+
+- **`snobol_get_api_version()` PHP function**: Exposed as a first-class PHP function;
+  returns the library's API version integer directly from the C library.
+
+- **`Pattern::fromString()` supports `caseInsensitive` option**: The `$options`
+  array parameter now accepts `['caseInsensitive' => true]` to compile source-text
+  patterns via the case-insensitive `compile_ast_to_bytecode_c()` path.
+
+### Verified
+
+- All C unit tests pass (1359/1359) ✅
+- New C test suites: `test_unicode_fold` (22 cases), `test_string_case` (Unicode),
+  `test_pattern_case` (11 cases), `test_api_version` (5 cases)
+- `core_amalgam.c` regenerated (13 source files) ✅
+
+---
+
 ## [0.6.0] - 2026-05-10
 
 ### PHP Binding Cleanup (`php-binding-cleanup`)

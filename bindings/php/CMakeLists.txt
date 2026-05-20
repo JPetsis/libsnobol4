@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 # PHP binding for libsnobol4
 # Requires PHP 8.0+ development headers
 
-project(libsnobol4_php VERSION 0.1.0 LANGUAGES C)
+project(libsnobol4_php VERSION 0.7.0 LANGUAGES C)
 
 # Find php-config executable
 find_program(PHP_CONFIG php-config

@@ -5,6 +5,67 @@ monorepo structure.
 
 ---
 
+## v0.6.x → v0.7.0 (Unicode Completeness)
+
+### No breaking changes
+
+All existing APIs are fully backward-compatible. This release is purely additive.
+
+### New API: `snobol_pattern_compile_ex()`
+
+```c
+#include <snobol/snobol.h>
+
+snobol_pattern_t *pat = snobol_pattern_compile_ex(
+    ctx, "'hello'", 7,
+    SNOBOL_FLAG_CASE_INSENSITIVE,
+    &err
+);
+// pat now matches "HELLO", "Hello", etc.
+```
+
+Existing callers of `snobol_pattern_compile()` need no changes — it now internally
+delegates to `compile_ex` with `flags=0`, producing identical behaviour.
+
+### New API: `snobol_get_api_version()`
+
+```c
+uint32_t v = snobol_get_api_version();
+uint32_t major = v >> 16;   // 0
+uint32_t minor = (v >> 8) & 0xFF;  // 7
+uint32_t patch = v & 0xFF;  // 0
+```
+
+Intended for use in binding MINIT or startup code to detect major ABI changes.
+
+### PHP binding: new `RuntimeException` on major version mismatch
+
+If your PHP application loads the `snobol` extension and the linked libsnobol4
+shared library has a **different major version** from what the extension was
+compiled against, PHP will now throw a `RuntimeException` at extension load time
+(during MINIT). This surfaces immediately rather than causing subtle wrong
+behaviour later.
+
+**No action needed** if you keep the extension and library in sync (the normal
+case). If you build from source, always rebuild the PHP extension after upgrading
+the C core.
+
+### PHP: `Pattern::fromString()` caseInsensitive option
+
+```php
+$pat = Pattern::fromString("'hello'", ['caseInsensitive' => true]);
+$res = $pat->match('HELLO');  // matches
+```
+
+### UPPER / LOWER now full Unicode
+
+`Text::upper()` / `Text::lower()` (and the `${vN.upper()}` / `${vN.lower()}`
+template expressions) now handle the full Latin-1 Supplement and Latin Extended-A
+Unicode blocks, including the German sharp-s expansion (ß → SS). ASCII strings
+are unchanged — the ASCII fast-path is preserved.
+
+---
+
 ## v0.5.x → v0.6.0 (C23 Adoption + PHP Binding Cleanup)
 
 ### C23 compiler requirement (PHP extension builders only)

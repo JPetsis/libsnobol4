@@ -37,8 +37,8 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   every match in `subject` using a template string where capture references and formatting
   expressions are compiled entirely to C VM instructions.  Supported expressions inside `${vN...}`:
   * `${vN}` — raw capture
-  * `${vN.upper()}` — ASCII uppercase
-  * `${vN.lower()}` — ASCII lowercase
+  * `${vN.upper()}` — Unicode uppercase (Latin-1 + Latin Extended-A; German ß→SS)
+  * `${vN.lower()}` — Unicode lowercase (Latin-1 + Latin Extended-A)
   * `${vN.length()}` — decimal codepoint count
   * `${vN.lpad(W[,'c'])}` — left-pad to width W (fill char defaults to space)
   * `${vN.rpad(W[,'c'])}` — right-pad to width W (fill char defaults to space)
@@ -56,7 +56,9 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **REPLACE_CHAR** – Character translation table (like POSIX `tr`)
   * **LPAD / RPAD** – Pad strings to a Unicode codepoint width
   * **CHAR / ORD** – Codepoint ↔ UTF-8 character conversions
-  * **UPPER / LOWER** – Case conversion (v1: ASCII; v2: full Unicode planned)
+  * **UPPER / LOWER** – Full Unicode case conversion (Latin-1 + Latin Extended-A, German sharp-s ß→SS)
+* **Case-Insensitive Pattern Matching** (v0.7.0): `snobol_pattern_compile_ex()` with `SNOBOL_FLAG_CASE_INSENSITIVE` enables case-folded matching at compile time. Covers ASCII, Latin-1, and Latin Extended-A codepoints.
+* **API Version Function** (v0.7.0): `snobol_get_api_version()` returns `(MAJOR << 16) | (MINOR << 8) | PATCH` for binding/library compatibility checks.
 * **Built-in Comparison Predicates** (v0.2.0): Boolean predicates matching SNOBOL4 semantics:
   * **IDENT / DIFFER** – String identity / difference
   * **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
@@ -69,7 +71,7 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
 
 | Binding              | Status   | Version |
 |----------------------|----------|---------|
-| [PHP](bindings/php/) | ✅ Stable | v0.6.0  |
+| [PHP](bindings/php/README.md) | ✅ Stable | v0.7.0  |
 
 ## Project Structure
 
@@ -283,7 +285,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 libsnobol4 uses independent versioning for core and each binding:
 
-- **Core**: v0.6.0 (C23 language features adopted throughout)
-- **PHP Binding**: v0.6.0
+- **Core**: v0.7.0 (Unicode Completeness: UPPER/LOWER v2, case-insensitive patterns, API version function)
+- **PHP Binding**: v0.7.0
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.

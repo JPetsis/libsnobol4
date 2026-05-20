@@ -264,10 +264,49 @@ Templates support variable references and transformations:
 |-------------------|--------------------------------|
 | `$v0`, `$v1`, ... | Variable reference             |
 | `${v0}`           | Braced variable reference      |
-| `${v0.upper()}`   | Uppercase transformation       |
+| `${v0.upper()}`   | Unicode uppercase (Latin-1 + Latin Extended-A, ß→SS) |
+| `${v0.lower()}`   | Unicode lowercase (Latin-1 + Latin Extended-A) |
 | `${v0.length()}`  | Length of captured value       |
 | `$TABLE['key']`   | Table lookup with literal key  |
 | `$TABLE[$v0]`     | Table lookup with variable key |
+
+## Case-Insensitive Pattern Matching
+
+`Pattern::fromString()` accepts a `caseInsensitive` option that compiles the
+pattern with case-folded character classes:
+
+```php
+<?php
+use Snobol\Pattern;
+
+$pat = Pattern::fromString("'hello'", ['caseInsensitive' => true]);
+$res = $pat->match('HELLO world');
+// matches — $res['_match_len'] == 5
+
+$pat2 = Pattern::fromString("'café'", ['caseInsensitive' => true]);
+$res2 = $pat2->match("CAF\xC3\x89 dessert");
+// matches CAFÉ case-insensitively
+```
+
+Coverage: ASCII, Latin-1 Supplement (U+00C0–U+00FF), Latin Extended-A (U+0100–U+017F).
+Captured text always preserves the original case of the subject.
+
+## Extension Load-Time Version Check
+
+The `snobol` PHP extension verifies at load time that the linked `libsnobol4`
+shared library has the same **major version** as the extension was compiled
+against. If a mismatch is detected (e.g., you upgraded the C library without
+rebuilding the extension), a `RuntimeException` is thrown and the extension
+returns `FAILURE`. You can query the version from PHP:
+
+```php
+$v = snobol_get_api_version();
+$major = ($v >> 16) & 0xFF;  // 0
+$minor = ($v >> 8) & 0xFF;   // 7
+$patch = $v & 0xFF;          // 0
+```
+
+For v0.7.0 this returns `0x00000700` (1792 in decimal).
 
 ## Running Tests
 

@@ -233,11 +233,20 @@ PHP_METHOD(Snobol_Pattern, fromString) {
         RETURN_NULL();
     }
 
+    /* Extract caseInsensitive option */
+    bool case_insensitive = false;
+    if (options && Z_TYPE_P(options) == IS_ARRAY) {
+        zval *ci = zend_hash_str_find(Z_ARRVAL_P(options), "caseInsensitive", sizeof("caseInsensitive") - 1);
+        if (ci && zend_is_true(ci)) {
+            case_insensitive = true;
+        }
+    }
+
     /* Compile AST to bytecode */
     uint8_t *bc = NULL;
     size_t bc_len = 0;
-    
-    if (compile_ast_to_bytecode_c(ast, false, &bc, &bc_len) != 0) {
+
+    if (compile_ast_to_bytecode_c(ast, case_insensitive, &bc, &bc_len) != 0) {
         SNOBOL_LOG("Snobol_Pattern::fromString: compilation FAILED");
         snobol_ast_free(ast);
         snobol_parser_destroy(parser);

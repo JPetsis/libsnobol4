@@ -17,17 +17,30 @@
 
 /* Version macros */
 #define SNOBOL_VERSION_MAJOR 0
-#define SNOBOL_VERSION_MINOR 3
+#define SNOBOL_VERSION_MINOR 7
 #define SNOBOL_VERSION_PATCH 0
-#define SNOBOL_VERSION_STRING "0.3.0"
+#define SNOBOL_VERSION_STRING "0.7.0"
 
 /**
- * Get library version at runtime
+ * Get library version at runtime (three separate integers)
  * @param major Output parameter for major version (can be NULL)
  * @param minor Output parameter for minor version (can be NULL)
  * @param patch Output parameter for patch version (can be NULL)
  */
 void snobol_version(int* major, int* minor, int* patch);
+
+/**
+ * Get library API version as a single encoded integer.
+ *
+ * Encoding: (MAJOR << 16) | (MINOR << 8) | PATCH
+ *
+ * Bindings should compare `snobol_get_api_version() >> 16` against their
+ * compile-time SNOBOL_VERSION_MAJOR to detect incompatible library upgrades.
+ *
+ * @return Encoded API version uint32_t.
+ *         For v0.7.0 this returns 0x00000700u.
+ */
+uint32_t snobol_get_api_version(void);
 
 /* Include common headers */
 #include "snobol/ast.h"
@@ -77,8 +90,37 @@ typedef struct snobol_table snobol_table_t;
 snobol_context_t* snobol_context_create(void);
 void snobol_context_destroy(snobol_context_t* ctx);
 
+/* -----------------------------------------------------------------------
+ * Pattern compilation flags
+ * ----------------------------------------------------------------------- */
+
+/**
+ * Make literal and character-class matching case-insensitive for ASCII and
+ * Latin-1 Supplement (U+0041–U+005A / U+0061–U+007A; U+00C0–U+00FF pairs).
+ * Captured text preserves the original subject case.
+ *
+ * JIT is disabled when this flag is set; patterns fall back to the interpreter.
+ * Pass to snobol_pattern_compile_ex() via the flags bitmask.
+ */
+#define SNOBOL_FLAG_CASE_INSENSITIVE  0x0001u
+
 /* Pattern compilation */
 snobol_pattern_t* snobol_pattern_compile(snobol_context_t* ctx, const char* source, size_t len, char** error);
+
+/**
+ * Compile a pattern with option flags.
+ *
+ * @param ctx    Context that owns the returned pattern.
+ * @param source Pattern source text (UTF-8).
+ * @param len    Byte length of source.
+ * @param flags  Bitmask of SNOBOL_FLAG_* constants (unknown bits are ignored).
+ * @param error  On failure, *error is set to a malloc'd error string.
+ *               On success, *error is set to NULL.  Caller must free on error.
+ * @return Compiled pattern owned by ctx, or NULL on parse/compile error.
+ *         Free with snobol_pattern_free() before destroying the context.
+ */
+snobol_pattern_t* snobol_pattern_compile_ex(snobol_context_t* ctx, const char* source, size_t len, uint32_t flags, char** error);
+
 void snobol_pattern_free(snobol_pattern_t* pattern);
 
 /* Pattern matching */

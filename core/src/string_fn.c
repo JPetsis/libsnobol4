@@ -12,6 +12,7 @@
 #include "snobol/snobol_internal.h"
 #include "snobol/vm.h"
 #include "snobol/string_fn.h"
+#include "snobol/unicode_fold.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -422,46 +423,78 @@ bool snobol_ord(const char *str, size_t str_len, uint32_t *out_cp) {
  * -------------------------------------------------------------------------- */
 
 /**
- * UPPER: ASCII fast path uppercase.
- * v1.0: only ASCII a-z → A-Z; all other bytes preserved.
- * v2.0 TODO: full Unicode case folding.
+ * UPPER: Unicode-aware uppercase conversion.
+ * v2: full Unicode case folding — Latin-1 Supplement (U+00C0–U+00FF) and
+ *     Latin Extended-A (U+0100–U+017E), including multi-char expansion for
+ *     the German sharp-s U+00DF ß → "SS".
+ * ASCII fast path: direct arithmetic for a–z.
+ * Codepoints beyond Latin Extended-A are passed through unchanged.
  */
 bool snobol_upper(const char *str, size_t str_len, snobol_buf *out) {
     if (!out) return false;
     snobol_buf_clear(out);
     if (!str || str_len == 0) return true;
 
-    char *buf = (char *)snobol_malloc(str_len + 1);
-    if (!buf) return false;
+    size_t pos = 0;
+    while (pos < str_len) {
+        uint32_t cp = 0;
+        int cp_bytes = 0;
+        if (!utf8_peek_next(str, str_len, pos, &cp, &cp_bytes)) {
+            /* Invalid or truncated byte — pass through as raw byte */
+            snobol_buf_append(out, str + pos, 1);
+            pos++;
+            continue;
+        }
 
-    for (size_t i = 0; i < str_len; i++) {
-        unsigned char c = (unsigned char)str[i];
-        buf[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : str[i];
+        uint32_t upper_out[2];
+        int upper_len = 0;
+        snobol_to_upper_cp(cp, upper_out, &upper_len);
+
+        char utf8_buf[4];
+        for (int k = 0; k < upper_len; k++) {
+            int nbytes = encode_utf8(upper_out[k], utf8_buf);
+            if (nbytes > 0) {
+                snobol_buf_append(out, utf8_buf, (size_t)nbytes);
+            }
+        }
+
+        pos += (size_t)cp_bytes;
     }
-    snobol_buf_append(out, buf, str_len);
-    snobol_free(buf);
     return true;
 }
 
 /**
- * LOWER: ASCII fast path lowercase.
- * v1.0: only ASCII A-Z → a-z; all other bytes preserved.
- * v2.0 TODO: full Unicode case folding.
+ * LOWER: Unicode-aware lowercase conversion.
+ * v2: full Unicode case folding — Latin-1 Supplement (U+00C0–U+00FF) and
+ *     Latin Extended-A (U+0100–U+017E).
+ * ASCII fast path: direct arithmetic for A–Z.
+ * Codepoints beyond Latin Extended-A are passed through unchanged.
  */
 bool snobol_lower(const char *str, size_t str_len, snobol_buf *out) {
     if (!out) return false;
     snobol_buf_clear(out);
     if (!str || str_len == 0) return true;
 
-    char *buf = (char *)snobol_malloc(str_len + 1);
-    if (!buf) return false;
+    size_t pos = 0;
+    while (pos < str_len) {
+        uint32_t cp = 0;
+        int cp_bytes = 0;
+        if (!utf8_peek_next(str, str_len, pos, &cp, &cp_bytes)) {
+            snobol_buf_append(out, str + pos, 1);
+            pos++;
+            continue;
+        }
 
-    for (size_t i = 0; i < str_len; i++) {
-        unsigned char c = (unsigned char)str[i];
-        buf[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : str[i];
+        uint32_t lower_cp = snobol_to_lower_cp(cp);
+
+        char utf8_buf[4];
+        int nbytes = encode_utf8(lower_cp, utf8_buf);
+        if (nbytes > 0) {
+            snobol_buf_append(out, utf8_buf, (size_t)nbytes);
+        }
+
+        pos += (size_t)cp_bytes;
     }
-    snobol_buf_append(out, buf, str_len);
-    snobol_free(buf);
     return true;
 }
 

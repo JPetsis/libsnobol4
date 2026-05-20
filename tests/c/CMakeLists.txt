@@ -35,6 +35,10 @@ add_executable(snobol4_tests
     test_search_jit.c
     test_fusion.c
     test_compact_choice.c
+    # New: Unicode fold, case-insensitive patterns, API version
+    test_unicode_fold.c
+    test_pattern_case.c
+    test_api_version.c
 )
 
 # Link against core library

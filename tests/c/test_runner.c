@@ -156,6 +156,10 @@ void test_search_runtime_suite(void);
 void test_search_jit_suite(void);
 void test_fusion_suite(void);
 void test_compact_choice_suite(void);
+/* Unicode / API new suites */
+void test_unicode_fold_suite(void);
+void test_pattern_case_suite(void);
+void test_api_version_suite(void);
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
@@ -211,6 +215,10 @@ int main(void) {
     RUN_SUITE("Search JIT",                 test_search_jit_suite);
     RUN_SUITE("Fusion: SPLIT/ANY",          test_fusion_suite);
     RUN_SUITE("Compact Choice Stack",       test_compact_choice_suite);
+    /* Unicode / API */
+    RUN_SUITE("Unicode Fold Table",         test_unicode_fold_suite);
+    RUN_SUITE("Pattern: Case-Insensitive",  test_pattern_case_suite);
+    RUN_SUITE("API Version",                test_api_version_suite);
 
     /* Stress test */
     {
