@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Verified
 
 - All C unit tests pass (1359/1359) ✅
+- All PHP tests pass (236/236) ✅
 - New C test suites: `test_unicode_fold` (22 cases), `test_string_case` (Unicode),
   `test_pattern_case` (11 cases), `test_api_version` (5 cases)
 - `core_amalgam.c` regenerated (13 source files) ✅

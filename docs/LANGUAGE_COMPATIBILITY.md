@@ -408,11 +408,11 @@ JIT regression guard results show the profitability gate correctly skips these p
 | Suite         | Tests | Assertions | Status   |
 |---------------|-------|------------|----------|
 | C Tests       | 1,359 | -          | ✅ Pass   |
-| PHP Tests     | 183   | 410        | ✅ Pass   |
+| PHP Tests     | 236   | 490        | ✅ Pass   |
 | Compatibility | 21    | -          | ✅ Pass   |
 | Skipped       | 4     | -          | Expected |
 
-**Total:** 1,563 tests passing
+**Total:** 1,616 tests passing
 
 ## Case-Insensitive Matching
 
