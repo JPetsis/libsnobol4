@@ -243,7 +243,7 @@ See `bench/` directory for benchmark scripts and `bench/results_builtin.json` fo
 └──────────────────────────┼──────────────────────────────┘
                            │
 ┌──────────────────────────┼──────────────────────────────┐
-│              Language-Agnostic Core (C)               │
+│              Language-Agnostic Core (C)                 │
 │                          │                              │
 │  ┌──────────────┐  ┌─────▼──────┐  ┌──────────────┐     │
 │  │ Lexer (C)    │─▶│ Parser (C) │─▶│  Compiler    │     │
