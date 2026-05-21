@@ -8,8 +8,8 @@ on:
         required: false
         default: '8.5'
   schedule:
-    # Run sanitizers weekly on Tuesday at 02:00 UTC
-    - cron: '0 2 * * 2'
+    # Run sanitizers nightly at 02:00 UTC
+    - cron: '0 2 * * *'
 
 jobs:
   asan-ubsan:
@@ -51,34 +51,14 @@ jobs:
             -DBUILD_TESTS=ON \
             -DBUILD_PHP=OFF \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+            -DSNOBOL_SANITIZE=ON
 
       - name: Build C library
         run: cmake --build build
 
-      - name: Build C extension with ASan/UBSan
-        working-directory: bindings/php
-        run: |
-          phpize
-          ./configure --enable-snobol
-          make clean
-          make
-          sudo make install
-
-      - name: Enable extension
-        run: |
-          echo "extension=snobol.so" | sudo tee -a /etc/php/${{ github.event.inputs.php-version || '8.5' }}/cli/php.ini
-          php -m | grep snobol || echo "Warning: Extension not loaded, continuing anyway"
-
-      - name: Run C tests with sanitizers
+      - name: Run C tests with ASan/UBSan
         working-directory: build
-        run: ctest --output-on-failure
-        continue-on-error: true
-
-      - name: Run PHP tests with sanitizers
-        run: |
-          export LD_PRELOAD=$(find /usr/lib -name "libasan.so.*" | head -n 1)
-          php vendor/bin/phpunit tests/php
+        run: cmake --build . --target test-asan
         continue-on-error: false
 
       - name: Check for sanitizer errors

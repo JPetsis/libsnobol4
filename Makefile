@@ -7,9 +7,9 @@
 #   make clean    - Clean build artifacts
 #   make help     - Show all targets
 
-.PHONY: all build test clean distclean install help \
+.PHONY: all build test clean distclean install uninstall help \
         build-debug build-release build-jit build-asan \
-        test-verbose test-valgrind bench docs format lint warnings
+        test-verbose test-valgrind test-asan bench docs format lint warnings
 
 # Default build type
 BUILD_TYPE ?= Release
@@ -61,8 +61,15 @@ build-jit:
 	@$(MAKE) build BUILD_TYPE=Release CMAKE_EXTRA_FLAGS="-DSNOBOL_JIT=ON -DSNOBOL_PROFILE=ON"
 
 build-asan:
-	@$(MAKE) build BUILD_TYPE=Debug \
-		CMAKE_EXTRA_FLAGS="-DCMAKE_C_FLAGS='-fsanitize=address -fno-omit-frame-pointer -g'"
+	@echo "==> Configuring build with AddressSanitizer + UBSan..."
+	$(CMAKE) -B build-asan \
+		-DCMAKE_BUILD_TYPE=Debug \
+		-DBUILD_TESTS=ON \
+		-DBUILD_PHP=OFF \
+		-DSNOBOL_SANITIZE=ON \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	@echo "==> Building with sanitizers..."
+	$(CMAKE) --build build-asan
 
 # Run tests
 test:
@@ -86,48 +93,73 @@ test-verbose:
 		exit 1; \
 	fi
 
-# Run tests under Valgrind
+# Run tests under Valgrind (delegates to CMake test-valgrind target)
 test-valgrind:
-	@echo "==> Running tests under Valgrind..."
-	@if command -v valgrind >/dev/null 2>&1; then \
-		if [ -f build/tests/c/snobol4_tests ]; then \
-			valgrind \
-				--leak-check=full \
-				--show-leak-kinds=all \
-				--track-origins=yes \
-				--verbose \
-				--error-exitcode=1 \
-				./build/tests/c/snobol4_tests; \
-		else \
-			echo "Test executable not found. Run 'make build' first."; \
-			exit 1; \
-		fi; \
+	@echo "==> Running tests under Valgrind (via CMake target)..."
+	@if [ -d build ]; then \
+		$(CMAKE_BUILD) --target test-valgrind; \
 	else \
-		echo "Valgrind not found. Install with:"; \
-		echo "  macOS: brew install valgrind (may require --HEAD on Apple Silicon)"; \
-		echo "  Linux: apt install valgrind (Debian/Ubuntu) or yum install valgrind (RHEL/CentOS)"; \
+		echo "Build directory not found. Run 'make build' first."; \
+		exit 1; \
+	fi
+
+# Run tests with AddressSanitizer + UBSan (delegates to CMake test-asan target)
+test-asan:
+	@echo "==> Running ASan/UBSan tests (via CMake target)..."
+	@if [ -d build-asan ]; then \
+		$(CMAKE) --build build-asan --target test-asan; \
+	else \
+		echo "ASan build directory not found. Run 'make build-asan' first."; \
 		exit 1; \
 	fi
 
 # Clean targets
+# Removes all CMake build trees (build/, build-asan/, build-win/, cmake-build-*/)
+# and transient benchmark result files.
 clean:
-	@echo "==> Cleaning build artifacts..."
+	@echo "==> Cleaning all build directories..."
 	rm -rf build/
 	rm -rf build_test/
+	rm -rf build-asan/
+	rm -rf build-win/
+	rm -rf cmake-build-debug/
+	rm -rf cmake-build-debug-llvm-clang/
 	@echo "==> Cleaning benchmark results..."
 	find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' ! -name 'results_builtin.json' ! -name 'results_layered_search.json' -delete 2>/dev/null || true
 	@echo "==> Clean complete!"
 
-distclean: clean
+# Uninstall previously installed files using CMake's install manifest.
+# Removes headers, library, CMake config files, and libsnobol4.pc.
+# Set INSTALL_PREFIX to match the prefix used during 'make install' (default: /usr/local).
+INSTALL_PREFIX ?= /usr/local
+uninstall:
+	@echo "==> Uninstalling libsnobol4 from $(INSTALL_PREFIX)..."
+	@if [ -f build/install_manifest.txt ]; then \
+		echo "Using build/install_manifest.txt..."; \
+		xargs rm -f < build/install_manifest.txt; \
+		rm -f build/install_manifest.txt; \
+	else \
+		echo "No install manifest found in build/. Removing known paths manually..."; \
+		rm -rf $(INSTALL_PREFIX)/include/snobol; \
+		rm -f  $(INSTALL_PREFIX)/lib/libsnobol4.a; \
+		rm -rf $(INSTALL_PREFIX)/lib/cmake/libsnobol4; \
+		rm -f  $(INSTALL_PREFIX)/lib/pkgconfig/libsnobol4.pc; \
+		rm -f  $(INSTALL_PREFIX)/bin/example_basic; \
+		rm -f  $(INSTALL_PREFIX)/bin/example_captures; \
+	fi
+	@echo "==> Uninstall complete!"
+
+distclean: clean uninstall
 	@echo "==> Removing generated config files..."
 	rm -f snobol4-core/config.h.in~
 	rm -f snobol4-core/configure~
 	@echo "==> Deep clean complete!"
 
-# Install
+# Install (generates build/install_manifest.txt used by 'make uninstall')
 install:
-	@echo "==> Installing libsnobol4..."
-	$(CMAKE) --install build
+	@echo "==> Installing libsnobol4 to $(INSTALL_PREFIX)..."
+	$(CMAKE) --install build --prefix $(INSTALL_PREFIX)
+	@echo "==> Install complete! Run 'make uninstall' to reverse."
 
 # Benchmark (requires PHP extension)
 bench:
@@ -232,20 +264,23 @@ help:
 	@echo "  build-debug    - Build with Debug configuration"
 	@echo "  build-release  - Build with Release configuration"
 	@echo "  build-jit      - Build with JIT and profiling enabled"
-	@echo "  build-asan     - Build with AddressSanitizer"
+	@echo "  build-asan     - Build with AddressSanitizer+UBSan (SNOBOL_SANITIZE=ON)"
 	@echo "  build-php      - Build with PHP binding (requires PHP dev headers)"
 	@echo ""
 	@echo "Test targets:"
 	@echo "  test           - Run C test suite"
 	@echo "  test-verbose   - Run tests with verbose output"
-	@echo "  test-valgrind  - Run tests under Valgrind (memory leak detection)"
+	@echo "  test-valgrind  - Run tests under Valgrind (delegates to CMake target)"
+	@echo "  test-asan      - Run tests under AddressSanitizer+UBSan (requires make build-asan first)"
 	@echo ""
 	@echo "Clean targets:"
-	@echo "  clean          - Remove build artifacts and benchmark results"
-	@echo "  distclean      - Remove all generated files"
+	@echo "  clean          - Remove all build directories (build/, build-asan/, cmake-build-*/, etc.) and transient benchmark results"
+	@echo "  uninstall      - Remove installed files (headers, lib, cmake config, libsnobol4.pc); uses build/install_manifest.txt or falls back to INSTALL_PREFIX paths"
+	@echo "  distclean      - clean + uninstall + remove generated config files"
 	@echo ""
 	@echo "Other targets:"
-	@echo "  install        - Install system-wide (requires sudo)"
+	@echo "  install        - Install to INSTALL_PREFIX (default: /usr/local); requires sudo if prefix needs root"
+	@echo "  uninstall      - Uninstall from INSTALL_PREFIX (default: /usr/local)"
 	@echo "  bench          - Run benchmark suite (requires PHP)"
 	@echo "  docs           - Generate documentation (requires Doxygen)"
 	@echo "  format         - Format code (requires clang-format)"
@@ -259,13 +294,16 @@ help:
 	@echo "  make test               # Run tests"
 	@echo "  make test-verbose       # Verbose test output"
 	@echo "  make test-valgrind      # Run tests under Valgrind"
-	@echo "  make clean              # Clean build"
+	@echo "  make clean              # Remove all build directories"
 	@echo "  make build-php          # Build with PHP binding"
-	@echo "  make install            # Install system-wide"
+	@echo "  make install            # Install to /usr/local (default)"
+	@echo "  make install INSTALL_PREFIX=~/local  # Install to custom prefix"
+	@echo "  make uninstall          # Remove installed files"
 	@echo ""
 	@echo "Variables:"
-	@echo "  BUILD_TYPE     - CMake build type (default: Release)"
+	@echo "  BUILD_TYPE       - CMake build type (default: Release)"
 	@echo "  CMAKE_EXTRA_FLAGS - Additional CMake flags"
+	@echo "  INSTALL_PREFIX   - Installation prefix for install/uninstall (default: /usr/local)"
 	@echo ""
 	@echo "Examples with variables:"
 	@echo "  make build BUILD_TYPE=Debug"

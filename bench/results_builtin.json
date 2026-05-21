@@ -5,7 +5,7 @@
     "extensionVersion": "0.2.0",
     "phpVersion": "8.4.18",
     "os": "Linux (DDEV)",
-    "description": "Consolidated benchmark analysis for the snobol4-builtin-functions change. Covers tasks 8.5–8.9 performance acceptance criteria.",
+    "description": "Consolidated benchmark analysis for the snobol4-builtin-functions change. Performance acceptance criteria for replace, tokenize, transform, and unicode operations.",
     "sources": [
       "bench/results_replace.json",
       "bench/results_tokenize.json",
@@ -14,7 +14,7 @@
     ]
   },
   "summary": {
-    "task_8_6_replace_parity": {
+    "replace_parity": {
       "verdict": "PASS",
       "description": "Text::replace throughput vs PHP str_replace",
       "snobol_ops_per_sec": 543416.68,
@@ -22,7 +22,7 @@
       "ratio": 1.022,
       "note": "Text::replace is ~2.2% faster than str_replace on a 9KB corpus (102% of native)"
     },
-    "task_8_7_breakx_choice_pushes": {
+    "breakx_choice_pushes": {
       "verdict": "PASS",
       "description": "BREAKX reduces choice-stack pressure vs ARB+NOTANY",
       "breakx_pushes_per_iter": 1000,
@@ -30,7 +30,7 @@
       "reduction_ratio": 8.28,
       "note": "BREAKX uses 8.28× fewer choice pushes than ARB+NOTANY alternative"
     },
-    "task_8_8_transform_performance": {
+    "transform_performance": {
       "verdict": "PASS",
       "description": "Text::upper/lower/trim within 2× of native PHP functions",
       "upper_ratio": 0.916,
@@ -38,7 +38,7 @@
       "trim_ratio": 0.902,
       "note": "All three functions stay within 1× of native PHP (84–92% of native throughput)"
     },
-    "task_8_9_unicode_parity": {
+    "unicode_parity": {
       "verdict": "PASS",
       "description": "Text::size and Text::reverse parity on Unicode input",
       "size_unicode_ratio": 0.987,
@@ -81,7 +81,7 @@
       "note": "Pattern-based replace is naturally slower than PCRE due to VM overhead per character. This is expected for iterative scan-and-replace workflows."
     },
     "tokenize_benchmark": {
-      "description": "CSV/whitespace tokenization vs PCRE; includes BREAKX vs ARB comparison (Task 8.7)",
+      "description": "CSV/whitespace tokenization vs PCRE; includes BREAKX vs ARB comparison",
       "input_bytes": 7889,
       "warmup": 10,
       "iterations": 500,
@@ -161,7 +161,6 @@
           "php_native_ops_per_sec": 530803.17,
           "php_native_fn": "str_replace",
           "ratio": 1.022,
-          "task": "8.6",
           "verdict": "PASS"
         },
         {
@@ -203,7 +202,6 @@
           "php_native_ops_per_sec": 911265.52,
           "php_native_fn": "mb_strlen",
           "ratio": 0.987,
-          "task": "8.9",
           "verdict": "PASS"
         },
         {
@@ -224,7 +222,6 @@
           "php_native_ops_per_sec": 19143.03,
           "php_native_fn": "preg_split+array_reverse+implode",
           "ratio": 1.025,
-          "task": "8.9",
           "verdict": "PASS"
         },
         {

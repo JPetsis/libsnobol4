@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=@CMAKE_INSTALL_FULL_LIBDIR@
+includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
+
+Name: libsnobol4
+Description: SNOBOL4-style high-performance pattern matching library (C23 core)
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lsnobol4
+Cflags: -I${includedir}
+

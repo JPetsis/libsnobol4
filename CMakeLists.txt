@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(libsnobol4 VERSION 0.7.0 LANGUAGES C)
+project(libsnobol4 VERSION 0.8.0 LANGUAGES C)
 
 # Options
 option(BUILD_TESTS "Build C test suite" ON)
@@ -8,6 +8,12 @@ option(BUILD_PHP "Build PHP binding" OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(SNOBOL_PROFILE "Enable VM profiling" OFF)
 option(SNOBOL_JIT "Enable micro-JIT" ON)
+option(SNOBOL_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+
+# Sanitizer guard: not supported on MSVC
+if(SNOBOL_SANITIZE AND MSVC)
+    message(FATAL_ERROR "SNOBOL_SANITIZE=ON requires GCC or Clang. MSVC does not support -fsanitize=address,undefined.")
+endif()
 
 # Core library (always built)
 add_subdirectory(core)
@@ -32,6 +38,38 @@ add_custom_target(clean-all
     COMMENT "Removing all build artifacts"
 )
 
+# Sanitizer test target (only available when SNOBOL_SANITIZE=ON)
+if(SNOBOL_SANITIZE)
+    add_custom_target(test-asan
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Running tests with AddressSanitizer + UndefinedBehaviorSanitizer"
+    )
+else()
+    add_custom_target(test-asan
+        COMMAND ${CMAKE_COMMAND} -E echo "Configure with -DSNOBOL_SANITIZE=ON to enable ASan/UBSan targets"
+        COMMAND ${CMAKE_COMMAND} -E false
+        COMMENT "test-asan requires SNOBOL_SANITIZE=ON"
+    )
+endif()
+
+# Valgrind test target
+find_program(VALGRIND valgrind)
+if(VALGRIND)
+    if(BUILD_TESTS)
+        add_custom_target(test-valgrind
+            COMMAND ${VALGRIND}
+                    --error-exitcode=1
+                    --leak-check=full
+                    --track-origins=yes
+                    ${CMAKE_BINARY_DIR}/tests/c/snobol4_tests
+            COMMENT "Running tests under Valgrind memcheck"
+        )
+    endif()
+else()
+    message(WARNING "valgrind not found on PATH; 'test-valgrind' target will not be created. Install with: apt install valgrind (Linux) or brew install valgrind (macOS).")
+endif()
+
 # Benchmark target (if benchmark files exist)
 if(EXISTS ${CMAKE_SOURCE_DIR}/bench)
     add_custom_target(bench
@@ -43,9 +81,11 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/bench)
 endif()
 
 # Installation summary
+include(GNUInstallDirs)
 install(CODE "
     message(STATUS \"libsnobol4 ${PROJECT_VERSION} installation complete\")
-    message(STATUS \"  Headers: ${CMAKE_INSTALL_FULL_INCLUDEDIR}/snobol/\")
-    message(STATUS \"  Library: ${CMAKE_INSTALL_FULL_LIBDIR}/\")
-    message(STATUS \"  CMake config: ${CMAKE_INSTALL_FULL_LIBDIR}/cmake/libsnobol4/\")
+    message(STATUS \"  Headers:      \${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/snobol/\")
+    message(STATUS \"  Library:      \${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/\")
+    message(STATUS \"  CMake config: \${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/libsnobol4/\")
+    message(STATUS \"  pkg-config:   \${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/pkgconfig/libsnobol4.pc\")
 ")

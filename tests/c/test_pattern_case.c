@@ -95,7 +95,7 @@ void test_pattern_case_suite(void) {
         snobol_context_destroy(ctx);
     }
 
-    test_suite("Pattern: case-insensitive Latin-1 (task 4.1)");
+    test_suite("Pattern: case-insensitive Latin-1");
 
     /* literal "café" matches "CAFÉ" case-insensitively */
     /* NB: pattern source uses single-quoted literals */

@@ -7,9 +7,13 @@ on:
         description: 'PHP version to use'
         required: false
         default: '8.5'
+      base_ref:
+        description: 'Base branch/ref for comparison (optional)'
+        required: false
+        default: 'main'
   schedule:
-    # Run benchmarks weekly on Monday at 02:00 UTC
-    - cron: '0 2 * * 1'
+    # Run benchmarks nightly at 02:00 UTC
+    - cron: '0 2 * * *'
 
 jobs:
   benchmarks:
@@ -36,7 +40,7 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: Build C extension
-        working-directory: snobol4-core
+        working-directory: bindings/php
         run: |
           phpize
           ./configure --enable-snobol
@@ -48,23 +52,15 @@ jobs:
           echo "extension=snobol.so" | sudo tee -a /etc/php/${{ github.event.inputs.php-version || '8.5' }}/cli/php.ini
           php -m | grep snobol
 
-      - name: Run tokenization benchmarks
-        run: php bench/tokenize.php
-
-      - name: Run replace/removal benchmarks
-        run: php bench/replace.php
-
-      - name: Run date matching benchmarks
-        run: php bench/dates.php
-
-      - name: Run backtracking benchmarks
-        run: php bench/backtracking.php
+      - name: Run all benchmarks
+        run: php bench/run_all.php
 
       - name: Generate summary
         run: |
           echo "## Benchmark Results Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**PHP Version:** ${{ github.event.inputs.php-version || '8.5' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Base ref:** ${{ github.event.inputs.base_ref || 'main' }}" >> $GITHUB_STEP_SUMMARY
           echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Benchmark results have been uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
@@ -75,4 +71,4 @@ jobs:
           name: benchmark-results-php-${{ github.event.inputs.php-version || '8.5' }}
           path: |
             bench/results_*.json
-          retention-days: 90
+          retention-days: 30

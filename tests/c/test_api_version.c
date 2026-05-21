@@ -1,8 +1,8 @@
 /**
  * test_api_version.c – Tests for snobol_get_api_version()
  *
- * Assert snobol_get_api_version() == (0 << 16) | (7 << 8) | 0
- * for the current v0.7.0 library.
+ * Assert snobol_get_api_version() == (0 << 16) | (8 << 8) | 0
+ * for the current v0.8.0 library.
  */
 
 #include <stdint.h>
@@ -18,9 +18,9 @@ void test_api_version_suite(void) {
 
     uint32_t ver = snobol_get_api_version();
 
-    /* For v0.7.0: (0 << 16) | (7 << 8) | 0 == 0x00000700 */
-    test_assert(ver == 0x00000700u,
-                "snobol_get_api_version() == 0x00000700u (v0.7.0)");
+    /* For v0.8.0: (0 << 16) | (8 << 8) | 0 == 0x00000800 */
+    test_assert(ver == 0x00000800u,
+                "snobol_get_api_version() == 0x00000800u (v0.8.0)");
 
     /* Major version extraction */
     uint32_t major = ver >> 16;

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 # Core libsnobol4 C library
 # This builds the language-agnostic C pattern matching engine
 
-project(libsnobol4_core VERSION 0.2.0 LANGUAGES C)
+project(libsnobol4_core VERSION 0.3.0 LANGUAGES C)
 
 # Library target for all core source files
 add_library(snobol4 STATIC
@@ -68,8 +68,23 @@ if(SNOBOL_PROFILE)
     target_compile_definitions(snobol4 PRIVATE SNOBOL_PROFILE=1)
 endif()
 
+# Optional: apply sanitizer flags
+if(SNOBOL_SANITIZE)
+    target_compile_options(snobol4 PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(snobol4 PUBLIC
+        -fsanitize=address,undefined
+    )
+endif()
+
 # Enable micro-JIT only on ARM64 (emits ARM64 machine code; requires sys/mman.h).
 # Enabling it on x86-64 would compile in ARM64 trace execution and crash at runtime.
+# Explicitly force JIT off on Windows regardless of user input.
+if(WIN32)
+    set(SNOBOL_JIT OFF CACHE BOOL "" FORCE)
+endif()
 if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
 endif()
@@ -117,3 +132,16 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/libsnobol4ConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/libsnobol4
 )
+
+# Generate and install pkg-config file
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/libsnobol4.pc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/libsnobol4.pc
+    @ONLY
+)
+
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/libsnobol4.pc
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+)
+

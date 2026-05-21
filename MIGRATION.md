@@ -5,6 +5,59 @@ monorepo structure.
 
 ---
 
+## v0.7.0 → v0.8.0 (Build & Tooling Hardening)
+
+### No breaking changes
+
+This is a non-breaking tooling release.  There are **no C API changes** and **no PHP API changes**.
+All existing `find_package(libsnobol4)` and direct-header consumers require no code changes.
+
+### New: pkg-config support
+
+After `cmake --install build`, a `libsnobol4.pc` file is now installed to
+`${libdir}/pkgconfig/libsnobol4.pc`.  Non-CMake build systems can use it
+to discover the library:
+
+```bash
+pkg-config --cflags --libs libsnobol4
+# If installed to a non-standard prefix:
+PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --cflags --libs libsnobol4
+```
+
+### New: SNOBOL_SANITIZE CMake option
+
+```bash
+cmake -B build-asan -DSNOBOL_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-asan --target test-asan
+```
+
+This option is only supported with GCC or Clang; MSVC builds will emit a
+fatal error if `SNOBOL_SANITIZE=ON` is requested.
+
+### New: CMakePresets.json
+
+Named presets are available at the project root:
+
+```bash
+cmake --preset debug          # Debug build
+cmake --preset asan           # ASan + UBSan (Linux/macOS)
+cmake --preset windows-msvc   # Windows MSVC
+cmake --preset windows-mingw  # Windows MinGW-w64
+```
+
+### New: Makefile targets
+
+- `make build-asan` — configure and build in `build-asan/` with `SNOBOL_SANITIZE=ON`.
+- `make test-asan`  — run the test suite under ASan/UBSan (requires `make build-asan` first).
+- `make test-valgrind` — run the test suite under Valgrind memcheck (requires `make build` and Valgrind on PATH).
+
+### Windows builds
+
+MSVC (Visual Studio 2022+) and MinGW-w64 are now officially supported.
+The JIT is automatically forced to `OFF` on Windows — no manual configuration needed.
+
+---
+
 ## v0.6.x → v0.7.0 (Unicode Completeness)
 
 ### No breaking changes

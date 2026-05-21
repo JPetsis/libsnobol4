@@ -98,8 +98,18 @@ make test-verbose
 cd bindings/php
 vendor/bin/phpunit tests/php
 
-# Memory leak detection (requires Valgrind)
+# Memory leak detection with Valgrind (delegates to CMake test-valgrind target)
 make test-valgrind
+
+# AddressSanitizer + UndefinedBehaviorSanitizer (GCC or Clang required)
+# Step 1: configure and build with sanitizers enabled
+make build-asan
+# Step 2: run the test suite under ASan/UBSan
+make test-asan
+
+# Alternatively, use CMake directly:
+cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DSNOBOL_SANITIZE=ON
+cmake --build build-asan --target test-asan
 ```
 
 ### Code Quality
@@ -224,6 +234,28 @@ libsnobol4 uses independent versioning for core and bindings:
 - **Documentation**: See `README.md` and `bindings/php/README.md`
 - **Issues**: Open an issue on GitHub
 - **Discussions**: Use GitHub Discussions for questions
+
+## Windows Development
+
+The project supports MSVC (Visual Studio 2022+) and MinGW-w64 toolchains on Windows. The JIT is automatically disabled on Windows builds (no `mmap`/`MAP_JIT` calls are compiled).
+
+**Quick start:**
+
+```bash
+# Visual Studio 2022
+cmake --preset windows-msvc
+cmake --build build-msvc --config Release
+ctest --test-dir build-msvc -C Release --output-on-failure
+
+# MinGW-w64
+cmake --preset windows-mingw
+cmake --build build-mingw
+ctest --test-dir build-mingw --output-on-failure
+```
+
+`CMakePresets.json` at the project root includes `windows-msvc` and `windows-mingw` presets alongside `debug`, `release`, and `asan` presets for Unix.
+
+Note: `SNOBOL_SANITIZE=ON` is not supported on MSVC — configure with GCC or Clang.
 
 ## Code of Conduct
 

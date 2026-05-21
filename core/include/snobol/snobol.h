@@ -16,10 +16,14 @@
 #include <stdbool.h>
 
 /* Version macros */
+/** @brief Library major version number. */
 #define SNOBOL_VERSION_MAJOR 0
-#define SNOBOL_VERSION_MINOR 7
+/** @brief Library minor version number. */
+#define SNOBOL_VERSION_MINOR 8
+/** @brief Library patch version number. */
 #define SNOBOL_VERSION_PATCH 0
-#define SNOBOL_VERSION_STRING "0.7.0"
+/** @brief Library version as a string literal, e.g. @c "0.8.0". */
+#define SNOBOL_VERSION_STRING "0.8.0"
 
 /**
  * Get library version at runtime (three separate integers)
@@ -87,7 +91,24 @@ typedef struct snobol_match snobol_match_t;
 typedef struct snobol_table snobol_table_t;
 
 /* Context lifecycle */
+/**
+ * @brief Create a new pattern matching context.
+ *
+ * The context owns all compiled patterns and associated resources.
+ * Must be destroyed with snobol_context_destroy() when no longer needed.
+ *
+ * @return New context, or NULL on allocation failure.
+ */
 snobol_context_t* snobol_context_create(void);
+
+/**
+ * @brief Destroy a pattern matching context and free all associated resources.
+ *
+ * All patterns compiled under this context are invalidated.
+ * Passing NULL is safe (no-op).
+ *
+ * @param[in] ctx Context to destroy.
+ */
 void snobol_context_destroy(snobol_context_t* ctx);
 
 /* -----------------------------------------------------------------------
@@ -105,6 +126,19 @@ void snobol_context_destroy(snobol_context_t* ctx);
 #define SNOBOL_FLAG_CASE_INSENSITIVE  0x0001u
 
 /* Pattern compilation */
+/**
+ * @brief Compile a SNOBOL4 pattern string to a compiled pattern object.
+ *
+ * Equivalent to snobol_pattern_compile_ex() with @p flags = 0.
+ *
+ * @param[in]  ctx    Context that will own the returned pattern.
+ * @param[in]  source Pattern source text (UTF-8).
+ * @param[in]  len    Byte length of @p source.
+ * @param[out] error  On failure, *error is set to a malloc'd error string that
+ *                    the caller must free.  Set to NULL on success.
+ * @return Compiled pattern owned by @p ctx, or NULL on parse/compile error.
+ *         Free with snobol_pattern_free() before destroying the context.
+ */
 snobol_pattern_t* snobol_pattern_compile(snobol_context_t* ctx, const char* source, size_t len, char** error);
 
 /**
@@ -121,14 +155,63 @@ snobol_pattern_t* snobol_pattern_compile(snobol_context_t* ctx, const char* sour
  */
 snobol_pattern_t* snobol_pattern_compile_ex(snobol_context_t* ctx, const char* source, size_t len, uint32_t flags, char** error);
 
+/**
+ * @brief Free a compiled pattern.
+ *
+ * @param[in] pattern Pattern to free.  NULL is safe.
+ */
 void snobol_pattern_free(snobol_pattern_t* pattern);
 
 /* Pattern matching */
+/**
+ * @brief Execute a compiled pattern against a subject string.
+ *
+ * @param[in] pattern Compiled pattern to execute.
+ * @param[in] subject Subject string (UTF-8).
+ * @param[in] len     Byte length of @p subject.
+ * @return New match result that the caller must free with snobol_match_free().
+ *         Always returns a valid pointer; call snobol_match_success() to
+ *         determine whether the match succeeded.
+ */
 snobol_match_t* snobol_pattern_match(snobol_pattern_t* pattern, const char* subject, size_t len);
+
+/**
+ * @brief Free a match result.
+ *
+ * @param[in] match Match result to free.  NULL is safe.
+ */
 void snobol_match_free(snobol_match_t* match);
 
 /* Match result access */
+/**
+ * @brief Return whether a match result represents a successful match.
+ *
+ * @param[in] match Match result from snobol_pattern_match().
+ * @return true if the pattern matched; false otherwise.
+ */
 bool snobol_match_success(snobol_match_t* match);
+
+/**
+ * @brief Retrieve the output buffer produced by a successful match.
+ *
+ * The output contains any text emitted by @c OP_EMIT_LITERAL / @c OP_EMIT_CAPTURE
+ * instructions during the match.
+ *
+ * @param[in]  match Match result from snobol_pattern_match().
+ * @param[out] len   If non-NULL, set to the byte length of the returned string.
+ * @return Pointer to the output string (owned by @p match, do not free),
+ *         or NULL if there is no output.
+ */
 const char* snobol_match_get_output(snobol_match_t* match, size_t* len);
+
+/**
+ * @brief Retrieve the value of a named capture variable from a match result.
+ *
+ * @param[in]  match Match result from snobol_pattern_match().
+ * @param[in]  name  Variable name (NUL-terminated).
+ * @param[out] len   If non-NULL, set to the byte length of the returned string.
+ * @return Pointer to the variable value (owned by @p match, do not free),
+ *         or NULL if the variable was not set during the match.
+ */
 const char* snobol_match_get_variable(snobol_match_t* match, const char* name, size_t* len);
 

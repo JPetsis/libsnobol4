@@ -1,10 +1,19 @@
 #pragma once
 
+/**
+ * @file vm.h
+ * @brief Virtual machine types, opcodes, and execution API for libsnobol4
+ *
+ * Defines the bytecode instruction set, VM state structure, and all
+ * functions for executing compiled SNOBOL4 patterns.  This is an internal
+ * API used by the language bindings and the public @c snobol.h wrapper.
+ */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Enable dynamic pattern and table support */
+/** @brief Enable dynamic pattern and table support */
 #define SNOBOL_DYNAMIC_PATTERN 1
 
 /* Forward declare table type */
@@ -23,14 +32,31 @@ typedef struct SnobolJitConfig SnobolJitConfig;
 /* jit_trace_fn will be defined in jit.h */
 #endif
 
+/** @brief Maximum number of capture registers per VM execution. */
 constexpr int MAX_CAPS = 64;
+/** @brief Maximum number of named variable registers per VM execution. */
 constexpr int MAX_VARS = 64;
 
+/**
+ * @brief Unicode codepoint range [start, end] (both inclusive).
+ *
+ * Used to represent character class ranges in the bytecode charclass tables.
+ */
 typedef struct cp_range {
-    uint32_t start;  // Start codepoint (inclusive)
-    uint32_t end;    // End codepoint (inclusive)
+    uint32_t start;  /**< Start codepoint (inclusive) */
+    uint32_t end;    /**< End codepoint (inclusive) */
 } CpRange;
 
+/**
+ * @brief Decode the next UTF-8 codepoint from a byte string.
+ *
+ * @param[in]  s        Input string (UTF-8 bytes).
+ * @param[in]  len      Byte length of @p s.
+ * @param[in]  pos      Current byte offset in @p s.
+ * @param[out] out_cp   Decoded codepoint.
+ * @param[out] out_bytes Number of bytes consumed.
+ * @return 1 on success, 0 if @p pos is at end or the sequence is invalid.
+ */
 static inline int utf8_peek_next(const char *s, size_t len, size_t pos, uint32_t *out_cp, int *out_bytes) {
     if (pos >= len) return 0;
     unsigned char c = (unsigned char)s[pos];
@@ -56,78 +82,77 @@ static inline int utf8_peek_next(const char *s, size_t len, size_t pos, uint32_t
     return 0;
 }
 
-/* helpers to read u32/u16/u8 from bc with bounds checking */
+/** @brief Read a big-endian uint32 from bytecode, advancing @p ip by 4. Returns 0 on overrun. */
 static inline uint32_t read_u32(const uint8_t *bc, size_t bc_len, size_t *ip) {
     if (*ip + 4 > bc_len) { *ip = bc_len; return 0; }
     uint32_t v = ((uint32_t)bc[*ip] << 24) | ((uint32_t)bc[*ip+1] << 16) | ((uint32_t)bc[*ip+2] << 8) | (uint32_t)bc[*ip+3];
     *ip += 4;
     return v;
 }
+/** @brief Read a big-endian uint16 from bytecode, advancing @p ip by 2. Returns 0 on overrun. */
 static inline uint16_t read_u16(const uint8_t *bc, size_t bc_len, size_t *ip) {
     if (*ip + 2 > bc_len) { *ip = bc_len; return 0; }
     uint16_t v = ((uint16_t)bc[*ip] << 8) | ((uint16_t)bc[*ip+1]);
     *ip += 2;
     return v;
 }
+/** @brief Read a uint8 from bytecode, advancing @p ip by 1. Returns 0 on overrun. */
 static inline uint8_t read_u8(const uint8_t *bc, size_t bc_len, size_t *ip) {
     if (*ip + 1 > bc_len) { *ip = bc_len; return 0; }
     uint8_t v = bc[(*ip)++];
     return v;
 }
 
-/* Bytecode opcodes */
+/**
+ * @brief Bytecode opcodes for the SNOBOL4 VM.
+ *
+ * Each opcode is followed by zero or more operand bytes as documented
+ * in the inline comments.  Operands are big-endian.
+ */
 typedef enum {
-    OP_ACCEPT = 0,
-    OP_FAIL,
-    OP_JMP,
-    OP_SPLIT,
-    OP_LIT,       // offset (u32), len (u32)
-    OP_ANY,       // charclass id (u16)
-    OP_NOTANY,    // charclass id (u16)
-    OP_SPAN,      // charclass id (u16)  -> match 1+
-    OP_BREAK,     // charclass id (u16)  -> consume until char in set (0 or more)
-    OP_CAP_START, // reg u8
-    OP_CAP_END,   // reg u8
-    OP_ASSIGN,    // var u16, reg u8
-    OP_LEN,       // n u32 (match exactly n codepoints)
-    OP_EVAL,      // fn u16, reg u8 (call back to PHP)
-    OP_ANCHOR,    // type u8 (0=start, 1=end)
-    OP_REPEAT_INIT, // loop_id u8, min u32, max u32, skip_target u32
-    OP_REPEAT_STEP, // loop_id u8, jmp_target u32
-    OP_EMIT_LITERAL, // offset u32, len u32 (Renamed from OP_EMIT_LIT)
-    OP_EMIT_CAPTURE, // reg u8 (Renamed from OP_EMIT_REF)
-    OP_EMIT_EXPR,    // LEGACY: reg u8, expr_type u8 (1=upper, 2=length) — use OP_EMIT_FORMAT in new code
+    OP_ACCEPT = 0,    /**< Pattern succeeds; no operands */
+    OP_FAIL,          /**< Pattern fails unconditionally; no operands */
+    OP_JMP,           /**< Unconditional jump; target: u32 */
+    OP_SPLIT,         /**< Non-deterministic branch; target_a: u32, target_b: u32 */
+    OP_LIT,           /**< Match literal bytes; offset: u32, len: u32 */
+    OP_ANY,           /**< Match char in class; charclass id: u16 */
+    OP_NOTANY,        /**< Match char NOT in class; charclass id: u16 */
+    OP_SPAN,          /**< Match 1+ chars in class; charclass id: u16 */
+    OP_BREAK,         /**< Consume until char in set (0 or more); charclass id: u16 */
+    OP_CAP_START,     /**< Begin capture region; reg: u8 */
+    OP_CAP_END,       /**< End capture region; reg: u8 */
+    OP_ASSIGN,        /**< Assign capture register to variable; var: u16, reg: u8 */
+    OP_LEN,           /**< Match exactly n codepoints; n: u32 */
+    OP_EVAL,          /**< Call back to host; fn: u16, reg: u8 */
+    OP_ANCHOR,        /**< Position anchor; type: u8 (0=start, 1=end) */
+    OP_REPEAT_INIT,   /**< Begin bounded repetition; loop_id: u8, min: u32, max: u32, skip_target: u32 */
+    OP_REPEAT_STEP,   /**< Step bounded repetition; loop_id: u8, jmp_target: u32 */
+    OP_EMIT_LITERAL,  /**< Append literal to output; offset: u32, len: u32 */
+    OP_EMIT_CAPTURE,  /**< Append capture register to output; reg: u8 */
+    OP_EMIT_EXPR,     /**< LEGACY: emit with expression; reg: u8, expr_type: u8 — use OP_EMIT_FORMAT in new code */
 
     /* Table-backed replacement opcodes */
-    /* OP_EMIT_TABLE encoding: table_id u16 (0xFFFF=unbound), key_type u8,
-     *   name_len u8, name_bytes[name_len], then key payload:
-     *     key_type=0 (literal): key_len u16, key_bytes[key_len]
-     *     key_type=1 (capture): key_reg u8
-     * Use snobol_template_bind_tables() to resolve 0xFFFF -> runtime table_id. */
-    OP_EMIT_TABLE,
-    /* OP_EMIT_FORMAT encoding: reg u8, format_type u8 (see SNBL_FMT_* constants)
-     *   SNBL_FMT_LPAD and SNBL_FMT_RPAD also read: width u16, fill_char u8 */
-    OP_EMIT_FORMAT,
+    OP_EMIT_TABLE,    /**< Table-backed lookup emit; see vm.h inline encoding doc */
+    OP_EMIT_FORMAT,   /**< Formatted capture emit; reg: u8, format_type: u8 (see SNBL_FMT_*) */
 
-    /* Control flow opcodes for labelled patterns and goto-like transfers */
-    OP_LABEL,      // label_id u16 (define a label target)
-    OP_GOTO,       // label_id u16 (unconditional transfer to label)
-    OP_GOTO_F,     // label_id u16 (transfer to label if last match failed)
-    OP_TABLE_GET,  // table_id u16, key_reg u8, dest_reg u8 (lookup table[key])
-    OP_TABLE_SET,  // table_id u16, key_reg u8, value_reg u8 (set table[key] = value)
-    OP_DYNAMIC,    // pattern_reg u8 (evaluate dynamic pattern from register)
-    OP_DYNAMIC_DEF, // len u32, bytecode... (define dynamic pattern bytecode block)
+    /* Control flow opcodes */
+    OP_LABEL,         /**< Define label target; label_id: u16 */
+    OP_GOTO,          /**< Unconditional label jump; label_id: u16 */
+    OP_GOTO_F,        /**< Jump to label if last match failed; label_id: u16 */
+    OP_TABLE_GET,     /**< Lookup: dest_reg = table[key_reg]; table_id: u16, key_reg: u8, dest_reg: u8 */
+    OP_TABLE_SET,     /**< Update: table[key_reg] = value_reg; table_id: u16, key_reg: u8, value_reg: u8 */
+    OP_DYNAMIC,       /**< Evaluate dynamic pattern from register; pattern_reg: u8 */
+    OP_DYNAMIC_DEF,   /**< Define inline dynamic pattern block; len: u32, bytecode... */
 
     /* Pattern primitives */
-    OP_BREAKX,     // charclass id (u16) – like BREAK but pushes retry choice for O(n) tokenization
-    OP_BAL,        // open_cp u32, close_cp u32 – match balanced delimiter pair
-    OP_FENCE,      // no args – cut choice stack (prevent backtracking past this point)
-    OP_REM,        // no args – match remainder of subject to end
-    OP_RPOS,       // n u32 – succeed only when cursor is n codepoints from end
-    OP_RTAB,       // n u32 – advance cursor to n codepoints from end
+    OP_BREAKX,        /**< BREAK with retry choice for O(n) tokenization; charclass id: u16 */
+    OP_BAL,           /**< Match balanced delimiter pair; open_cp: u32, close_cp: u32 */
+    OP_FENCE,         /**< Cut choice stack (no backtrack past this point); no operands */
+    OP_REM,           /**< Match remainder of subject to end; no operands */
+    OP_RPOS,          /**< Succeed when cursor is n codepoints from end; n: u32 */
+    OP_RTAB,          /**< Advance cursor to n codepoints from end; n: u32 */
 
-    /* Optimizer no-op: emitted by the fusion pass to fill dead bytecode slots */
-    OP_NOP,        // no operands – skip one byte
+    OP_NOP,           /**< No-op — skip one byte (emitted by fusion pass) */
 } OpCode;
 
 /* --------------------------------------------------------------------------
@@ -155,75 +180,89 @@ typedef enum {
  * functions in the VM, bypassing the host eval_fn callback for lower latency.
  * IDs start at 1 (0 = SNOBOL_FN_NONE = host callback).
  * -------------------------------------------------------------------------- */
+/**
+ * @brief Built-in function dispatch IDs for direct C dispatch via @c OP_EVAL.
+ *
+ * IDs start at 1; ID 0 (@c SNOBOL_FN_NONE) means "host callback".
+ * All IDs < @c SNOBOL_FN_MAX are recognised built-ins.
+ */
 typedef enum {
-    SNOBOL_FN_NONE       = 0,  /* Not a built-in: use eval_fn host callback */
+    SNOBOL_FN_NONE       = 0,  /**< Not a built-in: use eval_fn host callback */
     /* String transformation functions */
-    SNOBOL_FN_SIZE       = 1,
-    SNOBOL_FN_TRIM       = 2,
-    SNOBOL_FN_DUPL       = 3,
-    SNOBOL_FN_REVERSE    = 4,
-    SNOBOL_FN_SUBSTR     = 5,
-    SNOBOL_FN_REPLACE    = 6,
-    SNOBOL_FN_REPLACE_CHAR = 7,
-    SNOBOL_FN_LPAD       = 8,
-    SNOBOL_FN_RPAD       = 9,
-    SNOBOL_FN_CHAR       = 10,
-    SNOBOL_FN_ORD        = 11,
-    SNOBOL_FN_UPPER      = 12,
-    SNOBOL_FN_LOWER      = 13,
+    SNOBOL_FN_SIZE       = 1,  /**< @see snobol_size() */
+    SNOBOL_FN_TRIM       = 2,  /**< @see snobol_trim() */
+    SNOBOL_FN_DUPL       = 3,  /**< @see snobol_dupl() */
+    SNOBOL_FN_REVERSE    = 4,  /**< @see snobol_reverse() */
+    SNOBOL_FN_SUBSTR     = 5,  /**< @see snobol_substr() */
+    SNOBOL_FN_REPLACE    = 6,  /**< @see snobol_replace() */
+    SNOBOL_FN_REPLACE_CHAR = 7, /**< @see snobol_replace_char() */
+    SNOBOL_FN_LPAD       = 8,  /**< @see snobol_lpad() */
+    SNOBOL_FN_RPAD       = 9,  /**< @see snobol_rpad() */
+    SNOBOL_FN_CHAR       = 10, /**< @see snobol_char_fn() */
+    SNOBOL_FN_ORD        = 11, /**< @see snobol_ord() */
+    SNOBOL_FN_UPPER      = 12, /**< @see snobol_upper() */
+    SNOBOL_FN_LOWER      = 13, /**< @see snobol_lower() */
     /* Comparison / type-check functions */
-    SNOBOL_FN_IDENT      = 14,
-    SNOBOL_FN_DIFFER     = 15,
-    SNOBOL_FN_LEXEQ      = 16,
-    SNOBOL_FN_LEXLT      = 17,
-    SNOBOL_FN_LEXGT      = 18,
-    SNOBOL_FN_INTEGER    = 19,
-    SNOBOL_FN_REAL       = 20,
-    SNOBOL_FN_NUMERIC    = 21,
-    /* Sentinel – all IDs < SNOBOL_FN_MAX are known built-ins */
-    SNOBOL_FN_MAX        = 22,
+    SNOBOL_FN_IDENT      = 14, /**< @see snobol_ident() */
+    SNOBOL_FN_DIFFER     = 15, /**< @see snobol_differ() */
+    SNOBOL_FN_LEXEQ      = 16, /**< @see snobol_lexeq() */
+    SNOBOL_FN_LEXLT      = 17, /**< @see snobol_lexlt() */
+    SNOBOL_FN_LEXGT      = 18, /**< @see snobol_lexgt() */
+    SNOBOL_FN_INTEGER    = 19, /**< @see snobol_integer() */
+    SNOBOL_FN_REAL       = 20, /**< @see snobol_real() */
+    SNOBOL_FN_NUMERIC    = 21, /**< @see snobol_numeric() */
+    SNOBOL_FN_MAX        = 22, /**< Sentinel: all IDs < SNOBOL_FN_MAX are known built-ins */
 } snobol_builtin_fn_t;
 
+/** @brief Maximum number of bounded-repetition loop counters per VM. */
 constexpr int MAX_LOOPS = 16;
 
-/* Generic dynamic buffer */
+/**
+ * @brief Generic growable byte buffer used for VM output accumulation.
+ */
 typedef struct {
-    char *data;
-    size_t len;
-    size_t cap;
+    char *data;   /**< Buffer data pointer (heap-allocated, may be NULL). */
+    size_t len;   /**< Current used byte count. */
+    size_t cap;   /**< Allocated capacity in bytes. */
 } snobol_buf;
 
-/* Callback for emission */
+/** @brief Callback invoked by @c OP_EMIT_* instructions to stream output. */
 typedef void (*emit_cb)(const char *data, size_t len, void *udata);
 
-/* --------------------------------------------------------------------------
- * Compact Choice Stack (delta/write-log based)
- * -------------------------------------------------------------------------- */
-
-/* Write-log entry: records a single capture modification */
+/**
+ * @brief Write-log entry recording a single capture register modification.
+ *
+ * Used by the compact choice stack to reconstruct capture state on backtrack.
+ */
 typedef struct {
-    uint8_t cap_index;        /* Which capture register was modified */
-    size_t  old_start;        /* Previous cap_start value */
-    size_t  old_end;          /* Previous cap_end value */
+    uint8_t cap_index;        /**< Index of the capture register that was modified */
+    size_t  old_start;        /**< Previous cap_start value */
+    size_t  old_end;          /**< Previous cap_end value */
 } WriteLogEntry;
 
-/* Compact choice record with delta data */
+/**
+ * @brief Header for a compact choice stack record (delta/write-log based).
+ *
+ * Followed in memory by: counter snapshots, loop_last_pos snapshots,
+ * write-log entries, and a trailing uint32_t copy of total_size.
+ */
 typedef struct {
-    uint32_t total_size;      /* Total size of this record including trailing size */
-    size_t  ip;               /* Instruction pointer to restore */
-    size_t  pos;              /* Subject position to restore */
-    size_t  var_count;        /* Snapshot of vm->var_count */
-    uint8_t max_cap_used;     /* Number of captures tracked */
-    uint8_t max_counter_used; /* Number of counters tracked */
-    uint8_t write_log_count;  /* Number of write-log entries */
-    uint8_t pad;              /* Padding for alignment */
-    /* Followed by: counter snapshots (if max_counter_used > 0)
-     * Followed by: loop_last_pos snapshots (max_counter_used * size_t)
-     * Followed by: write-log entries (write_log_count entries)
-     * Followed by: trailing uint32_t total_size */
+    uint32_t total_size;      /**< Total size of this record including trailing size */
+    size_t  ip;               /**< Instruction pointer to restore */
+    size_t  pos;              /**< Subject position to restore */
+    size_t  var_count;        /**< Snapshot of vm->var_count */
+    uint8_t max_cap_used;     /**< Number of captures tracked */
+    uint8_t max_counter_used; /**< Number of counters tracked */
+    uint8_t write_log_count;  /**< Number of write-log entries */
+    uint8_t pad;              /**< Padding for alignment */
 } CompactChoiceHeader;
 
-/* Legacy choice stack (full snapshots) */
+/**
+ * @brief Legacy full-snapshot choice stack entry.
+ *
+ * Used when @c use_compact_choice is false (SNOBOL_LEGACY_CHOICE=1).
+ * Stores a complete copy of all capture, variable, and counter state.
+ */
 struct choice {
     size_t ip;
     size_t pos;
@@ -236,9 +275,17 @@ struct choice {
     uint8_t max_counter_used_snapshot;
 };
 
+/**
+ * @brief VM state: all mutable state for a single pattern execution.
+ *
+ * Callers initialise the @c bc, @c bc_len, @c s, @c len fields and any
+ * desired callbacks, then call vm_exec() or vm_run().
+ * All heap allocations within the struct are managed by vm_push_choice(),
+ * vm_pop_choice(), vm_write_log_init(), and the buffer helpers.
+ */
 typedef struct {
-    const uint8_t *bc;
-    size_t bc_len;
+    const uint8_t *bc;   /**< Compiled bytecode pointer (not owned). */
+    size_t bc_len;        /**< Bytecode length in bytes. */
 
     const char *s;
     size_t len;    // bytes of s
@@ -336,10 +383,35 @@ typedef struct {
 #endif
 } VM;
 
+/**
+ * @brief Retrieve charclass range data for a set ID.
+ * @param[in]  vm         VM instance (for bytecode range table).
+ * @param[in]  set_id     Charclass set ID from the bytecode.
+ * @param[out] out_count  Number of ranges returned.
+ * @param[out] out_case   Non-zero if set is case-insensitive.
+ * @return Pointer to packed range data, or NULL if set_id is out of range.
+ */
 const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count, uint16_t *out_case);
+
+/**
+ * @brief Build a 128-bit ASCII bitmap from range data; returns false if any range exceeds 127.
+ * @param[in]  ranges_ptr  Range data from get_ranges_ptr().
+ * @param[in]  count       Number of ranges.
+ * @param[out] map         Output 2×uint64 bitmap, one bit per ASCII code.
+ * @return true if all codepoints fit in ASCII; false otherwise.
+ */
 bool ranges_to_ascii_bitmap(const uint8_t *ranges_ptr, size_t count, uint64_t map[2]);
+
+/**
+ * @brief Test whether a codepoint is contained in a packed range array.
+ * @param[in] ranges_ptr  Range data from get_ranges_ptr().
+ * @param[in] count       Number of ranges.
+ * @param[in] cp          Codepoint to test.
+ * @return true if @p cp falls within any range.
+ */
 bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp);
 
+/** @brief Test bit @p c in a 128-bit ASCII bitmap. Returns false for c > 127. */
 static inline bool bitmap_test(const uint64_t map[2], uint8_t c) {
     if (c > 127) return false;
     if (c < 64) return (map[0] & (1ULL << c)) != 0;
@@ -347,46 +419,83 @@ static inline bool bitmap_test(const uint64_t map[2], uint8_t c) {
 }
 
 /* VM entry */
+/**
+ * @brief Execute a single pass of VM bytecode (used internally by vm_run).
+ * @param[in,out] vm  VM state.
+ * @return true if the pattern matched; false on failure.
+ */
 bool vm_exec(VM *vm);
+
+/**
+ * @brief Run the VM, re-executing on backtrack until accept or exhausted.
+ * @param[in,out] vm  VM state.
+ * @return true if the pattern matched; false if all paths failed.
+ */
 bool vm_run(VM *vm);
 
 /* Control flow management */
+/** @brief Allocate label offset table; call before vm_run(). */
 void vm_init_labels(VM *vm);
+/** @brief Free label offset table. */
 void vm_free_labels(VM *vm);
+/** @brief Register a label at a given bytecode offset. */
 bool vm_register_label(VM *vm, uint16_t label_id, uint32_t offset);
+/** @brief Retrieve the bytecode offset for a label; returns UINT32_MAX if not found. */
 uint32_t vm_get_label_offset(VM *vm, uint16_t label_id);
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
 /* Table registry */
+/** @brief Initialise the VM's table registry. */
 void vm_init_tables(VM *vm);
+/** @brief Free the VM's table registry. */
 void vm_free_tables(VM *vm);
+/** @brief Register a table and return its runtime ID via @p out_id. */
 bool vm_register_table(VM *vm, snobol_table_t *table, uint16_t *out_id);
+/** @brief Look up a table by runtime ID; returns NULL if not found. */
 snobol_table_t *vm_get_table(VM *vm, uint16_t table_id);
 #endif
 
 /* Buffer management */
+/** @brief Initialise a snobol_buf to empty state (no allocation). */
 void snobol_buf_init(snobol_buf *b);
+/** @brief Append @p len bytes from @p data to the buffer, growing as needed. */
 void snobol_buf_append(snobol_buf *b, const char *data, size_t len);
+/** @brief Reset buffer length to 0 (keeps allocation). */
 void snobol_buf_clear(snobol_buf *b);
+/** @brief Free buffer memory and reset to empty state. */
 void snobol_buf_free(snobol_buf *b);
 
 /* helpers */
+/** @brief Push a backtracking choice point onto the VM's choice stack. */
 void vm_push_choice(VM *vm, size_t ip, size_t pos);
+/** @brief Pop the most recent choice point; return false if stack is empty. */
 bool vm_pop_choice(VM *vm);
 
 /* Write-log management for compact choice stack */
+/** @brief Allocate write-log circular buffer. */
 void vm_write_log_init(VM *vm);
+/** @brief Free write-log buffer. */
 void vm_write_log_free(VM *vm);
+/** @brief Clear all write-log entries without freeing memory. */
 void vm_write_log_clear(VM *vm);
+/** @brief Track an old cap_start value before overwriting register @p cap. */
 void vm_write_log_track_cap_start(VM *vm, uint8_t cap, size_t old_start);
+/** @brief Track an old cap_end value before overwriting register @p cap. */
 void vm_write_log_track_cap_end(VM *vm, uint8_t cap, size_t old_end);
+/** @brief Return the current number of valid write-log entries. */
 size_t vm_write_log_count_entries(const VM *vm);
+/** @brief Copy write-log entries into a caller-provided buffer. */
 void vm_write_log_copy_entries(const VM *vm, WriteLogEntry *dst, size_t dst_cap);
+/** @brief Restore capture state from a compact choice record header. */
 void vm_write_log_restore(VM *vm, const CompactChoiceHeader *hdr);
+/** @brief Return the total size in bytes of a compact choice record. */
 size_t vm_compact_choice_record_size(const CompactChoiceHeader *hdr);
 
 /* Choice stack statistics */
-size_t vm_choice_stack_memory_usage(VM *vm);          /* Current bytes used by choice stack */
-size_t vm_choice_record_average_size(VM *vm);         /* Average record size in bytes (from stats) */
-size_t vm_choice_stack_depth(VM *vm);                 /* Number of choice points on stack */
+/** @brief Return the current bytes used by the choice stack. */
+size_t vm_choice_stack_memory_usage(VM *vm);
+/** @brief Return the average choice record size in bytes (computed from accumulated stats). */
+size_t vm_choice_record_average_size(VM *vm);
+/** @brief Return the current number of live choice points on the stack. */
+size_t vm_choice_stack_depth(VM *vm);
 

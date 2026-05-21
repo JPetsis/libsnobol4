@@ -165,13 +165,14 @@ See [bindings/php/README.md](bindings/php/README.md) for detailed PHP documentat
 
 ## Build Options
 
-| Option              | Default | Description              |
-|---------------------|---------|--------------------------|
-| `BUILD_TESTS`       | ON      | Build C test suite       |
-| `BUILD_PHP`         | OFF     | Build PHP binding        |
-| `BUILD_SHARED_LIBS` | OFF     | Build shared library     |
-| `SNOBOL_JIT`        | ON      | Enable micro-JIT (ARM64) |
-| `SNOBOL_PROFILE`    | OFF     | Enable VM profiling      |
+| Option              | Default | Description                             |
+|---------------------|---------|-----------------------------------------|
+| `BUILD_TESTS`       | ON      | Build C test suite                      |
+| `BUILD_PHP`         | OFF     | Build PHP binding                       |
+| `BUILD_SHARED_LIBS` | OFF     | Build shared library                    |
+| `SNOBOL_JIT`        | ON      | Enable micro-JIT (ARM64)                |
+| `SNOBOL_PROFILE`    | OFF     | Enable VM profiling                     |
+| `SNOBOL_SANITIZE`   | OFF     | AddressSanitizer + UBSan (GCC/Clang)   |
 
 ### Example Configurations
 
@@ -185,6 +186,32 @@ cmake -B build -DBUILD_PHP=ON
 # Release build with JIT and profiling
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
     -DSNOBOL_JIT=ON -DSNOBOL_PROFILE=ON
+
+# ASan + UBSan build (GCC or Clang required)
+cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DSNOBOL_SANITIZE=ON
+cmake --build build-asan --target test-asan
+```
+
+### Windows
+
+```bash
+# Visual Studio 2022 (JIT disabled automatically on Windows)
+cmake -B build -G "Visual Studio 17 2022"
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+
+# MinGW-w64
+cmake -B build -G "MinGW Makefiles"
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+CMake presets are available via `CMakePresets.json`:
+
+```bash
+cmake --preset asan   # ASan + UBSan
+cmake --preset debug  # Debug build
+cmake --preset release
 ```
 
 ## Testing
@@ -200,6 +227,13 @@ ctest --test-dir build --verbose
 
 # Run specific test
 ctest --test-dir build -R test_lexer
+
+# Run with AddressSanitizer + UBSan
+make build-asan
+make test-asan
+
+# Run under Valgrind (memcheck)
+make test-valgrind
 ```
 
 ### PHP Tests
@@ -273,7 +307,32 @@ See `bench/` directory for benchmark scripts and `bench/results_builtin.json` fo
 - **PHP Binding**: [bindings/php/README.md](bindings/php/README.md)
 - **Grammar**: [core/grammar/snobol.ebnf](core/grammar/snobol.ebnf)
 
-## Contributing
+## Installation
+
+```bash
+cmake --install build --prefix /usr/local
+```
+
+After installation, the library can be located by CMake or pkg-config:
+
+```bash
+# CMake (find_package)
+find_package(libsnobol4 REQUIRED)
+target_link_libraries(your_target PRIVATE libsnobol4::snobol4)
+
+# pkg-config
+pkg-config --cflags --libs libsnobol4
+# If installed to a non-standard prefix:
+PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --cflags --libs libsnobol4
+```
+
+## CI / Contributing
+
+The default pull-request CI gate (`.github/workflows/ci-core.yml`) runs on `ubuntu-latest`, `macos-latest`, and `windows-latest`.
+
+**Optional workflows** (triggered via GitHub Actions "Run workflow" or nightly schedule):
+- **Sanitizers** (`.github/workflows/sanitizers.yml`): ASan + UBSan build on Ubuntu — not part of the PR gate.
+- **Benchmarks** (`.github/workflows/benchmarks.yml`): full benchmark suite with artifact upload — not part of the PR gate.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
@@ -285,7 +344,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 libsnobol4 uses independent versioning for core and each binding:
 
-- **Core**: v0.7.0 (Unicode Completeness: UPPER/LOWER v2, case-insensitive patterns, API version function)
-- **PHP Binding**: v0.7.0
+- **Core**: v0.8.0 (Build & Tooling Hardening: sanitizer targets, pkg-config, Windows CMake, doc comments)
+- **PHP Binding**: v0.8.0
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.

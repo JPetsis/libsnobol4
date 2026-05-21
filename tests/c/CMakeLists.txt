@@ -50,6 +50,17 @@ target_compile_features(snobol4_tests PRIVATE c_std_23)
 # Enable profiling for tests
 target_compile_definitions(snobol4_tests PRIVATE SNOBOL_PROFILE=1)
 
+# Propagate sanitizer flags to test binaries
+if(SNOBOL_SANITIZE)
+    target_compile_options(snobol4_tests PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(snobol4_tests PUBLIC
+        -fsanitize=address,undefined
+    )
+endif()
+
 # Enable JIT for tests only on ARM64 (micro-JIT emits ARM64 machine code)
 if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     target_compile_definitions(snobol4_tests PRIVATE SNOBOL_JIT=1)
