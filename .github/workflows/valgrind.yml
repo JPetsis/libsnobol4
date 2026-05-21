@@ -78,7 +78,9 @@ jobs:
           fi
 
           # Count <error> records — each represents one distinct issue
-          ERROR_COUNT=$(grep -c '<error>' build/valgrind-report.xml 2>/dev/null || echo 0)
+          ERROR_COUNT=$(grep -c '<error>' build/valgrind-report.xml 2>/dev/null | tr -d '[:space:]' || echo 0)
+          # Fallback: if grep returns empty string, default to 0
+          ERROR_COUNT=${ERROR_COUNT:-0}
           echo "**Errors detected:** ${ERROR_COUNT}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
