@@ -23,6 +23,7 @@ static void test_catastrophic_nested_arbno(void)
     // Using OP_REPEAT infrastructure instead of raw SPLITs to benefit from optimization.
 
     uint8_t bc[1024];
+    memset(bc, 0, sizeof(bc)); /* zero-init: vm magic-number check reads bc[1020..1023] */
     size_t ip = 0;
     
     // Outer ARBNO: REPEAT_INIT(id=0, min=0, max=-1, skip=L1_DONE)

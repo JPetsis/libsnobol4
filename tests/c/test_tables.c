@@ -190,10 +190,11 @@ static void test_table_multiple_references(void) {
     (void)table_set(table, "key", "value");
     test_assert(table_size(table) == 1, "size is 1");
     
-    /* Release three times */
+    /* Release three times — plus one final release for the original table_create reference */
     table_release(table);
     table_release(table);
     table_release(table);
+    table_release(table); /* release original reference from table_create (refcount: 4→3→2→1→0) */
     test_assert(true, "multiple releases don't crash");
 }
 
