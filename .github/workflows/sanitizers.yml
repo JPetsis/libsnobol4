@@ -1,72 +1,153 @@
 name: Sanitizers
 
 on:
-  workflow_dispatch:
-    inputs:
-      php-version:
-        description: 'PHP version to use'
-        required: false
-        default: '8.5'
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'core/**'
+      - 'tests/c/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/sanitizers.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'core/**'
+      - 'tests/c/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/sanitizers.yml'
   # TODO: re-enable nightly schedule once the project is more mature
   # schedule:
   #   - cron: '0 2 * * *'
+  workflow_dispatch:
 
 jobs:
-  asan-ubsan:
-    name: ASan + UBSan Tests (PHP ${{ github.event.inputs.php-version || '8.5' }})
+  asan:
+    name: AddressSanitizer (Ubuntu)
     runs-on: ubuntu-latest
 
     env:
       CC: clang
       CXX: clang++
-      CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -g
-      CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -g
-      LDFLAGS: -fsanitize=address,undefined
-      ASAN_OPTIONS: detect_leaks=0:fast_unwind_on_malloc=0
+      ASAN_OPTIONS: detect_leaks=1:fast_unwind_on_malloc=0:halt_on_error=0
       UBSAN_OPTIONS: print_stacktrace=1
-      USE_ZEND_ALLOC: 0
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ github.event.inputs.php-version || '8.5' }}
-          extensions: json
-          tools: composer
-
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential php${{ github.event.inputs.php-version || '8.5' }}-dev autoconf clang
+          sudo apt-get install -y cmake build-essential clang
 
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist
-
-      - name: Configure CMake with sanitizers
+      - name: Configure CMake with ASan
         run: |
           cmake -B build \
             -DBUILD_TESTS=ON \
             -DBUILD_PHP=OFF \
             -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang \
             -DSNOBOL_SANITIZE=ON
 
-      - name: Build C library
+      - name: Build
         run: cmake --build build
 
-      - name: Run C tests with ASan/UBSan
-        working-directory: build
-        run: cmake --build . --target test-asan
-        continue-on-error: false
-
-      - name: Check for sanitizer errors
+      - name: Run tests under ASan
+        id: asan_run
+        continue-on-error: true
         run: |
-          echo "## Sanitizer Run Summary" >> $GITHUB_STEP_SUMMARY
+          set -o pipefail
+          cd build
+          ctest --output-on-failure 2>&1 | tee ../asan-report.txt
+
+      - name: Upload ASan log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asan-report
+          path: asan-report.txt
+          retention-days: 30
+
+      - name: Summarise ASan results
+        if: always()
+        run: |
+          echo "## AddressSanitizer Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**PHP Version:** ${{ github.event.inputs.php-version || '8.5' }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Sanitizers:** AddressSanitizer + UndefinedBehaviorSanitizer" >> $GITHUB_STEP_SUMMARY
           echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Sanitizer:** AddressSanitizer (detect_leaks=1)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "If tests passed, no memory safety issues were detected." >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.asan_run.outcome }}" = "success" ]; then
+            echo "✅ **No ASan errors detected.**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **ASan errors detected — see uploaded \`asan-report.txt\` artifact.**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "ERROR:|WARNING:|SUMMARY:" asan-report.txt | head -30 >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  ubsan:
+    name: UndefinedBehaviorSanitizer (Ubuntu)
+    runs-on: ubuntu-latest
+
+    env:
+      CC: clang
+      CXX: clang++
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential clang
+
+      - name: Configure CMake with UBSan
+        run: |
+          cmake -B build \
+            -DBUILD_TESTS=ON \
+            -DBUILD_PHP=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer -g"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests under UBSan
+        id: ubsan_run
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cd build
+          ctest --output-on-failure 2>&1 | tee ../ubsan-report.txt
+
+      - name: Upload UBSan log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubsan-report
+          path: ubsan-report.txt
+          retention-days: 30
+
+      - name: Summarise UBSan results
+        if: always()
+        run: |
+          echo "## UndefinedBehaviorSanitizer Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Sanitizer:** UndefinedBehaviorSanitizer" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.ubsan_run.outcome }}" = "success" ]; then
+            echo "✅ **No UBSan errors detected.**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **UBSan errors detected — see uploaded \`ubsan-report.txt\` artifact.**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "runtime error:|SUMMARY:" ubsan-report.txt | head -30 >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
