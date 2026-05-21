@@ -48,6 +48,10 @@ jobs:
         run: cmake --build build
 
       - name: Run tests under Valgrind (XML report)
+        # continue-on-error so the artifact is always uploaded;
+        # the "Check for definite leaks" step below enforces the real gate.
+        continue-on-error: true
+        id: valgrind_run
         run: cmake --build build --target test-valgrind-report
 
       - name: Upload Valgrind XML report
@@ -58,30 +62,35 @@ jobs:
           path: build/valgrind-report.xml
           retention-days: 30
 
-      - name: Summarise Valgrind results
+      - name: Check for definite/indirect leaks and summarise
         if: always()
         run: |
           echo "## Valgrind Memcheck Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
           echo "**Suppression file:** dev/valgrind.supp" >> $GITHUB_STEP_SUMMARY
+          echo "**Failure policy:** definite + indirect leaks only" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ -f build/valgrind-report.xml ]; then
-            # Count error records in the XML
-            ERROR_COUNT=$(grep -c '<error>' build/valgrind-report.xml 2>/dev/null || echo 0)
-            LEAK_COUNT=$(grep -c 'LeakSummary\|leak_definitely_lost\|definitely lost' build/valgrind-report.xml 2>/dev/null || echo 0)
-
-            echo "**Errors detected:** ${ERROR_COUNT}" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-
-            if [ "$ERROR_COUNT" -eq 0 ]; then
-              echo "✅ **No memory errors detected.**" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "❌ **Memory errors detected — see uploaded \`valgrind-report.xml\` artifact.**" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
+          if [ ! -f build/valgrind-report.xml ]; then
             echo "⚠️ Report file not found (build may have failed before Valgrind ran)." >> $GITHUB_STEP_SUMMARY
+            exit 1
           fi
+
+          # Count <error> records — each represents one distinct issue
+          ERROR_COUNT=$(grep -c '<error>' build/valgrind-report.xml 2>/dev/null || echo 0)
+          echo "**Errors detected:** ${ERROR_COUNT}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$ERROR_COUNT" -eq 0 ]; then
+            echo "✅ **No definite/indirect memory errors detected.**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **${ERROR_COUNT} error(s) detected — see uploaded \`valgrind-report.xml\` artifact.**" >> $GITHUB_STEP_SUMMARY
+            # Print a human-readable snippet for quick triage in the log
+            echo "--- Valgrind error kinds ---"
+            grep '<kind>' build/valgrind-report.xml | sort | uniq -c | sort -rn || true
+            exit 1
+          fi
+
 
 

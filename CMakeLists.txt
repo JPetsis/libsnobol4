@@ -66,15 +66,19 @@ if(VALGRIND)
         endif()
 
         # Plain terminal output target (interactive use)
+        # --errors-for-leak-kinds=definite,indirect: only exit non-zero for
+        # definite and indirect leaks; "possibly lost" / "still reachable"
+        # (common in system/PHP allocators) are shown but do not fail the build.
         add_custom_target(test-valgrind
             COMMAND ${VALGRIND}
                     --error-exitcode=1
                     --leak-check=full
                     --show-leak-kinds=all
                     --track-origins=yes
-                    --errors-for-leak-kinds=all
+                    --errors-for-leak-kinds=definite,indirect
                     ${VALGRIND_SUPP_ARG}
                     ${CMAKE_BINARY_DIR}/tests/c/snobol4_tests
+            DEPENDS snobol4_tests
             COMMENT "Running tests under Valgrind memcheck"
         )
 
@@ -85,11 +89,12 @@ if(VALGRIND)
                     --leak-check=full
                     --show-leak-kinds=all
                     --track-origins=yes
-                    --errors-for-leak-kinds=all
+                    --errors-for-leak-kinds=definite,indirect
                     ${VALGRIND_SUPP_ARG}
                     --xml=yes
                     --xml-file=${CMAKE_BINARY_DIR}/valgrind-report.xml
                     ${CMAKE_BINARY_DIR}/tests/c/snobol4_tests
+            DEPENDS snobol4_tests
             COMMENT "Running tests under Valgrind memcheck (XML report → build/valgrind-report.xml)"
         )
     endif()
