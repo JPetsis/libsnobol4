@@ -3,6 +3,7 @@
  * @brief AST node creation and memory management
  */
 
+#include "snobol/snobol_internal.h"
 #include "snobol/ast.h"
 #include <stdio.h>
 #include <stdlib.h>

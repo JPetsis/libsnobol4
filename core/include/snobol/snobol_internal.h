@@ -1,5 +1,14 @@
 #pragma once
 
+/* MSVC C23 compatibility: MSVC does not yet support C23 nullptr/constexpr in C mode. */
+#if defined(_MSC_VER) && !defined(__cplusplus)
+#  ifndef nullptr
+#    define nullptr NULL
+#  endif
+#  ifndef constexpr
+#    define constexpr static const
+#  endif
+#endif
 
 /* Default to standalone build unless PHP_BUILD is explicitly defined */
 #ifndef PHP_BUILD

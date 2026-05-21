@@ -6,6 +6,7 @@
  * Implements the grammar defined in grammar/snobol.ebnf
  */
 
+#include "snobol/snobol_internal.h"
 #include "snobol/parser.h"
 #include <stdlib.h>
 #include <string.h>

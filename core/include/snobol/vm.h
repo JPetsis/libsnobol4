@@ -33,9 +33,9 @@ typedef struct SnobolJitConfig SnobolJitConfig;
 #endif
 
 /** @brief Maximum number of capture registers per VM execution. */
-constexpr int MAX_CAPS = 64;
+#define MAX_CAPS 64
 /** @brief Maximum number of named variable registers per VM execution. */
-constexpr int MAX_VARS = 64;
+#define MAX_VARS 64
 
 /**
  * @brief Unicode codepoint range [start, end] (both inclusive).
@@ -215,7 +215,7 @@ typedef enum {
 } snobol_builtin_fn_t;
 
 /** @brief Maximum number of bounded-repetition loop counters per VM. */
-constexpr int MAX_LOOPS = 16;
+#define MAX_LOOPS 16
 
 /**
  * @brief Generic growable byte buffer used for VM output accumulation.

@@ -6,6 +6,7 @@
  * Handles character-by-character scanning with proper UTF-8 support.
  */
 
+#include "snobol/snobol_internal.h"
 #include "snobol/lexer.h"
 #include <stdlib.h>
 #include <string.h>
