@@ -1,0 +1,86 @@
+name: Valgrind
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'core/**'
+      - 'tests/c/**'
+      - 'CMakeLists.txt'
+      - 'dev/valgrind.supp'
+      - '.github/workflows/valgrind.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'core/**'
+      - 'tests/c/**'
+      - 'CMakeLists.txt'
+      - 'dev/valgrind.supp'
+      - '.github/workflows/valgrind.yml'
+  schedule:
+    # Run nightly at 03:00 UTC (offset from sanitizers.yml at 02:00)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  valgrind:
+    name: Valgrind Memcheck (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential valgrind
+
+      - name: Configure CMake (Debug, no sanitizers)
+        run: |
+          cmake -B build \
+            -DBUILD_TESTS=ON \
+            -DBUILD_PHP=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DSNOBOL_SANITIZE=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests under Valgrind (XML report)
+        run: cmake --build build --target test-valgrind-report
+
+      - name: Upload Valgrind XML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valgrind-report
+          path: build/valgrind-report.xml
+          retention-days: 30
+
+      - name: Summarise Valgrind results
+        if: always()
+        run: |
+          echo "## Valgrind Memcheck Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Suppression file:** dev/valgrind.supp" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f build/valgrind-report.xml ]; then
+            # Count error records in the XML
+            ERROR_COUNT=$(grep -c '<error>' build/valgrind-report.xml 2>/dev/null || echo 0)
+            LEAK_COUNT=$(grep -c 'LeakSummary\|leak_definitely_lost\|definitely lost' build/valgrind-report.xml 2>/dev/null || echo 0)
+
+            echo "**Errors detected:** ${ERROR_COUNT}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$ERROR_COUNT" -eq 0 ]; then
+              echo "✅ **No memory errors detected.**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Memory errors detected — see uploaded \`valgrind-report.xml\` artifact.**" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "⚠️ Report file not found (build may have failed before Valgrind ran)." >> $GITHUB_STEP_SUMMARY
+          fi
+

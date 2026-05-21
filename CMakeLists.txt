@@ -57,13 +57,40 @@ endif()
 find_program(VALGRIND valgrind)
 if(VALGRIND)
     if(BUILD_TESTS)
+        # Suppression file (optional — only passed if it exists)
+        set(VALGRIND_SUPP_FILE "${CMAKE_SOURCE_DIR}/dev/valgrind.supp")
+        if(EXISTS "${VALGRIND_SUPP_FILE}")
+            set(VALGRIND_SUPP_ARG "--suppressions=${VALGRIND_SUPP_FILE}")
+        else()
+            set(VALGRIND_SUPP_ARG "")
+        endif()
+
+        # Plain terminal output target (interactive use)
         add_custom_target(test-valgrind
             COMMAND ${VALGRIND}
                     --error-exitcode=1
                     --leak-check=full
+                    --show-leak-kinds=all
                     --track-origins=yes
+                    --errors-for-leak-kinds=all
+                    ${VALGRIND_SUPP_ARG}
                     ${CMAKE_BINARY_DIR}/tests/c/snobol4_tests
             COMMENT "Running tests under Valgrind memcheck"
+        )
+
+        # XML report target (CI / persistent report)
+        add_custom_target(test-valgrind-report
+            COMMAND ${VALGRIND}
+                    --error-exitcode=1
+                    --leak-check=full
+                    --show-leak-kinds=all
+                    --track-origins=yes
+                    --errors-for-leak-kinds=all
+                    ${VALGRIND_SUPP_ARG}
+                    --xml=yes
+                    --xml-file=${CMAKE_BINARY_DIR}/valgrind-report.xml
+                    ${CMAKE_BINARY_DIR}/tests/c/snobol4_tests
+            COMMENT "Running tests under Valgrind memcheck (XML report → build/valgrind-report.xml)"
         )
     endif()
 else()

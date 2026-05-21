@@ -9,7 +9,7 @@
 
 .PHONY: all build test clean distclean install uninstall help \
         build-debug build-release build-jit build-asan \
-        test-verbose test-valgrind test-asan bench docs format lint warnings
+        test-verbose test-valgrind test-valgrind-report test-asan bench docs format lint warnings
 
 # Default build type
 BUILD_TYPE ?= Release
@@ -98,6 +98,17 @@ test-valgrind:
 	@echo "==> Running tests under Valgrind (via CMake target)..."
 	@if [ -d build ]; then \
 		$(CMAKE_BUILD) --target test-valgrind; \
+	else \
+		echo "Build directory not found. Run 'make build' first."; \
+		exit 1; \
+	fi
+
+# Run tests under Valgrind and save XML report to build/valgrind-report.xml
+test-valgrind-report:
+	@echo "==> Running tests under Valgrind (XML report → build/valgrind-report.xml)..."
+	@if [ -d build ]; then \
+		$(CMAKE_BUILD) --target test-valgrind-report; \
+		echo "==> Report saved to build/valgrind-report.xml"; \
 	else \
 		echo "Build directory not found. Run 'make build' first."; \
 		exit 1; \
@@ -270,7 +281,8 @@ help:
 	@echo "Test targets:"
 	@echo "  test           - Run C test suite"
 	@echo "  test-verbose   - Run tests with verbose output"
-	@echo "  test-valgrind  - Run tests under Valgrind (delegates to CMake target)"
+	@echo "  test-valgrind  - Run tests under Valgrind (terminal output)"
+	@echo "  test-valgrind-report - Run tests under Valgrind (XML report → build/valgrind-report.xml)"
 	@echo "  test-asan      - Run tests under AddressSanitizer+UBSan (requires make build-asan first)"
 	@echo ""
 	@echo "Clean targets:"
@@ -293,7 +305,8 @@ help:
 	@echo "  make build-debug        # Debug build"
 	@echo "  make test               # Run tests"
 	@echo "  make test-verbose       # Verbose test output"
-	@echo "  make test-valgrind      # Run tests under Valgrind"
+	@echo "  make test-valgrind      # Run tests under Valgrind (terminal output)"
+	@echo "  make test-valgrind-report # Run Valgrind + save XML to build/valgrind-report.xml"
 	@echo "  make clean              # Remove all build directories"
 	@echo "  make build-php          # Build with PHP binding"
 	@echo "  make install            # Install to /usr/local (default)"
