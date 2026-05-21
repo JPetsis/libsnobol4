@@ -1,12 +1,16 @@
 #pragma once
 
-/* MSVC C23 compatibility: MSVC does not yet support C23 nullptr/constexpr in C mode. */
-#if defined(_MSC_VER) && !defined(__cplusplus)
-#  ifndef nullptr
-#    define nullptr NULL
-#  endif
-#  ifndef constexpr
-#    define constexpr static const
+/* C23 keyword compatibility for pre-C23 compilers (MSVC, GCC/Clang < C23).
+ * __STDC_VERSION__ == 202311L for C23; anything lower (or undefined) means the
+ * compiler does not recognise 'nullptr' or 'constexpr' as keywords in C mode. */
+#if !defined(__cplusplus)
+#  if !defined(__STDC_VERSION__) || (__STDC_VERSION__ < 202311L)
+#    ifndef nullptr
+#      define nullptr NULL
+#    endif
+#    ifndef constexpr
+#      define constexpr static const
+#    endif
 #  endif
 #endif
 

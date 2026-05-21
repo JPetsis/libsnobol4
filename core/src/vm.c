@@ -60,7 +60,7 @@ static int vm_emit_lit_bytes(VmCodeBuf *c, const char *s, size_t len) {
  * (included before vm.c) already declares this constant. */
 #ifndef SNOBOL_LABEL_TABLE_MAGIC_DEFINED
 #define SNOBOL_LABEL_TABLE_MAGIC_DEFINED
-constexpr uint32_t SNOBOL_LABEL_TABLE_MAGIC = 0x534E424Cu;
+#define SNOBOL_LABEL_TABLE_MAGIC 0x534E424Cu
 #endif
 
 const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id, uint16_t *out_count, uint16_t *out_case) {

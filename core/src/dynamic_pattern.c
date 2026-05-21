@@ -23,8 +23,8 @@
  * this file) already defines these as constexpr uint32_t. */
 #ifndef SNOBOL_FNV_CONSTANTS_DEFINED
 #define SNOBOL_FNV_CONSTANTS_DEFINED
-constexpr uint32_t FNV_OFFSET_BASIS = 2166136261u;
-constexpr uint32_t FNV_PRIME        = 16777619u;
+#define FNV_OFFSET_BASIS 2166136261u
+#define FNV_PRIME        16777619u
 #endif
 
 uint32_t dynamic_pattern_hash_source(const char *source, size_t len) {

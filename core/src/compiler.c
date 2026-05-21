@@ -1368,7 +1368,7 @@ static int get_or_create_label_c(const char *name) {
  * where vm.c—included after compiler.c—declares the same constexpr. */
 #ifndef SNOBOL_LABEL_TABLE_MAGIC_DEFINED
 #define SNOBOL_LABEL_TABLE_MAGIC_DEFINED
-constexpr uint32_t SNOBOL_LABEL_TABLE_MAGIC = 0x534E424Cu;
+#define SNOBOL_LABEL_TABLE_MAGIC 0x534E424Cu
 #endif
 
 /* Emit label offset table at end of bytecode (after charclass section).
