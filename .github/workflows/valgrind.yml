@@ -17,9 +17,9 @@ on:
       - 'CMakeLists.txt'
       - 'dev/valgrind.supp'
       - '.github/workflows/valgrind.yml'
-  schedule:
-    # Run nightly at 03:00 UTC (offset from sanitizers.yml at 02:00)
-    - cron: '0 3 * * *'
+  # TODO: re-enable nightly schedule once the project is more mature
+  # schedule:
+  #   - cron: '0 3 * * *'
   workflow_dispatch:
 
 jobs:
@@ -83,4 +83,5 @@ jobs:
           else
             echo "⚠️ Report file not found (build may have failed before Valgrind ran)." >> $GITHUB_STEP_SUMMARY
           fi
+
 
