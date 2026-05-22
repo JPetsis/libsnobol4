@@ -73,8 +73,10 @@ PHP_BINDIR="$(dirname "$PHP_BIN")"
 # Install php-dev if not already present (fast-path: image pre-installs it).
 if [ ! -x "${PHP_BINDIR}/phpize${PHP_VER}" ]; then
     echo "📦 phpize${PHP_VER} not found – installing php${PHP_VER}-dev..."
-    sudo apt-get update -qq
-    sudo apt-get install -y --no-install-recommends "php${PHP_VER}-dev"
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        -o Dpkg::Options::="--force-confold" \
+        "php${PHP_VER}-dev"
 fi
 
 PHPIZE_BIN=""

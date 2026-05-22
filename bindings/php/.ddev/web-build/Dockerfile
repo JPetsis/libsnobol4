@@ -6,7 +6,8 @@ FROM $BASE_IMAGE
 # The post-start hook contains a dynamic fallback for when this layer is stale.
 ARG PHP_VERSION
 RUN sudo apt-get update \
-  && sudo apt-get install -y \
+  && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+      -o Dpkg::Options::="--force-confold" \
       build-essential autoconf valgrind \
       "php${PHP_VERSION}-dev" \
   && sudo rm -rf /var/lib/apt/lists/* \
