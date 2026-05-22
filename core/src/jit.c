@@ -66,7 +66,7 @@ void snobol_jit_load_config_from_env(void) {
  *    is destroyed.  Eviction never frees code that is still referenced.
  * --------------------------------------------------------------------------- */
 
-constexpr int JIT_CACHE_MAX_HARD = 512;  /* absolute upper bound regardless of config */
+#define JIT_CACHE_MAX_HARD 512  /* absolute upper bound regardless of config */
 
 static SnobolJitContext *jit_cache[JIT_CACHE_MAX_HARD];
 static int   jit_cache_count = 0;
@@ -382,10 +382,10 @@ done:
 
 /* ---------------------------------------------------------------------------
  * ARM64 instruction helpers
- * Pure-constant instructions → constexpr uint32_t
+ * Pure-constant instructions → #define macros
  * Argument-taking encoders   → static inline uint32_t functions (typed, no macro hazards)
  * --------------------------------------------------------------------------- */
-constexpr uint32_t A64_RET = 0xd65f03c0u;
+#define A64_RET ((uint32_t)0xd65f03c0u)
 
 static inline uint32_t A64_LDR_X_X_IMM(uint32_t rt, uint32_t rn, uint32_t imm) {
     return 0xf9400000u | (rt & 31u) | ((rn & 31u) << 5) | ((imm / 8u) << 10);
@@ -470,8 +470,8 @@ typedef struct {
  * CFG-based multi-block JIT structures
  * --------------------------------------------------------------------------- */
 
-constexpr int JIT_CFG_MAX_BLOCKS = 64;   /* BFS expansion limit */
-constexpr int JIT_LOOP_ITER_MAX  = 1024; /* max iterations before bailing to interpreter */
+#define JIT_CFG_MAX_BLOCKS 64    /* BFS expansion limit */
+#define JIT_LOOP_ITER_MAX  1024  /* max iterations before bailing to interpreter */
 
 typedef enum {
     BLOCK_TERM_SPLIT,    /* SPLIT opcode — two outgoing edges (succ_a, succ_b) */
@@ -527,9 +527,9 @@ typedef struct {
  * SUBS X19, X19, #1          — decrement loop counter and set flags
  *   Encoding: 0xF1000000 | (1<<10) | (19<<5) | 19 = 0xF1000673
  */
-constexpr uint32_t A64_STP_X19_X30_PRE16  = 0xA9BF7BF3u;
-constexpr uint32_t A64_LDP_X19_X30_POST16 = 0xA8C17BF3u;
-constexpr uint32_t A64_SUBS_X19_X19_1     = 0xF1000673u;
+#define A64_STP_X19_X30_PRE16  ((uint32_t)0xA9BF7BF3u)
+#define A64_LDP_X19_X30_POST16 ((uint32_t)0xA8C17BF3u)
+#define A64_SUBS_X19_X19_1     ((uint32_t)0xF1000673u)
 
 static void emit_instr(JITState *js, uint32_t ins) { *(js->p)++ = ins; }
 
@@ -1088,7 +1088,7 @@ static jit_trace_fn snobol_jit_compile_cfg(VM *vm, JitCfg *cfg,
 }
 
 
-constexpr int MAX_OPS_IN_REGION = 64;
+#define MAX_OPS_IN_REGION 64
 
 jit_trace_fn snobol_jit_compile([[maybe_unused]] VM *vm, [[maybe_unused]] size_t start_ip, size_t *out_code_size) {
     if (out_code_size) *out_code_size = 0;
