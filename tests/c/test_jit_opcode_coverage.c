@@ -387,12 +387,9 @@ static void test_eval_jit(void) {
     snobol_jit_release_context(ctx); snobol_jit_shutdown();
 }
 
-#endif /* SNOBOL_JIT */
-
 /* ========================================================================
  * OP_TABLE_GET test
  * ======================================================================== */
-#ifdef SNOBOL_DYNAMIC_PATTERN
 static void test_table_get_jit(void) {
     if (!jit_is_supported()) {
         test_assert(true, "TABLE_GET JIT: skipped (non-ARM64)"); return;
@@ -509,7 +506,6 @@ static void test_table_set_jit(void) {
     table_release(tbl);
     snobol_jit_shutdown();
 }
-#endif /* SNOBOL_DYNAMIC_PATTERN */
 
 /* ========================================================================
  * OP_DYNAMIC test
@@ -562,6 +558,8 @@ static void test_dynamic_jit(void) {
 
     snobol_jit_release_context(ctx); snobol_jit_shutdown();
 }
+
+#endif /* SNOBOL_JIT */
 
 void test_jit_opcode_coverage_suite(void) {
     test_suite("JIT Opcode Coverage");
