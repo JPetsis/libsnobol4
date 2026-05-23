@@ -15,6 +15,8 @@ add_library(snobol4 STATIC
     src/table.c
     src/dynamic_pattern.c
     src/jit.c
+    src/jit_ir.c
+    src/jit_backend_arm64.c
     src/version.c
     src/string_fn.c
     src/type_fn.c
@@ -91,6 +93,23 @@ endif()
 if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
 endif()
+
+# JIT backend selection (compile-time; only one backend per binary).
+# Valid values: "arm64"  (default, requires ARM64 host)
+# Adding a new backend: add the source file and a new valid value here.
+set(SNOBOL_JIT_BACKEND "arm64" CACHE STRING "JIT backend to compile in (arm64)")
+set_property(CACHE SNOBOL_JIT_BACKEND PROPERTY STRINGS "arm64")
+
+set(_valid_jit_backends "arm64")
+if(NOT SNOBOL_JIT_BACKEND IN_LIST _valid_jit_backends)
+    message(FATAL_ERROR
+        "SNOBOL_JIT_BACKEND='${SNOBOL_JIT_BACKEND}' is not a recognised backend.\n"
+        "Valid backends: ${_valid_jit_backends}"
+    )
+endif()
+target_compile_definitions(snobol4 PRIVATE
+    SNOBOL_JIT_BACKEND="${SNOBOL_JIT_BACKEND}"
+)
 
 # Installation rules
 include(GNUInstallDirs)

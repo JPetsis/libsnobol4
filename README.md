@@ -63,7 +63,11 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **IDENT / DIFFER** – String identity / difference
   * **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
   * **INTEGER / REAL / NUMERIC** – Numeric type predicates
-* **Optional Micro-JIT**: ARM64 JIT compilation for hot patterns (experimental)
+* **Optional Micro-JIT** (v0.10.0): ARM64 JIT compilation for hot patterns via a two-phase
+  architecture-neutral IR pipeline:
+  * `SNOBOL_JIT_DUMP_IR=1` — dump the IR to `stderr` before lowering (debug)
+  * `SNOBOL_JIT_BACKEND=arm64` (CMake option) — selects the code-generation backend (default: `arm64`)
+  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → ARM64 machine code
 * **C23 Code Quality** (v0.6.0): Core adopts `nullptr`, `[[nodiscard]]`, `[[maybe_unused]]`, and `constexpr` throughout. JIT A64 macro helpers converted to typed `static inline` functions. Requires GCC 13+ or Clang 17+.
 * **Profiling Support**: Built-in execution profiling for performance analysis
 

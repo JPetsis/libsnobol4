@@ -138,6 +138,7 @@ void test_jit_branches_suite(void);
 void test_jit_profitability_suite(void);
 void test_jit_cfg_suite(void);
 void test_jit_opcode_coverage_suite(void);
+void test_jit_ir_suite(void);
 void test_lexer_suite(void);
 void test_parser_suite(void);
 void test_ast_suite(void);
@@ -194,6 +195,7 @@ int main(void) {
     RUN_SUITE("JIT: Profitability",         test_jit_profitability_suite);
     RUN_SUITE("JIT: CFG Multi-Block",       test_jit_cfg_suite);
     RUN_SUITE("JIT: Full Opcode Coverage",  test_jit_opcode_coverage_suite);
+    RUN_SUITE("JIT: Neutral IR",            test_jit_ir_suite);
 
     /* Lexer / Parser / AST */
     RUN_SUITE("Lexer",                      test_lexer_suite);

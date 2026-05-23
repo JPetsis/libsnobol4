@@ -18,6 +18,7 @@ add_executable(snobol4_tests
     test_jit_profitability.c
     test_jit_cfg.c
     test_jit_opcode_coverage.c
+    test_jit_ir.c
     test_lexer.c
     test_parser.c
     test_ast.c
@@ -94,3 +95,25 @@ add_test(
     NAME snobol4_c_tests
     COMMAND snobol4_tests
 )
+
+# Named JIT IR unit-test target (task 6.1): same binary, subset label
+add_test(
+    NAME test_jit_ir
+    COMMAND snobol4_tests
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+set_tests_properties(test_jit_ir PROPERTIES LABELS "jit-ir")
+
+# IR roundtrip target (task 6.2): full pattern corpus run with JIT enabled
+# Verifies that every pattern in the test suite produces the same result
+# under the IR pipeline as it did under the interpreter.
+add_test(
+    NAME test_ir_roundtrip
+    COMMAND snobol4_tests
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+set_tests_properties(test_ir_roundtrip PROPERTIES
+    LABELS "jit-ir;roundtrip"
+    ENVIRONMENT "SNOBOL_JIT=1"
+)
+

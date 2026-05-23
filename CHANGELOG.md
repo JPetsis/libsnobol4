@@ -5,7 +5,64 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.0] - 2026-05-22
+## [0.10.0] - 2026-05-23
+
+### Added — JIT Neutral IR Layer (`jit-neutral-ir`)
+
+- **Architecture-neutral IR definition** (`core/include/snobol/jit_ir.h`):
+  `jit_ir_opcode_t` enum and `jit_ir_instr_t` struct with pre-decoded operands
+  and virtual register operands (max 256 per region, `uint16_t vreg_next`).
+
+- **IR region builder** (`core/src/jit_ir.c`):
+  `jit_ir_region_new`, `jit_ir_append`, `jit_ir_alloc_vreg`, `jit_ir_inc_use`.
+  Arena-style growable instruction array; marks region `non_compilable` and logs
+  a warning if the 256-register limit is exceeded.
+
+- **VM opcode lifter** (`jit_ir_lift_region`):
+  Translates all VM bytecodes to IR in a single linear pass.  Covers every opcode
+  listed in the JIT coverage matrix (jit-compiled, call-out, and pseudo groups).
+
+- **IR optimiser passes**:
+  - **DCE** (`jit_ir_dce`): removes pure instructions whose output register has
+    zero uses.
+  - **Copy-propagation** (`jit_ir_copy_propagation`): folds `JIT_IR_COPY`
+    instructions into their consumers, then triggers DCE to remove dead copies.
+
+- **`SNOBOL_JIT_DUMP_IR=1` environment variable**: when set, writes a
+  human-readable IR dump to `stderr` before the backend lowerer runs.
+
+- **`jit_backend_t` vtable** (`core/include/snobol/jit_backend.h`):
+  `lower`, `flush_icache`, `name` function pointers.
+  `jit_backend_register()` and `jit_backend_get()` registration API in `jit.c`.
+
+- **`SNOBOL_JIT_BACKEND` CMake option** (default: `arm64`):
+  selects the backend at compile time; unknown values produce a `FATAL_ERROR`
+  listing valid backend names.
+
+- **ARM64 backend** (`core/src/jit_backend_arm64.c`):
+  Implements the vtable; moves all ARM64 code-generation out of `jit.c`.
+  Has its own CFG builder (`ir_cfg_build`) and IR-based block emitter
+  (`emit_block_ops_ir`).
+
+- **Unit tests** (`tests/c/test_jit_ir.c`): covers region builder, vreg
+  allocation, 256-register limit, DCE, and copy-propagation.  Registered as
+  `test_jit_ir` and `test_ir_roundtrip` CTest targets with `jit-ir` / `roundtrip`
+  labels.
+
+- **CI job** (`ci-jit-backend-tests`): builds and runs the full JIT test suite on
+  macOS Apple Silicon and Linux AArch64 runners using `SNOBOL_JIT_BACKEND=arm64`.
+
+### Changed
+
+- **`jit.c` legacy fallback removed**: the pre-IR direct ARM64 emission code
+  (~1500 lines) has been deleted from `jit.c`.  The new two-phase IR pipeline is
+  the only compilation path; `snobol_jit_compile` returns `nullptr` if no backend
+  is registered (should not occur after `snobol_jit_init()`).
+
+- **`vreg_next` type** in `jit_ir_region_t` changed from `uint8_t` to `uint16_t`
+  to prevent silent wrap-around at the 256-register boundary.
+
+
 
 ### Added
 

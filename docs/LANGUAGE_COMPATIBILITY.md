@@ -41,6 +41,29 @@ The engine now supports full SNOBOL language compatibility including:
 | Table registration                | Placeholder `table_id=0`                   | Runtime resolves by name                   | Explicit registration API            |
 | Recursive EVAL                    | `EVAL(EVAL(...))` parsed but not optimized | Avoid deep nesting                         | Optimize recursive evaluation        |
 | JIT coverage                      | Full — all opcodes jit-compiled or call-out (v0.9.0) | Full — no interpreter fallback for any opcode | Full JIT support ✅ |
+| JIT architecture                  | Two-phase IR pipeline (v0.10.0): VM bytecode → architecture-neutral IR → machine code | Set `SNOBOL_JIT_DUMP_IR=1` to inspect IR | Backend vtable allows additional targets |
+
+## JIT Pipeline Architecture (v0.10.0+)
+
+The JIT subsystem uses a two-phase compilation pipeline:
+
+```
+VM bytecodes → [Lifter] → jit_ir_region_t → [DCE + Copy-prop] → [Backend lowerer] → machine code
+```
+
+1. **Lifter** (`jit_ir_lift_region`): Translates VM bytecode to a flat, linear IR
+   (`jit_ir_instr_t` array).  All operands are pre-decoded; the backend reads only IR fields.
+2. **Optimiser passes**: Dead-code elimination (DCE) removes pure instructions with zero-use
+   output registers; copy-propagation folds copy chains before DCE runs.
+3. **Backend lowerer** (`jit_backend_t::lower`): Architecture-specific code emitter.
+   The active backend is selected at compile time via `SNOBOL_JIT_BACKEND` (default: `arm64`).
+
+### Debug tools
+
+| Environment variable     | Effect                                                |
+|--------------------------|-------------------------------------------------------|
+| `SNOBOL_JIT_DUMP_IR=1`   | Dump human-readable IR to `stderr` before lowering   |
+| `SNOBOL_JIT_BACKEND`     | CMake option — selects the backend (default: `arm64`)|
 
 ## Parser Extensions
 

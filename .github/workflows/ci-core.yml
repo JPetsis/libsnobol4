@@ -54,3 +54,35 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure -C Release --verbose
 
+  jit-backend-tests:
+    name: JIT Backend Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # ARM64 runners: macOS Apple Silicon (macos-latest) + Linux AArch64
+        os: [ macos-latest, ubuntu-24.04-arm ]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure CMake (with JIT backend)
+        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=arm64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run JIT IR unit tests
+        working-directory: build
+        run: ctest --output-on-failure -L jit-ir
+
+      - name: Run IR roundtrip tests
+        working-directory: build
+        run: ctest --output-on-failure -L roundtrip
+
+      - name: Run full JIT test suite
+        working-directory: build
+        run: ctest --output-on-failure
+
