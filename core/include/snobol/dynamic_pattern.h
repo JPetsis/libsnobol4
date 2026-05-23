@@ -59,6 +59,7 @@ typedef struct dynamic_pattern {
     uint32_t refcount;     /* Reference count */
     uint32_t hash;         /* Pre-computed hash of source for caching */
     bool is_valid;         /* Pattern compiled successfully */
+    void *jit_ctx;         /* JIT context for this pattern (if JIT enabled) */
 } dynamic_pattern_t;
 
 /**

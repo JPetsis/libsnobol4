@@ -30,11 +30,40 @@ static inline snobol_table_php_t* php_snobol_table_fetch(zend_object *obj) {
     return (snobol_table_php_t *)((char *)(obj) - XtOffsetOf(snobol_table_php_t, std));
 }
 
+/* Table registry to support pattern binding */
+static snobol_table_t **global_php_tables = NULL;
+static size_t global_php_table_count = 0;
+static size_t global_php_table_cap = 0;
+
+static void php_snobol_table_register(snobol_table_t *tbl) {
+    if (global_php_table_count == global_php_table_cap) {
+        global_php_table_cap = global_php_table_cap ? global_php_table_cap * 2 : 16;
+        global_php_tables = realloc(global_php_tables, global_php_table_cap * sizeof(snobol_table_t *));
+    }
+    global_php_tables[global_php_table_count++] = tbl;
+}
+
+static void php_snobol_table_unregister(snobol_table_t *tbl) {
+    for (size_t i = 0; i < global_php_table_count; i++) {
+        if (global_php_tables[i] == tbl) {
+            memmove(global_php_tables + i, global_php_tables + i + 1, (global_php_table_count - i - 1) * sizeof(snobol_table_t *));
+            global_php_table_count--;
+            break;
+        }
+    }
+}
+
+size_t php_snobol_get_all_tables(snobol_table_t ***out_tables) {
+    if (out_tables) *out_tables = global_php_tables;
+    return global_php_table_count;
+}
+
 static void snobol_table_php_free(zend_object *object) {
     snobol_table_php_t *intern = php_snobol_table_fetch(object);
     SNOBOL_LOG("snobol_table_php_free: intern=%p table=%p", (void*)intern, (void*)intern->table);
 
     if (intern->table) {
+        php_snobol_table_unregister(intern->table);
         table_release(intern->table);
         intern->table = NULL;
     }
@@ -104,6 +133,8 @@ PHP_METHOD(Snobol_Table, __construct) {
         zend_throw_exception(zend_ce_exception, "Failed to create table", 0);
         RETURN_NULL();
     }
+
+    php_snobol_table_register(intern->table);
     
     SNOBOL_LOG("Snobol_Table::__construct: table=%p name=%s", 
                (void*)intern->table, table_name ? table_name : "(unnamed)");

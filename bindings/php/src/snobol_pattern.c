@@ -346,6 +346,32 @@ PHP_METHOD(Snobol_Pattern, match) {
     vm.dyn_pending_bc_len = 0;
 #endif
 
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    /* Initialize table registry for the VM */
+    vm_init_tables(&vm);
+
+    /* Bind any unbound table references in the bytecode using all named tables in PHP */
+    snobol_table_t **php_tables = NULL;
+    size_t tbl_count = php_snobol_get_all_tables(&php_tables);
+    if (tbl_count > 0) {
+        const char **names = (const char **)emalloc(tbl_count * sizeof(char *));
+        uint16_t *ids = (uint16_t *)emalloc(tbl_count * sizeof(uint16_t));
+        
+        for (size_t k = 0; k < tbl_count; k++) {
+            names[k] = php_tables[k]->name;
+            /* Register table in VM and get its internal ID */
+            vm_register_table(&vm, php_tables[k], &ids[k]);
+            SNOBOL_LOG("Snobol_Pattern::match: registered table[%zu] name='%s' id=%u", k, names[k] ? names[k] : "(null)", ids[k]);
+        }
+        
+        /* Bind the bytecode (in-place) */
+        snobol_template_bind_tables((uint8_t *)vm.bc, vm.bc_len, names, ids, tbl_count);
+        
+        efree(names);
+        efree(ids);
+    }
+#endif
+
     bool ok = vm_exec(&vm);
 
     SNOBOL_LOG("Snobol_Pattern::match: VM returned %d, pos=%zu, var_count=%zu", (int)ok, vm.pos, vm.var_count);
@@ -353,6 +379,7 @@ PHP_METHOD(Snobol_Pattern, match) {
     if (!ok) {
         if (eb.buf) efree(eb.buf);
 #ifdef SNOBOL_DYNAMIC_PATTERN
+        vm_free_tables(&vm);
         if (vm.dyn_cache) {
             dynamic_pattern_cache_destroy(vm.dyn_cache);
         }
@@ -397,6 +424,7 @@ PHP_METHOD(Snobol_Pattern, match) {
     add_assoc_zval(return_value, "_metrics", &metrics);
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
+    vm_free_tables(&vm);
     if (vm.dyn_cache) {
         dynamic_pattern_cache_destroy(vm.dyn_cache);
     }
@@ -1061,6 +1089,35 @@ static ast_node_t* php_ast_to_c(zval *php_ast) {
             }
         }
     }
+    else if (strcmp(type, "eval") == 0) {
+        zval *fn_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "fn", sizeof("fn")-1);
+        zval *reg_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "reg", sizeof("reg")-1);
+        if (fn_zv && reg_zv && Z_TYPE_P(fn_zv) == IS_LONG && Z_TYPE_P(reg_zv) == IS_LONG) {
+            return snobol_ast_create_eval((int)Z_LVAL_P(fn_zv), (int)Z_LVAL_P(reg_zv));
+        }
+    }
+    else if (strcmp(type, "table_access") == 0) {
+        zval *table_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "table", sizeof("table")-1);
+        zval *key_zv   = zend_hash_str_find(Z_ARRVAL_P(php_ast), "key",   sizeof("key")-1);
+        if (table_zv && key_zv && Z_TYPE_P(table_zv) == IS_STRING) {
+            ast_node_t *key = php_ast_to_c(key_zv);
+            if (key) {
+                return snobol_ast_create_table_access(Z_STRVAL_P(table_zv), key);
+            }
+        }
+    }
+    else if (strcmp(type, "table_update") == 0) {
+        zval *table_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "table", sizeof("table")-1);
+        zval *key_zv   = zend_hash_str_find(Z_ARRVAL_P(php_ast), "key",   sizeof("key")-1);
+        zval *val_zv   = zend_hash_str_find(Z_ARRVAL_P(php_ast), "value", sizeof("value")-1);
+        if (table_zv && key_zv && val_zv && Z_TYPE_P(table_zv) == IS_STRING) {
+            ast_node_t *key = php_ast_to_c(key_zv);
+            ast_node_t *val = php_ast_to_c(val_zv);
+            if (key && val) {
+                return snobol_ast_create_table_update(Z_STRVAL_P(table_zv), key, val);
+            }
+        }
+    }
     /* ---- Pattern primitives ---- */
     else if (strcmp(type, "breakx") == 0) {
         zval *set_zv = zend_hash_str_find(Z_ARRVAL_P(php_ast), "set", sizeof("set")-1);
@@ -1148,8 +1205,8 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *
 }
 
 /* compile_template_to_bytecode is provided by the core (compiler.c / core_amalgam.c).
- * The old PHP-side duplicate has been removed: see task 5.1 of the
- * template-substitution-completeness change. */
+ * The PHP-side duplicate has been removed; template compilation is
+ * handled entirely by the core. */
 #if 0 /* REMOVED: duplicate template compiler – delegate to core */
 int compile_template_to_bytecode_REMOVED(const char *tpl, size_t len, uint8_t **out_bc, size_t *out_len) {
     SNOBOL_LOG("compile_template_to_bytecode START: tpl='%.*s'", (int)len, tpl);

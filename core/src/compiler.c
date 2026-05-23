@@ -1236,6 +1236,72 @@ int snobol_template_bind_tables(uint8_t *bc, size_t bc_len,
                 break;
             }
 
+            case OP_LIT: {
+                if (ip + 8 > bc_len) return result;
+                uint32_t len = ((uint32_t)bc[ip+4] << 24) | ((uint32_t)bc[ip+5] << 16)
+                             | ((uint32_t)bc[ip+6] << 8)  | (uint32_t)bc[ip+7];
+                ip += 8 + len;
+                break;
+            }
+
+            case OP_ANY:
+            case OP_NOTANY:
+            case OP_SPAN:
+            case OP_BREAK:
+            case OP_BREAKX:
+                ip += 2;
+                break;
+
+            case OP_LEN:
+                ip += 4;
+                break;
+
+            case OP_CAP_START:
+            case OP_CAP_END:
+                ip += 1;
+                break;
+
+            case OP_ASSIGN:
+                ip += 3;
+                break;
+
+            case OP_REM:
+            case OP_FENCE:
+            case OP_DYNAMIC:
+            case OP_NOP:
+            case OP_FAIL:
+                /* no operands */
+                break;
+
+            case OP_SPLIT:
+            case OP_REPEAT_INIT:
+                ip += 8;
+                break;
+
+            case OP_REPEAT_STEP:
+            case OP_JMP:
+                ip += 4;
+                break;
+
+            case OP_RPOS:
+            case OP_RTAB:
+                ip += 4;
+                break;
+
+            case OP_LABEL:
+            case OP_GOTO:
+            case OP_GOTO_F:
+                ip += 2;
+                break;
+
+            case OP_BAL:
+                ip += 8;
+                break;
+
+            case OP_EVAL:
+                ip += 3;
+                break;
+
             case OP_EMIT_TABLE: {
                 /* table_id:u16, key_type:u8, name_len:u8, name_bytes[name_len], <key payload> */
                 if (ip + 4 > bc_len) return result;
@@ -1272,6 +1338,35 @@ int snobol_template_bind_tables(uint8_t *bc, size_t bc_len,
                     /* capture key: key_reg:u8 */
                     ip += 1;
                 }
+                break;
+            }
+
+            case OP_TABLE_GET:
+            case OP_TABLE_SET: {
+                /* table_id:u16, reg:u8, reg:u8, name_len:u8, name_bytes[name_len] */
+                if (ip + 4 > bc_len) return result;
+                uint16_t tid    = ((uint16_t)bc[ip] << 8) | bc[ip+1];
+                uint8_t  nm_len = bc[ip+4];
+
+                if (ip + 5 + nm_len > bc_len) return result;
+
+                if (tid == (uint16_t)SNBL_TABLE_ID_UNBOUND) {
+                    const char *name_ptr = (const char *)bc + ip + 5;
+                    bool resolved = false;
+                    for (size_t k = 0; k < n; k++) {
+                        if (names[k] && strlen(names[k]) == nm_len &&
+                            memcmp(names[k], name_ptr, nm_len) == 0) {
+                            bc[ip]   = (uint8_t)((ids[k] >> 8) & 0xFF);
+                            bc[ip+1] = (uint8_t)(ids[k] & 0xFF);
+                            resolved = true;
+                            break;
+                        }
+                    }
+                    SNOBOL_LOG("snobol_template_bind_tables: tid=0xFFFF nm_len=%d name='%.*s' resolved=%d", 
+                               (int)nm_len, (int)nm_len, name_ptr, (int)resolved);
+                    if (!resolved) result = -1;
+                }
+                ip += 5 + nm_len;
                 break;
             }
 
@@ -1471,8 +1566,54 @@ static int emit_len_c(int n, CodeBuf *c) {
 
 static int emit_eval_c(int fn, int reg, CodeBuf *c) {
     cb_emit_u8(c, OP_EVAL);
-    cb_emit_u8(c, (uint8_t)fn);
+    cb_emit_u16(c, (uint16_t)fn);
     cb_emit_u8(c, (uint8_t)reg);
+    return 0;
+}
+
+static int emit_table_access_c(const char *table, ast_node_t *key, CodeBuf *c) {
+    /* To support table access in patterns:
+     * 1. Capture key into reg 0
+     * 2. Emit OP_TABLE_GET with unbound ID and the name
+     */
+    cb_emit_u8(c, OP_CAP_START);
+    cb_emit_u8(c, 0);
+    if (emit_node_c(key, c) != 0) return -1;
+    cb_emit_u8(c, OP_CAP_END);
+    cb_emit_u8(c, 0);
+
+    cb_emit_u8(c, OP_TABLE_GET);
+    cb_emit_u16(c, 0xFFFF); /* unbound */
+    cb_emit_u8(c, 0);       /* kreg */
+    cb_emit_u8(c, 0);       /* dreg */
+    size_t nlen = strlen(table);
+    cb_emit_u8(c, (uint8_t)nlen);
+    cb_emit_bytes(c, (const uint8_t*)table, nlen);
+    return 0;
+}
+
+static int emit_table_update_c(const char *table, ast_node_t *key, ast_node_t *value, CodeBuf *c) {
+    /* Capture key into reg 0 */
+    cb_emit_u8(c, OP_CAP_START);
+    cb_emit_u8(c, 0);
+    if (emit_node_c(key, c) != 0) return -1;
+    cb_emit_u8(c, OP_CAP_END);
+    cb_emit_u8(c, 0);
+
+    /* Capture value into reg 1 */
+    cb_emit_u8(c, OP_CAP_START);
+    cb_emit_u8(c, 1);
+    if (emit_node_c(value, c) != 0) return -1;
+    cb_emit_u8(c, OP_CAP_END);
+    cb_emit_u8(c, 1);
+
+    cb_emit_u8(c, OP_TABLE_SET);
+    cb_emit_u16(c, 0xFFFF); /* unbound */
+    cb_emit_u8(c, 0);       /* kreg */
+    cb_emit_u8(c, 1);       /* vreg */
+    size_t nlen = strlen(table);
+    cb_emit_u8(c, (uint8_t)nlen);
+    cb_emit_bytes(c, (const uint8_t*)table, nlen);
     return 0;
 }
 
@@ -1929,10 +2070,10 @@ static int emit_node_c(ast_node_t* node, CodeBuf *c) {
         }
 
         case AST_TABLE_ACCESS:
+            return emit_table_access_c(node->data.table_access.table, node->data.table_access.key, c);
+
         case AST_TABLE_UPDATE:
-            /* These are handled at statement level, not pattern compilation */
-            SNOBOL_LOG("emit_node_c: unhandled node type %d", node->type);
-            return -1;
+            return emit_table_update_c(node->data.table_update.table, node->data.table_update.key, node->data.table_update.value, c);
 
         default:
             SNOBOL_LOG("emit_node_c: unknown node type %d", node->type);

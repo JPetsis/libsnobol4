@@ -111,6 +111,13 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(ai_snobol_reset_jit_stats, 0, 0, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(ai_snobol_load_jit_config, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_snobol_set_jit_config, 0, 0, 1)
+    ZEND_ARG_ARRAY_INFO(0, config, 0)
+ZEND_END_ARG_INFO()
+
 PHP_FUNCTION(snobol_get_jit_stats) {
     if (zend_parse_parameters_none() == FAILURE) {
         return;
@@ -153,6 +160,32 @@ PHP_FUNCTION(snobol_reset_jit_stats) {
         return;
     }
     snobol_jit_reset_stats();
+}
+
+PHP_FUNCTION(snobol_load_jit_config) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        return;
+    }
+    snobol_jit_load_config_from_env();
+}
+
+PHP_FUNCTION(snobol_set_jit_config) {
+    zval *config_arr;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "a", &config_arr) == FAILURE) {
+        return;
+    }
+
+    SnobolJitConfig cfg = *snobol_jit_get_config();
+    zval *val;
+
+    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "hotness_threshold", sizeof("hotness_threshold")-1)) != NULL) {
+        cfg.hotness_threshold = (uint64_t)zval_get_long(val);
+    }
+    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "min_useful_ops", sizeof("min_useful_ops")-1)) != NULL) {
+        cfg.min_useful_ops = (uint32_t)zval_get_long(val);
+    }
+
+    snobol_jit_set_config(&cfg);
 }
 #endif
 
@@ -464,6 +497,8 @@ static const zend_function_entry snobol_functions[] = {
 #ifdef SNOBOL_JIT
     PHP_FE(snobol_get_jit_stats, ai_snobol_get_jit_stats)
     PHP_FE(snobol_reset_jit_stats, ai_snobol_reset_jit_stats)
+    PHP_FE(snobol_load_jit_config, ai_snobol_load_jit_config)
+    PHP_FE(snobol_set_jit_config, ai_snobol_set_jit_config)
 #endif
     /* C function exports for string/comparison built-ins */
     PHP_FE(snobol_text_size,         ai_text_size)

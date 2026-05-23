@@ -40,7 +40,7 @@ The engine now supports full SNOBOL language compatibility including:
 |-----------------------------------|--------------------------------------------|--------------------------------------------|--------------------------------------|
 | Table registration                | Placeholder `table_id=0`                   | Runtime resolves by name                   | Explicit registration API            |
 | Recursive EVAL                    | `EVAL(EVAL(...))` parsed but not optimized | Avoid deep nesting                         | Optimize recursive evaluation        |
-| JIT coverage                      | Skips tables, dynamic, control flow        | Interpreter handles complex patterns       | JIT for simple labelled patterns     |
+| JIT coverage                      | Full — all opcodes jit-compiled or call-out (v0.9.0) | Full — no interpreter fallback for any opcode | Full JIT support ✅ |
 
 ## Parser Extensions
 
@@ -377,31 +377,30 @@ All runtime objects (tables, dynamic patterns) use reference counting:
 
 ## JIT Compatibility Notes
 
-The micro-JIT remains fully compatible with the new features:
+As of v0.9.0 the ARM64 micro-JIT compiles **all VM opcodes**. No opcode causes
+an interpreter fallback at runtime:
 
-- **Label opcodes** (`OP_LABEL`, `OP_GOTO`, `OP_GOTO_F`) are interpreted only - JIT skips patterns with control flow
-- **Table opcodes** (`OP_TABLE_GET`, `OP_TABLE_SET`, `OP_EMIT_TABLE`) are interpreted - JIT skips patterns with table
-  operations
-- **Dynamic pattern opcodes** (`OP_DYNAMIC_DEF`, `OP_DYNAMIC`) are interpreted - JIT skips patterns with dynamic
-  evaluation
-- **Format opcodes** (`OP_EMIT_FORMAT`) are interpreted - JIT skips patterns with formatting
+| Opcode group | JIT status (v0.9.0) |
+|---|---|
+| `OP_LABEL`, `OP_GOTO`, `OP_GOTO_F` | **jit-compiled** — label is a no-emit pseudo-op; GOTO/GOTO_F compile as unconditional/conditional branches |
+| `OP_TABLE_GET`, `OP_TABLE_SET`, `OP_EMIT_TABLE` | **call-out** — compiled as `BLR` to `snobol_jit_helper_table_{get,set}` / `snobol_jit_helper_emit_table_ip` |
+| `OP_DYNAMIC_DEF`, `OP_DYNAMIC` | **pseudo / call-out** — `OP_DYNAMIC_DEF` is a region-termination pseudo-op; `OP_DYNAMIC` compiles as `BLR` to `snobol_jit_helper_dynamic` |
+| `OP_EMIT_FORMAT`, `OP_EMIT_LITERAL`, `OP_EMIT_CAPTURE`, `OP_EMIT_EXPR` | **call-out** — compiled as inline `BLR` to the registered `vm->emit_fn` callback |
+| `OP_REM`, `OP_RPOS`, `OP_RTAB` | **jit-compiled** — inline integer comparisons against `vm->sp` / `vm->subject_len` |
+| `OP_FENCE` | **jit-compiled** — inline choice-stack cut |
+| `OP_BAL` | **call-out** — compiled as `BLR` to `snobol_jit_helper_bal` |
+| `OP_EVAL` | **call-out** — compiled as `BLR` with full caller-saved register spill/restore |
 
-**Phase 1c additions (CFG-based multi-block JIT):**
+**Phase 1c additions (CFG-based multi-block JIT, still active):**
 
-- **Multi-arm alternation** (`'a' | 'b' | 'c'`) — now compiled with the CFG builder; each SPLIT arm is a separate
+- **Multi-arm alternation** (`'a' | 'b' | 'c'`) — compiled with the CFG builder; each SPLIT arm is a separate
   compiled stub, eliminating interpreter round-trips between arms.
-- **ARBNO loops** — backward JMP edges are now compiled with a counted iteration guard (`JIT_LOOP_ITER_MAX` = 1024);
-  the loop body runs fully compiled for up to 1024 iterations before bailing to interpreter.
-- **`jit_blocks_compiled_total`** — new `SnobolJitStats` field counts compiled CFG blocks for observability.
+- **ARBNO loops** — backward JMP edges compiled with a counted iteration guard (`JIT_LOOP_ITER_MAX` = 1024).
+- **`jit_blocks_compiled_total`** — `SnobolJitStats` field counting compiled CFG blocks.
 
-This is by design - the JIT focuses on optimizing hot patterns. Complex patterns with tables, control flow, or
-dynamic evaluation fall back to the interpreter, which is the correct profitability decision.
-
-JIT regression guard results show the profitability gate correctly skips these patterns:
-
-- `skipped_cold_total` increments for patterns with new opcodes
-- `compilations_total` stays 0 for patterns that don't benefit from JIT
-- No performance regression for existing JIT-optimized patterns
+**Observability counters** (`jit_exec_time_ns_total`, `jit_interp_time_ns_total`, `jit_bailouts_total`) are
+exposed via `snobol_jit_get_stats()` / `snobol_jit_stats_reset()` and asserted in `tests/JitOpcodeCoverageTest.php`.
+For fully-compiled patterns `jit_bailouts_total` will be 0 and `jit_interp_time_ns_total` will be 0.
 
 ## Test Coverage
 

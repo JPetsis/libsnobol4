@@ -593,6 +593,8 @@ bool vm_run(VM *vm) {
         }
         } /* end SNOBOL_JIT block */
 #endif
+        /* Track interpreter dispatch time when JIT is enabled */
+        uint64_t t_interp = (vm->jit.enabled && vm->jit.stats) ? snobol_jit_now_ns() : 0;
         uint8_t op = vm->bc[vm->ip++];
         switch (op) {
             case OP_NOP: break; /* fusion filler — skip one byte */
@@ -1059,6 +1061,8 @@ bool vm_run(VM *vm) {
                 uint16_t table_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 uint8_t dest_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t name_len = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                vm->ip += name_len;
                 
                 snobol_table_t *table = vm_get_table(vm, table_id);
                 if (!table) {
@@ -1111,6 +1115,8 @@ bool vm_run(VM *vm) {
                 uint16_t table_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
                 uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
                 uint8_t value_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t name_len = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                vm->ip += name_len;
                 
                 snobol_table_t *table = vm_get_table(vm, table_id);
                 if (!table) {
@@ -1289,6 +1295,16 @@ bool vm_run(VM *vm) {
                 /* Execute dynamic pattern bytecode through the VM */
                 const uint8_t *saved_bc = vm->bc;
                 size_t saved_bc_len = vm->bc_len;
+#ifdef SNOBOL_JIT
+                void *saved_jit_ctx = vm->jit.ctx;
+                void **saved_jit_traces = vm->jit.traces;
+                uint64_t *saved_jit_ip_counts = vm->jit.ip_counts;
+
+                SnobolJitContext *inner_ctx = (SnobolJitContext *)pattern->jit_ctx;
+                vm->jit.ctx = inner_ctx;
+                vm->jit.traces = inner_ctx ? inner_ctx->traces : nullptr;
+                vm->jit.ip_counts = inner_ctx ? inner_ctx->ip_counts : nullptr;
+#endif
                 vm->bc = pattern->bc;
                 vm->bc_len = pattern->bc_len;
                 vm->ip = 0;
@@ -1302,6 +1318,11 @@ bool vm_run(VM *vm) {
                 vm->bc = saved_bc;
                 vm->bc_len = saved_bc_len;
                 vm->ip = saved_ip;
+#ifdef SNOBOL_JIT
+                vm->jit.ctx = saved_jit_ctx;
+                vm->jit.traces = saved_jit_traces;
+                vm->jit.ip_counts = saved_jit_ip_counts;
+#endif
 
                 if (!dynamic_result) {
                     /* Dynamic pattern failed - restore captures and position */
@@ -1473,6 +1494,11 @@ bool vm_run(VM *vm) {
 
             default: if (!vm_pop_choice(vm)) goto fail_ret; break;
         }
+        /* Accumulate interpreter dispatch time for this loop iteration */
+        if (t_interp && vm->jit.stats) {
+            uint64_t interp_ns = snobol_jit_now_ns() - t_interp;
+            vm->jit.stats->interp_time_ns_total += interp_ns;
+        }
     }
     if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
     if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
@@ -1487,8 +1513,8 @@ bool vm_exec(VM *vm) {
     vm->ip = 0; vm->pos = 0; vm->max_cap_used = 0; vm->max_counter_used = 0;
     memset(vm->counters, 0, sizeof(vm->counters));
     
-    /* Initialize control flow state */
-    vm_init_labels(vm);
+    /* Initialize control flow state if not already done */
+    if (!vm->label_offsets) vm_init_labels(vm);
 
     /* Pre-register labels from bytecode tail (compiler-produced bytecodes only).
      * Detection: last 4 bytes == SNOBOL_LABEL_TABLE_MAGIC (0x534E424C = "SNBL").
@@ -1513,8 +1539,8 @@ bool vm_exec(VM *vm) {
     }
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
-    /* Initialize table registry */
-    vm_init_tables(vm);
+    /* Initialize table registry if not already done */
+    if (!vm->tables) vm_init_tables(vm);
 #endif
     
 #ifdef SNOBOL_PROFILE
@@ -1522,10 +1548,15 @@ bool vm_exec(VM *vm) {
 #endif
     bool res = vm_run(vm);
     
-    /* Cleanup */
+    /* Cleanup - only labels registered from tail in this call */
+    /* (If the caller pre-registered labels, they are responsible for cleanup) */
+    /* For now, we keep the original behavior of vm_exec being self-contained, 
+     * but we allow pre-registered tables. Labels are usually per-bytecode. */
     vm_free_labels(vm);
 #ifdef SNOBOL_DYNAMIC_PATTERN
-    vm_free_tables(vm);
+    /* Only free tables if they were NOT pre-registered? 
+     * Actually, let's just NOT free tables here and let the caller do it.
+     * This is safer for persistent VM state. */
 #endif
     
 #ifdef SNOBOL_PROFILE

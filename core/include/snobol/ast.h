@@ -387,6 +387,15 @@ ast_node_t* snobol_ast_create_emit(const char* text, size_t len, int reg);
 /** Create AST_DYNAMIC_EVAL node */
 ast_node_t* snobol_ast_create_dynamic_eval(ast_node_t* expr);
 
+/** Create AST_EVAL node */
+ast_node_t* snobol_ast_create_eval(int fn, int reg);
+
+/** Create AST_TABLE_ACCESS node */
+ast_node_t* snobol_ast_create_table_access(const char* table, ast_node_t* key);
+
+/** Create AST_TABLE_UPDATE node */
+ast_node_t* snobol_ast_create_table_update(const char* table, ast_node_t* key, ast_node_t* value);
+
 /** Create AST_BREAKX node */
 ast_node_t* snobol_ast_create_breakx(const char* set, size_t len);
 

@@ -33,17 +33,17 @@ class ApiVersionTest extends TestCase
         $this->assertSame(0, $major, 'Major version component must be 0');
     }
 
-    public function testMinorVersionIsSeven(): void
+    public function testMinorVersionIsEight(): void
     {
         $v = snobol_get_api_version();
         $minor = ($v >> 8) & 0xFF;
-        $this->assertSame(7, $minor, 'Minor version component must be 7 (v0.7.0)');
+        $this->assertSame(8, $minor, 'Minor version component must be 8 (v0.8.0)');
     }
 
-    public function testEncodingMatchesV070(): void
+    public function testEncodingMatchesV080(): void
     {
-        // v0.7.0 encodes as (0 << 16) | (7 << 8) | 0 = 0x00000700
-        $expected = (0 << 16) | (7 << 8) | 0;
+        // v0.8.0 encodes as (0 << 16) | (8 << 8) | 0 = 0x00000800
+        $expected = (0 << 16) | (8 << 8) | 0;
         $this->assertSame($expected, snobol_get_api_version());
     }
 }

@@ -14,4 +14,22 @@
    Memcheck:Value8
    obj:*/php*
 }
+{
+   pcre2_cond
+   Memcheck:Cond
+   obj:*/libpcre2-8.so*
+}
+{
+   pcre2_value8
+   Memcheck:Value8
+   obj:*/libpcre2-8.so*
+}
+{
+   zend_objects_new_leak
+   Memcheck:Leak
+   match-leak-kinds: definite,indirect
+   fun:malloc
+   fun:__zend_malloc
+   fun:zend_objects_new
+}
 

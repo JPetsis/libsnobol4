@@ -420,6 +420,34 @@ ast_node_t* snobol_ast_create_dynamic_eval(ast_node_t* expr) {
     return node;
 }
 
+ast_node_t* snobol_ast_create_eval(int fn, int reg) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return nullptr;
+    node->type = AST_EVAL;
+    node->data.eval.fn = fn;
+    node->data.eval.reg = reg;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_table_access(const char* table, ast_node_t* key) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return nullptr;
+    node->type = AST_TABLE_ACCESS;
+    node->data.table_access.table = str_dup(table, strlen(table));
+    node->data.table_access.key = key;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_table_update(const char* table, ast_node_t* key, ast_node_t* value) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return nullptr;
+    node->type = AST_TABLE_UPDATE;
+    node->data.table_update.table = str_dup(table, strlen(table));
+    node->data.table_update.key = key;
+    node->data.table_update.value = value;
+    return node;
+}
+
 ast_node_t* snobol_ast_create_breakx(const char* set, size_t len) {
     ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
     if (!node) return nullptr;

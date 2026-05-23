@@ -5,6 +5,44 @@ monorepo structure.
 
 ---
 
+## v0.8.0 → v0.9.0 (Full JIT Opcode Coverage)
+
+### No breaking changes
+
+This is a non-breaking JIT improvement release. There are **no C API changes**
+and **no PHP API changes**. All existing consumers require no code changes.
+
+### Behaviour changes consumers should be aware of
+
+- **Patterns that previously never entered the JIT now do.**  
+  Opcodes that previously caused a JIT→interpreter context switch
+  (`OP_REM`, `OP_RPOS`, `OP_RTAB`, `OP_FENCE`, `OP_LABEL`, `OP_GOTO`,
+  `OP_GOTO_F`, `OP_EMIT_*`, `OP_TABLE_GET`, `OP_TABLE_SET`, `OP_BAL`,
+  `OP_EVAL`, `OP_DYNAMIC`, `OP_DYNAMIC_DEF`) are now compiled inline or
+  via call-out within the JIT region. Patterns using these opcodes will
+  execute faster under `SNOBOL_JIT=1` with no observable difference in
+  match results.
+
+- **`jit_bailouts_total` will be 0 for previously-falling-back patterns.**  
+  If your code reads `SnobolJitStats.jit_bailouts_total` and previously
+  observed non-zero values for patterns containing the opcodes listed above,
+  those values will now be 0. This is the expected and correct behaviour.
+
+- **`jit_interp_time_ns_total` will be lower (or 0) for fully-compiled patterns.**  
+  Patterns that previously triggered interpreter round-trips will no longer
+  accumulate interpreter time. Monitoring dashboards or assertions that
+  expected non-zero `jit_interp_time_ns_total` for such patterns should be
+  updated to expect 0.
+
+### New: benchmark gate in `bench/compare_jit.php`
+
+`bench/compare_jit.php` now calls `snobol_jit_get_stats()` at the end of the
+run (when the PHP extension is loaded) and exits with code 1 if the
+interpreter-time ratio exceeds 5%. This gate is a no-op when the extension is
+not loaded or when no timing data is available.
+
+---
+
 ## v0.7.0 → v0.8.0 (Build & Tooling Hardening)
 
 ### No breaking changes

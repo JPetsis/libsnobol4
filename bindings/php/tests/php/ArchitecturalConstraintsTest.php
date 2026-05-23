@@ -12,7 +12,6 @@ use PHPUnit\Framework\TestCase;
  * These tests enforce that the "C core owns all parsing" invariant
  * is never accidentally broken by PHP-side code additions.
  *
- * @see openspec/changes/php-binding-cleanup/specs/php-binding/spec.md
  */
 class ArchitecturalConstraintsTest extends TestCase
 {

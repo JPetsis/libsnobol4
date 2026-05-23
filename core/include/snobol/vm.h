@@ -139,9 +139,9 @@ typedef enum {
     OP_LABEL,         /**< Define label target; label_id: u16 */
     OP_GOTO,          /**< Unconditional label jump; label_id: u16 */
     OP_GOTO_F,        /**< Jump to label if last match failed; label_id: u16 */
-    OP_TABLE_GET,     /**< Lookup: dest_reg = table[key_reg]; table_id: u16, key_reg: u8, dest_reg: u8 */
-    OP_TABLE_SET,     /**< Update: table[key_reg] = value_reg; table_id: u16, key_reg: u8, value_reg: u8 */
-    OP_DYNAMIC,       /**< Evaluate dynamic pattern from register; pattern_reg: u8 */
+    OP_TABLE_GET,     /**< Lookup: dest_reg = table[key_reg]; table_id: u16, key_reg: u8, dest_reg: u8, name_len: u8, name: bytes[name_len] */
+    OP_TABLE_SET,     /**< Update: table[key_reg] = value_reg; table_id: u16, key_reg: u8, value_reg: u8, name_len: u8, name: bytes[name_len] */
+    OP_DYNAMIC,       /**< Evaluate dynamic pattern from pending definition; no operands */
     OP_DYNAMIC_DEF,   /**< Define inline dynamic pattern block; len: u32, bytecode... */
 
     /* Pattern primitives */

@@ -54,13 +54,16 @@ if test "$PHP_SNOBOL" != "no"; then
   dnl Note: phpize configure scripts do not call AC_CANONICAL_HOST, so $host_cpu
   dnl is empty.  We detect the architecture via `uname -m` instead.
   AC_DEFINE(HAVE_SNOBOL_JIT, 1, [Have libsnobol4 JIT support])
+  AC_DEFINE(SNOBOL_DYNAMIC_PATTERN, 1, [Enable dynamic patterns and tables])
   SNOBOL_HOST_CPU=`uname -m`
   AC_MSG_NOTICE([Detected host CPU: $SNOBOL_HOST_CPU])
   AC_MSG_NOTICE([PHP_SNOBOL value: $PHP_SNOBOL])
+  SNOBOL_JIT_FLAG=""
   case "$SNOBOL_HOST_CPU" in
     aarch64|arm64)
       AC_DEFINE(SNOBOL_JIT, 1, [Enable micro-JIT support (ARM64 only)])
       AC_MSG_NOTICE([micro-JIT enabled ($SNOBOL_HOST_CPU)])
+      SNOBOL_JIT_FLAG="-DSNOBOL_JIT=1"
       ;;
     *)
       AC_MSG_NOTICE([micro-JIT disabled (ARM64 only; detected=$SNOBOL_HOST_CPU)])
@@ -94,5 +97,5 @@ if test "$PHP_SNOBOL" != "no"; then
   CFLAGS="$snobol_saved_cflags"
 
   dnl Create the extension
-  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [$SNOBOL_C23_FLAG -I$CORE_DIR/include])
+  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [$SNOBOL_C23_FLAG $SNOBOL_JIT_FLAG -DSNOBOL_DYNAMIC_PATTERN=1 -I$CORE_DIR/include])
 fi

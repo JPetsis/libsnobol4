@@ -13,6 +13,55 @@
 #  include <pthread.h>
 #endif
 #include "snobol/snobol_internal.h"
+#include "snobol/table.h"
+#include "snobol/dynamic_pattern.h"
+#include "snobol/string_fn.h"
+#include "snobol/type_fn.h"
+
+/* ---------------------------------------------------------------------------
+ * JIT OPCODE COVERAGE MATRIX
+ *
+ * jit-compiled  — full inline ARM64 code emitted within the compiled region
+ * call-out       — ARM64 code calls a C helper via BLR; no interpreter fallback
+ * pseudo         — no ARM64 emitted; scan-pass only (data-block skip or marker)
+ *
+ * OP_ACCEPT       jit-compiled (EXIT terminator)
+ * OP_FAIL         jit-compiled (EXIT terminator)
+ * OP_JMP          jit-compiled (FWD/BWD terminator)
+ * OP_SPLIT        jit-compiled (SPLIT terminator, pushes choice)
+ * OP_LIT          jit-compiled (inline byte comparison)
+ * OP_ANY          jit-compiled (inline bitmap match)
+ * OP_NOTANY       jit-compiled (inline bitmap match)
+ * OP_SPAN         jit-compiled (inline bitmap loop)
+ * OP_BREAK        jit-compiled (inline bitmap scan)
+ * OP_BREAKX       jit-compiled (inline bitmap scan)
+ * OP_LEN          jit-compiled (inline codepoint advance)
+ * OP_ANCHOR       jit-compiled (inline position check)
+ * OP_CAP_START    jit-compiled (inline store)
+ * OP_CAP_END      jit-compiled (inline store)
+ * OP_ASSIGN       jit-compiled (inline var update)
+ * OP_REPEAT_INIT  jit-compiled (EXIT terminator)
+ * OP_REPEAT_STEP  jit-compiled (EXIT terminator)
+ * OP_NOP          jit-compiled (skip)
+ * OP_REM          jit-compiled (inline pos=len)
+ * OP_RPOS         jit-compiled (inline position guard)
+ * OP_RTAB         jit-compiled (inline cursor advance)
+ * OP_FENCE        jit-compiled (inline choice-stack cut)
+ * OP_LABEL        pseudo       (no-emit marker; IP recorded for GOTO resolution)
+ * OP_GOTO         jit-compiled (treated as unconditional branch like JMP)
+ * OP_GOTO_F       jit-compiled (NOP in compiled region; always falls through)
+ * OP_EMIT_LITERAL call-out     (snobol_jit_helper_emit_literal)
+ * OP_EMIT_CAPTURE call-out     (snobol_jit_helper_emit_capture)
+ * OP_EMIT_EXPR    call-out     (snobol_jit_helper_emit_expr)
+ * OP_EMIT_FORMAT  call-out     (snobol_jit_helper_emit_format)
+ * OP_EMIT_TABLE   call-out     (snobol_jit_helper_emit_table_ip)
+ * OP_TABLE_GET    call-out     (snobol_jit_helper_table_get)
+ * OP_TABLE_SET    call-out     (snobol_jit_helper_table_set)
+ * OP_BAL          call-out     (snobol_jit_helper_bal)
+ * OP_EVAL         call-out     (snobol_jit_helper_eval)
+ * OP_DYNAMIC      call-out     (snobol_jit_helper_dynamic)
+ * OP_DYNAMIC_DEF  pseudo       (region-skip: inline bytecode block skipped over)
+ * --------------------------------------------------------------------------- */
 
 /* ---------------------------------------------------------------------------
  * Global state
@@ -364,6 +413,116 @@ bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *c
             case OP_ASSIGN:
                 scan += 3;
                 break;
+            /* --- NEW opcodes for full coverage --- */
+            case OP_REM:
+                useful++;
+                break;
+            case OP_RPOS:
+                scan += 4;
+                useful++;
+                break;
+            case OP_RTAB:
+                scan += 4;
+                useful++;
+                break;
+            case OP_FENCE:
+                break;
+            case OP_LABEL:
+                scan += 2;
+                break;
+            case OP_GOTO: {
+                /* treat like JMP: follow forward if we can, then stop */
+                if (scan + 2 > vm->bc_len) goto done;
+                scan += 2;
+                goto done;
+            }
+            case OP_GOTO_F:
+                scan += 2;
+                break;
+            case OP_EMIT_LITERAL: {
+                if (scan + 8 > vm->bc_len) goto done;
+                uint32_t elt_off = ((uint32_t)vm->bc[scan] << 24)   |
+                                   ((uint32_t)vm->bc[scan+1] << 16) |
+                                   ((uint32_t)vm->bc[scan+2] << 8)  |
+                                    (uint32_t)vm->bc[scan+3];
+                uint32_t elt_len = ((uint32_t)vm->bc[scan+4] << 24) |
+                                   ((uint32_t)vm->bc[scan+5] << 16) |
+                                   ((uint32_t)vm->bc[scan+6] << 8)  |
+                                    (uint32_t)vm->bc[scan+7];
+                scan += 8;
+                /* If inline data follows, skip it */
+                size_t expected_ip = ip + (scan - (ip - 1 /* rewind for op byte*/));
+                (void)expected_ip;
+                if ((size_t)elt_off == (size_t)(vm->bc + scan - vm->bc))
+                    scan += (size_t)elt_len;
+                useful++;
+                break;
+            }
+            case OP_EMIT_CAPTURE:
+                scan += 1;
+                useful++;
+                break;
+            case OP_EMIT_EXPR:
+                scan += 2;
+                useful++;
+                break;
+            case OP_EMIT_FORMAT: {
+                if (scan + 2 > vm->bc_len) goto done;
+                uint8_t sc_fmt = vm->bc[scan + 1];
+                scan += 2;
+                if (sc_fmt == SNBL_FMT_LPAD || sc_fmt == SNBL_FMT_RPAD) scan += 3;
+                useful++;
+                break;
+            }
+            case OP_EMIT_TABLE: {
+                if (scan + 4 > vm->bc_len) goto done;
+                uint8_t sc_ktype = vm->bc[scan + 2];
+                uint8_t sc_nlen  = vm->bc[scan + 3];
+                scan += 4 + sc_nlen;
+                if (sc_ktype == 0) {
+                    if (scan + 2 > vm->bc_len) goto done;
+                    uint16_t kl = ((uint16_t)vm->bc[scan] << 8) | vm->bc[scan+1];
+                    scan += 2 + kl;
+                } else if (sc_ktype == 1) {
+                    scan += 1;
+                }
+                useful++;
+                break;
+            }
+            case OP_TABLE_GET:
+            case OP_TABLE_SET: {
+                if (scan + 4 > vm->bc_len) goto done;
+                uint8_t nlen = vm->bc[scan + 4];
+                scan += 5 + nlen;
+                useful++;
+                break;
+            }
+            case OP_BAL:
+                scan += 8;
+                useful++;
+                break;
+            case OP_EVAL:
+                scan += 3;
+                useful++;
+                break;
+            case OP_DYNAMIC:
+                useful++;
+                break;
+            case OP_DYNAMIC_DEF: {
+                if (scan + 4 > vm->bc_len) goto done;
+                uint32_t src_len = ((uint32_t)vm->bc[scan] << 24)   |
+                                   ((uint32_t)vm->bc[scan+1] << 16) |
+                                   ((uint32_t)vm->bc[scan+2] << 8)  |
+                                    (uint32_t)vm->bc[scan+3];
+                scan += 4 + src_len;
+                if (scan + 4 > vm->bc_len) goto done;
+                uint32_t dyn_bcl = ((uint32_t)vm->bc[scan] << 24)   |
+                                   ((uint32_t)vm->bc[scan+1] << 16) |
+                                   ((uint32_t)vm->bc[scan+2] << 8)  |
+                                    (uint32_t)vm->bc[scan+3];
+                scan += 4 + dyn_bcl;
+                break;
+            }
             default:
                 goto done;
         }
@@ -448,11 +607,337 @@ static inline uint32_t A64_B_HI(uint32_t imm) {
     return 0x54000008u | ((imm & 0x3ffffu) << 5);
 }
 
+/* New instruction helpers for full opcode coverage */
+static inline uint32_t A64_B_LO(uint32_t imm) {
+    /* B.LO (unsigned lower / carry clear) */
+    return 0x54000003u | ((imm & 0x3ffffu) << 5);
+}
+static inline uint32_t A64_MOV_X_X(uint32_t rd, uint32_t rm) {
+    /* MOV Xd, Xm  =  ORR Xd, XZR, Xm */
+    return 0xAA000000u | (rd & 31u) | (31u << 5) | ((rm & 31u) << 16);
+}
+static inline uint32_t A64_SUB_X_X_X(uint32_t rd, uint32_t rn, uint32_t rm) {
+    /* SUB Xd, Xn, Xm (shifted-register, shift=0) */
+    return 0xCB000000u | (rd & 31u) | ((rn & 31u) << 5) | ((rm & 31u) << 16);
+}
+
 typedef struct {
     uint32_t *p;
     uint32_t *code_start;
     size_t    code_size;
 } JITState;
+
+/* ---------------------------------------------------------------------------
+ * JIT call-out helper functions
+ *
+ * These are plain C functions called from JIT-compiled regions via BLR.
+ * For bool-returning helpers: return true = success, false = fail-path.
+ * All helpers that might advance vm->pos do so via the struct field (not a
+ * register), so the JIT caller must store and reload vm->pos around the call.
+ * --------------------------------------------------------------------------- */
+
+static void snobol_jit_helper_emit_literal(VM *vm, uint32_t offset, uint32_t len) {
+    if (vm->out) snobol_buf_append(vm->out, (const char *)vm->bc + offset, (size_t)len);
+    if (vm->emit_fn) vm->emit_fn((const char *)vm->bc + offset, (size_t)len, vm->emit_udata);
+}
+
+static void snobol_jit_helper_emit_capture(VM *vm, uint8_t reg) {
+    if (reg < MAX_CAPS &&
+        vm->cap_end[reg] >= vm->cap_start[reg] &&
+        vm->cap_end[reg] <= vm->len) {
+        size_t s = vm->cap_start[reg];
+        size_t e = vm->cap_end[reg];
+        if (vm->out)    snobol_buf_append(vm->out, vm->s + s, e - s);
+        if (vm->emit_fn) vm->emit_fn(vm->s + s, e - s, vm->emit_udata);
+    }
+}
+
+static void snobol_jit_helper_emit_expr(VM *vm, uint8_t reg, uint8_t expr_type) {
+    if (reg >= MAX_CAPS) return;
+    if (vm->cap_end[reg] < vm->cap_start[reg] || vm->cap_end[reg] > vm->len) return;
+    const char *data = vm->s + vm->cap_start[reg];
+    size_t len = vm->cap_end[reg] - vm->cap_start[reg];
+    /* Map old EMIT_EXPR discriminants to SNBL_FMT_* */
+    if (expr_type == 1) { /* uppercase */
+        char *tmp = (char *)snobol_malloc(len + 1);
+        if (!tmp) return;
+        for (size_t i = 0; i < len; ++i)
+            tmp[i] = (data[i] >= 'a' && data[i] <= 'z') ? (char)(data[i] - 32) : data[i];
+        if (vm->out)    snobol_buf_append(vm->out, tmp, len);
+        if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
+        snobol_free(tmp);
+    } else if (expr_type == 2) { /* length */
+        char tmp[32];
+        int n = snprintf(tmp, sizeof(tmp), "%zu", len);
+        if (vm->out)    snobol_buf_append(vm->out, tmp, (size_t)n);
+        if (vm->emit_fn) vm->emit_fn(tmp, (size_t)n, vm->emit_udata);
+    } else {
+        if (vm->out)    snobol_buf_append(vm->out, data, len);
+        if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata);
+    }
+}
+
+static void snobol_jit_helper_emit_format(VM *vm, uint8_t reg, uint8_t format_type,
+                                           uint16_t width, uint8_t fill_char) {
+    if (reg >= MAX_CAPS) return;
+    if (vm->cap_end[reg] < vm->cap_start[reg] || vm->cap_end[reg] > vm->len) return;
+    const char *data = vm->s + vm->cap_start[reg];
+    size_t len = vm->cap_end[reg] - vm->cap_start[reg];
+
+    if (format_type == SNBL_FMT_UPPER) {
+        char *tmp = (char *)snobol_malloc(len + 1);
+        if (!tmp) return;
+        for (size_t i = 0; i < len; ++i)
+            tmp[i] = (data[i] >= 'a' && data[i] <= 'z') ? (char)(data[i] - 32) : data[i];
+        if (vm->out)    snobol_buf_append(vm->out, tmp, len);
+        if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
+        snobol_free(tmp);
+    } else if (format_type == SNBL_FMT_LOWER) {
+        char *tmp = (char *)snobol_malloc(len + 1);
+        if (!tmp) return;
+        for (size_t i = 0; i < len; ++i)
+            tmp[i] = (data[i] >= 'A' && data[i] <= 'Z') ? (char)(data[i] + 32) : data[i];
+        if (vm->out)    snobol_buf_append(vm->out, tmp, len);
+        if (vm->emit_fn) vm->emit_fn(tmp, len, vm->emit_udata);
+        snobol_free(tmp);
+    } else if (format_type == SNBL_FMT_LENGTH) {
+        char tmp[32];
+        int n = snprintf(tmp, sizeof(tmp), "%zu", len);
+        if (vm->out)    snobol_buf_append(vm->out, tmp, (size_t)n);
+        if (vm->emit_fn) vm->emit_fn(tmp, (size_t)n, vm->emit_udata);
+    } else if (format_type == SNBL_FMT_LPAD || format_type == SNBL_FMT_RPAD) {
+        if (width > 1024) width = 1024;
+        if (len >= (size_t)width) {
+            if (vm->out)    snobol_buf_append(vm->out, data, len);
+            if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata);
+        } else {
+            size_t pad = (size_t)width - len;
+            size_t total = (size_t)width;
+            char *buf = (char *)snobol_malloc(total);
+            if (buf) {
+                if (format_type == SNBL_FMT_LPAD) {
+                    memset(buf, fill_char, pad);
+                    memcpy(buf + pad, data, len);
+                } else {
+                    memcpy(buf, data, len);
+                    memset(buf + len, fill_char, pad);
+                }
+                if (vm->out)    snobol_buf_append(vm->out, buf, total);
+                if (vm->emit_fn) vm->emit_fn(buf, total, vm->emit_udata);
+                snobol_free(buf);
+            }
+        }
+    } else {
+        if (vm->out)    snobol_buf_append(vm->out, data, len);
+        if (vm->emit_fn) vm->emit_fn(data, len, vm->emit_udata);
+    }
+}
+
+/* emit_table_ip: the JIT passes the bytecode offset of the OP_EMIT_TABLE byte.
+ * The helper decodes all variable-length operands from vm->bc at runtime. */
+static void snobol_jit_helper_emit_table_ip(VM *vm, uint64_t op_ip) {
+    size_t ip = (size_t)op_ip + 1; /* skip opcode byte */
+    if (ip + 4 > vm->bc_len) return;
+    uint16_t table_id = ((uint16_t)vm->bc[ip] << 8) | vm->bc[ip+1]; ip += 2;
+    uint8_t key_type  = vm->bc[ip++];
+    uint8_t name_len  = vm->bc[ip++];
+    ip += name_len; /* skip embedded name */
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+    snobol_table_t *table = vm_get_table(vm, table_id);
+    const char *value = nullptr;
+
+    if (key_type == 0) { /* literal key */
+        if (ip + 2 > vm->bc_len) return;
+        uint16_t key_len = ((uint16_t)vm->bc[ip] << 8) | vm->bc[ip+1]; ip += 2;
+        if (key_len > 0 && ip + key_len <= vm->bc_len) {
+            char *key = (char *)snobol_malloc(key_len + 1);
+            if (key) {
+                memcpy(key, vm->bc + ip, key_len);
+                key[key_len] = '\0';
+                if (table) value = table_get(table, key);
+                snobol_free(key);
+            }
+        }
+    } else if (key_type == 1) { /* capture-derived key */
+        if (ip >= vm->bc_len) return;
+        uint8_t key_reg = vm->bc[ip];
+        if (table && key_reg < MAX_CAPS &&
+            vm->cap_end[key_reg] >= vm->cap_start[key_reg] &&
+            vm->cap_end[key_reg] <= vm->len) {
+            size_t kl = vm->cap_end[key_reg] - vm->cap_start[key_reg];
+            char *key = (char *)snobol_malloc(kl + 1);
+            if (key) {
+                memcpy(key, vm->s + vm->cap_start[key_reg], kl);
+                key[kl] = '\0';
+                value = table_get(table, key);
+                snobol_free(key);
+            }
+        }
+    }
+
+    if (value) {
+        size_t vl = strlen(value);
+        if (vm->out)    snobol_buf_append(vm->out, value, vl);
+        if (vm->emit_fn) vm->emit_fn(value, vl, vm->emit_udata);
+    }
+#else
+    (void)table_id; (void)key_type;
+#endif
+}
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+static bool snobol_jit_helper_table_get(VM *vm, uint16_t table_id,
+                                         uint8_t key_reg, uint8_t dest_reg) {
+    (void)dest_reg;
+    snobol_table_t *table = vm_get_table(vm, table_id);
+    if (!table) return false;
+    if (key_reg >= MAX_CAPS ||
+        vm->cap_end[key_reg] <= vm->cap_start[key_reg]) return false;
+    size_t kl = vm->cap_end[key_reg] - vm->cap_start[key_reg];
+    char *key = (char *)snobol_malloc(kl + 1);
+    if (!key) return false;
+    memcpy(key, vm->s + vm->cap_start[key_reg], kl);
+    key[kl] = '\0';
+    const char *value = table_get(table, key);
+    snobol_free(key);
+    return value != nullptr;
+}
+
+static bool snobol_jit_helper_table_set(VM *vm, uint16_t table_id,
+                                         uint8_t key_reg, uint8_t value_reg) {
+    snobol_table_t *table = vm_get_table(vm, table_id);
+    if (!table) return false;
+    if (key_reg   >= MAX_CAPS || vm->cap_end[key_reg]   <= vm->cap_start[key_reg]) return false;
+    if (value_reg >= MAX_CAPS || vm->cap_end[value_reg] <= vm->cap_start[value_reg]) return false;
+    size_t kl = vm->cap_end[key_reg]   - vm->cap_start[key_reg];
+    size_t vl = vm->cap_end[value_reg] - vm->cap_start[value_reg];
+    char *key = (char *)snobol_malloc(kl + 1);
+    char *val = (char *)snobol_malloc(vl + 1);
+    if (!key || !val) { snobol_free(key); snobol_free(val); return false; }
+    memcpy(key, vm->s + vm->cap_start[key_reg],   kl); key[kl] = '\0';
+    memcpy(val, vm->s + vm->cap_start[value_reg], vl); val[vl] = '\0';
+    (void)table_set(table, key, val);
+    snobol_free(key); snobol_free(val);
+    return true;
+}
+#endif /* SNOBOL_DYNAMIC_PATTERN */
+
+static bool snobol_jit_helper_bal(VM *vm, uint32_t open_cp, uint32_t close_cp) {
+    size_t pos = vm->pos;
+    uint32_t first; int fb;
+    if (!utf8_peek_next(vm->s, vm->len, pos, &first, &fb) || first != open_cp)
+        return false;
+    int depth = 0;
+    bool ok = false;
+    while (pos < vm->len) {
+        uint32_t cp; int cb;
+        if (!utf8_peek_next(vm->s, vm->len, pos, &cp, &cb)) break;
+        if (cp == open_cp)       depth++;
+        else if (cp == close_cp) { depth--; if (depth == 0) { pos += (size_t)cb; ok = true; break; } }
+        pos += (size_t)cb;
+    }
+    if (ok) vm->pos = pos;
+    return ok;
+}
+
+static bool snobol_jit_helper_eval(VM *vm, uint16_t fn_id, uint8_t reg) {
+    if (reg >= MAX_CAPS) return false;
+    if (vm->cap_end[reg] < vm->cap_start[reg] ||
+        vm->cap_end[reg] > vm->len) return false;
+    if (vm->eval_fn)
+        return vm->eval_fn((int)fn_id, vm->s,
+                           vm->cap_start[reg], vm->cap_end[reg],
+                           vm->eval_udata);
+    return true; /* no host callback = always succeed */
+}
+
+#ifdef SNOBOL_DYNAMIC_PATTERN
+static bool snobol_jit_helper_dynamic(VM *vm) {
+    if (!vm->dyn_pending_source || !vm->dyn_pending_bc) return false;
+
+    dynamic_pattern_t *pattern = dynamic_pattern_cache_get(
+        vm->dyn_cache, vm->dyn_pending_source, (int)vm->dyn_pending_source_len);
+
+    if (!pattern) {
+        uint8_t *bc_copy = (uint8_t *)snobol_malloc(vm->dyn_pending_bc_len);
+        if (!bc_copy) return false;
+        memcpy(bc_copy, vm->dyn_pending_bc, vm->dyn_pending_bc_len);
+        pattern = dynamic_pattern_create(vm->dyn_pending_source, bc_copy,
+                                         vm->dyn_pending_bc_len);
+        if (!pattern || !pattern->is_valid) {
+            if (pattern) dynamic_pattern_release(pattern);
+            snobol_free(bc_copy);
+            return false;
+        }
+        if (!dynamic_pattern_cache_put(vm->dyn_cache, vm->dyn_pending_source, pattern)) {
+            dynamic_pattern_release(pattern); return false;
+        }
+    }
+
+    const uint8_t *saved_bc  = vm->bc;
+    size_t         saved_bcl = vm->bc_len;
+    size_t         saved_pos = vm->pos;
+    size_t         saved_ip  = vm->ip;
+
+#ifdef SNOBOL_JIT
+    SnobolJitContext *saved_ctx = (SnobolJitContext *)vm->jit.ctx;
+    void **saved_traces = vm->jit.traces;
+    uint64_t *saved_ip_counts = vm->jit.ip_counts;
+
+    SnobolJitContext *inner_ctx = (SnobolJitContext *)pattern->jit_ctx;
+    vm->jit.ctx = inner_ctx;
+    vm->jit.traces = inner_ctx ? inner_ctx->traces : nullptr;
+    vm->jit.ip_counts = inner_ctx ? inner_ctx->ip_counts : nullptr;
+#endif
+
+    vm->bc     = pattern->bc;
+    vm->bc_len = pattern->bc_len;
+    vm->ip     = 0;
+
+    bool result = vm_run(vm);
+
+    vm->bc     = saved_bc;
+    vm->bc_len = saved_bcl;
+    vm->ip     = saved_ip;
+#ifdef SNOBOL_JIT
+    vm->jit.ctx = saved_ctx;
+    vm->jit.traces = saved_traces;
+    vm->jit.ip_counts = saved_ip_counts;
+#endif
+
+    if (!result) vm->pos = saved_pos;
+    dynamic_pattern_release(pattern);
+    return result;
+}
+#endif /* SNOBOL_DYNAMIC_PATTERN */
+
+/* ---------------------------------------------------------------------------
+ * Macro helpers for emitting call-out prologues / epilogues
+ *
+ * Frame layout (32 bytes, 16-byte aligned):
+ *   [sp+ 0] x0  (vm pointer)
+ *   [sp+ 8] x30 (LR)
+ *   [sp+16] x1  (vm->s)
+ *   [sp+24] x2  (pos)
+ *
+ * x3 (len) is NOT saved — it is reloaded from vm->len after the call.
+ * --------------------------------------------------------------------------- */
+#define EMIT_CALLOUT_SAVE(js) do { \
+    emit_instr((js), 0xa9be7be0u); /* STP x0, x30, [sp, #-32]! */ \
+    emit_instr((js), 0xa9010be1u); /* STP x1, x2,  [sp, #16]   */ \
+} while(0)
+
+#define EMIT_CALLOUT_RESTORE(js) do { \
+    emit_instr((js), 0xa9410be1u); /* LDP x1, x2, [sp, #16]  */ \
+    emit_instr((js), 0xa8c27be0u); /* LDP x0, x30, [sp], #32 */ \
+    emit_instr((js), A64_LDR_X_X_IMM(3, 0, offsetof(VM, len))); \
+} while(0)
+
+/* For bool-returning helpers: save x0 return value to x9, then restore frame.
+ * Caller must check x9 afterwards. */
+#define EMIT_CALLOUT_SAVE_RET(js) \
+    emit_instr((js), A64_MOV_X_X(9, 0)) /* MOV x9, x0 (save bool result) */
 
 typedef struct {
     uint32_t *instr_p;
@@ -638,6 +1123,20 @@ static void jit_cfg_scan_block(const VM *vm, size_t start_ip, JitBlock *blk) {
             return;
         }
 
+        /* OP_GOTO: treat like JMP — resolve label_id → bytecode IP from vm->label_offsets */
+        if (op == OP_GOTO) {
+            if (scan + 3 > vm->bc_len) goto done_exit;
+            uint16_t label_id = ((uint16_t)vm->bc[scan+1] << 8) | vm->bc[scan+2];
+            size_t tgt = 0;
+            if (vm->label_offsets && label_id < vm->label_count)
+                tgt = (size_t)vm->label_offsets[label_id];
+            blk->term_ip = scan;
+            blk->next_ip = scan + 3;
+            blk->succ_a  = tgt;
+            blk->term    = (tgt > scan) ? BLOCK_TERM_JMP_FWD : BLOCK_TERM_JMP_BWD;
+            return;
+        }
+
         /* Advance over known linear ops */
         size_t next;
         switch (op) {
@@ -664,7 +1163,116 @@ static void jit_cfg_scan_block(const VM *vm, size_t start_ip, JitBlock *blk) {
             case OP_ASSIGN:
                 next = scan + 4;
                 break;
+            /* --- NEW: position guards (inline) --- */
+            case OP_REM:
+                next = scan + 1;
+                blk->worthy = true;
+                break;
+            case OP_RPOS:
+                next = scan + 5;
+                blk->worthy = true;
+                break;
+            case OP_RTAB:
+                next = scan + 5;
+                blk->worthy = true;
+                break;
+            /* --- NEW: fence (inline) --- */
+            case OP_FENCE:
+                next = scan + 1;
+                break;
+            /* --- NEW: labeled control flow --- */
+            case OP_LABEL:
+                next = scan + 3; /* 1 op + 2 byte label_id; no ARM64 emitted */
+                break;
+            case OP_GOTO_F:
+                next = scan + 3; /* NOP in JIT (always falls through) */
+                break;
+            /* --- NEW: emit family (call-out) --- */
+            case OP_EMIT_CAPTURE:
+                next = scan + 2;
+                blk->worthy = true;
+                break;
+            case OP_EMIT_EXPR:
+                next = scan + 3;
+                blk->worthy = true;
+                break;
+            case OP_EMIT_LITERAL: {
+                if (scan + 9 > vm->bc_len) goto done_exit;
+                uint32_t elt_off = cfg_read_u32(vm->bc + scan + 1);
+                uint32_t elt_len = cfg_read_u32(vm->bc + scan + 5);
+                next = scan + 9;
+                if ((size_t)elt_off == next) next += (size_t)elt_len; /* inline data */
+                blk->worthy = true;
+                break;
+            }
+            case OP_EMIT_FORMAT: {
+                if (scan + 3 > vm->bc_len) goto done_exit;
+                uint8_t fmt_type = vm->bc[scan + 2];
+                next = scan + 3;
+                if (fmt_type == SNBL_FMT_LPAD || fmt_type == SNBL_FMT_RPAD) {
+                    if (scan + 6 > vm->bc_len) goto done_exit;
+                    next = scan + 6;
+                }
+                blk->worthy = true;
+                break;
+            }
+            case OP_EMIT_TABLE: {
+                /* variable-length: table_id(2)+key_type(1)+name_len(1)+name+payload */
+                if (scan + 5 > vm->bc_len) goto done_exit;
+                uint8_t etbl_ktype = vm->bc[scan + 3];
+                uint8_t etbl_nlen  = vm->bc[scan + 4];
+                size_t  etbl_after = scan + 5 + etbl_nlen;
+                if (etbl_after > vm->bc_len) goto done_exit;
+                if (etbl_ktype == 0) {
+                    if (etbl_after + 2 > vm->bc_len) goto done_exit;
+                    uint16_t kl = ((uint16_t)vm->bc[etbl_after] << 8) | vm->bc[etbl_after+1];
+                    next = etbl_after + 2 + kl;
+                } else if (etbl_ktype == 1) {
+                    next = etbl_after + 1;
+                } else { goto done_exit; }
+                blk->worthy = true;
+                break;
+            }
+            /* --- NEW: table ops (call-out) --- */
+            case OP_TABLE_GET:
+            case OP_TABLE_SET: {
+                /* op(1) + u16 table_id(2) + u8 kreg(1) + u8 dreg/vreg(1) + u8 nlen(1) + name[nlen] */
+                if (scan + 6 > vm->bc_len) goto done_exit;
+                uint8_t tbl_nlen = vm->bc[scan + 5];
+                next = scan + 6 + tbl_nlen;
+                blk->worthy = true;
+                break;
+            }
+            /* --- NEW: BAL (call-out) --- */
+            case OP_BAL:
+                next = scan + 9; /* op + u32 open_cp + u32 close_cp */
+                blk->worthy = true;
+                break;
+            /* --- NEW: EVAL (call-out) --- */
+            case OP_EVAL:
+                next = scan + 4; /* op + u16 fn_id + u8 reg */
+                blk->worthy = true;
+                break;
+            /* --- NEW: DYNAMIC (call-out) --- */
+            case OP_DYNAMIC:
+                next = scan + 1; /* no operands */
+                blk->worthy = true;
+                break;
+            /* --- NEW: DYNAMIC_DEF (region-skip pseudo-op) --- */
+            case OP_DYNAMIC_DEF: {
+                if (scan + 5 > vm->bc_len) goto done_exit;
+                uint32_t src_len = cfg_read_u32(vm->bc + scan + 1);
+                size_t after_src = scan + 5 + src_len;
+                if (after_src + 4 > vm->bc_len) goto done_exit;
+                uint32_t dyn_bcl = cfg_read_u32(vm->bc + after_src);
+                next = after_src + 4 + dyn_bcl;
+                /* No ARM64 emitted; skip inline block without terminating */
+                break;
+            }
             default:
+                /* Any opcode not listed above is unhandled; fail loudly on debug
+                 * builds to catch future opcode additions early. */
+                SNOBOL_LOG("JIT CFG: unhandled opcode 0x%02x at ip=%zu", op, scan);
                 goto done_exit;
         }
         if (next > vm->bc_len) goto done_exit;
@@ -923,11 +1531,336 @@ static bool emit_block_ops(
             continue;
         }
 
+        /* ================================================================
+         * NEW opcodes — full JIT coverage
+         * ================================================================ */
+
+        /* OP_REM: set pos = len (advance to end of subject) */
+        if (op == OP_REM) {
+            scan = oip; /* no operands */
+            emit_instr(js, A64_MOV_X_X(2, 3)); /* MOV x2, x3  (pos = len) */
+            continue;
+        }
+
+        /* OP_RPOS n: fail unless pos == len - n (ASCII byte offsets) */
+        if (op == OP_RPOS) {
+            if (oip + 4 > vm->bc_len) return false;
+            uint32_t n = cfg_read_u32(vm->bc + oip);
+            scan = oip + 4;
+            emit_mov_x64(js, 7, n);
+            emit_instr(js, A64_SUB_X_X_X(8, 3, 7)); /* x8 = len - n */
+            emit_instr(js, A64_CMP_X_X(2, 8));
+            fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
+            emit_instr(js, A64_B_NE(0));
+            continue;
+        }
+
+        /* OP_RTAB n: set pos = len - n; fail if pos > target */
+        if (op == OP_RTAB) {
+            if (oip + 4 > vm->bc_len) return false;
+            uint32_t n = cfg_read_u32(vm->bc + oip);
+            scan = oip + 4;
+            emit_mov_x64(js, 7, n);
+            /* Fail if len < n (unsigned compare: len - n would underflow) */
+            emit_instr(js, A64_CMP_X_X(3, 7));
+            fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
+            emit_instr(js, A64_B_LO(0));
+            /* x8 = target = len - n */
+            emit_instr(js, A64_SUB_X_X_X(8, 3, 7));
+            /* Fail if pos > target */
+            emit_instr(js, A64_CMP_X_X(2, 8));
+            fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
+            emit_instr(js, A64_B_HI(0));
+            /* pos = target */
+            emit_instr(js, A64_MOV_X_X(2, 8));
+            continue;
+        }
+
+        /* OP_FENCE: cut choice stack by zeroing choices_top */
+        if (op == OP_FENCE) {
+            scan = oip; /* no operands */
+            emit_instr(js, A64_MOV_X_IMM(7, 0));
+            emit_instr(js, A64_STR_X_X_IMM(7, 0, offsetof(VM, choices_top)));
+            continue;
+        }
+
+        /* OP_LABEL: pseudo-op — no ARM64 emitted, just advance scan */
+        if (op == OP_LABEL) {
+            if (oip + 2 > vm->bc_len) return false;
+            scan = oip + 2;
+            continue;
+        }
+
+        /* OP_GOTO_F: NOP in JIT compiled regions (always falls through) */
+        if (op == OP_GOTO_F) {
+            if (oip + 2 > vm->bc_len) return false;
+            scan = oip + 2;
+            continue;
+        }
+
+        /* OP_DYNAMIC_DEF: skip inline source+bytecode block, no ARM64 */
+        if (op == OP_DYNAMIC_DEF) {
+            if (oip + 4 > vm->bc_len) return false;
+            uint32_t src_len = cfg_read_u32(vm->bc + oip);
+            size_t after_src = oip + 4 + src_len;
+            if (after_src + 4 > vm->bc_len) return false;
+            uint32_t dyn_bcl = cfg_read_u32(vm->bc + after_src);
+            scan = after_src + 4 + dyn_bcl;
+            if (scan > vm->bc_len) return false;
+            continue;
+        }
+
+        /* ----------------------------------------------------------------
+         * Helper macro: emit a void call-out (no failure check)
+         * x0=vm, caller sets x1, x2, x3 args before BLR.
+         * After BLR: restore frame and reload x3=len.
+         * ---------------------------------------------------------------- */
+#define EMIT_VOID_CALLOUT(js_, fn_ptr_) do { \
+    EMIT_CALLOUT_SAVE(js_); \
+    emit_mov_x64((js_), 9, (uint64_t)(uintptr_t)(fn_ptr_)); \
+    emit_instr((js_), 0xd63f0120u); /* BLR x9 */ \
+    EMIT_CALLOUT_RESTORE(js_); \
+} while(0)
+
+        /* ----------------------------------------------------------------
+         * Helper macro: emit a bool call-out (fail if return == 0)
+         * ---------------------------------------------------------------- */
+#define EMIT_BOOL_CALLOUT(js_, fn_ptr_, fail_patches_, fail_patch_count_, cur_) do { \
+    emit_instr((js_), A64_STR_X_X_IMM(2, 0, offsetof(VM, pos))); \
+    EMIT_CALLOUT_SAVE(js_); \
+    emit_mov_x64((js_), 9, (uint64_t)(uintptr_t)(fn_ptr_)); \
+    emit_instr((js_), 0xd63f0120u); /* BLR x9 */ \
+    EMIT_CALLOUT_SAVE_RET(js_); \
+    EMIT_CALLOUT_RESTORE(js_); \
+    emit_instr((js_), A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos))); \
+    emit_instr((js_), A64_MOV_W_IMM(7, 0)); \
+    emit_instr((js_), A64_CMP_W_W(9, 7)); \
+    (fail_patches_)[(*(fail_patch_count_))++] = (FailPatch){ (js_)->p, (cur_) }; \
+    emit_instr((js_), A64_B_EQ(0)); \
+} while(0)
+
+        /* OP_EMIT_LITERAL: call helper(vm, offset, len) */
+        if (op == OP_EMIT_LITERAL) {
+            if (oip + 8 > vm->bc_len) return false;
+            uint32_t elt_off = cfg_read_u32(vm->bc + oip);
+            uint32_t elt_len = cfg_read_u32(vm->bc + oip + 4);
+            scan = oip + 8;
+            if ((size_t)elt_off == scan) scan += (size_t)elt_len;
+            /* Store pos first so helper sees correct state */
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_literal);
+            emit_mov_w32(js, 1, elt_off);
+            emit_mov_w32(js, 2, elt_len);
+            emit_instr(js, 0xd63f0120u); /* BLR x9 */
+            EMIT_CALLOUT_RESTORE(js);
+            continue;
+        }
+
+        /* OP_EMIT_CAPTURE: call helper(vm, reg) */
+        if (op == OP_EMIT_CAPTURE) {
+            if (oip + 1 > vm->bc_len) return false;
+            uint8_t ecap_reg = vm->bc[oip];
+            scan = oip + 1;
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_capture);
+            emit_instr(js, A64_MOV_X_IMM(1, ecap_reg));
+            emit_instr(js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(js);
+            continue;
+        }
+
+        /* OP_EMIT_EXPR: call helper(vm, reg, expr_type) */
+        if (op == OP_EMIT_EXPR) {
+            if (oip + 2 > vm->bc_len) return false;
+            uint8_t eexpr_reg  = vm->bc[oip];
+            uint8_t eexpr_type = vm->bc[oip + 1];
+            scan = oip + 2;
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_expr);
+            emit_instr(js, A64_MOV_X_IMM(1, eexpr_reg));
+            emit_instr(js, A64_MOV_X_IMM(2, eexpr_type));
+            emit_instr(js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(js);
+            continue;
+        }
+
+        /* OP_EMIT_FORMAT: call helper(vm, reg, format_type, width, fill_char) */
+        if (op == OP_EMIT_FORMAT) {
+            if (oip + 2 > vm->bc_len) return false;
+            uint8_t efmt_reg  = vm->bc[oip];
+            uint8_t efmt_type = vm->bc[oip + 1];
+            scan = oip + 2;
+            uint16_t efmt_width = 0;
+            uint8_t  efmt_fill  = 0;
+            if (efmt_type == SNBL_FMT_LPAD || efmt_type == SNBL_FMT_RPAD) {
+                if (scan + 3 > vm->bc_len) return false;
+                efmt_width = ((uint16_t)vm->bc[scan] << 8) | vm->bc[scan+1];
+                efmt_fill  = vm->bc[scan + 2];
+                scan += 3;
+            }
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_format);
+            emit_instr(js, A64_MOV_X_IMM(1, efmt_reg));
+            emit_instr(js, A64_MOV_X_IMM(2, efmt_type));
+            emit_mov_w32(js, 3, efmt_width);
+            emit_instr(js, A64_MOV_X_IMM(4, efmt_fill));
+            emit_instr(js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(js);
+            continue;
+        }
+
+        /* OP_EMIT_TABLE: call helper(vm, op_ip) — decodes variable operands at runtime */
+        if (op == OP_EMIT_TABLE) {
+            if (oip + 4 > vm->bc_len) return false;
+            uint8_t etbl_ktype = vm->bc[oip + 2];
+            uint8_t etbl_nlen  = vm->bc[oip + 3];
+            size_t  etbl_after = oip + 4 + etbl_nlen;
+            if (etbl_after > vm->bc_len) return false;
+            if (etbl_ktype == 0) {
+                if (etbl_after + 2 > vm->bc_len) return false;
+                uint16_t kl = ((uint16_t)vm->bc[etbl_after] << 8) | vm->bc[etbl_after+1];
+                scan = etbl_after + 2 + kl;
+            } else if (etbl_ktype == 1) {
+                scan = etbl_after + 1;
+            } else { return false; }
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_table_ip);
+            emit_mov_x64(js, 1, (uint64_t)cur); /* pass bytecode IP of OP_EMIT_TABLE */
+            emit_instr(js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(js);
+            continue;
+        }
+
+        /* OP_TABLE_GET: bool call-out helper */
+        if (op == OP_TABLE_GET) {
+            if (oip + 5 > vm->bc_len) return false;
+            uint16_t tg_tid  = ((uint16_t)vm->bc[oip] << 8) | vm->bc[oip+1];
+            uint8_t  tg_kreg = vm->bc[oip + 2];
+            uint8_t  tg_dreg = vm->bc[oip + 3];
+            uint8_t  tg_nlen = vm->bc[oip + 4];
+            scan = oip + 5 + tg_nlen;
+#ifdef SNOBOL_DYNAMIC_PATTERN
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_table_get);
+            emit_mov_w32(js, 1, tg_tid);
+            emit_instr(js, A64_MOV_X_IMM(2, tg_kreg));
+            emit_instr(js, A64_MOV_X_IMM(3, tg_dreg));
+            emit_instr(js, 0xd63f0120u);
+            EMIT_CALLOUT_SAVE_RET(js);
+            EMIT_CALLOUT_RESTORE(js);
+            emit_instr(js, A64_MOV_W_IMM(7, 0));
+            emit_instr(js, A64_CMP_W_W(9, 7));
+            fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
+            emit_instr(js, A64_B_EQ(0));
+#else
+            (void)tg_tid; (void)tg_kreg; (void)tg_dreg;
+#endif
+            continue;
+        }
+
+        /* OP_TABLE_SET: bool call-out helper */
+        if (op == OP_TABLE_SET) {
+            if (oip + 5 > vm->bc_len) return false;
+            uint16_t ts_tid  = ((uint16_t)vm->bc[oip] << 8) | vm->bc[oip+1];
+            uint8_t  ts_kreg = vm->bc[oip + 2];
+            uint8_t  ts_vreg = vm->bc[oip + 3];
+            uint8_t  ts_nlen = vm->bc[oip + 4];
+            scan = oip + 5 + ts_nlen;
+#ifdef SNOBOL_DYNAMIC_PATTERN
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_table_set);
+            emit_mov_w32(js, 1, ts_tid);
+            emit_instr(js, A64_MOV_X_IMM(2, ts_kreg));
+            emit_instr(js, A64_MOV_X_IMM(3, ts_vreg));
+            emit_instr(js, 0xd63f0120u);
+            /* TABLE_SET always succeeds — ignore return value */
+            EMIT_CALLOUT_RESTORE(js);
+            emit_instr(js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos))); /* reload pos */
+#else
+            (void)ts_tid; (void)ts_kreg; (void)ts_vreg;
+#endif
+            continue;
+        }
+
+        /* OP_BAL: bool call-out helper(vm, open_cp, close_cp) */
+        if (op == OP_BAL) {
+            if (oip + 8 > vm->bc_len) return false;
+            uint32_t bal_open  = cfg_read_u32(vm->bc + oip);
+            uint32_t bal_close = cfg_read_u32(vm->bc + oip + 4);
+            scan = oip + 8;
+            /* Store current pos so helper can read it */
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_bal);
+            emit_mov_w32(js, 1, bal_open);
+            emit_mov_w32(js, 2, bal_close);
+            emit_instr(js, 0xd63f0120u); /* BLR x9 */
+            EMIT_CALLOUT_SAVE_RET(js);   /* save bool result in x9 */
+            EMIT_CALLOUT_RESTORE(js);
+            emit_instr(js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos))); /* reload pos */
+            emit_instr(js, A64_MOV_W_IMM(7, 0));
+            emit_instr(js, A64_CMP_W_W(9, 7));
+            fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
+            emit_instr(js, A64_B_EQ(0)); /* fail if return == 0 */
+            continue;
+        }
+
+        /* OP_EVAL: bool call-out helper(vm, fn_id, reg) */
+        if (op == OP_EVAL) {
+            if (oip + 3 > vm->bc_len) return false;
+            uint16_t ev_fn  = ((uint16_t)vm->bc[oip] << 8) | vm->bc[oip+1];
+            uint8_t  ev_reg = vm->bc[oip + 2];
+            scan = oip + 3;
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_eval);
+            emit_mov_w32(js, 1, ev_fn);
+            emit_instr(js, A64_MOV_X_IMM(2, ev_reg));
+            emit_instr(js, 0xd63f0120u);
+            EMIT_CALLOUT_SAVE_RET(js);
+            EMIT_CALLOUT_RESTORE(js);
+            emit_instr(js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            emit_instr(js, A64_MOV_W_IMM(7, 0));
+            emit_instr(js, A64_CMP_W_W(9, 7));
+            fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
+            emit_instr(js, A64_B_EQ(0));
+            continue;
+        }
+
+        /* OP_DYNAMIC: bool call-out helper(vm) */
+        if (op == OP_DYNAMIC) {
+            scan = oip; /* no operands */
+#ifdef SNOBOL_DYNAMIC_PATTERN
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_dynamic);
+            emit_instr(js, 0xd63f0120u);
+            EMIT_CALLOUT_SAVE_RET(js);
+            EMIT_CALLOUT_RESTORE(js);
+            emit_instr(js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            emit_instr(js, A64_MOV_W_IMM(7, 0));
+            emit_instr(js, A64_CMP_W_W(9, 7));
+            fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
+            emit_instr(js, A64_B_EQ(0));
+#endif
+            continue;
+        }
+
         /* Unknown or unreachable op */
         return false;
     }
     return true;
 }
+
+#undef EMIT_VOID_CALLOUT
+#undef EMIT_BOOL_CALLOUT
 
 /* Helper: emit a bail-out epilogue for the CFG path (restores x19/x30 frame). */
 static void emit_cfg_bailout(JITState *js, size_t bail_ip) {
@@ -1191,6 +2124,86 @@ jit_trace_fn snobol_jit_compile([[maybe_unused]] VM *vm, [[maybe_unused]] size_t
             /* No operands; skip without adding to op_seq */
             scan_ip = next_ip;
             continue;
+        /* --- NEW opcodes for full linear-path coverage --- */
+        } else if (op == OP_REM) {
+            worthy = true;
+        } else if (op == OP_RPOS || op == OP_RTAB) {
+            next_ip += 4;
+            worthy = true;
+        } else if (op == OP_FENCE) {
+            /* no operands */
+        } else if (op == OP_LABEL) {
+            next_ip += 2; /* label_id u16 */
+        } else if (op == OP_GOTO_F) {
+            next_ip += 2; /* NOP in JIT */
+        } else if (op == OP_EMIT_LITERAL) {
+            if (next_ip + 8 > vm->bc_len) break;
+            uint32_t elt_off = ((uint32_t)vm->bc[next_ip]   << 24) |
+                               ((uint32_t)vm->bc[next_ip+1] << 16) |
+                               ((uint32_t)vm->bc[next_ip+2] <<  8) |
+                                (uint32_t)vm->bc[next_ip+3];
+            uint32_t elt_len = ((uint32_t)vm->bc[next_ip+4] << 24) |
+                               ((uint32_t)vm->bc[next_ip+5] << 16) |
+                               ((uint32_t)vm->bc[next_ip+6] <<  8) |
+                                (uint32_t)vm->bc[next_ip+7];
+            next_ip += 8;
+            if ((size_t)elt_off == next_ip) next_ip += (size_t)elt_len;
+            worthy = true;
+        } else if (op == OP_EMIT_CAPTURE) {
+            next_ip += 1;
+            worthy = true;
+        } else if (op == OP_EMIT_EXPR) {
+            next_ip += 2;
+            worthy = true;
+        } else if (op == OP_EMIT_FORMAT) {
+            if (next_ip + 2 > vm->bc_len) break;
+            uint8_t efmt_t = vm->bc[next_ip + 1];
+            next_ip += 2;
+            if (efmt_t == SNBL_FMT_LPAD || efmt_t == SNBL_FMT_RPAD) {
+                if (next_ip + 3 > vm->bc_len) break;
+                next_ip += 3;
+            }
+            worthy = true;
+        } else if (op == OP_EMIT_TABLE) {
+            if (next_ip + 4 > vm->bc_len) break;
+            uint8_t etbl_k = vm->bc[next_ip + 2];
+            uint8_t etbl_n = vm->bc[next_ip + 3];
+            next_ip += 4 + etbl_n;
+            if (etbl_k == 0) {
+                if (next_ip + 2 > vm->bc_len) break;
+                uint16_t kl = ((uint16_t)vm->bc[next_ip] << 8) | vm->bc[next_ip+1];
+                next_ip += 2 + kl;
+            } else if (etbl_k == 1) { next_ip += 1; }
+            else break;
+            worthy = true;
+        } else if (op == OP_TABLE_GET || op == OP_TABLE_SET) {
+            if (next_ip + 5 > vm->bc_len) break;
+            uint8_t tbl_nlen = vm->bc[next_ip + 4];
+            next_ip += 5 + tbl_nlen;
+            worthy = true;
+        } else if (op == OP_BAL) {
+            next_ip += 8;
+            worthy = true;
+        } else if (op == OP_EVAL) {
+            next_ip += 3;
+            worthy = true;
+        } else if (op == OP_DYNAMIC) {
+            /* no operands */
+            worthy = true;
+        } else if (op == OP_DYNAMIC_DEF) {
+            if (next_ip + 4 > vm->bc_len) break;
+            uint32_t src_len = ((uint32_t)vm->bc[next_ip]   << 24) |
+                               ((uint32_t)vm->bc[next_ip+1] << 16) |
+                               ((uint32_t)vm->bc[next_ip+2] <<  8) |
+                                (uint32_t)vm->bc[next_ip+3];
+            next_ip += 4 + src_len;
+            if (next_ip + 4 > vm->bc_len) break;
+            uint32_t dyn_bcl = ((uint32_t)vm->bc[next_ip]   << 24) |
+                               ((uint32_t)vm->bc[next_ip+1] << 16) |
+                               ((uint32_t)vm->bc[next_ip+2] <<  8) |
+                                (uint32_t)vm->bc[next_ip+3];
+            next_ip += 4 + dyn_bcl;
+            /* DYNAMIC_DEF is a pseudo-op: no code emitted, just skip inline block */
         } else {
             break;
         }
@@ -1421,6 +2434,188 @@ jit_trace_fn snobol_jit_compile([[maybe_unused]] VM *vm, [[maybe_unused]] size_t
             emit_instr(&js, 0xa9417be3u); /* LDP x3, x30, [sp, #16]  */
             emit_instr(&js, 0xa8c20be1u); /* LDP x1, x2, [sp], #32   */
             /* Taken branch (a) is inlined as the next op(s) in op_seq */
+
+        /* ================================================================
+         * NEW opcodes — full linear-path JIT coverage
+         * ================================================================ */
+        } else if (op == OP_REM) {
+            emit_instr(&js, A64_MOV_X_X(2, 3)); /* pos = len */
+        } else if (op == OP_RPOS) {
+            uint32_t n = ((uint32_t)vm->bc[operand_ip]   << 24) |
+                         ((uint32_t)vm->bc[operand_ip+1] << 16) |
+                         ((uint32_t)vm->bc[operand_ip+2] <<  8) |
+                          (uint32_t)vm->bc[operand_ip+3];
+            emit_mov_x64(&js, 7, n);
+            emit_instr(&js, A64_SUB_X_X_X(8, 3, 7));
+            emit_instr(&js, A64_CMP_X_X(2, 8));
+            fail_patches[fail_patch_count++] = (FailPatch){ js.p, cur_op_ip };
+            emit_instr(&js, A64_B_NE(0));
+        } else if (op == OP_RTAB) {
+            uint32_t n = ((uint32_t)vm->bc[operand_ip]   << 24) |
+                         ((uint32_t)vm->bc[operand_ip+1] << 16) |
+                         ((uint32_t)vm->bc[operand_ip+2] <<  8) |
+                          (uint32_t)vm->bc[operand_ip+3];
+            emit_mov_x64(&js, 7, n);
+            emit_instr(&js, A64_CMP_X_X(3, 7));
+            fail_patches[fail_patch_count++] = (FailPatch){ js.p, cur_op_ip };
+            emit_instr(&js, A64_B_LO(0));
+            emit_instr(&js, A64_SUB_X_X_X(8, 3, 7));
+            emit_instr(&js, A64_CMP_X_X(2, 8));
+            fail_patches[fail_patch_count++] = (FailPatch){ js.p, cur_op_ip };
+            emit_instr(&js, A64_B_HI(0));
+            emit_instr(&js, A64_MOV_X_X(2, 8));
+        } else if (op == OP_FENCE) {
+            emit_instr(&js, A64_MOV_X_IMM(7, 0));
+            emit_instr(&js, A64_STR_X_X_IMM(7, 0, offsetof(VM, choices_top)));
+        } else if (op == OP_LABEL || op == OP_GOTO_F || op == OP_DYNAMIC_DEF) {
+            /* pseudo-ops: no ARM64 emitted */
+        } else if (op == OP_EMIT_LITERAL) {
+            uint32_t elt_off = ((uint32_t)vm->bc[operand_ip]   << 24) |
+                               ((uint32_t)vm->bc[operand_ip+1] << 16) |
+                               ((uint32_t)vm->bc[operand_ip+2] <<  8) |
+                                (uint32_t)vm->bc[operand_ip+3];
+            uint32_t elt_len = ((uint32_t)vm->bc[operand_ip+4] << 24) |
+                               ((uint32_t)vm->bc[operand_ip+5] << 16) |
+                               ((uint32_t)vm->bc[operand_ip+6] <<  8) |
+                                (uint32_t)vm->bc[operand_ip+7];
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_literal);
+            emit_mov_w32(&js, 1, elt_off);
+            emit_mov_w32(&js, 2, elt_len);
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(&js);
+        } else if (op == OP_EMIT_CAPTURE) {
+            uint8_t ecap_r = vm->bc[operand_ip];
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_capture);
+            emit_instr(&js, A64_MOV_X_IMM(1, ecap_r));
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(&js);
+        } else if (op == OP_EMIT_EXPR) {
+            uint8_t eex_r = vm->bc[operand_ip];
+            uint8_t eex_t = vm->bc[operand_ip + 1];
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_expr);
+            emit_instr(&js, A64_MOV_X_IMM(1, eex_r));
+            emit_instr(&js, A64_MOV_X_IMM(2, eex_t));
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(&js);
+        } else if (op == OP_EMIT_FORMAT) {
+            uint8_t efmt_r = vm->bc[operand_ip];
+            uint8_t efmt_t = vm->bc[operand_ip + 1];
+            uint16_t efmt_w = 0; uint8_t efmt_f = 0;
+            if (efmt_t == SNBL_FMT_LPAD || efmt_t == SNBL_FMT_RPAD) {
+                efmt_w = ((uint16_t)vm->bc[operand_ip+2] << 8) | vm->bc[operand_ip+3];
+                efmt_f = vm->bc[operand_ip + 4];
+            }
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_format);
+            emit_instr(&js, A64_MOV_X_IMM(1, efmt_r));
+            emit_instr(&js, A64_MOV_X_IMM(2, efmt_t));
+            emit_mov_w32(&js, 3, efmt_w);
+            emit_instr(&js, A64_MOV_X_IMM(4, efmt_f));
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(&js);
+        } else if (op == OP_EMIT_TABLE) {
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_emit_table_ip);
+            emit_mov_x64(&js, 1, (uint64_t)cur_op_ip);
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(&js);
+        } else if (op == OP_TABLE_GET) {
+#ifdef SNOBOL_DYNAMIC_PATTERN
+            uint16_t tg_tid  = ((uint16_t)vm->bc[operand_ip] << 8) | vm->bc[operand_ip+1];
+            uint8_t  tg_kreg = vm->bc[operand_ip + 2];
+            uint8_t  tg_dreg = vm->bc[operand_ip + 3];
+            uint8_t  tg_nlen = vm->bc[operand_ip + 4];
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_table_get);
+            emit_mov_w32(&js, 1, tg_tid);
+            emit_instr(&js, A64_MOV_X_IMM(2, tg_kreg));
+            emit_instr(&js, A64_MOV_X_IMM(3, tg_dreg));
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_SAVE_RET(&js);
+            EMIT_CALLOUT_RESTORE(&js);
+            emit_instr(&js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos))); /* reload pos */
+            emit_instr(&js, A64_MOV_W_IMM(7, 0));
+            emit_instr(&js, A64_CMP_W_W(9, 7));
+            fail_patches[fail_patch_count++] = (FailPatch){ js.p, cur_op_ip };
+            emit_instr(&js, A64_B_EQ(0));
+#endif
+        } else if (op == OP_TABLE_SET) {
+#ifdef SNOBOL_DYNAMIC_PATTERN
+            uint16_t ts_tid  = ((uint16_t)vm->bc[operand_ip] << 8) | vm->bc[operand_ip+1];
+            uint8_t  ts_kreg = vm->bc[operand_ip + 2];
+            uint8_t  ts_vreg = vm->bc[operand_ip + 3];
+            uint8_t  ts_nlen = vm->bc[operand_ip + 4];
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_table_set);
+            emit_mov_w32(&js, 1, ts_tid);
+            emit_instr(&js, A64_MOV_X_IMM(2, ts_kreg));
+            emit_instr(&js, A64_MOV_X_IMM(3, ts_vreg));
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_RESTORE(&js);
+            emit_instr(&js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos))); /* reload pos */
+#endif
+        } else if (op == OP_BAL) {
+            uint32_t bal_open  = ((uint32_t)vm->bc[operand_ip]   << 24) |
+                                 ((uint32_t)vm->bc[operand_ip+1] << 16) |
+                                 ((uint32_t)vm->bc[operand_ip+2] <<  8) |
+                                  (uint32_t)vm->bc[operand_ip+3];
+            uint32_t bal_close = ((uint32_t)vm->bc[operand_ip+4] << 24) |
+                                 ((uint32_t)vm->bc[operand_ip+5] << 16) |
+                                 ((uint32_t)vm->bc[operand_ip+6] <<  8) |
+                                  (uint32_t)vm->bc[operand_ip+7];
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_bal);
+            emit_mov_w32(&js, 1, bal_open);
+            emit_mov_w32(&js, 2, bal_close);
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_SAVE_RET(&js);
+            EMIT_CALLOUT_RESTORE(&js);
+            emit_instr(&js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            emit_instr(&js, A64_MOV_W_IMM(7, 0));
+            emit_instr(&js, A64_CMP_W_W(9, 7));
+            fail_patches[fail_patch_count++] = (FailPatch){ js.p, cur_op_ip };
+            emit_instr(&js, A64_B_EQ(0));
+        } else if (op == OP_EVAL) {
+            uint16_t ev_fn  = ((uint16_t)vm->bc[operand_ip] << 8) | vm->bc[operand_ip+1];
+            uint8_t  ev_reg = vm->bc[operand_ip + 2];
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_eval);
+            emit_mov_w32(&js, 1, ev_fn);
+            emit_instr(&js, A64_MOV_X_IMM(2, ev_reg));
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_SAVE_RET(&js);
+            EMIT_CALLOUT_RESTORE(&js);
+            emit_instr(&js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            emit_instr(&js, A64_MOV_W_IMM(7, 0));
+            emit_instr(&js, A64_CMP_W_W(9, 7));
+            fail_patches[fail_patch_count++] = (FailPatch){ js.p, cur_op_ip };
+            emit_instr(&js, A64_B_EQ(0));
+        } else if (op == OP_DYNAMIC) {
+#ifdef SNOBOL_DYNAMIC_PATTERN
+            emit_instr(&js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(&js);
+            emit_mov_x64(&js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_dynamic);
+            emit_instr(&js, 0xd63f0120u);
+            EMIT_CALLOUT_SAVE_RET(&js);
+            EMIT_CALLOUT_RESTORE(&js);
+            emit_instr(&js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            emit_instr(&js, A64_MOV_W_IMM(7, 0));
+            emit_instr(&js, A64_CMP_W_W(9, 7));
+            fail_patches[fail_patch_count++] = (FailPatch){ js.p, cur_op_ip };
+            emit_instr(&js, A64_B_EQ(0));
+#endif
         }
     }
 

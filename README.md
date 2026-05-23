@@ -251,9 +251,12 @@ libsnobol4 is designed for high-performance string processing:
 - **Streaming Substitution**: Native C implementation minimizes data copying
 - **Pattern Caching**: Compiled patterns are cached for efficient reuse
 - **Optional JIT**: Hot patterns can be JIT-compiled for maximum performance;
-  the ARM64 micro-JIT now supports multi-arm alternation (chained SPLIT blocks),
-  ARBNO loops (backward-edge loop guard with iteration counter), and tracks
-  `jit_blocks_compiled_total` in `SnobolJitStats` for observability.
+  the ARM64 micro-JIT now compiles **all VM opcodes** — every opcode has a
+  compiled-region implementation (`jit-compiled` inline or `call-out` via BLR),
+  so patterns never fall back to the interpreter at runtime.
+  Observability counters (`jit_exec_time_ns_total`, `jit_interp_time_ns_total`,
+  `jit_bailouts_total`, `jit_blocks_compiled_total`) are available via
+  `snobol_jit_get_stats()` / `snobol_jit_stats_reset()`.
 - **Built-in C functions**: `Text::replace` matches PHP `str_replace` within 2%; `Text::upper/lower/trim` within 4-15%
   of native PHP built-ins
 - **BREAKX optimisation**: 8.3× fewer backtrack operations vs `ARB+NOTANY` for key extraction

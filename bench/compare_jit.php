@@ -184,3 +184,54 @@ foreach ($pairs as $pair) {
     echo "  jit:          SNOBOL speedup from JIT (sn_on / sn_off; negative means slower)\n";
     echo "  pcre_off/on:  how many times faster PCRE is vs SNOBOL (pcre / snobol)\n";
 }
+
+/**
+ * Check that the JIT interpreter-time ratio is below the 5% gate.
+ *
+ * Reads `jit_exec_time_ns_total` and `jit_interp_time_ns_total` from the
+ * stats returned by snobol_jit_get_stats() (exposed via the PHP binding as
+ * an associative array).  If the ratio exceeds 0.05 the function prints a
+ * diagnostic and returns false.
+ *
+ * @param array<string, int> $stats  Associative array from snobol_jit_get_stats()
+ */
+function jit_ratio_check(array $stats): bool
+{
+    $execNs   = isset($stats['jit_exec_time_ns_total'])   ? (int) $stats['jit_exec_time_ns_total']   : 0;
+    $interpNs = isset($stats['jit_interp_time_ns_total']) ? (int) $stats['jit_interp_time_ns_total'] : 0;
+
+    $total = $execNs + $interpNs;
+    if ($total <= 0) {
+        // No timing data available; skip the gate.
+        return true;
+    }
+
+    $ratio = $interpNs / $total;
+
+    if ($ratio > 0.05) {
+        fprintf(
+            STDERR,
+            "JIT GATE FAILED: interpreter-time ratio %.2f%% exceeds 5%% threshold\n".
+            "  jit_exec_time_ns_total:   %d ns\n".
+            "  jit_interp_time_ns_total: %d ns\n",
+            $ratio * 100.0,
+            $execNs,
+            $interpNs
+        );
+        return false;
+    }
+
+    printf(
+        "JIT gate passed: interpreter-time ratio %.2f%% (threshold 5%%)\n",
+        $ratio * 100.0
+    );
+    return true;
+}
+
+// Run the JIT ratio gate when stats are available via the PHP extension.
+if (function_exists('snobol_get_jit_stats')) {
+    $stats = snobol_get_jit_stats();
+    if (is_array($stats) && !jit_ratio_check($stats)) {
+        exit(1);
+    }
+}

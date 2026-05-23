@@ -17,6 +17,7 @@ add_executable(snobol4_tests
     test_jit_branches.c
     test_jit_profitability.c
     test_jit_cfg.c
+    test_jit_opcode_coverage.c
     test_lexer.c
     test_parser.c
     test_ast.c

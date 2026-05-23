@@ -9,6 +9,9 @@
 #include "snobol/snobol_internal.h"
 #include "snobol/dynamic_pattern.h"
 #include "snobol/table.h"
+#ifdef SNOBOL_JIT
+#include "snobol/jit.h"
+#endif
 #include <string.h>
 #include <stdint.h>
 
@@ -61,6 +64,12 @@ dynamic_pattern_t *dynamic_pattern_create(const char *source, uint8_t *bc, size_
     SNOBOL_LOG("dynamic_pattern_create: pattern=%p source='%s' bc_len=%zu valid=%d",
                (void*)pattern, source ? source : "(null)", bc_len, pattern->is_valid);
     
+#ifdef SNOBOL_JIT
+    if (pattern->is_valid) {
+        pattern->jit_ctx = snobol_jit_acquire_context(pattern->bc, pattern->bc_len);
+    }
+#endif
+
     return pattern;
 }
 
@@ -103,6 +112,13 @@ void dynamic_pattern_release(dynamic_pattern_t *pattern) {
     if (pattern->source) {
         snobol_free(pattern->source);
     }
+
+#ifdef SNOBOL_JIT
+    if (pattern->jit_ctx) {
+        snobol_jit_release_context((SnobolJitContext *)pattern->jit_ctx);
+        pattern->jit_ctx = nullptr;
+    }
+#endif
     
     snobol_free(pattern);
 }

@@ -21,4 +21,8 @@ PHP_MINIT_FUNCTION(snobol);
 int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *out_len);
 int compile_ast_to_bytecode_wrapper(ast_node_t *ast, zval *options, uint8_t **out_bc, size_t *out_len);
 
+/* Table registry access */
+typedef struct snobol_table snobol_table_t;
+size_t php_snobol_get_all_tables(snobol_table_t ***out_tables);
+
 #endif /* PHP_SNOBOL_H */
