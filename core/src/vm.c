@@ -594,7 +594,9 @@ bool vm_run(VM *vm) {
         } /* end SNOBOL_JIT block */
 #endif
         /* Track interpreter dispatch time when JIT is enabled */
+#ifdef SNOBOL_JIT
         uint64_t t_interp = (vm->jit.enabled && vm->jit.stats) ? snobol_jit_now_ns() : 0;
+#endif
         uint8_t op = vm->bc[vm->ip++];
         switch (op) {
             case OP_NOP: break; /* fusion filler — skip one byte */
@@ -1495,10 +1497,12 @@ bool vm_run(VM *vm) {
             default: if (!vm_pop_choice(vm)) goto fail_ret; break;
         }
         /* Accumulate interpreter dispatch time for this loop iteration */
+#ifdef SNOBOL_JIT
         if (t_interp && vm->jit.stats) {
             uint64_t interp_ns = snobol_jit_now_ns() - t_interp;
             vm->jit.stats->interp_time_ns_total += interp_ns;
         }
+#endif
     }
     if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
     if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }

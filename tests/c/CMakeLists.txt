@@ -69,7 +69,12 @@ endif()
 
 # Warning flags for test sources - mirror core library settings
 if(MSVC)
-    target_compile_options(snobol4_tests PRIVATE /W4)
+    target_compile_options(snobol4_tests PRIVATE
+        /W4
+        # Use C17 so nullptr is not a keyword (C23), allowing snobol_internal.h
+        # compat #define nullptr NULL to work on MSVC 2022+.
+        /std:c17
+    )
     # Suppress MSVC safe-CRT deprecation warnings in test sources
     target_compile_definitions(snobol4_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 else ()

@@ -44,6 +44,9 @@ if(MSVC)
         /wd4189  # local variable initialized but not referenced
         /wd4244  # conversion (possible loss of data)
         /wd4267  # conversion from 'size_t' to smaller type
+        # Use C17 so that nullptr is not a keyword (C23 feature), allowing our
+        # snobol_internal.h compat #define nullptr NULL to take effect on MSVC 2022+.
+        /std:c17
     )
     # Suppress deprecation warnings for POSIX names (strcpy, getenv, etc.)
     target_compile_definitions(snobol4 PRIVATE _CRT_SECURE_NO_WARNINGS)
