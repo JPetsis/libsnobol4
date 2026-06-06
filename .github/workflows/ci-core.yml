@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ARM64 runners: macOS Apple Silicon (macos-latest) + Linux AArch64
+        # ARM64 runners: macOS Apple Silicon + Linux AArch64 (native)
         os: [ macos-latest, ubuntu-24.04-arm ]
 
     steps:
@@ -85,4 +85,24 @@ jobs:
       - name: Run full JIT test suite
         working-directory: build
         run: ctest --output-on-failure
+
+  jit-qemu-aarch64:
+    name: JIT QEMU AArch64 (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build and test in QEMU AArch64 container
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
+          file: ci/Dockerfile.jit-qemu
 

@@ -239,6 +239,38 @@ libsnobol4 uses independent versioning for core and bindings:
 
 The project supports MSVC (Visual Studio 2022+) and MinGW-w64 toolchains on Windows. The JIT is automatically disabled on Windows builds (no `mmap`/`MAP_JIT` calls are compiled).
 
+## Linux AArch64 JIT
+
+The micro-JIT runs on Linux AArch64 (bare-metal or QEMU). The build uses the same
+`-DSNOBOL_JIT_BACKEND=arm64` CMake option as macOS:
+
+```bash
+# Native AArch64 build
+cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=arm64
+cmake --build build
+ctest --test-dir build --output-on-failure
+
+# QEMU AArch64 (from x86-64 host)
+docker run --rm --platform linux/arm64 \
+  -v $(pwd):/workspace -w /workspace \
+  arm64v8/ubuntu:24.04 \
+  bash -c "apt-get update && apt-get install -y cmake build-essential \
+    && cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=arm64 \
+    && cmake --build build \
+    && ctest --test-dir build --output-on-failure"
+```
+
+### W^X Policy
+
+On Linux the JIT uses a **write-then-execute** (W^X) model:
+1. Pages are allocated with `PROT_READ | PROT_WRITE` (writable, not executable).
+2. After code emission, `mprotect` transitions them to `PROT_READ | PROT_EXEC`.
+3. Pages are never simultaneously writable and executable.
+
+This is the default behaviour on Linux AArch64. If you encounter `SIGSEGV` during
+JIT compilation, check that `mprotect` is permitted in your environment
+(e.g., some hardened kernels or seccomp profiles may block `PROT_EXEC`).
+
 **Quick start:**
 
 ```bash

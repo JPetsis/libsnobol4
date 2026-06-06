@@ -26,8 +26,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <stddef.h>
-#ifdef __APPLE__
+#ifdef SNOBOL_JIT_PLATFORM_MACOS
 #  include <pthread.h>
+#endif
+#ifdef SNOBOL_JIT_PLATFORM_LINUX
+#  include <sys/syscall.h>
+#  include <unistd.h>
 #endif
 
 #include "snobol/vm.h"
@@ -1117,7 +1121,7 @@ static void *arm64_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
     uint32_t *code = (uint32_t *)snobol_jit_alloc_code(code_size);
     if (!code) return nullptr;
 
-#ifdef __APPLE__
+#ifdef SNOBOL_JIT_PLATFORM_MACOS
     pthread_jit_write_protect_np(0);
 #endif
 
@@ -1236,7 +1240,7 @@ static void *arm64_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
                                     fail_patches, &fail_patch_count);
 
         if (!ok) {
-#ifdef __APPLE__
+#ifdef SNOBOL_JIT_PLATFORM_MACOS
             pthread_jit_write_protect_np(1);
 #endif
             snobol_jit_free_code(code, code_size);
@@ -1275,11 +1279,15 @@ static void *arm64_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
  * Exposed separately for completeness of the vtable interface.
  * ========================================================================= */
 static void arm64_flush_icache(void *code, size_t size) {
-#ifdef __APPLE__
+#ifdef SNOBOL_JIT_PLATFORM_MACOS
     pthread_jit_write_protect_np(1);
     __builtin___clear_cache((char *)code, (char *)code + size);
-#else
+#elif defined(SNOBOL_JIT_PLATFORM_LINUX)
+    /* __builtin___clear_cache emits the ISB barrier on AArch64.
+     * Some older kernels or QEMU user-mode may not honour it, so we
+     * fall back to the cacheflush syscall for robustness. */
     __builtin___clear_cache((char *)code, (char *)code + size);
+    syscall(__NR_cacheflush, code, size, 0);
 #endif
 }
 

@@ -64,10 +64,11 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
   * **INTEGER / REAL / NUMERIC** – Numeric type predicates
 * **Optional Micro-JIT** (v0.10.0): ARM64 JIT compilation for hot patterns via a two-phase
-  architecture-neutral IR pipeline:
+  architecture-neutral IR pipeline — runs on **macOS ARM64 and Linux AArch64**:
   * `SNOBOL_JIT_DUMP_IR=1` — dump the IR to `stderr` before lowering (debug)
   * `SNOBOL_JIT_BACKEND=arm64` (CMake option) — selects the code-generation backend (default: `arm64`)
   * Pipeline: VM bytecode → IR lift → DCE + copy-prop → ARM64 machine code
+  * Linux uses W^X (write-then-exec) page permissions; macOS uses `MAP_JIT`
 * **C23 Code Quality** (v0.6.0): Core adopts `nullptr`, `[[nodiscard]]`, `[[maybe_unused]]`, and `constexpr` throughout. JIT A64 macro helpers converted to typed `static inline` functions. Requires GCC 13+ or Clang 17+.
 * **Profiling Support**: Built-in execution profiling for performance analysis
 
@@ -174,7 +175,7 @@ See [bindings/php/README.md](bindings/php/README.md) for detailed PHP documentat
 | `BUILD_TESTS`       | ON      | Build C test suite                      |
 | `BUILD_PHP`         | OFF     | Build PHP binding                       |
 | `BUILD_SHARED_LIBS` | OFF     | Build shared library                    |
-| `SNOBOL_JIT`        | ON      | Enable micro-JIT (ARM64)                |
+| `SNOBOL_JIT`        | ON      | Enable micro-JIT (macOS ARM64 / Linux AArch64) |
 | `SNOBOL_PROFILE`    | OFF     | Enable VM profiling                     |
 | `SNOBOL_SANITIZE`   | OFF     | AddressSanitizer + UBSan (GCC/Clang)   |
 
@@ -255,9 +256,11 @@ libsnobol4 is designed for high-performance string processing:
 - **Streaming Substitution**: Native C implementation minimizes data copying
 - **Pattern Caching**: Compiled patterns are cached for efficient reuse
 - **Optional JIT**: Hot patterns can be JIT-compiled for maximum performance;
-  the ARM64 micro-JIT now compiles **all VM opcodes** — every opcode has a
+  the ARM64 micro-JIT compiles **all VM opcodes** — every opcode has a
   compiled-region implementation (`jit-compiled` inline or `call-out` via BLR),
   so patterns never fall back to the interpreter at runtime.
+  JIT is supported on **macOS ARM64 (Apple Silicon)** and **Linux AArch64**,
+  including QEMU-emulated environments for CI.
   Observability counters (`jit_exec_time_ns_total`, `jit_interp_time_ns_total`,
   `jit_bailouts_total`, `jit_blocks_compiled_total`) are available via
   `snobol_jit_get_stats()` / `snobol_jit_stats_reset()`.

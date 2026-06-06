@@ -5,6 +5,24 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [unreleased] - 2026-06-07
+
+### Added — Linux AArch64 JIT (`jit-arm64-linux`)
+
+- **CMake platform detection**: `core/CMakeLists.txt` now sets `SNOBOL_JIT_PLATFORM_MACOS` or
+  `SNOBOL_JIT_PLATFORM_LINUX` compile definitions for JIT code paths.
+- **Linux code-page allocation**: `snobol_jit_alloc_code` uses `mmap(MAP_ANONYMOUS|MAP_PRIVATE,
+  PROT_READ|PROT_WRITE)` on Linux; `snobol_jit_seal_code` calls `mprotect(PROT_READ|PROT_EXEC)`
+  to enable execution (W^X model). `MAP_JIT` is macOS-only.
+- **Linux icache flush**: `arm64_flush_icache` calls `__builtin___clear_cache` with a `cacheflush`
+  syscall fallback for older kernels / QEMU user-mode.
+- **Debug W^X enforcement**: Debug builds assert that `PROT_WRITE` is cleared after sealing.
+- **CI — QEMU AArch64 job**: New `jit-qemu-aarch64` GitHub Actions job validates the JIT in a
+  QEMU-emulated AArch64 container via `docker/setup-qemu-action`.
+- **CI — native AArch64 runner**: `ubuntu-24.04-arm` runner leg already present.
+- **Documentation**: README and CONTRIBUTING updated with Linux AArch64 build instructions and
+  W^X policy notes.
+
 ## [0.10.0] - 2026-05-23
 
 ### Added — JIT Neutral IR Layer (`jit-neutral-ir`)

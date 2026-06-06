@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <stddef.h>
 #include <string.h>
-#ifdef __APPLE__
+#ifdef SNOBOL_JIT_PLATFORM_MACOS
 #  include <pthread.h>
 #endif
 #include "snobol/snobol_internal.h"
@@ -306,7 +306,7 @@ void snobol_jit_shutdown(void) {
  * --------------------------------------------------------------------------- */
 
 void *snobol_jit_alloc_code(size_t size) {
-#ifdef __APPLE__
+#ifdef SNOBOL_JIT_PLATFORM_MACOS
     /* On Apple Silicon, MAP_JIT is required for pages that will be executed.
      * The caller (snobol_jit_compile) is responsible for calling
      * pthread_jit_write_protect_np(0) before writing and
@@ -316,7 +316,7 @@ void *snobol_jit_alloc_code(size_t size) {
     void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
     return (ptr == MAP_FAILED) ? nullptr : ptr;
-#else
+#elif defined(SNOBOL_JIT_PLATFORM_LINUX)
     void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return (ptr == MAP_FAILED) ? nullptr : ptr;
@@ -324,12 +324,13 @@ void *snobol_jit_alloc_code(size_t size) {
 }
 
 void snobol_jit_seal_code(void *code, size_t size) {
-#ifdef __APPLE__
+#ifdef SNOBOL_JIT_PLATFORM_MACOS
     /* Switch current thread back to exec mode, then flush the instruction cache. */
     pthread_jit_write_protect_np(1);
     __builtin___clear_cache((char *)code, (char *)code + size);
-#else
-    mprotect(code, size, PROT_READ | PROT_EXEC);
+#elif defined(SNOBOL_JIT_PLATFORM_LINUX)
+    int ret = mprotect(code, size, PROT_READ | PROT_EXEC);
+    assert(ret == 0 && "mprotect to PROT_READ|PROT_EXEC failed");
     __builtin___clear_cache((char *)code, (char *)code + size);
 #endif
 }

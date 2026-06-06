@@ -92,6 +92,13 @@ if(WIN32)
 endif()
 if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
     target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
+
+    # Platform detection for JIT code paths
+    if(APPLE)
+        target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_PLATFORM_MACOS=1)
+    else()
+        target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_PLATFORM_LINUX=1)
+    endif()
 endif()
 
 # JIT backend selection (compile-time; only one backend per binary).
