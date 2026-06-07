@@ -32,6 +32,10 @@
 #ifdef SNOBOL_JIT_PLATFORM_LINUX
 #  include <sys/syscall.h>
 #  include <unistd.h>
+/* __NR_cacheflush may not be exposed by all kernel headers on AArch64. */
+#  ifndef __NR_cacheflush
+#    define __NR_cacheflush 232
+#  endif
 #endif
 
 #include "snobol/vm.h"

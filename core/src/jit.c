@@ -14,6 +14,7 @@
 #ifdef SNOBOL_JIT_PLATFORM_MACOS
 #  include <pthread.h>
 #endif
+#include <assert.h>
 #include "snobol/snobol_internal.h"
 #include "snobol/table.h"
 #include "snobol/dynamic_pattern.h"
