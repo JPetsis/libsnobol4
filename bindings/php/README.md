@@ -310,15 +310,32 @@ For v0.7.0 this returns `0x00000700` (1792 in decimal).
 
 ## Running Tests
 
-```bash
-# Install dependencies
-composer install
+This project has two `composer.json` files:
 
-# Run PHPUnit tests
-vendor/bin/phpunit tests/php
+- `bindings/php/composer.json` — used inside DDEV (`/var/www/html`)
+- `composer.json` (root) — for native (non-DDEV) development and IDE integration
+
+### With DDEV
+
+```bash
+# Install/update dependencies
+ddev composer install
+
+# Run tests
+ddev exec vendor/bin/phpunit tests/php
 
 # Run with coverage
-vendor/bin/phpunit tests/php --coverage-html build/coverage
+ddev exec vendor/bin/phpunit tests/php --coverage-html /tmp/coverage
+```
+
+### Without DDEV
+
+```bash
+# From the repository root
+composer install
+
+# Run tests
+vendor/bin/phpunit bindings/php/tests/php
 ```
 
 ## Troubleshooting
