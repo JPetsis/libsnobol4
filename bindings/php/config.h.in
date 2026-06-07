@@ -57,6 +57,9 @@
 /* Define to the version of this package. */
 /* #undef PACKAGE_VERSION */
 
+/* Enable dynamic patterns and tables */
+#undef SNOBOL_DYNAMIC_PATTERN
+
 /* Enable micro-JIT support (ARM64 only) */
 #undef SNOBOL_JIT
 

@@ -1167,7 +1167,12 @@ bool vm_run(VM *vm) {
                 value[val_len] = '\0';
                 
                 /* Set in table */
-                (void)table_set(table, key, value);
+                if (!table_set(table, key, value)) {
+                    snobol_free(key);
+                    snobol_free(value);
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
 
                 snobol_free(key);
                 snobol_free(value);

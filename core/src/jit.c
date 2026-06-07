@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <stddef.h>
 #include <string.h>
+#include <fcntl.h>
 #ifdef SNOBOL_JIT_PLATFORM_MACOS
 #  include <pthread.h>
 #endif
@@ -308,12 +309,6 @@ void snobol_jit_shutdown(void) {
 
 void *snobol_jit_alloc_code(size_t size) {
 #ifdef SNOBOL_JIT_PLATFORM_MACOS
-    /* On Apple Silicon, MAP_JIT is required for pages that will be executed.
-     * The caller (snobol_jit_compile) is responsible for calling
-     * pthread_jit_write_protect_np(0) before writing and
-     * snobol_jit_seal_code() to restore exec mode afterwards.
-     * We do NOT toggle the write-protect here so that every alloc/free path
-     * in snobol_jit_compile can be made symmetric without leaking write mode. */
     void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
     return (ptr == MAP_FAILED) ? nullptr : ptr;
@@ -578,8 +573,6 @@ jit_trace_fn snobol_jit_compile([[maybe_unused]] VM *vm, [[maybe_unused]] size_t
     if (out_code_size) *out_code_size = 0;
 
 #if !defined(__aarch64__) && !defined(__arm64__)
-    /* JIT code generation is ARM64-only. On all other architectures, return
-     * nullptr so the interpreter is used unconditionally. */
     return nullptr;
 #endif
 
@@ -616,7 +609,7 @@ jit_trace_fn snobol_jit_compile([[maybe_unused]] VM *vm, [[maybe_unused]] size_t
         void *code_ptr = active_backend->lower(ir, vm, &code_region);
         jit_ir_region_free(ir);
 
-        if (!code_ptr) return nullptr;
+        if (!code_ptr) { return nullptr; }
 
         /* Count CFG blocks from the region (approximate: count 1 for linear) */
         global_jit_stats.jit_blocks_compiled_total += 1;
@@ -625,7 +618,6 @@ jit_trace_fn snobol_jit_compile([[maybe_unused]] VM *vm, [[maybe_unused]] size_t
         return (jit_trace_fn)code_ptr;
     }
 
-    /* No backend registered — should not happen after snobol_jit_init(). */
     return nullptr;
 }
 

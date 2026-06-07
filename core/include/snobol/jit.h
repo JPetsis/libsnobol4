@@ -7,6 +7,18 @@
 
 #ifdef SNOBOL_JIT
 
+/* Auto-detect the target platform if the build system did not supply an explicit
+ * -DSNOBOL_JIT_PLATFORM_{LINUX,MACOS}=1 flag (e.g. the PHP phpize build). */
+#if !defined(SNOBOL_JIT_PLATFORM_LINUX) && !defined(SNOBOL_JIT_PLATFORM_MACOS)
+#  if defined(__linux__)
+#    define SNOBOL_JIT_PLATFORM_LINUX 1
+#  elif defined(__APPLE__) && defined(__MACH__)
+#    define SNOBOL_JIT_PLATFORM_MACOS 1
+#  else
+#    warning "SNOBOL_JIT enabled on an untested platform — mmap-based code allocation may be broken"
+#  endif
+#endif
+
 /* VM type is defined in vm.h - include it */
 #include "snobol/vm.h"
 
