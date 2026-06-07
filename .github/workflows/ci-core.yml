@@ -126,3 +126,23 @@ jobs:
           push: false
           file: ci/Dockerfile.jit-qemu-armv7
 
+  jit-qemu-riscv64:
+    name: JIT QEMU RISC-V 64 (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: riscv64
+
+      - name: Build and test in QEMU RISC-V 64 container
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/riscv64
+          push: false
+          file: ci/Dockerfile.jit-qemu-riscv64
+

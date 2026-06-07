@@ -18,6 +18,7 @@ add_library(snobol4 STATIC
     src/jit_ir.c
     src/jit_backend_arm64.c
     src/jit_backend_arm32.c
+    src/jit_backend_riscv64.c
     src/version.c
     src/string_fn.c
     src/type_fn.c
@@ -103,6 +104,10 @@ if(NOT WIN32)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64")
         set(_jit_arch_ok TRUE)
     endif()
+    # RISC-V 64-bit
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64|riscv64.*")
+        set(_jit_arch_ok TRUE)
+    endif()
     if(_jit_arch_ok)
         target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
 
@@ -119,11 +124,12 @@ endif()
 # JIT backend selection (compile-time; only one backend per binary).
 # Valid values: "arm64"  (default, requires ARM64 host)
 #               "arm32"  (requires ARMv7-A Thumb-2 host)
+#               "riscv64" (requires RV64GC host)
 # Adding a new backend: add the source file and a new valid value here.
-set(SNOBOL_JIT_BACKEND "arm64" CACHE STRING "JIT backend to compile in (arm64|arm32)")
-set_property(CACHE SNOBOL_JIT_BACKEND PROPERTY STRINGS "arm64;arm32")
+set(SNOBOL_JIT_BACKEND "arm64" CACHE STRING "JIT backend to compile in (arm64|arm32|riscv64)")
+set_property(CACHE SNOBOL_JIT_BACKEND PROPERTY STRINGS "arm64;arm32;riscv64")
 
-set(_valid_jit_backends "arm64;arm32")
+set(_valid_jit_backends "arm64;arm32;riscv64")
 if(NOT SNOBOL_JIT_BACKEND IN_LIST _valid_jit_backends)
     message(FATAL_ERROR
         "SNOBOL_JIT_BACKEND='${SNOBOL_JIT_BACKEND}' is not a recognised backend.\n"
@@ -133,6 +139,12 @@ endif()
 target_compile_definitions(snobol4 PRIVATE
     SNOBOL_JIT_BACKEND="${SNOBOL_JIT_BACKEND}"
 )
+
+# Optional: enable RV64C compressed instructions (RISC-V 64-bit only)
+option(SNOBOL_JIT_RV64C "Enable RV64C compressed instructions on RISC-V 64-bit" OFF)
+if(SNOBOL_JIT_RV64C AND CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
+    target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_RV64C=1)
+endif()
 
 # Installation rules
 include(GNUInstallDirs)

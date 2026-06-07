@@ -86,6 +86,9 @@ void snobol_jit_arm64_register(void);
 #if defined(__arm__) || defined(__thumb__) || defined(__ARM_ARCH_7A__)
 void snobol_jit_arm32_register(void);
 #endif
+#if defined(__riscv) && __riscv_xlen == 64
+void snobol_jit_riscv64_register(void);
+#endif
 
 #endif /* SNOBOL_JIT */
 

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [unreleased] - 2026-06-07
 
+### Added — Linux RISC-V 64 JIT Backend (`jit-riscv64`)
+
+- **RISC-V 64-bit code-generation backend**: New `core/src/jit_backend_riscv64.c` implements
+  full JIT lowering for RV64I base ISA. Supports all 22 IR opcodes via direct instruction
+  encoding (no assembler dependency).
+- **RISC-V JIT backend registration**: `snobol_jit_riscv64_register()` called from `snobol_jit_init()`
+  when compiled on `__riscv` with `__riscv_xlen == 64` targets.
+- **Fixed register convention**: a0=VM, t0=s, t1=pos, t2=len, t3–t6=scratch, s2=loop counter —
+  mirrors ARM64 layout for commonality.
+- **RV64I instruction emitters**: R-type, I-type, S-type, B-type, U-type, J-type formats,
+  plus load/store (LD, SD, LB, SB, LBU), branches (BEQ, BNE, BLT, BGE, BLTU, BGEU),
+  and AUIPC+JALR call-out sequence for ±2 GB range.
+- **RISC-V psABI call-out sequence**: save ra, load args into a0–a7, AUIPC+JALR, restore ra —
+  full C calling convention compatibility.
+- **Code-page allocation**: `mmap(PROT_READ|PROT_WRITE)` → `mprotect(PROT_READ|PROT_EXEC)`
+  (W^X model), with `__builtin___clear_cache` for icache coherence.
+- **`SNOBOL_JIT_RV64C` CMake option**: Optional RV64C compressed instruction support (default OFF).
+- **CI — QEMU RISC-V 64 job**: New `jit-qemu-riscv64` GitHub Actions job validates the RISC-V JIT
+  in a QEMU-emulated RISC-V 64 container via `docker/setup-qemu-action`.
+- **CI — CMake backend validation**: `riscv64` added to valid backend list; auto-detected when
+  compiling on RISC-V 64 hosts.
+- **Test coverage**: New `tests/c/test_jit_riscv64.c` with architecture-specific round-trip
+  tests (LIT, SPLIT, LEN). All existing JIT tests now detect `__riscv`/`__riscv_xlen == 64`
+  for platform support.
+- **Documentation**: README updated to document `riscv64` backend availability and `SNOBOL_JIT_RV64C`
+  option.
+
 ### Added — Linux ARM32 JIT Backend (`jit-arm32`)
 
 - **ARM32 Thumb-2 code-generation backend**: New `core/src/jit_backend_arm32.c` implements

@@ -20,6 +20,7 @@ add_executable(snobol4_tests
     test_jit_opcode_coverage.c
     test_jit_ir.c
     test_jit_arm32.c
+    test_jit_riscv64.c
     test_lexer.c
     test_parser.c
     test_ast.c
@@ -65,7 +66,7 @@ if(SNOBOL_SANITIZE)
 endif()
 
 # Enable JIT for tests on ARM64 or ARM32 hosts
-if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]|arm)$")
+if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]|arm|riscv64)$")
     target_compile_definitions(snobol4_tests PRIVATE SNOBOL_JIT=1)
 endif()
 

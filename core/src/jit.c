@@ -290,6 +290,8 @@ void snobol_jit_init(void) {
     snobol_jit_arm64_register();
 #elif defined(__arm__) || defined(__thumb__) || defined(__ARM_ARCH_7A__)
     snobol_jit_arm32_register();
+#elif defined(__riscv) && __riscv_xlen == 64
+    snobol_jit_riscv64_register();
 #endif
 }
 
@@ -574,7 +576,7 @@ done:
 jit_trace_fn snobol_jit_compile([[maybe_unused]] VM *vm, [[maybe_unused]] size_t start_ip, size_t *out_code_size) {
     if (out_code_size) *out_code_size = 0;
 
-#if !defined(__aarch64__) && !defined(__arm64__) && !defined(__arm__) && !defined(__thumb__) && !defined(__ARM_ARCH_7A__)
+#if !defined(__aarch64__) && !defined(__arm64__) && !defined(__arm__) && !defined(__thumb__) && !defined(__ARM_ARCH_7A__) && !(defined(__riscv) && __riscv_xlen == 64)
     return nullptr;
 #endif
 

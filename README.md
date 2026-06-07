@@ -63,12 +63,13 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **IDENT / DIFFER** – String identity / difference
   * **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
   * **INTEGER / REAL / NUMERIC** – Numeric type predicates
-* **Optional Micro-JIT** (v0.10.0): ARM64/ARM32 JIT compilation for hot patterns via a two-phase
-  architecture-neutral IR pipeline — runs on **macOS ARM64, Linux AArch64, and Linux ARMv7-A**:
+* **Optional Micro-JIT** (v0.10.0): ARM64/ARM32/RISC-V 64 JIT compilation for hot patterns via a two-phase
+  architecture-neutral IR pipeline — runs on **macOS ARM64, Linux AArch64, Linux ARMv7-A, and Linux RISC-V 64**:
   * `SNOBOL_JIT_DUMP_IR=1` — dump the IR to `stderr` before lowering (debug)
-  * `SNOBOL_JIT_BACKEND=arm64|arm32` (CMake option) — selects the code-generation backend (default: `arm64`)
-  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → ARM64/Thumb-2 machine code
+  * `SNOBOL_JIT_BACKEND=arm64|arm32|riscv64` (CMake option) — selects the code-generation backend (default: `arm64`)
+  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → ARM64/Thumb-2/RV64I machine code
   * **ARM32 backend** targets ARMv7-A with Thumb-2 instruction set; uses W^X page permissions on Linux
+  * **RISC-V 64 backend** targets RV64I base ISA; optional RV64C compressed support via `SNOBOL_JIT_RV64C=ON`
   * Linux uses W^X (write-then-exec) page permissions; macOS uses `MAP_JIT`
 * **C23 Code Quality** (v0.6.0): Core adopts `nullptr`, `[[nodiscard]]`, `[[maybe_unused]]`, and `constexpr` throughout. JIT A64 macro helpers converted to typed `static inline` functions. Requires GCC 13+ or Clang 17+.
 * **Profiling Support**: Built-in execution profiling for performance analysis
@@ -171,14 +172,16 @@ See [bindings/php/README.md](bindings/php/README.md) for detailed PHP documentat
 
 ## Build Options
 
-| Option              | Default | Description                                    |
-|---------------------|---------|------------------------------------------------|
-| `BUILD_TESTS`       | ON      | Build C test suite                             |
-| `BUILD_PHP`         | OFF     | Build PHP binding                              |
-| `BUILD_SHARED_LIBS` | OFF     | Build shared library                           |
-| `SNOBOL_JIT`        | ON      | Enable micro-JIT (macOS ARM64 / Linux AArch64) |
-| `SNOBOL_PROFILE`    | OFF     | Enable VM profiling                            |
-| `SNOBOL_SANITIZE`   | OFF     | AddressSanitizer + UBSan (GCC/Clang)           |
+| Option               | Default | Description                                                        |
+|----------------------|---------|--------------------------------------------------------------------|
+| `BUILD_TESTS`        | ON      | Build C test suite                                                 |
+| `BUILD_PHP`          | OFF     | Build PHP binding                                                  |
+| `BUILD_SHARED_LIBS`  | OFF     | Build shared library                                               |
+| `SNOBOL_JIT`         | ON      | Enable micro-JIT (macOS ARM64 / Linux AArch64 / ARMv7 / RISC-V 64) |
+| `SNOBOL_JIT_BACKEND` | arm64   | Selects backend: `arm64`, `arm32`, or `riscv64`                    |
+| `SNOBOL_JIT_RV64C`   | OFF     | Enable RISC-V compressed (RV64C) instruction support               |
+| `SNOBOL_PROFILE`     | OFF     | Enable VM profiling                                                |
+| `SNOBOL_SANITIZE`    | OFF     | AddressSanitizer + UBSan (GCC/Clang)                               |
 
 ### Example Configurations
 
@@ -260,8 +263,9 @@ libsnobol4 is designed for high-performance string processing:
   the ARM64 micro-JIT compiles **all VM opcodes** — every opcode has a
   compiled-region implementation (`jit-compiled` inline or `call-out` via BLR),
   so patterns never fall back to the interpreter at runtime.
-  JIT is supported on **macOS ARM64 (Apple Silicon)** and **Linux AArch64**,
-  including QEMU-emulated environments for CI.
+  JIT is supported on **macOS ARM64 (Apple Silicon)**, **Linux AArch64**,
+  **Linux ARMv7-A**, and **Linux RISC-V 64**, including QEMU-emulated
+  environments for CI.
   Observability counters (`jit_exec_time_ns_total`, `jit_interp_time_ns_total`,
   `jit_bailouts_total`, `jit_blocks_compiled_total`) are available via
   `snobol_jit_get_stats()` / `snobol_jit_stats_reset()`.
