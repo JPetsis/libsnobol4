@@ -1251,9 +1251,10 @@ static void *arm64_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
             return nullptr;
         }
 
-        /* Success epilogue */
+        /* Success epilogue — use term_ip so the interpreter re-dispatches
+         * ACCEPT (or FAIL) and returns the correct result to the caller. */
         emit_instr(out, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
-        emit_mov_x64(out, 7, blk->next_ip);
+        emit_mov_x64(out, 7, blk->term_ip);
         emit_instr(out, A64_STR_X_X_IMM(7, 0, offsetof(VM, ip)));
         emit_instr(out, A64_RET);
 

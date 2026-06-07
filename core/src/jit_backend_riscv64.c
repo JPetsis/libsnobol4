@@ -316,7 +316,7 @@ static void emit_mov_imm12(jit_region_t *js, int rd, int32_t val) {
 /* Load a 32-bit signed value into rd: LUI + ADDI (sign-extends to 64-bit).
  * For values in [-2GB, 2GB-1] this is correct. */
 static void emit_mov_imm32(jit_region_t *js, int rd, int32_t val) {
-    uint32_t hi = (uint32_t)(((int64_t)val + 0x800) >> 12) & 0xFFFFF;
+    uint32_t hi = (((uint32_t)val + 0x800u) >> 12) & 0xFFFFF;
     int32_t  lo = val - (int32_t)(hi << 12);
     if (hi != 0) {
         emit_instr(js, rv64_lui(rd, hi));
@@ -974,9 +974,11 @@ static bool emit_block_ops_ir(
             emit_instr(js, rv64_srl(RV64_T6, RV64_T4, RV64_T6));
             emit_instr(js, rv64_andi(RV64_T6, RV64_T6, 1));
             uint32_t *map_done = js->p; emit_instr(js, rv64_jal(RV64_ZERO, 0));
+            *use_map1 = rv64_bne(RV64_T6, RV64_ZERO, (uint32_t)((intptr_t)js->p - (intptr_t)use_map1));
             emit_instr(js, rv64_andi(RV64_T6, RV64_T3, 63));
             emit_instr(js, rv64_srl(RV64_T6, RV64_T5, RV64_T6));
             emit_instr(js, rv64_andi(RV64_T6, RV64_T6, 1));
+            *map_done = rv64_jal(RV64_ZERO, (uint32_t)((intptr_t)js->p - (intptr_t)map_done));
 
             if (ins->opcode == JIT_IR_NOTANY) {
                 fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
@@ -1020,9 +1022,11 @@ static bool emit_block_ops_ir(
             emit_instr(js, rv64_srl(RV64_T6, RV64_T4, RV64_T6));
             emit_instr(js, rv64_andi(RV64_T6, RV64_T6, 1));
             uint32_t *sp_map_done = js->p; emit_instr(js, rv64_jal(RV64_ZERO, 0));
+            *sp_use_map1 = rv64_bne(RV64_T6, RV64_ZERO, (uint32_t)((intptr_t)js->p - (intptr_t)sp_use_map1));
             emit_instr(js, rv64_andi(RV64_T6, RV64_T3, 63));
             emit_instr(js, rv64_srl(RV64_T6, RV64_T5, RV64_T6));
             emit_instr(js, rv64_andi(RV64_T6, RV64_T6, 1));
+            *sp_map_done = rv64_jal(RV64_ZERO, (uint32_t)((intptr_t)js->p - (intptr_t)sp_map_done));
 
             fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
             emit_instr(js, rv64_beq(RV64_T6, RV64_ZERO, 0));
@@ -1046,9 +1050,11 @@ static bool emit_block_ops_ir(
             emit_instr(js, rv64_srl(RV64_T6, RV64_T4, RV64_T6));
             emit_instr(js, rv64_andi(RV64_T6, RV64_T6, 1));
             uint32_t *sp_done2 = js->p; emit_instr(js, rv64_jal(RV64_ZERO, 0));
+            *sp_use1 = rv64_bne(RV64_T6, RV64_ZERO, (uint32_t)((intptr_t)js->p - (intptr_t)sp_use1));
             emit_instr(js, rv64_andi(RV64_T6, RV64_T3, 63));
             emit_instr(js, rv64_srl(RV64_T6, RV64_T5, RV64_T6));
             emit_instr(js, rv64_andi(RV64_T6, RV64_T6, 1));
+            *sp_done2 = rv64_jal(RV64_ZERO, (uint32_t)((intptr_t)js->p - (intptr_t)sp_done2));
             sp_lpatches[sp_np++] = js->p; emit_instr(js, rv64_beq(RV64_T6, RV64_ZERO, 0));
             emit_instr(js, rv64_addi(RV64_POS, RV64_POS, 1));
             intptr_t sp_loop_off = (intptr_t)sp_loop_start - (intptr_t)js->p;
@@ -1361,6 +1367,7 @@ static void *riscv64_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out)
     if (!ir || !vm || !out) return nullptr;
     if (ir->non_compilable || ir->count == 0) return nullptr;
 
+
     JitCfg cfg;
     int n_blocks = ir_cfg_build(ir, &cfg);
 
@@ -1414,19 +1421,26 @@ static void *riscv64_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out)
                     emit_cfg_bailout_riscv64(out, blk->term_ip);
                     break;
                 }
-                /* Save state and push choice */
-                emit_instr(out, rv64_addi(RV64_SP, RV64_SP, -32));
+                /* Save state and push choice.
+                 * vm_push_choice(VM *vm, size_t ip, size_t pos)
+                 * Callee may clobber A0 (VM) and caller-saved temporaries,
+                 * so we save RA, VM, S, POS and restore them after the call.
+                 * A2 (pos) is passed explicitly from our POS register. */
+                emit_instr(out, rv64_addi(RV64_SP, RV64_SP, -40));
                 emit_instr(out, rv64_sd(RV64_SP, RV64_RA, 0));
-                emit_instr(out, rv64_sd(RV64_SP, RV64_S, 8));
-                emit_instr(out, rv64_sd(RV64_SP, RV64_POS, 16));
+                emit_instr(out, rv64_sd(RV64_SP, RV64_VM, 8));
+                emit_instr(out, rv64_sd(RV64_SP, RV64_S, 16));
+                emit_instr(out, rv64_sd(RV64_SP, RV64_POS, 24));
                 emit_mov_imm64(out, RV64_FNP, (uint64_t)(uintptr_t)vm_push_choice);
                 emit_mov_imm64(out, RV64_T4, (uint64_t)blk->succ_b);
                 emit_instr(out, rv64_add(RV64_A1, RV64_T4, RV64_ZERO));
+                emit_instr(out, rv64_add(RV64_A2, RV64_POS, RV64_ZERO));
                 emit_instr(out, rv64_jalr(RV64_RA, RV64_FNP, 0));
                 emit_instr(out, rv64_ld(RV64_RA, RV64_SP, 0));
-                emit_instr(out, rv64_ld(RV64_S, RV64_SP, 8));
-                emit_instr(out, rv64_ld(RV64_POS, RV64_SP, 16));
-                emit_instr(out, rv64_addi(RV64_SP, RV64_SP, 32));
+                emit_instr(out, rv64_ld(RV64_VM, RV64_SP, 8));
+                emit_instr(out, rv64_ld(RV64_S, RV64_SP, 16));
+                emit_instr(out, rv64_ld(RV64_POS, RV64_SP, 24));
+                emit_instr(out, rv64_addi(RV64_SP, RV64_SP, 40));
                 emit_ld_from_vm(out, RV64_LEN, offsetof(VM, len));
                 stub_patches[stub_patch_count++] = (StubPatch){ out->p, blk->succ_a };
                 emit_instr(out, rv64_jal(RV64_ZERO, 0));
@@ -1514,9 +1528,10 @@ static void *riscv64_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out)
             return nullptr;
         }
 
-        /* Success epilogue */
+        /* Success epilogue — use term_ip so the interpreter re-dispatches
+         * ACCEPT (or FAIL) and returns the correct result to the caller. */
         emit_instr(out, rv64_sd(RV64_VM, RV64_POS, offsetof(VM, pos)));
-        emit_mov_imm64(out, RV64_T4, (uint64_t)blk->next_ip);
+        emit_mov_imm64(out, RV64_T4, (uint64_t)blk->term_ip);
         emit_instr(out, rv64_sd(RV64_VM, RV64_T4, offsetof(VM, ip)));
         emit_instr(out, rv64_ld(RV64_RA, RV64_SP, 0));
         emit_instr(out, rv64_addi(RV64_SP, RV64_SP, 16));
