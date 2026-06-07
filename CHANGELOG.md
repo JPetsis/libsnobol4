@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [unreleased] - 2026-06-07
 
+### Added — Linux ARM32 JIT Backend (`jit-arm32`)
+
+- **ARM32 Thumb-2 code-generation backend**: New `core/src/jit_backend_arm32.c` implements
+  full JIT lowering for ARMv7-A Thumb-2. Supports all 22 IR opcodes via direct Thumb-2
+  encoding (no assembler dependency).
+- **ARM32 JIT backend registration**: `snobol_jit_arm32_register()` called from `snobol_jit_init()`
+  when compiled on `__arm__` / `__thumb__` targets.
+- **Fixed register convention**: r0=VM, r1=s, r2=pos, r3=len, r4–r11=temps, r12=BLX scratch,
+  lr=link register — mirrors ARM64 layout for commonality.
+- **Thumb-2 instruction emitters**: Data-processing (MOV, ADD, SUB, CMP, AND, ORR),
+  branches (B, BL, BLX, BX, CBZ, CBNZ), load/store (LDR, STR, LDRB, STRB), and
+  literal-pool-based LDR (literal) for large immediates.
+- **AAPCS32 call-out sequence**: `PUSH {lr}`, argument setup in r0–r3, `BLX` to helper,
+  `POP {lr}` — full C ABI compatibility.
+- **Code-page allocation**: `mmap(PROT_READ|PROT_WRITE)` → `mprotect(PROT_READ|PROT_EXEC)`
+  (W^X model), with `__builtin___clear_cache` for icache coherence.
+- **CI — QEMU ARMv7 job**: New `jit-qemu-armv7` GitHub Actions job validates the ARM32 JIT
+  in a QEMU-emulated ARMv7 container via `docker/setup-qemu-action`.
+- **CI — CMake backend validation**: `-DSNOBOL_JIT_BACKEND=arm32` tested in QEMU ARMv7 job.
+- **Test coverage**: New `tests/c/test_jit_arm32.c` with architecture-specific round-trip
+  tests (LIT, SPLIT, ANY, LEN, SPAN). All existing JIT tests now detect `__arm__`/`__thumb__`
+  for platform support.
+- **Documentation**: README updated to document `arm32` backend availability and minimum
+  target (ARMv7-A Thumb-2).
+
 ### Added — Linux AArch64 JIT (`jit-arm64-linux`)
 
 - **CMake platform detection**: `core/CMakeLists.txt` now sets `SNOBOL_JIT_PLATFORM_MACOS` or
@@ -22,8 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI — native AArch64 runner**: `ubuntu-24.04-arm` runner leg already present.
 - **Documentation**: README and CONTRIBUTING updated with Linux AArch64 build instructions and
   W^X policy notes.
-
-## [0.10.0] - 2026-05-23
 
 ### Added — JIT Neutral IR Layer (`jit-neutral-ir`)
 
@@ -80,9 +103,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`vreg_next` type** in `jit_ir_region_t` changed from `uint8_t` to `uint16_t`
   to prevent silent wrap-around at the 256-register boundary.
 
+## [0.9.0] - 2026-05-22
 
-
-### Added
+### Added - Full JIT Opcode Coverage
 
 - **Full JIT opcode coverage**: All VM opcodes now have compiled-region implementations in the ARM64 micro-JIT — no more interpreter fallback for any opcode group:
   - **Position guards** (`OP_REM`, `OP_RPOS`, `OP_RTAB`): compiled inline as integer comparisons against `vm->sp` / `vm->subject_len`.

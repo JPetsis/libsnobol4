@@ -17,6 +17,7 @@ add_library(snobol4 STATIC
     src/jit.c
     src/jit_ir.c
     src/jit_backend_arm64.c
+    src/jit_backend_arm32.c
     src/version.c
     src/string_fn.c
     src/type_fn.c
@@ -84,30 +85,45 @@ if(SNOBOL_SANITIZE)
     )
 endif()
 
-# Enable micro-JIT only on ARM64 (emits ARM64 machine code; requires sys/mman.h).
-# Enabling it on x86-64 would compile in ARM64 trace execution and crash at runtime.
+# Enable micro-JIT only on ARM architectures (emits ARM64 or ARM32 machine code;
+# requires sys/mman.h).  Enabling it on x86-64 would compile in ARM trace execution
+# and crash at runtime.  Backend source files have their own arch guards so the
+# compiler only sees code for the active target.
 # Explicitly force JIT off on Windows regardless of user input.
 if(WIN32)
     set(SNOBOL_JIT OFF CACHE BOOL "" FORCE)
 endif()
-if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-    target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
-
-    # Platform detection for JIT code paths
-    if(APPLE)
-        target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_PLATFORM_MACOS=1)
-    else()
-        target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_PLATFORM_LINUX=1)
+if(NOT WIN32)
+    set(_jit_arch_ok FALSE)
+    # ARM64
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+        set(_jit_arch_ok TRUE)
     endif()
+    # ARM32 (armv7l, armv6l, arm, etc. — but not arm64)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64")
+        set(_jit_arch_ok TRUE)
+    endif()
+    if(_jit_arch_ok)
+        target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
+
+        # Platform detection for JIT code paths
+        if(APPLE)
+            target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_PLATFORM_MACOS=1)
+        else()
+            target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_PLATFORM_LINUX=1)
+        endif()
+    endif()
+    unset(_jit_arch_ok)
 endif()
 
 # JIT backend selection (compile-time; only one backend per binary).
 # Valid values: "arm64"  (default, requires ARM64 host)
+#               "arm32"  (requires ARMv7-A Thumb-2 host)
 # Adding a new backend: add the source file and a new valid value here.
-set(SNOBOL_JIT_BACKEND "arm64" CACHE STRING "JIT backend to compile in (arm64)")
-set_property(CACHE SNOBOL_JIT_BACKEND PROPERTY STRINGS "arm64")
+set(SNOBOL_JIT_BACKEND "arm64" CACHE STRING "JIT backend to compile in (arm64|arm32)")
+set_property(CACHE SNOBOL_JIT_BACKEND PROPERTY STRINGS "arm64;arm32")
 
-set(_valid_jit_backends "arm64")
+set(_valid_jit_backends "arm64;arm32")
 if(NOT SNOBOL_JIT_BACKEND IN_LIST _valid_jit_backends)
     message(FATAL_ERROR
         "SNOBOL_JIT_BACKEND='${SNOBOL_JIT_BACKEND}' is not a recognised backend.\n"

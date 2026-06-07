@@ -76,11 +76,15 @@ const jit_backend_t  *jit_backend_get(void);
 const char           *jit_backend_name(void);
 
 /* -------------------------------------------------------------------------
- * ARM64 backend init (declaration; definition in jit_backend_arm64.c)
+ * Backend init declarations (definitions in jit_backend_arm64.c,
+ * jit_backend_arm32.c)
  * -------------------------------------------------------------------------
  */
 #if defined(__aarch64__) || defined(__arm64__)
 void snobol_jit_arm64_register(void);
+#endif
+#if defined(__arm__) || defined(__thumb__) || defined(__ARM_ARCH_7A__)
+void snobol_jit_arm32_register(void);
 #endif
 
 #endif /* SNOBOL_JIT */

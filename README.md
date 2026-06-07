@@ -63,20 +63,21 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **IDENT / DIFFER** – String identity / difference
   * **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
   * **INTEGER / REAL / NUMERIC** – Numeric type predicates
-* **Optional Micro-JIT** (v0.10.0): ARM64 JIT compilation for hot patterns via a two-phase
-  architecture-neutral IR pipeline — runs on **macOS ARM64 and Linux AArch64**:
+* **Optional Micro-JIT** (v0.10.0): ARM64/ARM32 JIT compilation for hot patterns via a two-phase
+  architecture-neutral IR pipeline — runs on **macOS ARM64, Linux AArch64, and Linux ARMv7-A**:
   * `SNOBOL_JIT_DUMP_IR=1` — dump the IR to `stderr` before lowering (debug)
-  * `SNOBOL_JIT_BACKEND=arm64` (CMake option) — selects the code-generation backend (default: `arm64`)
-  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → ARM64 machine code
+  * `SNOBOL_JIT_BACKEND=arm64|arm32` (CMake option) — selects the code-generation backend (default: `arm64`)
+  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → ARM64/Thumb-2 machine code
+  * **ARM32 backend** targets ARMv7-A with Thumb-2 instruction set; uses W^X page permissions on Linux
   * Linux uses W^X (write-then-exec) page permissions; macOS uses `MAP_JIT`
 * **C23 Code Quality** (v0.6.0): Core adopts `nullptr`, `[[nodiscard]]`, `[[maybe_unused]]`, and `constexpr` throughout. JIT A64 macro helpers converted to typed `static inline` functions. Requires GCC 13+ or Clang 17+.
 * **Profiling Support**: Built-in execution profiling for performance analysis
 
 ### Available Bindings
 
-| Binding              | Status   | Version |
-|----------------------|----------|---------|
-| [PHP](bindings/php/README.md) | ✅ Stable | v0.7.0  |
+| Binding                       | Status   | Version  |
+|-------------------------------|----------|----------|
+| [PHP](bindings/php/README.md) | ✅ Stable | v0.7.0   |
 
 ## Project Structure
 
@@ -170,14 +171,14 @@ See [bindings/php/README.md](bindings/php/README.md) for detailed PHP documentat
 
 ## Build Options
 
-| Option              | Default | Description                             |
-|---------------------|---------|-----------------------------------------|
-| `BUILD_TESTS`       | ON      | Build C test suite                      |
-| `BUILD_PHP`         | OFF     | Build PHP binding                       |
-| `BUILD_SHARED_LIBS` | OFF     | Build shared library                    |
+| Option              | Default | Description                                    |
+|---------------------|---------|------------------------------------------------|
+| `BUILD_TESTS`       | ON      | Build C test suite                             |
+| `BUILD_PHP`         | OFF     | Build PHP binding                              |
+| `BUILD_SHARED_LIBS` | OFF     | Build shared library                           |
 | `SNOBOL_JIT`        | ON      | Enable micro-JIT (macOS ARM64 / Linux AArch64) |
-| `SNOBOL_PROFILE`    | OFF     | Enable VM profiling                     |
-| `SNOBOL_SANITIZE`   | OFF     | AddressSanitizer + UBSan (GCC/Clang)   |
+| `SNOBOL_PROFILE`    | OFF     | Enable VM profiling                            |
+| `SNOBOL_SANITIZE`   | OFF     | AddressSanitizer + UBSan (GCC/Clang)           |
 
 ### Example Configurations
 

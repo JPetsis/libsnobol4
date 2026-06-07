@@ -25,7 +25,8 @@ void test_suite(const char *name);
 void test_assert(bool condition, const char *message);
 
 static bool jit_is_supported(void) {
-#if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
+#if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64) \
+    || defined(__arm__) || defined(__thumb__) || defined(__ARM_ARCH_7A__)
     return true;
 #else
     return false;

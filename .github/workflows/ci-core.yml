@@ -106,3 +106,23 @@ jobs:
           push: false
           file: ci/Dockerfile.jit-qemu
 
+  jit-qemu-armv7:
+    name: JIT QEMU ARMv7 (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+
+      - name: Build and test in QEMU ARMv7 container
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm/v7
+          push: false
+          file: ci/Dockerfile.jit-qemu-armv7
+
