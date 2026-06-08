@@ -55,36 +55,69 @@ jobs:
         run: ctest --output-on-failure -C Release --verbose
 
   jit-backend-tests:
-    name: JIT Backend Tests (${{ matrix.os }})
+    name: JIT Backend Tests (${{ matrix.os }}, ${{ matrix.backend }})
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        # ARM64 runners: macOS Apple Silicon + Linux AArch64 (native)
-        os: [ macos-latest, ubuntu-24.04-arm ]
+        include:
+          # ARM64: macOS Apple Silicon + Linux AArch64
+          - os: macos-latest
+            backend: arm64
+          - os: ubuntu-24.04-arm
+            backend: arm64
+          # x86-64: Linux + Windows + macOS Intel
+          - os: ubuntu-latest
+            backend: x86_64
+          - os: windows-latest
+            backend: x86_64
+          - os: macos-13
+            backend: x86_64
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install CMake (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+
       - name: Configure CMake (with JIT backend)
-        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=arm64
+        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=${{ matrix.backend }}
 
       - name: Build
         run: cmake --build build --config Release
 
       - name: Run JIT IR unit tests
+        if: matrix.os != 'windows-latest'
         working-directory: build
         run: ctest --output-on-failure -L jit-ir
 
       - name: Run IR roundtrip tests
+        if: matrix.os != 'windows-latest'
         working-directory: build
         run: ctest --output-on-failure -L roundtrip
 
       - name: Run full JIT test suite
+        if: matrix.os != 'windows-latest'
         working-directory: build
         run: ctest --output-on-failure
+
+      - name: Run JIT IR unit tests (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: build
+        run: ctest --output-on-failure -L jit-ir -C Release --verbose
+
+      - name: Run IR roundtrip tests (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: build
+        run: ctest --output-on-failure -L roundtrip -C Release --verbose
+
+      - name: Run full JIT test suite (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: build
+        run: ctest --output-on-failure -C Release --verbose
 
   jit-qemu-aarch64:
     name: JIT QEMU AArch64 (Linux)

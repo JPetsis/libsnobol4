@@ -63,13 +63,16 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **IDENT / DIFFER** – String identity / difference
   * **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
   * **INTEGER / REAL / NUMERIC** – Numeric type predicates
-* **Optional Micro-JIT** (v0.10.0): ARM64/ARM32/RISC-V 64 JIT compilation for hot patterns via a two-phase
-  architecture-neutral IR pipeline — runs on **macOS ARM64, Linux AArch64, Linux ARMv7-A, and Linux RISC-V 64**:
+* **Optional Micro-JIT** (v0.10.0): ARM64/ARM32/RISC-V 64/x86-64 JIT compilation for hot patterns via a two-phase
+  architecture-neutral IR pipeline — runs on **macOS ARM64/Intel, Linux AArch64/x86-64, Linux ARMv7-A, Linux RISC-V 64, and Windows x86-64**:
   * `SNOBOL_JIT_DUMP_IR=1` — dump the IR to `stderr` before lowering (debug)
-  * `SNOBOL_JIT_BACKEND=arm64|arm32|riscv64` (CMake option) — selects the code-generation backend (default: `arm64`)
-  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → ARM64/Thumb-2/RV64I machine code
+  * `SNOBOL_JIT_BACKEND=arm64|arm32|riscv64|x86_64` (CMake option) — selects the code-generation backend (default: `arm64`)
+  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → ARM64/Thumb-2/RV64I/x86-64 machine code
   * **ARM32 backend** targets ARMv7-A with Thumb-2 instruction set; uses W^X page permissions on Linux
   * **RISC-V 64 backend** targets RV64I base ISA; optional RV64C compressed support via `SNOBOL_JIT_RV64C=ON`
+  * **x86-64 backend** supports both System V AMD64 ABI (Linux/macOS) and Microsoft x64 ABI (Windows) via
+    compile-time `SNOBOL_JIT_WIN64_ABI`. Uses W^X page permissions: `VirtualAlloc`/`VirtualProtect` on Windows,
+    `mmap`/`mprotect` on Linux, `MAP_JIT` on macOS. DEP-compliant: never uses `PAGE_EXECUTE_READWRITE`.
   * Linux uses W^X (write-then-exec) page permissions; macOS uses `MAP_JIT`
 * **C23 Code Quality** (v0.6.0): Core adopts `nullptr`, `[[nodiscard]]`, `[[maybe_unused]]`, and `constexpr` throughout. JIT A64 macro helpers converted to typed `static inline` functions. Requires GCC 13+ or Clang 17+.
 * **Profiling Support**: Built-in execution profiling for performance analysis
@@ -172,16 +175,16 @@ See [bindings/php/README.md](bindings/php/README.md) for detailed PHP documentat
 
 ## Build Options
 
-| Option               | Default | Description                                                        |
-|----------------------|---------|--------------------------------------------------------------------|
-| `BUILD_TESTS`        | ON      | Build C test suite                                                 |
-| `BUILD_PHP`          | OFF     | Build PHP binding                                                  |
-| `BUILD_SHARED_LIBS`  | OFF     | Build shared library                                               |
-| `SNOBOL_JIT`         | ON      | Enable micro-JIT (macOS ARM64 / Linux AArch64 / ARMv7 / RISC-V 64) |
-| `SNOBOL_JIT_BACKEND` | arm64   | Selects backend: `arm64`, `arm32`, or `riscv64`                    |
-| `SNOBOL_JIT_RV64C`   | OFF     | Enable RISC-V compressed (RV64C) instruction support               |
-| `SNOBOL_PROFILE`     | OFF     | Enable VM profiling                                                |
-| `SNOBOL_SANITIZE`    | OFF     | AddressSanitizer + UBSan (GCC/Clang)                               |
+| Option               | Default | Description                                                                                      |
+|----------------------|---------|--------------------------------------------------------------------------------------------------|
+| `BUILD_TESTS`        | ON      | Build C test suite                                                                               |
+| `BUILD_PHP`          | OFF     | Build PHP binding                                                                                |
+| `BUILD_SHARED_LIBS`  | OFF     | Build shared library                                                                             |
+| `SNOBOL_JIT`         | ON      | Enable micro-JIT (macOS ARM64/Intel / Linux AArch64/x86-64 / ARMv7 / RISC-V 64 / Windows x86-64) |
+| `SNOBOL_JIT_BACKEND` | arm64   | Selects backend: `arm64`, `arm32`, `riscv64`, or `x86_64`                                        |
+| `SNOBOL_JIT_RV64C`   | OFF     | Enable RISC-V compressed (RV64C) instruction support                                             |
+| `SNOBOL_PROFILE`     | OFF     | Enable VM profiling                                                                              |
+| `SNOBOL_SANITIZE`    | OFF     | AddressSanitizer + UBSan (GCC/Clang)                                                             |
 
 ### Example Configurations
 

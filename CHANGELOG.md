@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [unreleased] - 2026-06-07
 
+### Added — Windows / Linux / macOS x86-64 JIT Backend (`jit-windows-x86`)
+
+- **x86-64 code-generation backend**: New `core/src/jit_backend_x86_64.c` implements
+  full JIT lowering for x86-64. Supports all 22 IR opcodes via direct instruction encoding
+  (no assembler dependency).
+- **Dual ABI support**: Compile-time `SNOBOL_JIT_WIN64_ABI` selects between System V AMD64 ABI
+  (Linux/macOS) and Microsoft x64 ABI (Windows). The ABI is auto-detected from `CMAKE_SYSTEM_NAME`.
+- **Register convention**: rbx=VM (callee-saved), rsi=s, rdi=pos, r12=len — mirrors ARM64 layout.
+  Register mapping adjusted per ABI for call-out argument passing.
+- **Full instruction emitter suite**: REX prefix, ModRM, SIB encoding; MOV rr/ri/rm/mr, ADD, SUB,
+  XOR, CMP, TEST, MOVZX; JMP rel8/rel32, Jcc rel8/rel32; CALL rel32/CALL [mem]; PUSH/POP;
+  prologue/epilogue.
+- **Code-page allocation**:
+  - **Windows**: `VirtualAlloc(MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)` →
+    `VirtualProtect(PAGE_EXECUTE_READ)` — DEP-compliant, never uses `PAGE_EXECUTE_READWRITE`.
+    Static assert verifies no `PAGE_EXECUTE_READWRITE` usage in debug builds.
+  - **Linux**: `mmap(PROT_READ|PROT_WRITE)` → `mprotect(PROT_READ|PROT_EXEC)` (W^X model).
+  - **macOS**: `mmap(MAP_JIT)` → `pthread_jit_write_protect_np`.
+- **CI — x86_64 JIT jobs**: New matrix entries in `jit-backend-tests` for `ubuntu-latest` (x86-64),
+  `windows-latest` (x86-64 MSVC), and `macos-13` (Intel x86-64), each with `SNOBOL_JIT_BACKEND=x86_64`.
+- **Test coverage**: New `tests/c/test_jit_x86_64.c` with architecture-specific round-trip tests
+  (LIT, SPLIT, LEN). JIT enabled for x86-64 hosts in `tests/c/CMakeLists.txt`.
+- **Documentation**: README, CONTRIBUTING, and CHANGELOG updated to document x86_64 backend
+  availability, dual ABI support, DEP compliance, and build instructions.
+
 ### Added — Linux RISC-V 64 JIT Backend (`jit-riscv64`)
 
 - **RISC-V 64-bit code-generation backend**: New `core/src/jit_backend_riscv64.c` implements

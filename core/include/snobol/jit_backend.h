@@ -89,6 +89,9 @@ void snobol_jit_arm32_register(void);
 #if defined(__riscv) && __riscv_xlen == 64
 void snobol_jit_riscv64_register(void);
 #endif
+#if defined(__x86_64__) || defined(_M_X64)
+void snobol_jit_x86_64_register(void);
+#endif
 
 #endif /* SNOBOL_JIT */
 

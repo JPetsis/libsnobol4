@@ -21,6 +21,7 @@ add_executable(snobol4_tests
     test_jit_ir.c
     test_jit_arm32.c
     test_jit_riscv64.c
+    test_jit_x86_64.c
     test_lexer.c
     test_parser.c
     test_ast.c
@@ -65,8 +66,10 @@ if(SNOBOL_SANITIZE)
     )
 endif()
 
-# Enable JIT for tests on ARM64 or ARM32 hosts
-if(NOT WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]|arm|riscv64)$")
+# Enable JIT for tests on supported architectures.
+# The core library auto-detects the host arch and registers the matching backend;
+# tests need SNOBOL_JIT=1 to enable JIT code paths in the test harness.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]|arm|riscv64|AMD64|x86_64|amd64|i686|x86)$")
     target_compile_definitions(snobol4_tests PRIVATE SNOBOL_JIT=1)
 endif()
 

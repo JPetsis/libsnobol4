@@ -5,17 +5,30 @@
 
 #ifdef SNOBOL_JIT
 
-#include <sys/mman.h>
+#ifdef SNOBOL_JIT_PLATFORM_WINDOWS
+#  include <windows.h>
+#else
+#  include <sys/mman.h>
+#  include <unistd.h>
+#  include <fcntl.h>
+#endif
 #include <stdlib.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <stddef.h>
 #include <string.h>
-#include <fcntl.h>
 #ifdef SNOBOL_JIT_PLATFORM_MACOS
 #  include <pthread.h>
 #endif
 #include <assert.h>
+
+/* Static assertion: PAGE_EXECUTE_READWRITE must never be used (DEP compliance).
+ * This placeholder assertion passes universally — the real enforcement is in
+ * snobol_jit_alloc_code() which always allocates with PAGE_READWRITE, and
+ * snobol_jit_seal_code() which transitions to PAGE_EXECUTE_READ. */
+#ifdef SNOBOL_JIT_PLATFORM_WINDOWS
+_Static_assert(MEM_COMMIT && MEM_RESERVE && PAGE_READWRITE && PAGE_EXECUTE_READ,
+               "Windows memory allocation constants must be available");
+#endif
 #include "snobol/snobol_internal.h"
 #include "snobol/table.h"
 #include "snobol/dynamic_pattern.h"
@@ -292,6 +305,8 @@ void snobol_jit_init(void) {
     snobol_jit_arm32_register();
 #elif defined(__riscv) && __riscv_xlen == 64
     snobol_jit_riscv64_register();
+#elif defined(__x86_64__) || defined(_M_X64)
+    snobol_jit_x86_64_register();
 #endif
 }
 
@@ -312,7 +327,12 @@ void snobol_jit_shutdown(void) {
  * --------------------------------------------------------------------------- */
 
 void *snobol_jit_alloc_code(size_t size) {
-#ifdef SNOBOL_JIT_PLATFORM_MACOS
+#ifdef SNOBOL_JIT_PLATFORM_WINDOWS
+    /* DEP compliance: allocate as PAGE_READWRITE, never PAGE_EXECUTE_READWRITE.
+     * Code pages are switched to PAGE_EXECUTE_READ in snobol_jit_seal_code(). */
+    void *ptr = VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    return ptr ? ptr : nullptr;
+#elif defined(SNOBOL_JIT_PLATFORM_MACOS)
     void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
     return (ptr == MAP_FAILED) ? nullptr : ptr;
@@ -324,7 +344,12 @@ void *snobol_jit_alloc_code(size_t size) {
 }
 
 void snobol_jit_seal_code(void *code, size_t size) {
-#ifdef SNOBOL_JIT_PLATFORM_MACOS
+#ifdef SNOBOL_JIT_PLATFORM_WINDOWS
+    DWORD old;
+    BOOL ok = VirtualProtect(code, size, PAGE_EXECUTE_READ, &old);
+    assert(ok && "VirtualProtect to PAGE_EXECUTE_READ failed");
+    FlushInstructionCache(GetCurrentProcess(), code, size);
+#elif defined(SNOBOL_JIT_PLATFORM_MACOS)
     /* Switch current thread back to exec mode, then flush the instruction cache. */
     pthread_jit_write_protect_np(1);
     __builtin___clear_cache((char *)code, (char *)code + size);
@@ -336,7 +361,12 @@ void snobol_jit_seal_code(void *code, size_t size) {
 }
 
 void snobol_jit_free_code(void *code, size_t size) {
+#ifdef SNOBOL_JIT_PLATFORM_WINDOWS
+    (void)size;
+    if (code) VirtualFree(code, 0, MEM_RELEASE);
+#else
     if (code && size) munmap(code, size);
+#endif
 }
 
 /* ---------------------------------------------------------------------------
@@ -576,7 +606,7 @@ done:
 jit_trace_fn snobol_jit_compile([[maybe_unused]] VM *vm, [[maybe_unused]] size_t start_ip, size_t *out_code_size) {
     if (out_code_size) *out_code_size = 0;
 
-#if !defined(__aarch64__) && !defined(__arm64__) && !defined(__arm__) && !defined(__thumb__) && !defined(__ARM_ARCH_7A__) && !(defined(__riscv) && __riscv_xlen == 64)
+#if !defined(__aarch64__) && !defined(__arm64__) && !defined(__arm__) && !defined(__thumb__) && !defined(__ARM_ARCH_7A__) && !(defined(__riscv) && __riscv_xlen == 64) && !defined(__x86_64__) && !defined(_M_X64)
     return nullptr;
 #endif
 

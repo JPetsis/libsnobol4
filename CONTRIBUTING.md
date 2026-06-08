@@ -237,7 +237,43 @@ libsnobol4 uses independent versioning for core and bindings:
 
 ## Windows Development
 
-The project supports MSVC (Visual Studio 2022+) and MinGW-w64 toolchains on Windows. The JIT is automatically disabled on Windows builds (no `mmap`/`MAP_JIT` calls are compiled).
+The project supports MSVC (Visual Studio 2022+) and MinGW-w64 toolchains on Windows. The JIT is supported on Windows x86-64 via the `x86_64` backend (Microsoft x64 ABI), using `VirtualAlloc`/`VirtualProtect` for W^X code-page management (DEP-compliant — never uses `PAGE_EXECUTE_READWRITE`). Build with:
+
+```bash
+cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=x86_64
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+## Linux / macOS x86-64 JIT
+
+The micro-JIT runs on x86-64 Linux and macOS (Intel) via the `x86_64` backend using the
+System V AMD64 ABI. Build with:
+
+```bash
+cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=x86_64
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+On Linux, code pages use `mmap(PROT_READ|PROT_WRITE)` → `mprotect(PROT_READ|PROT_EXEC)` (W^X model);
+on macOS Intel, `mmap` with `MAP_JIT` is used. The x86 instruction cache is coherent on both platforms,
+so no explicit icache flush is needed (except `FlushInstructionCache` on Windows).
+
+## Windows x86-64 JIT
+
+The micro-JIT runs on Windows x86-64 (MSVC or MinGW-w64) via the `x86_64` backend using the
+Microsoft x64 ABI. Build with:
+
+```bash
+cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=x86_64
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+**DEP compliance**: Code pages are allocated with `VirtualAlloc(MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)`,
+then switched to `PAGE_EXECUTE_READ` via `VirtualProtect` after emission. `PAGE_EXECUTE_READWRITE` is
+never used. The `/NXCOMPAT` linker flag (enabled by default since VS 2010) ensures hardware DEP is active.
 
 ## Linux AArch64 JIT
 
