@@ -523,15 +523,17 @@ static void x64_pop_r(jit_region_t *out, int reg) {
  * ========================================================================= */
 
 static void x64_prologue(jit_region_t *out) {
-    /* Push rbx (VM) and r12 (len) — callee-saved registers we use */
+    /* Push rbp, rbx (VM), r12 (len) — callee-saved registers we use */
+    x64_push_r(out, X64_RBP);
     x64_push_r(out, X64_RBX);
     x64_push_r(out, X64_R12);
 }
 
 static void x64_epilogue(jit_region_t *out) {
-    /* Pop r12, rbx */
+    /* Pop r12, rbx, rbp */
     x64_pop_r(out, X64_R12);
     x64_pop_r(out, X64_RBX);
+    x64_pop_r(out, X64_RBP);
     x64_ret(out);
 }
 
