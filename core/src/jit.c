@@ -327,19 +327,30 @@ void snobol_jit_shutdown(void) {
  * --------------------------------------------------------------------------- */
 
 void *snobol_jit_alloc_code(size_t size) {
+    /*
+     * Allocate extra space for a 16-byte leading pad.  UBSan's
+     * -fsanitize=function reads function metadata from fn[-8] and fn[-16];
+     * without this pad a JIT trace placed at the start of an mmap page
+     * would cause fn[-8] to land on unmapped memory → SIGSEGV.
+     * See LLVM issue #65253.
+     */
+    size_t alloc_size = size + 16;
 #ifdef SNOBOL_JIT_PLATFORM_WINDOWS
     /* DEP compliance: allocate as PAGE_READWRITE, never PAGE_EXECUTE_READWRITE.
      * Code pages are switched to PAGE_EXECUTE_READ in snobol_jit_seal_code(). */
-    void *ptr = VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    return ptr ? ptr : nullptr;
+    void *ptr = VirtualAlloc(nullptr, alloc_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!ptr) return nullptr;
+    return (void *)((uint8_t *)ptr + 16);
 #elif defined(SNOBOL_JIT_PLATFORM_MACOS)
-    void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+    void *ptr = mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
-    return (ptr == MAP_FAILED) ? nullptr : ptr;
+    if (ptr == MAP_FAILED) return nullptr;
+    return (void *)((uint8_t *)ptr + 16);
 #elif defined(SNOBOL_JIT_PLATFORM_LINUX)
-    void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE,
+    void *ptr = mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return (ptr == MAP_FAILED) ? nullptr : ptr;
+    if (ptr == MAP_FAILED) return nullptr;
+    return (void *)((uint8_t *)ptr + 16);
 #endif
 }
 
@@ -361,11 +372,14 @@ void snobol_jit_seal_code(void *code, size_t size) {
 }
 
 void snobol_jit_free_code(void *code, size_t size) {
+    /* Recover the original allocation address by reversing the 16-byte
+     * pad introduced in snobol_jit_alloc_code(). */
+    void *base = (void *)((uint8_t *)code - 16);
+    size_t total = size + 16;
 #ifdef SNOBOL_JIT_PLATFORM_WINDOWS
-    (void)size;
-    if (code) VirtualFree(code, 0, MEM_RELEASE);
+    VirtualFree(base, 0, MEM_RELEASE);
 #else
-    if (code && size) munmap(code, size);
+    if (code && size) munmap(base, total);
 #endif
 }
 

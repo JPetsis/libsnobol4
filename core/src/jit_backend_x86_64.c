@@ -1136,11 +1136,11 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_add_rr(out, X64_RAX, X64_RDI);
             x64_cmp_rr(out, X64_RAX, X64_R12);
             uint8_t *past_len = (uint8_t *)out->p;
-            x64_jcc_rel8(out, JCC_JAE, 0);
+            x64_jcc_rel8(out, JCC_JA, 0);
             /* Fail */
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
-            /* Patch the JAE */
+            /* Patch the JA */
             intptr_t past_len_off = (uint8_t *)out->p - past_len;
             past_len[1] = (uint8_t)(past_len_off - 2); /* rel8 offset */
 
