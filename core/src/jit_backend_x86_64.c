@@ -364,6 +364,28 @@ static void x64_loadb_mr(jit_region_t *out, int reg, int base, int32_t disp) {
     }
 }
 
+/* Load byte from [base + index] using SIB addressing (no displacement):
+ *   MOVZX reg64, byte ptr [base + index]
+ * The index register is used with scale=1 (no SIB scale field = 0). */
+static void x64_loadb_mr_idx(jit_region_t *out, int reg, int base, int index) {
+    int need_rex_r = reg > 7;
+    int need_rex_x = index > 7;
+    int need_rex_b = base > 7;
+    uint8_t rex_byte = rex(0, need_rex_r, need_rex_x, need_rex_b);
+    if (need_rex_r || need_rex_x || need_rex_b) emit_byte(out, rex_byte);
+    emit_byte(out, 0x0F);
+    emit_byte(out, 0xB6);
+    if (base == X64_RBP) {
+        /* MOD=00 with SIB base=RBP means no base register; use MOD=01, disp8=0 */
+        emit_byte(out, modrm(1, reg & 7, 4));
+        emit_byte(out, sib(0, index & 7, base & 7));
+        emit_disp8(out, 0);
+    } else {
+        emit_byte(out, modrm(0, reg & 7, 4));
+        emit_byte(out, sib(0, index & 7, base & 7));
+    }
+}
+
 /* =========================================================================
  * Load/store with [base + index*scale + disp] (SIB addressing)
  * ========================================================================= */
@@ -1116,7 +1138,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
 
             /* Compare each byte */
             for (uint32_t j = 0; j < lit_len; j++) {
-                x64_loadb_mr(out, X64_RAX, X64_RSI, (int32_t)((intptr_t)j + (intptr_t)X64_RDI));
+                x64_loadb_mr_idx(out, X64_RAX, X64_RSI, X64_RDI);
                 x64_cmp_rm32_imm32(out, X64_RAX, data[j]);
                 uint8_t *ok = (uint8_t *)out->p;
                 x64_jcc_rel8(out, JCC_JE, 0);
@@ -1124,10 +1146,8 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
                 x64_epilogue(out);
                 intptr_t ok_off = (uint8_t *)out->p - ok;
                 ok[-1] = (uint8_t)(ok_off - 2);
+                x64_add_ri32(out, X64_RDI, 1);
             }
-            /* Advance pos by lit_len */
-            x64_mov_ri64(out, X64_RAX, lit_len);
-            x64_add_rr(out, X64_RDI, X64_RAX);
             break;
         }
 
@@ -1150,7 +1170,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             intptr_t in_range_off = (uint8_t *)out->p - in_range;
             in_range[-1] = (uint8_t)(in_range_off - 2);
 
-            x64_loadb_mr(out, X64_RAX, X64_RSI, X64_RDI);
+            x64_loadb_mr_idx(out, X64_RAX, X64_RSI, X64_RDI);
             x64_cmp_rm32_imm32(out, X64_RAX, 127);
             uint8_t *ascii_ok = (uint8_t *)out->p;
             x64_jcc_rel8(out, JCC_JBE, 0);
@@ -1211,7 +1231,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             uint8_t *span_done = (uint8_t *)out->p;
             x64_jcc_rel8(out, JCC_JAE, 0);
 
-            x64_loadb_mr(out, X64_RAX, X64_RSI, X64_RDI);
+            x64_loadb_mr_idx(out, X64_RAX, X64_RSI, X64_RDI);
             x64_cmp_rm32_imm32(out, X64_RAX, 127);
             uint8_t *span_ascii_ok = (uint8_t *)out->p;
             x64_jcc_rel8(out, JCC_JBE, 0);
@@ -1266,7 +1286,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
                 /* Check byte at s[pos-1] == '\n' */
                 x64_mov_ri64(out, X64_RAX, -1);
                 x64_add_rr(out, X64_RAX, X64_RDI);
-                x64_loadb_mr(out, X64_RAX, X64_RSI, X64_RAX);
+                x64_loadb_mr_idx(out, X64_RAX, X64_RSI, X64_RAX);
                 x64_cmp_rm32_imm32(out, X64_RAX, '\n');
                 uint8_t *anchored = (uint8_t *)out->p;
                 x64_jcc_rel8(out, JCC_JE, 0);
