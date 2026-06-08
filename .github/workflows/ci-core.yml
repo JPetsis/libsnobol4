@@ -30,6 +30,10 @@ jobs:
       matrix:
         os: [ ubuntu-latest, macos-latest, windows-latest ]
 
+    env:
+      SNOBOL_JIT_LOG_FILE: snobol-jit-core-${{ matrix.os }}.log
+      SNOBOL_TEST_TIMEOUT_SECS: "60"
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -54,6 +58,17 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure -C Release --verbose
 
+      - name: Upload JIT log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jit-log-core-${{ matrix.os }}
+          path: |
+            build/${{ env.SNOBOL_JIT_LOG_FILE }}
+            build/watchdog.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   jit-backend-tests:
     name: JIT Backend Tests (${{ matrix.os }}, ${{ matrix.backend }})
     runs-on: ${{ matrix.os }}
@@ -74,6 +89,14 @@ jobs:
             backend: x86_64
           - os: macos-13
             backend: x86_64
+
+    env:
+      # Capture every JIT/VM event to a file so a CI hang can be diagnosed
+      # post-mortem by inspecting the last few hundred lines of the log.
+      SNOBOL_JIT_LOG_FILE: snobol-jit-${{ matrix.os }}-${{ matrix.backend }}.log
+      # Per-suite watchdog.  Aborts the test binary if a suite runs longer
+      # than this; default 60 s.
+      SNOBOL_TEST_TIMEOUT_SECS: "60"
 
     steps:
       - name: Checkout code
@@ -118,6 +141,17 @@ jobs:
         if: matrix.os == 'windows-latest'
         working-directory: build
         run: ctest --output-on-failure -C Release --verbose
+
+      - name: Upload JIT log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jit-log-${{ matrix.os }}-${{ matrix.backend }}
+          path: |
+            build/${{ env.SNOBOL_JIT_LOG_FILE }}
+            build/watchdog.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   jit-qemu-aarch64:
     name: JIT QEMU AArch64 (Linux)

@@ -15,7 +15,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include <string.h>
+#include <errno.h>
 #ifdef SNOBOL_JIT_PLATFORM_MACOS
 #  include <pthread.h>
 #endif
@@ -137,6 +139,44 @@ void snobol_jit_load_config_from_env(void) {
     if ((v = getenv("SNOBOL_JIT_SKIP_BT")))       global_jit_cfg.skip_backtrack_heavy     = (strtol(v, nullptr, 10) != 0);
     if ((v = getenv("SNOBOL_JIT_SEARCH_HOT")))    global_jit_cfg.search_hotness_threshold = (uint64_t)strtoull(v, nullptr, 10);
     if ((v = getenv("SNOBOL_JIT_SEARCH_OPS")))    global_jit_cfg.search_min_useful_ops    = (uint32_t)strtoul(v, nullptr, 10);
+}
+
+/* ---------------------------------------------------------------------------
+ * JIT event log
+ *
+ * When SNOBOL_JIT_LOG_FILE is set, every JIT and VM event is appended to the
+ * file.  Used to diagnose CI hangs by capturing the exact sequence of events
+ * leading up to a failure.
+ * --------------------------------------------------------------------------- */
+static FILE *jit_log_fp = nullptr;
+
+void snobol_jit_log_open(void) {
+    if (jit_log_fp) return;
+    const char *path = getenv("SNOBOL_JIT_LOG_FILE");
+    if (!path || !path[0]) return;
+    jit_log_fp = fopen(path, "w");
+    if (jit_log_fp) {
+        setvbuf(jit_log_fp, nullptr, _IOLBF, 0); /* line-buffered for tail -f */
+        fprintf(jit_log_fp, "# snobol_jit log opened pid=%lu\n",
+                (unsigned long)snobol_jit_now_ns());
+    }
+}
+
+void snobol_jit_log_close(void) {
+    if (jit_log_fp) {
+        fprintf(jit_log_fp, "# snobol_jit log closed\n");
+        fclose(jit_log_fp);
+        jit_log_fp = nullptr;
+    }
+}
+
+void snobol_jit_log(const char *fmt, ...) {
+    if (!jit_log_fp) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(jit_log_fp, fmt, ap);
+    va_end(ap);
+    fputc('\n', jit_log_fp);
 }
 
 /* ---------------------------------------------------------------------------
@@ -298,6 +338,11 @@ void snobol_jit_init(void) {
     jit_cache_count = 0;
     lru_clock = 0;
     snobol_jit_load_config_from_env();
+    snobol_jit_log_open();
+    snobol_jit_log("init backend=%s hotness=%llu min_useful=%u",
+                   jit_backend_name(),
+                   (unsigned long long)global_jit_cfg.hotness_threshold,
+                   (unsigned)global_jit_cfg.min_useful_ops);
     /* Register the compile-time selected backend */
 #if defined(__aarch64__) || defined(__arm64__)
     snobol_jit_arm64_register();
@@ -311,6 +356,7 @@ void snobol_jit_init(void) {
 }
 
 void snobol_jit_shutdown(void) {
+    snobol_jit_log("shutdown cache_count=%d", jit_cache_count);
     for (int i = 0; i < jit_cache_count; i++) {
         if (jit_cache[i]) {
             /* Force-destroy even if ref_count > 0 (process teardown) */
@@ -320,6 +366,7 @@ void snobol_jit_shutdown(void) {
         }
     }
     jit_cache_count = 0;
+    snobol_jit_log_close();
 }
 
 /* ---------------------------------------------------------------------------
@@ -339,6 +386,7 @@ void *snobol_jit_alloc_code(size_t size) {
     /* DEP compliance: allocate as PAGE_READWRITE, never PAGE_EXECUTE_READWRITE.
      * Code pages are switched to PAGE_EXECUTE_READ in snobol_jit_seal_code(). */
     void *ptr = VirtualAlloc(nullptr, alloc_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    snobol_jit_log("alloc_code size=%zu platform=Windows ptr=%p", size, ptr);
     if (!ptr) return nullptr;
     return (void *)((uint8_t *)ptr + 16);
 #elif defined(SNOBOL_JIT_PLATFORM_MACOS)
@@ -349,6 +397,7 @@ void *snobol_jit_alloc_code(size_t size) {
 #elif defined(SNOBOL_JIT_PLATFORM_LINUX)
     void *ptr = mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    snobol_jit_log("alloc_code size=%zu platform=Linux ptr=%p", size, ptr);
     if (ptr == MAP_FAILED) return nullptr;
     return (void *)((uint8_t *)ptr + 16);
 #endif
@@ -358,6 +407,8 @@ void snobol_jit_seal_code(void *code, size_t size) {
 #ifdef SNOBOL_JIT_PLATFORM_WINDOWS
     DWORD old;
     BOOL ok = VirtualProtect(code, size, PAGE_EXECUTE_READ, &old);
+    snobol_jit_log("seal_code platform=Windows code=%p size=%zu ok=%d",
+                   code, size, (int)ok);
     assert(ok && "VirtualProtect to PAGE_EXECUTE_READ failed");
     FlushInstructionCache(GetCurrentProcess(), code, size);
 #elif defined(SNOBOL_JIT_PLATFORM_MACOS)
@@ -371,6 +422,8 @@ void snobol_jit_seal_code(void *code, size_t size) {
      * protect the full page-aligned range (including the leading pad). */
     void *base = (void *)((uint8_t *)code - 16);
     int ret = mprotect(base, size + 16, PROT_READ | PROT_EXEC);
+    snobol_jit_log("seal_code platform=Linux code=%p base=%p size=%zu ret=%d errno=%d",
+                   code, base, size, ret, ret ? errno : 0);
     assert(ret == 0 && "mprotect to PROT_READ|PROT_EXEC failed");
     __builtin___clear_cache((char *)code, (char *)code + size);
 #endif
@@ -381,6 +434,7 @@ void snobol_jit_free_code(void *code, size_t size) {
      * pad introduced in snobol_jit_alloc_code(). */
     void *base = (void *)((uint8_t *)code - 16);
     size_t total = size + 16;
+    snobol_jit_log("free_code code=%p base=%p size=%zu", code, base, size);
 #ifdef SNOBOL_JIT_PLATFORM_WINDOWS
     VirtualFree(base, 0, MEM_RELEASE);
 #else
@@ -657,14 +711,24 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
             const char *dump_env = getenv("SNOBOL_JIT_DUMP_IR");
             if (dump_env && dump_env[0] == '1' && dump_env[1] == '\0')
                 jit_ir_dump(ir, stderr);
+            if (jit_log_fp) {
+                snobol_jit_log("--- IR for start_ip=%zu ---", start_ip);
+                jit_ir_dump(ir, jit_log_fp);
+            }
         }
 
         /* Lower IR → machine code via backend */
         jit_region_t code_region = { nullptr, nullptr, 0 };
+        snobol_jit_log("compile start_ip=%zu ir_count=%zu", start_ip, ir->count);
         void *code_ptr = active_backend->lower(ir, vm, &code_region);
         jit_ir_region_free(ir);
 
-        if (!code_ptr) { return nullptr; }
+        if (!code_ptr) {
+            snobol_jit_log("compile result=FAIL start_ip=%zu", start_ip);
+            return nullptr;
+        }
+        snobol_jit_log("compile result=OK start_ip=%zu code_size=%zu",
+                       start_ip, code_region.code_size);
 
         /* Count CFG blocks from the region (approximate: count 1 for linear) */
         global_jit_stats.jit_blocks_compiled_total += 1;

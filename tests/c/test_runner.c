@@ -5,6 +5,17 @@
 #include <signal.h>
 #include <setjmp.h>
 #include <time.h>
+#include <stdarg.h>
+#include <errno.h>
+
+#ifdef _WIN32
+#  include <windows.h>
+#  include <io.h>
+#else
+#  include <unistd.h>
+#  include <pthread.h>
+#  include <sys/types.h>
+#endif
 
 /* ---------------------------------------------------------------------------
  * Portable monotonic clock
@@ -74,6 +85,98 @@ static void signal_handler(int sig) {
     longjmp(test_jump, 1);
 }
 
+/* ── Watchdog timer ────────────────────────────────────────────────────────
+ *
+ * Each test suite is wrapped with a watchdog that aborts the process if the
+ * suite takes longer than SNOBOL_TEST_TIMEOUT_SECS (default 60).  The
+ * watchdog uses a dedicated background thread that calls abort() when the
+ * timer fires.  The aborted process produces a core file (where available)
+ * and the parent CI job captures it as an artifact.
+ * --------------------------------------------------------------------------- */
+static int  g_timeout_secs      = 60;
+static volatile int g_watchdog_active = 0;
+#ifdef _WIN32
+static HANDLE g_watchdog_thread = nullptr;
+static DWORD  g_watchdog_tid    = 0;
+#else
+static pthread_t g_watchdog_thread;
+#endif
+
+static void watchdog_log(const char *fmt, ...) {
+    FILE *fp = fopen("watchdog.log", "a");
+    if (!fp) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(fp, fmt, ap);
+    va_end(ap);
+    fputc('\n', fp);
+    fclose(fp);
+}
+
+#ifdef _WIN32
+static DWORD WINAPI watchdog_proc(LPVOID arg) {
+    (void)arg;
+    int secs = g_timeout_secs;
+    for (int i = 0; i < secs * 10 && g_watchdog_active; i++) {
+        Sleep(100);
+    }
+    if (g_watchdog_active) {
+        watchdog_log("TIMEOUT after %d s in suite: %s", secs, test_ctx.current_suite);
+        fflush(stdout);
+        /* abort() is the most reliable way to terminate a hanging process
+         * across all platforms and produce a core dump. */
+        abort();
+    }
+    return 0;
+}
+#else
+static void *watchdog_proc(void *arg) {
+    (void)arg;
+    int secs = g_timeout_secs;
+    /* Sleep in small slices so the active flag is checked frequently. */
+    for (int i = 0; i < secs * 10 && g_watchdog_active; i++) {
+        struct timespec ts = { 0, 100 * 1000 * 1000 }; /* 100 ms */
+        nanosleep(&ts, nullptr);
+    }
+    if (g_watchdog_active) {
+        watchdog_log("TIMEOUT after %d s in suite: %s", secs, test_ctx.current_suite);
+        fflush(stdout);
+        /* abort() generates SIGABRT which is not blocked by the test's
+         * SIGSEGV handler.  This terminates the process so the CI job
+         * can capture the core dump. */
+        abort();
+    }
+    return nullptr;
+}
+#endif
+
+static void watchdog_start(void) {
+    const char *env = getenv("SNOBOL_TEST_TIMEOUT_SECS");
+    if (env && env[0]) {
+        int v = atoi(env);
+        if (v > 0) g_timeout_secs = v;
+    }
+    g_watchdog_active = 1;
+#ifdef _WIN32
+    g_watchdog_thread = CreateThread(nullptr, 0, watchdog_proc, nullptr, 0, &g_watchdog_tid);
+#else
+    pthread_create(&g_watchdog_thread, nullptr, watchdog_proc, nullptr);
+#endif
+}
+
+static void watchdog_stop(void) {
+    g_watchdog_active = 0;
+#ifdef _WIN32
+    if (g_watchdog_thread) {
+        WaitForSingleObject(g_watchdog_thread, INFINITE);
+        CloseHandle(g_watchdog_thread);
+        g_watchdog_thread = nullptr;
+    }
+#else
+    pthread_join(g_watchdog_thread, nullptr);
+#endif
+}
+
 /* ── Public API (called by individual test files) ────────────────────────── */
 
 /* Called multiple times within a suite to label sub-groups */
@@ -107,9 +210,11 @@ void test_assert(bool condition, const char *message) {
     int _p0 = test_ctx.passed, _f0 = test_ctx.failed;                  \
     struct timespec _t0, _t1;                                           \
     printf("\n▸ %s\n", (display_name));                                 \
+    watchdog_start();                                                   \
     SNOBOL_CLOCK_GETTIME(&_t0);                                         \
     if (setjmp(test_jump) == 0) { fn(); }                               \
     SNOBOL_CLOCK_GETTIME(&_t1);                                         \
+    watchdog_stop();                                                    \
     int    _sp = test_ctx.passed - _p0;                                 \
     int    _sf = test_ctx.failed  - _f0;                                \
     double _ms = elapsed_ms(_t0, _t1);                                  \

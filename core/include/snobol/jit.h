@@ -66,6 +66,18 @@ const SnobolJitConfig  *snobol_jit_get_config(void);
 void                    snobol_jit_load_config_from_env(void);
 
 /* ---------------------------------------------------------------------------
+ * JIT event log
+ *
+ * Used to capture a chronological trace of JIT/VM events to a file for
+ * post-mortem analysis of CI hangs and crashes.  Enable by setting the
+ * SNOBOL_JIT_LOG_FILE environment variable to an output file path.  The
+ * log is opened on first use and closed on shutdown.
+ * --------------------------------------------------------------------------- */
+void snobol_jit_log_open(void);
+void snobol_jit_log_close(void);
+void snobol_jit_log(const char *fmt, ...);
+
+/* ---------------------------------------------------------------------------
  * JIT Statistics
  *
  * All counters are global (single instance per process).  Use

@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include "../../core/include/snobol/jit.h"
 #include <string.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,7 +21,10 @@
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
 
-/* Helper to create mock bytecode */
+/* Helper to create mock bytecode.  Returns a heap-allocated buffer that
+ * the caller must free.  Tests that exercise dynamic_pattern_create use the
+ * returned pointer as the bytecode; dynamic_pattern_release will free it
+ * when the pattern's refcount drops to zero. */
 static uint8_t *create_mock_bytecode(size_t *out_len) {
     uint8_t *bc = (uint8_t *)malloc(8);
     if (bc) {
@@ -33,10 +37,10 @@ static uint8_t *create_mock_bytecode(size_t *out_len) {
 
 static void test_dynamic_pattern_create_free(void) {
     test_suite("Dynamic Pattern: create and free");
-    
+
     size_t bc_len;
     uint8_t *bc = create_mock_bytecode(&bc_len);
-    
+
     dynamic_pattern_t *pattern = dynamic_pattern_create("test pattern", bc, bc_len);
     test_assert(pattern != NULL, "dynamic_pattern_create returns non-NULL");
     test_assert(pattern->bc != NULL, "bytecode pointer is stored");
@@ -45,7 +49,7 @@ static void test_dynamic_pattern_create_free(void) {
     test_assert(pattern->is_valid == true, "pattern is valid");
     test_assert(pattern->source != NULL, "source is copied");
     test_assert(strcmp(pattern->source, "test pattern") == 0, "source content matches");
-    
+
     dynamic_pattern_release(pattern);
     test_assert(true, "dynamic_pattern_release completes without error");
 }
@@ -558,6 +562,11 @@ static void test_dynamic_pattern_concurrent_cache_access(void) {
 }
 
 void test_dynamic_pattern_suite(void) {
+    /* dynamic_pattern_create() acquires a JIT context internally.  Initialize
+     * and shut down the JIT for this suite so the cache entries are freed
+     * (otherwise snobol_jit_release_context only decrements refcount and the
+     * contexts leak until process exit). */
+    snobol_jit_init();
     test_dynamic_pattern_create_free();
     test_dynamic_pattern_create_null_source();
     test_dynamic_pattern_create_invalid();
@@ -582,4 +591,5 @@ void test_dynamic_pattern_suite(void) {
     test_dynamic_pattern_invalid_source_handling();
     test_dynamic_pattern_ownership_lifecycle();
     test_dynamic_pattern_concurrent_cache_access();
+    snobol_jit_shutdown();
 }

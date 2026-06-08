@@ -822,6 +822,18 @@ static bool snobol_jit_helper_dynamic(VM *vm) {
             dynamic_pattern_release(pattern); return false;
         }
     }
+    /* The pattern has been built and cached; the pending buffers are no
+     * longer needed.  Free them to avoid leaking across vm_exec calls. */
+    if (vm->dyn_pending_source) {
+        snobol_free(vm->dyn_pending_source);
+        vm->dyn_pending_source = nullptr;
+        vm->dyn_pending_source_len = 0;
+    }
+    if (vm->dyn_pending_bc) {
+        snobol_free(vm->dyn_pending_bc);
+        vm->dyn_pending_bc = nullptr;
+        vm->dyn_pending_bc_len = 0;
+    }
     const uint8_t *saved_bc  = vm->bc;
     size_t         saved_bcl = vm->bc_len;
     size_t         saved_pos = vm->pos;

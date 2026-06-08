@@ -467,6 +467,14 @@ bool vm_run(VM *vm) {
             return false;
         }
     }
+    snobol_jit_log("vm_run enter ip=%zu pos=%zu len=%zu bc_len=%zu jit=%d",
+                   vm->ip, vm->pos, vm->len, vm->bc_len,
+#ifdef SNOBOL_JIT
+                   vm->jit.enabled
+#else
+                   0
+#endif
+    );
 
     while (1) {
 #ifdef SNOBOL_PROFILE
@@ -493,7 +501,9 @@ bool vm_run(VM *vm) {
 
             uint64_t t_exec = (vm->jit.stats) ? snobol_jit_now_ns() : 0;
             jit_trace_fn fn = (jit_trace_fn)vm->jit.traces[current_ip];
+            snobol_jit_log("jit_trace enter ip=%zu pos=%zu", current_ip, vm->pos);
             fn(vm);
+            snobol_jit_log("jit_trace exit ip=%zu pos=%zu", vm->ip, vm->pos);
             if (vm->jit.stats) {
                 uint64_t exec_ns = snobol_jit_now_ns() - t_exec;
                 vm->jit.stats->exec_time_ns_total += exec_ns;
@@ -598,15 +608,24 @@ bool vm_run(VM *vm) {
         uint64_t t_interp = (vm->jit.enabled && vm->jit.stats) ? snobol_jit_now_ns() : 0;
 #endif
         uint8_t op = vm->bc[vm->ip++];
+        snobol_jit_log("dispatch ip=%zu op=0x%02X pos=%zu choices_top=%zu",
+                       (size_t)(vm->ip - 1), op, vm->pos, vm->choices_top);
         switch (op) {
             case OP_NOP: break; /* fusion filler — skip one byte */
             case OP_ACCEPT:
+                snobol_jit_log("vm_run exit reason=ACCEPT pos=%zu", vm->pos);
                 if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
                 if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
                 return true;
-            case OP_FAIL: if (!vm_pop_choice(vm)) goto fail_ret; break;
+            case OP_FAIL: {
+                bool had = vm_pop_choice(vm);
+                snobol_jit_log("OP_FAIL pop=%d new_ip=%zu", (int)had, vm->ip);
+                if (!had) goto fail_ret;
+                break;
+            }
             case OP_JMP: { uint32_t tgt = read_u32(vm->bc, vm->bc_len, &vm->ip); vm->ip = (size_t)tgt; break; }
             case OP_SPLIT: { uint32_t a = read_u32(vm->bc, vm->bc_len, &vm->ip); uint32_t b = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                snobol_jit_log("OP_SPLIT a=%u b=%u pos=%zu", a, b, vm->pos);
                 vm_push_choice(vm, (size_t)b, vm->pos); vm->ip = (size_t)a; break; }
             case OP_LIT: {
                 uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip); uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
@@ -1291,6 +1310,20 @@ bool vm_run(VM *vm) {
                     SNOBOL_LOG("OP_DYNAMIC: cache hit");
                 }
 
+                /* The pattern has been built and cached; the pending buffers are
+                 * no longer needed.  Free them to avoid leaking across
+                 * vm_exec calls. */
+                if (vm->dyn_pending_source) {
+                    snobol_free(vm->dyn_pending_source);
+                    vm->dyn_pending_source = nullptr;
+                    vm->dyn_pending_source_len = 0;
+                }
+                if (vm->dyn_pending_bc) {
+                    snobol_free(vm->dyn_pending_bc);
+                    vm->dyn_pending_bc = nullptr;
+                    vm->dyn_pending_bc_len = 0;
+                }
+
                 /* Execute the dynamic pattern with full VM semantics
                  * Save/restore IP and position for proper backtracking */
                 size_t saved_ip = vm->ip;
@@ -1513,6 +1546,7 @@ bool vm_run(VM *vm) {
     if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
     return false;
  fail_ret:
+    snobol_jit_log("vm_run exit reason=FAIL");
     if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
     if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
     return false;
