@@ -1057,11 +1057,17 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             break;
 
         case JIT_IR_ACCEPT:
+            x64_save_state(out);
+            x64_mov_ri64(out, X64_RAX, ins->bc_ip);
+            x64_store_mr(out, X64_RBX, X64_RAX, offsetof(VM, ip));
             x64_mov_ri64(out, X64_RAX, 1);
             x64_epilogue(out);
             return (uint8_t *)out->p; /* actual end of emitted code */
 
         case JIT_IR_FAIL:
+            x64_save_state(out);
+            x64_mov_ri64(out, X64_RAX, ins->bc_ip);
+            x64_store_mr(out, X64_RBX, X64_RAX, offsetof(VM, ip));
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             return (uint8_t *)out->p;
@@ -1128,11 +1134,11 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_add_rr(out, X64_RAX, X64_RDI);
             x64_cmp_rr(out, X64_RAX, X64_R12);
             uint8_t *past_len = (uint8_t *)out->p;
-            x64_jcc_rel8(out, JCC_JBE, 0);
+            x64_jcc_rel8(out, JCC_JAE, 0);
             /* Fail */
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
-            /* Patch the JBE */
+            /* Patch the JAE */
             intptr_t past_len_off = (uint8_t *)out->p - past_len;
             past_len[1] = (uint8_t)(past_len_off - 2); /* rel8 offset */
 
@@ -1164,7 +1170,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
 
             x64_cmp_rr(out, X64_RDI, X64_R12);
             uint8_t *in_range = (uint8_t *)out->p;
-            x64_jcc_rel8(out, JCC_JB, 0);
+            x64_jcc_rel8(out, JCC_JA, 0);
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             intptr_t in_range_off = (uint8_t *)out->p - in_range;
@@ -1357,8 +1363,9 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             /* RPOS N: fails unless pos == len - N */
             uint32_t rn = ins->u.rpos_rtab.n;
             x64_mov_ri64(out, X64_RAX, rn);
-            x64_sub_rr(out, X64_R12, X64_RAX);
-            x64_cmp_rr(out, X64_RDI, X64_RAX);
+            x64_mov_rr(out, X64_R8, X64_R12);
+            x64_sub_rr(out, X64_R8, X64_RAX);
+            x64_cmp_rr(out, X64_RDI, X64_R8);
             uint8_t *rpos_ok = (uint8_t *)out->p;
             x64_jcc_rel8(out, JCC_JE, 0);
             x64_xor_rr(out, X64_RAX, X64_RAX);
@@ -1379,8 +1386,9 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             intptr_t rtab_ok_off = (uint8_t *)out->p - rtab_ok;
             rtab_ok[1] = (uint8_t)(rtab_ok_off - 2);
             x64_mov_ri64(out, X64_RAX, tn);
-            x64_sub_rr(out, X64_R12, X64_RAX);
-            x64_mov_rr(out, X64_RDI, X64_R12);
+            x64_mov_rr(out, X64_R8, X64_R12);
+            x64_sub_rr(out, X64_R8, X64_RAX);
+            x64_mov_rr(out, X64_RDI, X64_R8);
             break;
         }
 
