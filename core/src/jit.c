@@ -365,7 +365,12 @@ void snobol_jit_seal_code(void *code, size_t size) {
     pthread_jit_write_protect_np(1);
     __builtin___clear_cache((char *)code, (char *)code + size);
 #elif defined(SNOBOL_JIT_PLATFORM_LINUX)
-    int ret = mprotect(code, size, PROT_READ | PROT_EXEC);
+    /* mprotect requires page-aligned address. The 16-byte pad introduced in
+     * snobol_jit_alloc_code() makes `code` 16 bytes past the mmap base, so
+     * mprotect(code, size, ...) would fail with EINVAL. Reverse the pad and
+     * protect the full page-aligned range (including the leading pad). */
+    void *base = (void *)((uint8_t *)code - 16);
+    int ret = mprotect(base, size + 16, PROT_READ | PROT_EXEC);
     assert(ret == 0 && "mprotect to PROT_READ|PROT_EXEC failed");
     __builtin___clear_cache((char *)code, (char *)code + size);
 #endif
