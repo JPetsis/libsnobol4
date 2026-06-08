@@ -1134,7 +1134,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_epilogue(out);
             /* Patch the JBE */
             intptr_t past_len_off = (uint8_t *)out->p - past_len;
-            past_len[-1] = (uint8_t)(past_len_off - 2); /* rel8 offset */
+            past_len[1] = (uint8_t)(past_len_off - 2); /* rel8 offset */
 
             /* Compare each byte */
             for (uint32_t j = 0; j < lit_len; j++) {
@@ -1145,7 +1145,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
                 x64_xor_rr(out, X64_RAX, X64_RAX);
                 x64_epilogue(out);
                 intptr_t ok_off = (uint8_t *)out->p - ok;
-                ok[-1] = (uint8_t)(ok_off - 2);
+                ok[1] = (uint8_t)(ok_off - 2);
                 x64_add_ri32(out, X64_RDI, 1);
             }
             break;
@@ -1168,7 +1168,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             intptr_t in_range_off = (uint8_t *)out->p - in_range;
-            in_range[-1] = (uint8_t)(in_range_off - 2);
+            in_range[1] = (uint8_t)(in_range_off - 2);
 
             x64_loadb_mr_idx(out, X64_RAX, X64_RSI, X64_RDI);
             x64_cmp_rm32_imm32(out, X64_RAX, 127);
@@ -1177,7 +1177,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             intptr_t ascii_ok_off = (uint8_t *)out->p - ascii_ok;
-            ascii_ok[-1] = (uint8_t)(ascii_ok_off - 2);
+            ascii_ok[1] = (uint8_t)(ascii_ok_off - 2);
 
             x64_mov_rr(out, X64_RCX, X64_RAX);
             x64_and_ri32(out, X64_RCX, 0x40);
@@ -1188,11 +1188,11 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             uint8_t *bit_checked = (uint8_t *)out->p;
             x64_jmp_rel8(out, 0);
             intptr_t use_high_off = (uint8_t *)out->p - use_high;
-            use_high[-1] = (uint8_t)(use_high_off - 2);
+            use_high[1] = (uint8_t)(use_high_off - 2);
             x64_and_ri32(out, X64_RAX, 63);
             x64_bt_rr(out, X64_R8, X64_RAX);
             intptr_t bit_checked_off = (uint8_t *)out->p - bit_checked;
-            bit_checked[-1] = (uint8_t)(bit_checked_off - 2);
+            bit_checked[1] = (uint8_t)(bit_checked_off - 2);
 
             if (ins->opcode == JIT_IR_NOTANY) {
                 uint8_t *found = (uint8_t *)out->p;
@@ -1200,14 +1200,14 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
                 x64_xor_rr(out, X64_RAX, X64_RAX);
                 x64_epilogue(out);
                 intptr_t found_off = (uint8_t *)out->p - found;
-                found[-1] = (uint8_t)(found_off - 2);
+                found[1] = (uint8_t)(found_off - 2);
             } else {
                 uint8_t *found = (uint8_t *)out->p;
                 x64_jcc_rel8(out, JCC_JB, 0); /* JC: CF=1 (in set) → success */
                 x64_xor_rr(out, X64_RAX, X64_RAX);
                 x64_epilogue(out);
                 intptr_t found_off = (uint8_t *)out->p - found;
-                found[-1] = (uint8_t)(found_off - 2);
+                found[1] = (uint8_t)(found_off - 2);
             }
 
             if (ins->opcode != JIT_IR_BREAKX) {
@@ -1238,7 +1238,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             uint8_t *span_nonascii_done = (uint8_t *)out->p;
             x64_jmp_rel8(out, 0);
             intptr_t span_ascii_ok_off = (uint8_t *)out->p - span_ascii_ok;
-            span_ascii_ok[-1] = (uint8_t)(span_ascii_ok_off - 2);
+            span_ascii_ok[1] = (uint8_t)(span_ascii_ok_off - 2);
 
             x64_mov_rr(out, X64_RCX, X64_RAX);
             x64_and_ri32(out, X64_RCX, 0x40);
@@ -1249,22 +1249,22 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             uint8_t *bit_checked_s = (uint8_t *)out->p;
             x64_jmp_rel8(out, 0);
             intptr_t use_high_s_off = (uint8_t *)out->p - use_high_s;
-            use_high_s[-1] = (uint8_t)(use_high_s_off - 2);
+            use_high_s[1] = (uint8_t)(use_high_s_off - 2);
             x64_and_ri32(out, X64_RAX, 63);
             x64_bt_rr(out, X64_R8, X64_RAX);
             intptr_t bit_checked_s_off = (uint8_t *)out->p - bit_checked_s;
-            bit_checked_s[-1] = (uint8_t)(bit_checked_s_off - 2);
+            bit_checked_s[1] = (uint8_t)(bit_checked_s_off - 2);
 
             uint8_t *span_not_in = (uint8_t *)out->p;
             x64_jcc_rel8(out, JCC_JAE, 0); /* JNC: CF=0 (not in set) → done */
             x64_add_ri32(out, X64_RDI, 1);
             x64_jmp_rel32(out, (int32_t)(intptr_t)((uint8_t *)out->p - loop_start));
             intptr_t span_not_in_off = (uint8_t *)out->p - span_not_in;
-            span_not_in[-1] = (uint8_t)(span_not_in_off - 2);
+            span_not_in[1] = (uint8_t)(span_not_in_off - 2);
             intptr_t span_done_off = (uint8_t *)out->p - span_done;
-            span_done[-1] = (uint8_t)(span_done_off - 2);
+            span_done[1] = (uint8_t)(span_done_off - 2);
             intptr_t span_nonascii_done_off = (uint8_t *)out->p - span_nonascii_done;
-            span_nonascii_done[-1] = (uint8_t)(span_nonascii_done_off - 2);
+            span_nonascii_done[1] = (uint8_t)(span_nonascii_done_off - 2);
             break;
         }
 
@@ -1284,7 +1284,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
                 uint8_t *at_start = (uint8_t *)out->p;
                 x64_jcc_rel8(out, JCC_JE, 0);
                 /* Check byte at s[pos-1] == '\n' */
-                x64_mov_ri64(out, X64_RAX, -1);
+                x64_mov_ri64(out, X64_RAX, (uint64_t)-1);
                 x64_add_rr(out, X64_RAX, X64_RDI);
                 x64_loadb_mr_idx(out, X64_RAX, X64_RSI, X64_RAX);
                 x64_cmp_rm32_imm32(out, X64_RAX, '\n');
@@ -1293,9 +1293,9 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
                 x64_xor_rr(out, X64_RAX, X64_RAX);
                 x64_epilogue(out);
                 intptr_t anchored_off = (uint8_t *)out->p - anchored;
-                anchored[-1] = (uint8_t)(anchored_off - 2);
+                anchored[1] = (uint8_t)(anchored_off - 2);
                 intptr_t at_start_off = (uint8_t *)out->p - at_start;
-                at_start[-1] = (uint8_t)(at_start_off - 2);
+                at_start[1] = (uint8_t)(at_start_off - 2);
             }
             break;
         }
@@ -1329,7 +1329,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_jcc_rel8(out, JCC_JAE, 0);
             x64_store_mr(out, X64_RBX, X64_RCX, offsetof(VM, var_count));
             intptr_t skip_off = (uint8_t *)out->p - skip;
-            skip[-1] = (uint8_t)(skip_off - 2);
+            skip[1] = (uint8_t)(skip_off - 2);
             break;
         }
 
@@ -1364,7 +1364,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             intptr_t rpos_ok_off = (uint8_t *)out->p - rpos_ok;
-            rpos_ok[-1] = (uint8_t)(rpos_ok_off - 2);
+            rpos_ok[1] = (uint8_t)(rpos_ok_off - 2);
             break;
         }
 
@@ -1377,7 +1377,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             intptr_t rtab_ok_off = (uint8_t *)out->p - rtab_ok;
-            rtab_ok[-1] = (uint8_t)(rtab_ok_off - 2);
+            rtab_ok[1] = (uint8_t)(rtab_ok_off - 2);
             x64_mov_ri64(out, X64_RAX, tn);
             x64_sub_rr(out, X64_R12, X64_RAX);
             x64_mov_rr(out, X64_RDI, X64_R12);
@@ -1539,7 +1539,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             intptr_t tget_ok_off = (uint8_t *)out->p - tget_ok;
-            tget_ok[-1] = (uint8_t)(tget_ok_off - 2);
+            tget_ok[1] = (uint8_t)(tget_ok_off - 2);
             break;
         }
 
@@ -1587,7 +1587,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             intptr_t bal_ok_off = (uint8_t *)out->p - bal_ok;
-            bal_ok[-1] = (uint8_t)(bal_ok_off - 2);
+            bal_ok[1] = (uint8_t)(bal_ok_off - 2);
             break;
         }
 
@@ -1613,7 +1613,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             intptr_t eval_ok_off = (uint8_t *)out->p - eval_ok;
-            eval_ok[-1] = (uint8_t)(eval_ok_off - 2);
+            eval_ok[1] = (uint8_t)(eval_ok_off - 2);
             break;
         }
 
@@ -1634,7 +1634,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
             intptr_t dyn_ok_off = (uint8_t *)out->p - dyn_ok;
-            dyn_ok[-1] = (uint8_t)(dyn_ok_off - 2);
+            dyn_ok[1] = (uint8_t)(dyn_ok_off - 2);
 #else
             x64_xor_rr(out, X64_RAX, X64_RAX);
             x64_epilogue(out);
