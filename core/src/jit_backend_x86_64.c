@@ -333,6 +333,7 @@ static void x64_store_mr(jit_region_t *out, int base, int reg, int32_t disp) {
         emit_rex_w(out, reg, base);
         emit_byte(out, 0x89);
         emit_byte(out, modrm(MOD_DISP8, reg & 7, base & 7));
+        if (base == X64_RSP) emit_byte(out, sib(0, 4, base & 7));
         emit_disp8(out, (int8_t)disp);
     } else {
         emit_rex_w(out, reg, base);
@@ -527,9 +528,19 @@ static void x64_prologue(jit_region_t *out) {
     x64_push_r(out, X64_RBP);
     x64_push_r(out, X64_RBX);
     x64_push_r(out, X64_R12);
+#ifdef SNOBOL_JIT_WIN64_ABI
+    /* Allocate 48 bytes: 32-byte shadow space + 16 bytes for possible
+     * stack arguments (e.g. fill_char in EMIT_FORMAT goes at [RSP+32]).
+     * Must keep RSP 16-byte aligned for the Win64 ABI requirement. */
+    x64_sub_ri32(out, X64_RSP, 48);
+#endif
 }
 
 static void x64_epilogue(jit_region_t *out) {
+#ifdef SNOBOL_JIT_WIN64_ABI
+    /* Unwind 48 bytes allocated in x64_prologue */
+    x64_add_ri32(out, X64_RSP, 48);
+#endif
     /* Pop r12, rbx, rbp */
     x64_pop_r(out, X64_R12);
     x64_pop_r(out, X64_RBX);
@@ -1506,7 +1517,8 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_RDX, cap_reg6);
             x64_mov_ri64(out, X64_R8, fmt_type);
             x64_mov_ri64(out, X64_R9, width);
-            /* 5th arg uses stack on Win64 — for simplicity, use helper that reads from VM state */
+            x64_mov_ri64(out, X64_R10, fill_char);
+            x64_store_mr(out, X64_RSP, X64_R10, 32);  /* 5th arg at [RSP+32] */
 #else
             x64_mov_rr(out, X64_RDI, X64_RBX);
             x64_mov_ri64(out, X64_RSI, cap_reg6);

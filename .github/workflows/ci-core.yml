@@ -87,7 +87,7 @@ jobs:
             backend: x86_64
           - os: windows-latest
             backend: x86_64
-          - os: macos-13
+          - os: macos-26-intel
             backend: x86_64
 
     env:
