@@ -129,19 +129,17 @@ jobs:
 
       - name: Install procdump (Windows, /GS leg only)
         if: matrix.os == 'windows-latest' && !matrix.no_gs
-        run: choco install procdump --no-progress
+        run: choco install procdump --no-progress --ignore-checksums
 
       - name: Configure CMake (with JIT backend)
-        shell: bash
-        run: |
-          cmake -B build \
-            -DBUILD_TESTS=ON \
-            -DBUILD_PHP=OFF \
-            -DSNOBOL_JIT_BACKEND=${{ matrix.backend }} \
-            ${{ matrix.no_gs && '-DSNOBOL_JIT_NO_GS=ON' || '' }}
+        run: >
+          cmake -B build
+          -DBUILD_TESTS=ON
+          -DBUILD_PHP=OFF
+          -DSNOBOL_JIT_BACKEND=${{ matrix.backend }}
+          ${{ matrix.no_gs && '-DSNOBOL_JIT_NO_GS=ON' || '' }}
 
       - name: Build
-        shell: bash
         run: cmake --build build --config Release
 
       - name: Run JIT IR unit tests

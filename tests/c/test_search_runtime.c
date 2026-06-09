@@ -89,7 +89,6 @@ static size_t build_break_accept(uint8_t *bc, uint8_t break_op,
     }
 
     /* Offset table: 1 entry (set_id=1) → absolute offset of class_data_off */
-    size_t table_off = ip;
     emit_u32_be(bc, &ip, (uint32_t)class_data_off);
 
     /* Final u32: number of charclass entries = 1 */
@@ -114,7 +113,6 @@ static size_t build_span_accept(uint8_t *bc, const char *chars, size_t nchr) {
         emit_u32_be(bc, &ip, c);
     }
 
-    size_t table_off = ip;
     emit_u32_be(bc, &ip, (uint32_t)class_data_off);
     emit_u32_be(bc, &ip, 1);
 

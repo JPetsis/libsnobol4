@@ -79,6 +79,11 @@ endif()
 if(MSVC)
     target_compile_options(snobol4_tests PRIVATE
         /W4
+        /wd4100  # unreferenced formal parameter
+        /wd4101  # unreferenced local variable
+        /wd4189  # local variable initialized but not referenced
+        /wd4244  # conversion (possible loss of data)
+        /wd4267  # conversion from 'size_t' to smaller type
         # Use C17 so nullptr is not a keyword (C23), allowing snobol_internal.h
         # compat #define nullptr NULL to work on MSVC 2022+.
         /std:c17
