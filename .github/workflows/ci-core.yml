@@ -132,6 +132,7 @@ jobs:
         run: choco install procdump --no-progress
 
       - name: Configure CMake (with JIT backend)
+        shell: bash
         run: |
           cmake -B build \
             -DBUILD_TESTS=ON \
@@ -140,6 +141,7 @@ jobs:
             ${{ matrix.no_gs && '-DSNOBOL_JIT_NO_GS=ON' || '' }}
 
       - name: Build
+        shell: bash
         run: cmake --build build --config Release
 
       - name: Run JIT IR unit tests
