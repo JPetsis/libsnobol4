@@ -1332,6 +1332,31 @@ bool vm_run(VM *vm) {
                 memcpy(saved_cap_start, vm->cap_start, sizeof(saved_cap_start));
                 memcpy(saved_cap_end, vm->cap_end, sizeof(saved_cap_end));
 
+                /* Save/restore the choice stack and write-log: vm_run() frees
+                 * vm->choices and vm->write_log on both success and failure
+                 * paths, so the recursive call would destroy the outer call's
+                 * backtracking state, causing heap corruption on Windows. */
+                void   *saved_choices      = vm->choices;
+                size_t  saved_choices_cap  = vm->choices_cap;
+                size_t  saved_choices_top  = vm->choices_top;
+                bool    saved_compact      = vm->use_compact_choice;
+                WriteLogEntry *saved_wlog  = vm->write_log;
+                size_t  saved_wlog_cap     = vm->write_log_cap;
+                size_t  saved_wlog_next    = vm->write_log_next;
+                uint64_t saved_wlog_bitmap = vm->write_log_bitmap;
+                size_t  saved_wlog_cc      = vm->write_log_compressed_count;
+                bool    saved_wlog_dirty   = vm->write_log_dirty;
+                /* Null out so vm_run() allocates fresh state for the inner run */
+                vm->choices     = nullptr;
+                vm->choices_cap = 0;
+                vm->choices_top = 0;
+                vm->write_log   = nullptr;
+                vm->write_log_cap  = 0;
+                vm->write_log_next = 0;
+                vm->write_log_bitmap = 0;
+                vm->write_log_compressed_count = 0;
+                vm->write_log_dirty = false;
+
                 /* Execute dynamic pattern bytecode through the VM */
                 const uint8_t *saved_bc = vm->bc;
                 size_t saved_bc_len = vm->bc_len;
@@ -1363,6 +1388,17 @@ bool vm_run(VM *vm) {
                 vm->jit.traces = saved_jit_traces;
                 vm->jit.ip_counts = saved_jit_ip_counts;
 #endif
+                /* Restore choice stack and write-log that vm_run() freed */
+                vm->choices     = saved_choices;
+                vm->choices_cap = saved_choices_cap;
+                vm->choices_top = saved_choices_top;
+                vm->use_compact_choice = saved_compact;
+                vm->write_log   = saved_wlog;
+                vm->write_log_cap  = saved_wlog_cap;
+                vm->write_log_next = saved_wlog_next;
+                vm->write_log_bitmap = saved_wlog_bitmap;
+                vm->write_log_compressed_count = saved_wlog_cc;
+                vm->write_log_dirty = saved_wlog_dirty;
 
                 if (!dynamic_result) {
                     /* Dynamic pattern failed - restore captures and position */
