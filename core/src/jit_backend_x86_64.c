@@ -547,18 +547,19 @@ static void x64_prologue(jit_region_t *out) {
      *   push R12  → RSP mod 16 = 0
      *   push RDI  → RSP mod 16 = 8
      *   push RSI  → RSP mod 16 = 0
-     *   sub  32   → RSP mod 16 = 0  ← 16-byte aligned before any nested CALL ✓
-     * The 5th stack arg for EMIT_FORMAT is stored at [RSP+32] (above shadow). */
+     *   sub  48   → RSP mod 16 = 0  ← 16-byte aligned before any nested CALL ✓
+     * 5th stack arg (fill_char in EMIT_FORMAT) at [RSP+32] is within the 48-byte
+     * allocation and does NOT overwrite the saved RSI at [RSP+40]. */
     x64_push_r(out, X64_RDI);
     x64_push_r(out, X64_RSI);
-    x64_sub_ri32(out, X64_RSP, 32);
+    x64_sub_ri32(out, X64_RSP, 48);
 #endif
 }
 
 static void x64_epilogue(jit_region_t *out) {
 #ifdef SNOBOL_JIT_WIN64_ABI
-    /* Unwind 32 bytes allocated in x64_prologue */
-    x64_add_ri32(out, X64_RSP, 32);
+    /* Unwind 48 bytes allocated in x64_prologue */
+    x64_add_ri32(out, X64_RSP, 48);
     /* Restore Win64 callee-saved RDI and RSI (pushed in prologue) */
     x64_pop_r(out, X64_RSI);
     x64_pop_r(out, X64_RDI);
