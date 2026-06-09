@@ -29,8 +29,10 @@ add_library(snobol4 STATIC
     src/api.c
 )
 
-# Set C23 standard
-target_compile_features(snobol4 PUBLIC c_std_23)
+# Set C23 standard (MSVC uses /std:c17 set below in the warning-flags block)
+if(NOT MSVC)
+    target_compile_features(snobol4 PUBLIC c_std_23)
+endif()
 
 # Set up include directories
 target_include_directories(snobol4

@@ -49,8 +49,10 @@ add_executable(snobol4_tests
 # Link against core library
 target_link_libraries(snobol4_tests PRIVATE snobol4)
 
-# Use C23 standard
-target_compile_features(snobol4_tests PRIVATE c_std_23)
+# Use C23 standard (MSVC uses /std:c17 set below in the warning-flags block)
+if(NOT MSVC)
+    target_compile_features(snobol4_tests PRIVATE c_std_23)
+endif()
 
 # Enable profiling for tests
 target_compile_definitions(snobol4_tests PRIVATE SNOBOL_PROFILE=1)

@@ -470,7 +470,14 @@ static void x64_call_rel32(jit_region_t *out, int32_t off) {
     emit_disp32(out, off);
 }
 
-/* CALL [mem]: FF /2 (ModRM with reg=2) */
+/* CALL r64: FF /2 with ModRM mod=3 (register direct — reg holds the address) */
+static void x64_call_reg(jit_region_t *out, int reg) {
+    emit_byte(out, rex(0, 0, 0, reg > 7));
+    emit_byte(out, 0xFF);
+    emit_byte(out, modrm(MOD_REG, 2, reg & 7));
+}
+
+/* CALL [mem]: FF /2 (ModRM with reg=2, memory indirect) */
 static void x64_call_mem(jit_region_t *out, int base, int32_t disp) {
     if (disp == 0 && base != X64_RBP && base != X64_RSP) {
         emit_byte(out, rex(0, 0, 0, base > 7));
@@ -1468,7 +1475,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_RDX, lit_len2);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_emit_literal);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             break;
         }
@@ -1484,7 +1491,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_RSI, cap_reg4);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_emit_capture);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             break;
         }
@@ -1503,7 +1510,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_RDX, expr_type);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_emit_expr);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             break;
         }
@@ -1529,7 +1536,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_R8, fill_char);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_emit_format);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             break;
         }
@@ -1544,7 +1551,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_RSI, (uint64_t)ins->bc_ip);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_emit_table_ip);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             break;
         }
@@ -1566,7 +1573,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_RCX, dest_reg2);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_table_get);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             /* Check result in rax */
             x64_test_rr(out, X64_RAX, X64_RAX);
@@ -1596,7 +1603,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_RCX, val_reg);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_table_set);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             break;
         }
@@ -1615,7 +1622,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_RDX, close_cp);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_bal);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             x64_test_rr(out, X64_RAX, X64_RAX);
             uint8_t *bal_ok = (uint8_t *)out->p;
@@ -1641,7 +1648,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_ri64(out, X64_RDX, reg);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_eval);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             x64_test_rr(out, X64_RAX, X64_RAX);
             uint8_t *eval_ok = (uint8_t *)out->p;
@@ -1662,7 +1669,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             x64_mov_rr(out, X64_RDI, X64_RBX);
 #endif
             x64_mov_ri64(out, X64_R10, (uint64_t)(uintptr_t)&snobol_jit_helper_dynamic);
-            x64_call_mem(out, X64_R10, 0);
+            x64_call_reg(out, X64_R10);
             x64_reload_state(out);
             x64_test_rr(out, X64_RAX, X64_RAX);
             uint8_t *dyn_ok = (uint8_t *)out->p;
