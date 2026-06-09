@@ -531,19 +531,26 @@ static void x64_pop_r(jit_region_t *out, int reg) {
  * ========================================================================= */
 
 static void x64_prologue(jit_region_t *out) {
-    /* Push rbp, rbx (VM), r12 (len) — callee-saved registers we use */
+    /* Push callee-saved registers we use.
+     * SysV AMD64: RBP, RBX, R12 are callee-saved; RDI/RSI are caller-saved.
+     * Win64:      RBP, RBX, R12, RDI, RSI are all callee-saved. */
     x64_push_r(out, X64_RBP);
     x64_push_r(out, X64_RBX);
     x64_push_r(out, X64_R12);
 #ifdef SNOBOL_JIT_WIN64_ABI
-    /* Allocate 32-byte shadow space required by Win64 ABI.
+    /* On Win64, RDI and RSI are callee-saved — we use them as pos/s registers
+     * so we must preserve them across the JIT function call.
      * Stack alignment at JIT function entry (after caller's CALL):
      *   RSP mod 16 = 8  (return address pushed)
      *   push RBP  → RSP mod 16 = 0
      *   push RBX  → RSP mod 16 = 8
      *   push R12  → RSP mod 16 = 0
+     *   push RDI  → RSP mod 16 = 8
+     *   push RSI  → RSP mod 16 = 0
      *   sub  32   → RSP mod 16 = 0  ← 16-byte aligned before any nested CALL ✓
      * The 5th stack arg for EMIT_FORMAT is stored at [RSP+32] (above shadow). */
+    x64_push_r(out, X64_RDI);
+    x64_push_r(out, X64_RSI);
     x64_sub_ri32(out, X64_RSP, 32);
 #endif
 }
@@ -552,6 +559,9 @@ static void x64_epilogue(jit_region_t *out) {
 #ifdef SNOBOL_JIT_WIN64_ABI
     /* Unwind 32 bytes allocated in x64_prologue */
     x64_add_ri32(out, X64_RSP, 32);
+    /* Restore Win64 callee-saved RDI and RSI (pushed in prologue) */
+    x64_pop_r(out, X64_RSI);
+    x64_pop_r(out, X64_RDI);
 #endif
     /* Pop r12, rbx, rbp */
     x64_pop_r(out, X64_R12);
@@ -1202,7 +1212,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             uint64_t ascii_map[2];
             if (!ranges || !ranges_to_ascii_bitmap(ranges, count16, ascii_map)) return (uint8_t *)out->p;
 
-            x64_mov_ri64(out, X64_RBP, ascii_map[0]);
+            x64_mov_ri64(out, X64_R11, ascii_map[0]);
             x64_mov_ri64(out, X64_R8, ascii_map[1]);
 
             x64_cmp_rr(out, X64_RDI, X64_R12);
@@ -1227,7 +1237,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             uint8_t *use_high = (uint8_t *)out->p;
             x64_jcc_rel8(out, JCC_JNE, 0);
             x64_and_ri32(out, X64_RAX, 63);
-            x64_bt_rr(out, X64_RBP, X64_RAX);
+            x64_bt_rr(out, X64_R11, X64_RAX);
             uint8_t *bit_checked = (uint8_t *)out->p;
             x64_jmp_rel8(out, 0);
             intptr_t use_high_off = (uint8_t *)out->p - use_high;
@@ -1266,7 +1276,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             uint64_t ascii_map[2];
             if (!ranges || !ranges_to_ascii_bitmap(ranges, count16, ascii_map)) return (uint8_t *)out->p;
 
-            x64_mov_ri64(out, X64_RBP, ascii_map[0]);
+            x64_mov_ri64(out, X64_R11, ascii_map[0]);
             x64_mov_ri64(out, X64_R8, ascii_map[1]);
 
             uint8_t *loop_start = (uint8_t *)out->p;
@@ -1288,7 +1298,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
             uint8_t *use_high_s = (uint8_t *)out->p;
             x64_jcc_rel8(out, JCC_JNE, 0);
             x64_and_ri32(out, X64_RAX, 63);
-            x64_bt_rr(out, X64_RBP, X64_RAX);
+            x64_bt_rr(out, X64_R11, X64_RAX);
             uint8_t *bit_checked_s = (uint8_t *)out->p;
             x64_jmp_rel8(out, 0);
             intptr_t use_high_s_off = (uint8_t *)out->p - use_high_s;
