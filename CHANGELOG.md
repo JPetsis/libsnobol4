@@ -5,7 +5,7 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [unreleased] - 2026-06-07
+## [0.10.0] - 2026-06-09
 
 ### Added — Windows / Linux / macOS x86-64 JIT Backend (`jit-windows-x86`)
 
@@ -154,6 +154,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`vreg_next` type** in `jit_ir_region_t` changed from `uint8_t` to `uint16_t`
   to prevent silent wrap-around at the 256-register boundary.
+
+### Verified
+
+- **No breaking changes**: public API (`snobol.h`, `compiler.h`, `vm.h`, etc.) is unchanged. All internal refactoring (IR pipeline, backend vtable) is transparent to callers. Existing bytecode, patterns, and bindings continue to work without modification.
 
 ## [0.9.0] - 2026-05-22
 
@@ -316,15 +320,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-### C23 Code-Quality Adoption (`adopt-c23-features`)
+### Code Quality Improvements
 
 ### Changed
 
 - **`nullptr` throughout `core/src/*.c`**: all `NULL` pointer literals replaced
-  with the typed C23 `nullptr` keyword. The single surviving `NULL` in the
-  codebase is the string literal `"(NULL)\n"` in `ast.c` (intentional).
+  with `nullptr`. The single surviving `NULL` in the codebase is the string
+  literal `"(NULL)\n"` in `ast.c` (intentional).
 
-- **`[[nodiscard]]` on public headers**: annotated in `core/include/snobol/`:
+- **`[[nodiscard]]` (alias `SNOBOL_NODISCARD`) on public headers**: annotated in
+  `core/include/snobol/`:
   - `search.h` — `snobol_search_exec()`
   - `table.h` — `table_create()`, `table_retain()`, `table_set()`, `table_delete()`
   - `string_fn.h` — all twelve `bool`-returning functions (`snobol_trim`,
@@ -358,10 +363,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     for register fields and immediates, catching argument-type errors at
     compile time. Call-site syntax is unchanged.
 
-- **PHP binding `config.m4`**: `./configure` now probes for C23 support
-  (`-std=c23`, falling back to `-std=c2x`) using a correct `AC_LANG_PROGRAM`
-  test and passes the detected flag to `PHP_NEW_EXTENSION`. Requires GCC 13+
-  or Clang 17+; fails with a descriptive error on older toolchains.
+- **PHP binding `config.m4`**: `./configure` probes for compiler C standard
+  support and passes the detected flag to `PHP_NEW_EXTENSION`.
 
 ### Verified
 

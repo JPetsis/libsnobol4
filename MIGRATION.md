@@ -5,6 +5,33 @@ monorepo structure.
 
 ---
 
+## v0.9.0 → v0.10.0 (Multi-Architecture JIT)
+
+### No breaking changes
+
+This is a non-breaking release. There are **no C API changes** and **no PHP API changes**.
+All existing consumers require no code changes.
+
+### Behaviour changes consumers should be aware of
+
+- **New `SNOBOL_JIT_BACKEND` CMake option** (default: `arm64`).  Selects the
+  code-generation backend at compile time.  Valid values: `arm64`, `arm32`,
+  `riscv64`, `x86_64`.  Unknown values produce a CMake `FATAL_ERROR`.
+- **`SNOBOL_JIT_DUMP_IR=1` environment variable**: set to dump the
+  architecture-neutral IR to `stderr` before backend lowering.  Useful for
+  debugging JIT compilation across all backends.
+- **New backends**: ARM32 (Thumb-2, ARMv7-A), RISC-V 64 (RV64GC), and
+  x86-64 (System V AMD64 + Microsoft x64 ABI) in addition to the existing ARM64.
+- **Windows x86-64 JIT**: enabled on Windows when `SNOBOL_JIT_BACKEND=x86_64`;
+  uses `VirtualAlloc`/`VirtualProtect` with DEP compliance.
+- **QEMU CI jobs**: `jit-qemu-armv7` and `jit-qemu-riscv64` validate JIT
+  correctness on ARM32 and RISC-V 64 in emulated environments.
+- **IR pipeline**: all backends share a common architecture-neutral IR lifter,
+  DCE, and copy-propagation optimiser.  The pre-IR ARM64 code in `jit.c` has
+  been removed — the IR pipeline is the only compilation path.
+
+---
+
 ## v0.8.0 → v0.9.0 (Full JIT Opcode Coverage)
 
 ### No breaking changes
@@ -157,28 +184,7 @@ are unchanged — the ASCII fast-path is preserved.
 
 ---
 
-## v0.5.x → v0.6.0 (C23 Adoption + PHP Binding Cleanup)
-
-### C23 compiler requirement (PHP extension builders only)
-
-The PHP binding `config.m4` now probes for C23 language support and passes
-`-std=c23` (or the `-std=c2x` fallback) to the extension compiler. Building
-the PHP extension from source now **requires GCC 13+ or Clang 17+**.
-
-If `./configure` fails with a message like `C23 support required`, upgrade
-your toolchain:
-
-```bash
-# macOS — upgrade via Homebrew
-brew install gcc@13   # or: brew install llvm
-
-# Ubuntu 24.04+
-sudo apt install gcc-13
-```
-
-**Users who install a pre-built `.so`** from a package manager or CI artefact
-are not affected — this requirement only applies to contributors who build the
-extension from source.
+## v0.5.x → v0.6.0 (Code Quality Improvements + PHP Binding Cleanup)
 
 ### No API changes
 
@@ -187,8 +193,8 @@ There are **no breaking API changes** in v0.6.0.
 - All PHP public APIs (`Pattern`, `PatternHelper`, `Text`, `Table`, etc.) are
   unchanged.
 - All C public APIs (`core/include/snobol/*.h`) are unchanged in signature and
-  semantics; only annotation keywords (`[[nodiscard]]`, `[[maybe_unused]]`) were
-  added — these are backward-compatible with any C23-capable compiler.
+  semantics; annotation macros (`SNOBOL_NODISCARD`, `[[maybe_unused]]`) were
+  added with MSVC-compatible fallbacks.
 - `nullptr` replaces `NULL` internally in `core/src/` but is not visible at
   the public API level.
 
@@ -276,7 +282,7 @@ git fetch --all
 
 | Old Path                | New Path                  | Notes                      |
 |-------------------------|---------------------------|----------------------------|
-| `snobol4-core/`         | `core/`                   | Language-agnostic C23 core |
+| `snobol4-core/`         | `core/`                   | Language-agnostic C core   |
 | `snobol4-core/include/` | `core/include/snobol/`    | Namespaced headers         |
 | `snobol4-core/src/*.c`  | `core/src/*.c`            | Core implementation        |
 | `php-src/`              | `bindings/php/php-src/`   | PHP helper classes         |

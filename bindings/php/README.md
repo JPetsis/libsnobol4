@@ -260,15 +260,15 @@ $value = $table->get($key);
 
 Templates support variable references and transformations:
 
-| Syntax            | Description                    |
-|-------------------|--------------------------------|
-| `$v0`, `$v1`, ... | Variable reference             |
-| `${v0}`           | Braced variable reference      |
+| Syntax            | Description                                          |
+|-------------------|------------------------------------------------------|
+| `$v0`, `$v1`, ... | Variable reference                                   |
+| `${v0}`           | Braced variable reference                            |
 | `${v0.upper()}`   | Unicode uppercase (Latin-1 + Latin Extended-A, ß→SS) |
-| `${v0.lower()}`   | Unicode lowercase (Latin-1 + Latin Extended-A) |
-| `${v0.length()}`  | Length of captured value       |
-| `$TABLE['key']`   | Table lookup with literal key  |
-| `$TABLE[$v0]`     | Table lookup with variable key |
+| `${v0.lower()}`   | Unicode lowercase (Latin-1 + Latin Extended-A)       |
+| `${v0.length()}`  | Length of captured value                             |
+| `$TABLE['key']`   | Table lookup with literal key                        |
+| `$TABLE[$v0]`     | Table lookup with variable key                       |
 
 ## Case-Insensitive Pattern Matching
 

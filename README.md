@@ -1,5 +1,9 @@
 # libsnobol4
 
+![core-build](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-core.yml/badge.svg)
+![php-build](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-php.yml/badge.svg)
+![sanitizers](https://github.com/JPetsis/libsnobol4/actions/workflows/sanitizers.yml/badge.svg)
+
 A high-performance C library implementing [SNOBOL4](https://en.wikipedia.org/wiki/SNOBOL)-style string pattern
 matching and manipulation.
 
@@ -74,7 +78,7 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
     compile-time `SNOBOL_JIT_WIN64_ABI`. Uses W^X page permissions: `VirtualAlloc`/`VirtualProtect` on Windows,
     `mmap`/`mprotect` on Linux, `MAP_JIT` on macOS. DEP-compliant: never uses `PAGE_EXECUTE_READWRITE`.
   * Linux uses W^X (write-then-exec) page permissions; macOS uses `MAP_JIT`
-* **C23 Code Quality** (v0.6.0): Core adopts `nullptr`, `[[nodiscard]]`, `[[maybe_unused]]`, and `constexpr` throughout. JIT A64 macro helpers converted to typed `static inline` functions. Requires GCC 13+ or Clang 17+.
+* **Modern C Code Quality** (v0.6.0): Core adopts `nullptr`, `SNOBOL_NODISCARD`, `[[maybe_unused]]`, and `constexpr` with MSVC-compatible fallbacks throughout.
 * **Profiling Support**: Built-in execution profiling for performance analysis
 
 ### Available Bindings
@@ -82,6 +86,26 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
 | Binding                       | Status   | Version  |
 |-------------------------------|----------|----------|
 | [PHP](bindings/php/README.md) | ✅ Stable | v0.7.0   |
+
+### JIT Backends
+
+The optional micro-JIT compiles hot VM regions to native code via a two-phase architecture-neutral IR pipeline.
+Four backends are supported; select one at CMake time via `SNOBOL_JIT_BACKEND`:
+
+| Backend   | Target Architecture | Host OS               | ISA / ABI                                      | Code-Page Model           |
+|-----------|---------------------|-----------------------|------------------------------------------------|---------------------------|
+| `arm64`   | AArch64             | macOS, Linux          | ARMv8-A, MAP_JIT (macOS) / W^X (Linux)         | `mmap` + `mprotect`       |
+| `arm32`   | ARMv7-A (Thumb-2)   | Linux                 | Thumb-2, AAPCS32                               | W^X (`mmap` + `mprotect`) |
+| `riscv64` | RV64GC              | Linux                 | RV64I base + optional RV64C (compressed)       | W^X + `__clear_cache`     |
+| `x86_64`  | x86-64 (AMD64)      | Linux, macOS, Windows | System V AMD64 (Linux/macOS), MS x64 (Windows) | W^X / VirtualAlloc        |
+
+**Key features:**
+- **Two-phase IR pipeline**: VM bytecode → architecture-neutral IR (`jit_ir_region_t`) → DCE + copy-prop optimiser → machine code via backend vtable
+- **`SNOBOL_JIT_DUMP_IR=1`**: set the environment variable to dump the IR to `stderr` before lowering (debugging)
+- **Full opcode coverage**: every opcode is `jit-compiled`, `call-out`, or `pseudo` — no interpreter fallback at runtime
+- **CFG-based compilation**: multi-block regions with stub-based control flow; backward-edge loop guard (`JIT_LOOP_ITER_MAX` = 1024)
+- **LRU code cache**: up to 128 entries (configurable), evicted when `ref_count == 0`
+- **CI coverage**: native ARM64 runner + QEMU-emulated AArch64, ARMv7, RISC-V 64 + native x86-64 on Linux, macOS, Windows
 
 ## Project Structure
 
@@ -175,16 +199,17 @@ See [bindings/php/README.md](bindings/php/README.md) for detailed PHP documentat
 
 ## Build Options
 
-| Option               | Default | Description                                                                                      |
-|----------------------|---------|--------------------------------------------------------------------------------------------------|
-| `BUILD_TESTS`        | ON      | Build C test suite                                                                               |
-| `BUILD_PHP`          | OFF     | Build PHP binding                                                                                |
-| `BUILD_SHARED_LIBS`  | OFF     | Build shared library                                                                             |
-| `SNOBOL_JIT`         | ON      | Enable micro-JIT (macOS ARM64/Intel / Linux AArch64/x86-64 / ARMv7 / RISC-V 64 / Windows x86-64) |
-| `SNOBOL_JIT_BACKEND` | arm64   | Selects backend: `arm64`, `arm32`, `riscv64`, or `x86_64`                                        |
-| `SNOBOL_JIT_RV64C`   | OFF     | Enable RISC-V compressed (RV64C) instruction support                                             |
-| `SNOBOL_PROFILE`     | OFF     | Enable VM profiling                                                                              |
-| `SNOBOL_SANITIZE`    | OFF     | AddressSanitizer + UBSan (GCC/Clang)                                                             |
+| Option               | Default | Description                                                                                              |
+|----------------------|---------|----------------------------------------------------------------------------------------------------------|
+| `BUILD_TESTS`        | ON      | Build C test suite                                                                                       |
+| `BUILD_PHP`          | OFF     | Build PHP binding                                                                                        |
+| `BUILD_SHARED_LIBS`  | OFF     | Build shared library                                                                                     |
+| `SNOBOL_JIT`         | ON      | Enable micro-JIT (macOS ARM64/Intel / Linux AArch64/x86-64 / ARMv7 / RISC-V 64 / Windows x86-64)         |
+| `SNOBOL_JIT_BACKEND` | arm64   | Selects backend: `arm64`, `arm32`, `riscv64`, or `x86_64`                                                |
+| `SNOBOL_JIT_RV64C`   | OFF     | Enable RISC-V compressed (RV64C) instruction support                                                     |
+| `SNOBOL_JIT_DUMP_IR` | OFF     | Dump architecture-neutral IR to stderr before lowering (env var, not CMake — set `SNOBOL_JIT_DUMP_IR=1`) |
+| `SNOBOL_PROFILE`     | OFF     | Enable VM profiling                                                                                      |
+| `SNOBOL_SANITIZE`    | OFF     | AddressSanitizer + UBSan (GCC/Clang)                                                                     |
 
 ### Example Configurations
 
@@ -362,7 +387,21 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 libsnobol4 uses independent versioning for core and each binding:
 
-- **Core**: v0.8.0 (Build & Tooling Hardening: sanitizer targets, pkg-config, Windows CMake, doc comments)
+- **Core**: v0.10.0 (Multi-Architecture JIT: IR layer, ARM64, ARM32, RISC-V 64, x86-64 backends)
 - **PHP Binding**: v0.8.0
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.
+
+### Platform Support
+
+| Platform             | JIT Backend | CI Status       |
+|----------------------|-------------|-----------------|
+| macOS ARM64          | `arm64`     | ✅ Native runner |
+| Linux AArch64        | `arm64`     | ✅ Native + QEMU |
+| Linux ARMv7-A        | `arm32`     | ✅ QEMU-emulated |
+| Linux RISC-V 64      | `riscv64`   | ✅ QEMU-emulated |
+| Linux x86-64         | `x86_64`    | ✅ Native runner |
+| macOS x86-64 (Intel) | `x86_64`    | ✅ Native runner |
+| Windows x86-64       | `x86_64`    | ✅ Native runner |
+
+QEMU-based CI provides **correctness coverage**; native runners provide **performance coverage**.

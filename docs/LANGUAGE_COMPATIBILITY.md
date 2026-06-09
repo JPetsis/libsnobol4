@@ -32,16 +32,16 @@ The engine now supports full SNOBOL language compatibility including:
 | Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                     |
 | Helper API: `DynamicPatternCache`             | ✅ Complete | Truthful runtime-backed cache interface       |
 | Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)    |
-| Test coverage                                 | ✅ Complete | 158 PHP tests, 896 C tests                    |
+| Test coverage                                 | ✅ Complete | 228 PHP tests, 1,457 C tests                  |
 
 ### ⚠️ Known Limitations
 
-| Feature                           | Limitation                                 | Workaround                                 | Future                               |
-|-----------------------------------|--------------------------------------------|--------------------------------------------|--------------------------------------|
-| Table registration                | Placeholder `table_id=0`                   | Runtime resolves by name                   | Explicit registration API            |
-| Recursive EVAL                    | `EVAL(EVAL(...))` parsed but not optimized | Avoid deep nesting                         | Optimize recursive evaluation        |
-| JIT coverage                      | Full — all opcodes jit-compiled or call-out (v0.9.0) | Full — no interpreter fallback for any opcode | Full JIT support ✅ |
-| JIT architecture                  | Two-phase IR pipeline (v0.10.0): VM bytecode → architecture-neutral IR → machine code | Set `SNOBOL_JIT_DUMP_IR=1` to inspect IR | Backend vtable allows additional targets |
+| Feature            | Limitation                                                                            | Workaround                                    | Future                                   |
+|--------------------|---------------------------------------------------------------------------------------|-----------------------------------------------|------------------------------------------|
+| Table registration | Placeholder `table_id=0`                                                              | Runtime resolves by name                      | Explicit registration API                |
+| Recursive EVAL     | `EVAL(EVAL(...))` parsed but not optimized                                            | Avoid deep nesting                            | Optimize recursive evaluation            |
+| JIT coverage       | Full — all opcodes jit-compiled or call-out (v0.9.0)                                  | Full — no interpreter fallback for any opcode | Full JIT support ✅                       |
+| JIT architecture   | Two-phase IR pipeline (v0.10.0): VM bytecode → architecture-neutral IR → machine code | Set `SNOBOL_JIT_DUMP_IR=1` to inspect IR      | Backend vtable allows additional targets |
 
 ## JIT Pipeline Architecture (v0.10.0+)
 
@@ -60,10 +60,10 @@ VM bytecodes → [Lifter] → jit_ir_region_t → [DCE + Copy-prop] → [Backend
 
 ### Debug tools
 
-| Environment variable     | Effect                                                |
-|--------------------------|-------------------------------------------------------|
-| `SNOBOL_JIT_DUMP_IR=1`   | Dump human-readable IR to `stderr` before lowering   |
-| `SNOBOL_JIT_BACKEND`     | CMake option — selects the backend (default: `arm64`)|
+| Environment variable   | Effect                                                |
+|------------------------|-------------------------------------------------------|
+| `SNOBOL_JIT_DUMP_IR=1` | Dump human-readable IR to `stderr` before lowering    |
+| `SNOBOL_JIT_BACKEND`   | CMake option — selects the backend (default: `arm64`) |
 
 ## Parser Extensions
 
@@ -229,17 +229,17 @@ $template = "\$STATE[\$v0]";  // Uses captured value as key
 
 The following opcodes support these features:
 
-| Opcode           | Operands                                     | Description                                        |
-|------------------|----------------------------------------------|----------------------------------------------------|
-| `OP_LABEL`       | label_id (u16)                               | Define a label target                              |
-| `OP_GOTO`        | label_id (u16)                               | Unconditional transfer to label                    |
-| `OP_GOTO_F`      | label_id (u16)                               | Transfer to label if last match failed             |
-| `OP_TABLE_GET`   | table_id (u16), key_reg (u8), dest_reg (u8)  | Lookup table[key]                                  |
-| `OP_TABLE_SET`   | table_id (u16), key_reg (u8), value_reg (u8) | Set table[key] = value                             |
-| `OP_DYNAMIC_DEF` | len (u32), bytecode[len]                     | Define dynamic pattern bytecode block              |
-| `OP_DYNAMIC`     | (uses pending bytecode from OP_DYNAMIC_DEF)  | Execute stored dynamic pattern                     |
-| `OP_EMIT_TABLE`  | table_id (u16), key_type (u8), name_len (u8), name_bytes[name_len], ... | Emit table lookup (key_type: 0=literal, 1=capture); name resolved by `snobol_template_bind_tables()` |
-| `OP_EMIT_FORMAT` | reg (u8), format_type (u8) [+ width u16, fill_char u8 for LPAD/RPAD]   | Format capture: `SNBL_FMT_UPPER=1`, `SNBL_FMT_LOWER=2`, `SNBL_FMT_LENGTH=3`, `SNBL_FMT_LPAD=4`, `SNBL_FMT_RPAD=5` |
+| Opcode           | Operands                                                                | Description                                                                                                                                     |
+|------------------|-------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `OP_LABEL`       | label_id (u16)                                                          | Define a label target                                                                                                                           |
+| `OP_GOTO`        | label_id (u16)                                                          | Unconditional transfer to label                                                                                                                 |
+| `OP_GOTO_F`      | label_id (u16)                                                          | Transfer to label if last match failed                                                                                                          |
+| `OP_TABLE_GET`   | table_id (u16), key_reg (u8), dest_reg (u8)                             | Lookup table[key]                                                                                                                               |
+| `OP_TABLE_SET`   | table_id (u16), key_reg (u8), value_reg (u8)                            | Set table[key] = value                                                                                                                          |
+| `OP_DYNAMIC_DEF` | len (u32), bytecode[len]                                                | Define dynamic pattern bytecode block                                                                                                           |
+| `OP_DYNAMIC`     | (uses pending bytecode from OP_DYNAMIC_DEF)                             | Execute stored dynamic pattern                                                                                                                  |
+| `OP_EMIT_TABLE`  | table_id (u16), key_type (u8), name_len (u8), name_bytes[name_len], ... | Emit table lookup (key_type: 0=literal, 1=capture); name resolved by `snobol_template_bind_tables()`                                            |
+| `OP_EMIT_FORMAT` | reg (u8), format_type (u8) [+ width u16, fill_char u8 for LPAD/RPAD]    | Format capture: `SNBL_FMT_UPPER=1`, `SNBL_FMT_LOWER=2`, `SNBL_FMT_LENGTH=3`, `SNBL_FMT_LPAD=4`, `SNBL_FMT_RPAD=5`                               |
 | `OP_EMIT_EXPR`   | reg (u8), expr_type (u8)                                                | **Deprecated** legacy opcode. VM maps old discriminants (1→UPPER, 2→LENGTH) to `OP_EMIT_FORMAT`. New compilation always emits `OP_EMIT_FORMAT`. |
 
 ### OP_EMIT_TABLE Bytecode Format
@@ -262,16 +262,16 @@ to patch all `0xFFFF` table_id entries to runtime-assigned IDs.
 
 Inside `${vN.expr()}` braces the following expression forms are supported:
 
-| Expression         | Emitted opcode                                   | Effect                              |
-|--------------------|--------------------------------------------------|-------------------------------------|
-| `${vN}`            | `OP_EMIT_CAPTURE reg`                            | Emit raw capture                    |
-| `${vN.upper()}`    | `OP_EMIT_FORMAT reg SNBL_FMT_UPPER`              | Unicode uppercase (Latin-1 + Latin Extended-A, ß→SS) |
-| `${vN.lower()}`    | `OP_EMIT_FORMAT reg SNBL_FMT_LOWER`              | Unicode lowercase (Latin-1 + Latin Extended-A) |
-| `${vN.length()}`   | `OP_EMIT_FORMAT reg SNBL_FMT_LENGTH`             | Decimal codepoint count             |
-| `${vN.lpad(W)}`    | `OP_EMIT_FORMAT reg SNBL_FMT_LPAD width 0x20`   | Left-pad to width W with spaces     |
-| `${vN.lpad(W,'c')}` | `OP_EMIT_FORMAT reg SNBL_FMT_LPAD width fill`  | Left-pad to width W with char `c`   |
-| `${vN.rpad(W)}`    | `OP_EMIT_FORMAT reg SNBL_FMT_RPAD width 0x20`   | Right-pad to width W with spaces    |
-| `${vN.rpad(W,'c')}` | `OP_EMIT_FORMAT reg SNBL_FMT_RPAD width fill`  | Right-pad to width W with char `c`  |
+| Expression          | Emitted opcode                                | Effect                                               |
+|---------------------|-----------------------------------------------|------------------------------------------------------|
+| `${vN}`             | `OP_EMIT_CAPTURE reg`                         | Emit raw capture                                     |
+| `${vN.upper()}`     | `OP_EMIT_FORMAT reg SNBL_FMT_UPPER`           | Unicode uppercase (Latin-1 + Latin Extended-A, ß→SS) |
+| `${vN.lower()}`     | `OP_EMIT_FORMAT reg SNBL_FMT_LOWER`           | Unicode lowercase (Latin-1 + Latin Extended-A)       |
+| `${vN.length()}`    | `OP_EMIT_FORMAT reg SNBL_FMT_LENGTH`          | Decimal codepoint count                              |
+| `${vN.lpad(W)}`     | `OP_EMIT_FORMAT reg SNBL_FMT_LPAD width 0x20` | Left-pad to width W with spaces                      |
+| `${vN.lpad(W,'c')}` | `OP_EMIT_FORMAT reg SNBL_FMT_LPAD width fill` | Left-pad to width W with char `c`                    |
+| `${vN.rpad(W)}`     | `OP_EMIT_FORMAT reg SNBL_FMT_RPAD width 0x20` | Right-pad to width W with spaces                     |
+| `${vN.rpad(W,'c')}` | `OP_EMIT_FORMAT reg SNBL_FMT_RPAD width fill` | Right-pad to width W with char `c`                   |
 
 Width is a 1–1024 decimal integer; it is capped at 1024 in the VM dispatch.
 
@@ -310,7 +310,7 @@ make test
 ./vendor/bin/phpunit tests/compat
 ```
 
-**Results:** All 34 compatibility tests pass (21 existing + 13 new labelled control flow tests).
+**Results:** All 26 compatibility tests pass.
 
 ### Labelled Control Flow in Compatibility Fixtures
 
@@ -398,21 +398,42 @@ All runtime objects (tables, dynamic patterns) use reference counting:
 - Invalid labels cause controlled failure via backtracking
 - Dynamic pattern compilation failures fail gracefully
 
+## JIT Availability
+
+The JIT subsystem supports four backends across multiple operating systems:
+
+| Backend   | Target Architecture | OS                    | CI Status       | Notes                                                             |
+|-----------|---------------------|-----------------------|-----------------|-------------------------------------------------------------------|
+| `arm64`   | AArch64             | macOS (Apple Silicon) | ✅ Native runner | `MAP_JIT` code pages; full opcode coverage                        |
+| `arm64`   | AArch64             | Linux                 | ✅ Native + QEMU | W^X model; `__builtin___clear_cache`                              |
+| `arm32`   | ARMv7-A (Thumb-2)   | Linux                 | ✅ QEMU-emulated | W^X model; AAPCS32 calling convention                             |
+| `riscv64` | RV64GC              | Linux                 | ✅ QEMU-emulated | Optional RV64C compressed; W^X + icache flush                     |
+| `x86_64`  | x86-64 (AMD64)      | Linux                 | ✅ Native runner | System V AMD64 ABI; W^X model                                     |
+| `x86_64`  | x86-64 (AMD64)      | macOS (Intel)         | ✅ Native runner | System V AMD64 ABI; `MAP_JIT`                                     |
+| `x86_64`  | x86-64 (AMD64)      | Windows               | ✅ Native runner | Microsoft x64 ABI; `VirtualAlloc`/`VirtualProtect`; DEP-compliant |
+
+**CI coverage notes:**
+- QEMU-based CI (`jit-qemu-aarch64`, `jit-qemu-armv7`, `jit-qemu-riscv64`) provides **correctness coverage** — validates JIT compilation and match results match interpreter output.
+- Native runners (`jit-backend-tests` matrix) provide **performance coverage** — benchmarks measure JIT throughput and bailout rates under real hardware conditions.
+
+Select the backend at CMake time via `-DSNOBOL_JIT_BACKEND=<name>` (default: `arm64`).
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for per-backend build instructions.
+
 ## JIT Compatibility Notes
 
 As of v0.9.0 the ARM64 micro-JIT compiles **all VM opcodes**. No opcode causes
 an interpreter fallback at runtime:
 
-| Opcode group | JIT status (v0.9.0) |
-|---|---|
-| `OP_LABEL`, `OP_GOTO`, `OP_GOTO_F` | **jit-compiled** — label is a no-emit pseudo-op; GOTO/GOTO_F compile as unconditional/conditional branches |
-| `OP_TABLE_GET`, `OP_TABLE_SET`, `OP_EMIT_TABLE` | **call-out** — compiled as `BLR` to `snobol_jit_helper_table_{get,set}` / `snobol_jit_helper_emit_table_ip` |
-| `OP_DYNAMIC_DEF`, `OP_DYNAMIC` | **pseudo / call-out** — `OP_DYNAMIC_DEF` is a region-termination pseudo-op; `OP_DYNAMIC` compiles as `BLR` to `snobol_jit_helper_dynamic` |
-| `OP_EMIT_FORMAT`, `OP_EMIT_LITERAL`, `OP_EMIT_CAPTURE`, `OP_EMIT_EXPR` | **call-out** — compiled as inline `BLR` to the registered `vm->emit_fn` callback |
-| `OP_REM`, `OP_RPOS`, `OP_RTAB` | **jit-compiled** — inline integer comparisons against `vm->sp` / `vm->subject_len` |
-| `OP_FENCE` | **jit-compiled** — inline choice-stack cut |
-| `OP_BAL` | **call-out** — compiled as `BLR` to `snobol_jit_helper_bal` |
-| `OP_EVAL` | **call-out** — compiled as `BLR` with full caller-saved register spill/restore |
+| Opcode group                                                           | JIT status (v0.9.0)                                                                                                                       |
+|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| `OP_LABEL`, `OP_GOTO`, `OP_GOTO_F`                                     | **jit-compiled** — label is a no-emit pseudo-op; GOTO/GOTO_F compile as unconditional/conditional branches                                |
+| `OP_TABLE_GET`, `OP_TABLE_SET`, `OP_EMIT_TABLE`                        | **call-out** — compiled as `BLR` to `snobol_jit_helper_table_{get,set}` / `snobol_jit_helper_emit_table_ip`                               |
+| `OP_DYNAMIC_DEF`, `OP_DYNAMIC`                                         | **pseudo / call-out** — `OP_DYNAMIC_DEF` is a region-termination pseudo-op; `OP_DYNAMIC` compiles as `BLR` to `snobol_jit_helper_dynamic` |
+| `OP_EMIT_FORMAT`, `OP_EMIT_LITERAL`, `OP_EMIT_CAPTURE`, `OP_EMIT_EXPR` | **call-out** — compiled as inline `BLR` to the registered `vm->emit_fn` callback                                                          |
+| `OP_REM`, `OP_RPOS`, `OP_RTAB`                                         | **jit-compiled** — inline integer comparisons against `vm->sp` / `vm->subject_len`                                                        |
+| `OP_FENCE`                                                             | **jit-compiled** — inline choice-stack cut                                                                                                |
+| `OP_BAL`                                                               | **call-out** — compiled as `BLR` to `snobol_jit_helper_bal`                                                                               |
+| `OP_EVAL`                                                              | **call-out** — compiled as `BLR` with full caller-saved register spill/restore                                                            |
 
 **Phase 1c additions (CFG-based multi-block JIT, still active):**
 
@@ -429,12 +450,12 @@ For fully-compiled patterns `jit_bailouts_total` will be 0 and `jit_interp_time_
 
 | Suite         | Tests | Assertions | Status   |
 |---------------|-------|------------|----------|
-| C Tests       | 1,359 | -          | ✅ Pass   |
-| PHP Tests     | 236   | 490        | ✅ Pass   |
-| Compatibility | 21    | -          | ✅ Pass   |
+| C Tests       | 1,457 | -          | ✅ Pass   |
+| PHP Tests     | 228   | 556        | ✅ Pass   |
+| Compatibility | 26    | -          | ✅ Pass   |
 | Skipped       | 4     | -          | Expected |
 
-**Total:** 1,616 tests passing
+**Total:** 1,711 tests passing
 
 ## Case-Insensitive Matching
 

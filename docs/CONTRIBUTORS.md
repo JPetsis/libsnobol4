@@ -28,7 +28,7 @@ C core** from **language-specific bindings**. This enables:
 └──────────────────────────┼──────────────────────────────┘
                            │
 ┌──────────────────────────┼──────────────────────────────┐
-│              Language-Agnostic Core (C)               │
+│              Language-Agnostic Core (C)                 │
 │                          │                              │
 │  ┌──────────────┐  ┌─────▼──────┐  ┌──────────────┐     │
 │  │ Lexer (C)    │─▶│ Parser (C) │─▶│  Compiler    │     │
