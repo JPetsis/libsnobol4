@@ -58,6 +58,18 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure -C Release --verbose
 
+      - name: Capture test binary output (Windows, always)
+        if: always() && matrix.os == 'windows-latest'
+        working-directory: build
+        shell: pwsh
+        run: |
+          $bin = Get-ChildItem -Recurse -Filter snobol4_tests.exe | Select-Object -First 1
+          if ($bin) {
+            & $bin.FullName 2>&1 | Tee-Object -FilePath test-direct-output.txt
+          } else {
+            "snobol4_tests.exe not found" | Out-File test-direct-output.txt
+          }
+
       - name: Upload JIT log (always)
         if: always()
         uses: actions/upload-artifact@v4
@@ -66,6 +78,9 @@ jobs:
           path: |
             build/${{ env.SNOBOL_JIT_LOG_FILE }}
             build/watchdog.log
+            build/test-direct-output.txt
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -144,6 +159,18 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure -C Release --verbose
 
+      - name: Capture test binary output (Windows, always)
+        if: always() && matrix.os == 'windows-latest'
+        working-directory: build
+        shell: pwsh
+        run: |
+          $bin = Get-ChildItem -Recurse -Filter snobol4_tests.exe | Select-Object -First 1
+          if ($bin) {
+            & $bin.FullName 2>&1 | Tee-Object -FilePath test-direct-output.txt
+          } else {
+            "snobol4_tests.exe not found" | Out-File test-direct-output.txt
+          }
+
       - name: Upload JIT log (always)
         if: always()
         uses: actions/upload-artifact@v4
@@ -152,6 +179,9 @@ jobs:
           path: |
             build/${{ env.SNOBOL_JIT_LOG_FILE }}
             build/watchdog.log
+            build/test-direct-output.txt
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
           if-no-files-found: ignore
           retention-days: 7
 

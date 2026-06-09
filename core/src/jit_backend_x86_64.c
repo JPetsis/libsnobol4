@@ -536,19 +536,22 @@ static void x64_prologue(jit_region_t *out) {
     x64_push_r(out, X64_RBX);
     x64_push_r(out, X64_R12);
 #ifdef SNOBOL_JIT_WIN64_ABI
-    /* Allocate 48 bytes: 32-byte shadow space + 16 bytes for possible
-     * stack arguments (e.g. fill_char in EMIT_FORMAT goes at [RSP+32]).
-     * Must keep RSP 16-byte aligned for the Win64 ABI requirement. */
-    /* 40 = 32 shadow + 8 for the 5th stack arg (e.g. fill_char in EMIT_FORMAT).
-     * After 3 pushes RSP mod 16 = 8; subtract 40 (= 8 mod 16) => RSP mod 16 = 0. */
-    x64_sub_ri32(out, X64_RSP, 40);
+    /* Allocate 32-byte shadow space required by Win64 ABI.
+     * Stack alignment at JIT function entry (after caller's CALL):
+     *   RSP mod 16 = 8  (return address pushed)
+     *   push RBP  → RSP mod 16 = 0
+     *   push RBX  → RSP mod 16 = 8
+     *   push R12  → RSP mod 16 = 0
+     *   sub  32   → RSP mod 16 = 0  ← 16-byte aligned before any nested CALL ✓
+     * The 5th stack arg for EMIT_FORMAT is stored at [RSP+32] (above shadow). */
+    x64_sub_ri32(out, X64_RSP, 32);
 #endif
 }
 
 static void x64_epilogue(jit_region_t *out) {
 #ifdef SNOBOL_JIT_WIN64_ABI
-    /* Unwind 40 bytes allocated in x64_prologue */
-    x64_add_ri32(out, X64_RSP, 40);
+    /* Unwind 32 bytes allocated in x64_prologue */
+    x64_add_ri32(out, X64_RSP, 32);
 #endif
     /* Pop r12, rbx, rbp */
     x64_pop_r(out, X64_R12);
