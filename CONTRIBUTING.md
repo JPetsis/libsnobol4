@@ -307,6 +307,116 @@ This is the default behaviour on Linux AArch64. If you encounter `SIGSEGV` durin
 JIT compilation, check that `mprotect` is permitted in your environment
 (e.g., some hardened kernels or seccomp profiles may block `PROT_EXEC`).
 
+## Linux ARM32 (ARMv7-A Thumb-2) JIT
+
+The micro-JIT runs on Linux ARMv7-A via the `arm32` backend (Thumb-2 instruction set). Build with:
+
+```bash
+# Native ARMv7 build
+cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=arm32
+cmake --build build
+ctest --test-dir build --output-on-failure
+
+# QEMU ARMv7 (from x86-64 host)
+docker run --rm --platform linux/arm/v7 \
+  -v $(pwd):/workspace -w /workspace \
+  arm32v7/ubuntu:24.04 \
+  bash -c "apt-get update && apt-get install -y cmake build-essential \
+    && cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=arm32 \
+    && cmake --build build \
+    && ctest --test-dir build --output-on-failure"
+```
+
+**W^X model**: `mmap(PROT_READ|PROT_WRITE)` → `mprotect(PROT_READ|PROT_EXEC)`. The ARMv7
+page table does not distinguish between read-only and read-execute at the page level, so
+W^X is enforced at the API level only (PROT_WRITE is cleared after emission).
+
+## Linux RISC-V 64 JIT
+
+The micro-JIT runs on Linux RISC-V 64 via the `riscv64` backend (RV64I base ISA, optional
+RV64C compressed support). Build with:
+
+```bash
+# Native RISC-V 64 build
+cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=riscv64
+cmake --build build
+ctest --test-dir build --output-on-failure
+
+# With RV64C compressed instructions
+cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=riscv64 -DSNOBOL_JIT_RV64C=ON
+cmake --build build
+
+# QEMU RISC-V 64 (from x86-64 host)
+docker run --rm --platform linux/riscv64 \
+  -v $(pwd):/workspace -w /workspace \
+  riscv64/ubuntu:24.04 \
+  bash -c "apt-get update && apt-get install -y cmake build-essential \
+    && cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=riscv64 \
+    && cmake --build build \
+    && ctest --test-dir build --output-on-failure"
+```
+
+## QEMU Multi-Architecture Setup
+
+The CI matrix uses QEMU user-mode emulation via `docker/setup-qemu-action` to validate
+JIT correctness on non-native architectures. To reproduce locally:
+
+```bash
+# Enable QEMU binfmt support (one-time)
+docker run --privileged --rm tonistiigi/binfmt --install all
+
+# Build per-platform Docker images
+docker build -t jit-qemu-aarch64 -f ci/Dockerfile.jit-qemu .
+docker build -t jit-qemu-armv7 -f ci/Dockerfile.jit-qemu-armv7 .
+docker build -t jit-qemu-riscv64 -f ci/Dockerfile.jit-qemu-riscv64 .
+
+# Run with platform emulation
+docker run --rm --platform linux/arm64 jit-qemu-aarch64
+docker run --rm --platform linux/arm/v7 jit-qemu-armv7
+docker run --rm --platform linux/riscv64 jit-qemu-riscv64
+```
+
+Available QEMU CI jobs in `.github/workflows/ci-core.yml`:
+- `jit-qemu-aarch64`: Linux AArch64 via `qemu-aarch64`
+- `jit-qemu-armv7`: Linux ARMv7-A via `qemu-arm`
+- `jit-qemu-riscv64`: Linux RISC-V 64 via `qemu-riscv64`
+
+## `SNOBOL_JIT_DUMP_IR` Debugging Workflow
+
+Set the `SNOBOL_JIT_DUMP_IR` environment variable to `1` to dump the architecture-neutral
+IR to `stderr` before the backend lowerer runs:
+
+```bash
+# Enable IR dumping
+SNOBOL_JIT_DUMP_IR=1 ctest --test-dir build --output-on-failure
+
+# Or with a specific test
+SNOBOL_JIT_DUMP_IR=1 ctest --test-dir build -R test_jit --verbose
+```
+
+**What you will see:**
+
+```
+=== IR dump (region @ bc[0..47], 12 instrs) ===
+   0: COPY            v1, v0
+   1: LIT_IMM         v2, 104        # 'h'
+   2: LIT_IMM         v3, 101        # 'e'
+   3: COPY            v4, v2
+   ...
+  11: ACCEPT          v0
+=== end IR dump ===
+```
+
+**Workflow:**
+1. Run a specific pattern test with `SNOBOL_JIT_DUMP_IR=1`
+2. Inspect the IR dump to verify the lifter produced correct IR
+3. If a backend miscompiles, compare IR dumps across backends to isolate whether the issue is in the lifter (shared) or the lowerer (backend-specific)
+4. For backend-specific debugging, add `fprintf(stderr, ...)` in the lowerer function (`jit_backend_*.c`)
+
+**Note**: `SNOBOL_JIT_DUMP_IR` is an environment variable, not a CMake option. No rebuild is needed to toggle it.
+
+---
+
 **Quick start:**
 
 ```bash

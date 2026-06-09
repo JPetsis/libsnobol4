@@ -398,6 +398,27 @@ All runtime objects (tables, dynamic patterns) use reference counting:
 - Invalid labels cause controlled failure via backtracking
 - Dynamic pattern compilation failures fail gracefully
 
+## JIT Availability
+
+The JIT subsystem supports four backends across multiple operating systems:
+
+| Backend  | Target Architecture | OS                | CI Status             | Notes                                          |
+|----------|---------------------|-------------------|-----------------------|------------------------------------------------|
+| `arm64`  | AArch64             | macOS (Apple Silicon) | ✅ Native runner  | `MAP_JIT` code pages; full opcode coverage     |
+| `arm64`  | AArch64             | Linux             | ✅ Native + QEMU      | W^X model; `__builtin___clear_cache`           |
+| `arm32`  | ARMv7-A (Thumb-2)   | Linux             | ✅ QEMU-emulated      | W^X model; AAPCS32 calling convention          |
+| `riscv64`| RV64GC              | Linux             | ✅ QEMU-emulated      | Optional RV64C compressed; W^X + icache flush  |
+| `x86_64` | x86-64 (AMD64)      | Linux             | ✅ Native runner      | System V AMD64 ABI; W^X model                  |
+| `x86_64` | x86-64 (AMD64)      | macOS (Intel)     | ✅ Native runner      | System V AMD64 ABI; `MAP_JIT`                  |
+| `x86_64` | x86-64 (AMD64)      | Windows           | ✅ Native runner      | Microsoft x64 ABI; `VirtualAlloc`/`VirtualProtect`; DEP-compliant |
+
+**CI coverage notes:**
+- QEMU-based CI (`jit-qemu-aarch64`, `jit-qemu-armv7`, `jit-qemu-riscv64`) provides **correctness coverage** — validates JIT compilation and match results match interpreter output.
+- Native runners (`jit-backend-tests` matrix) provide **performance coverage** — benchmarks measure JIT throughput and bailout rates under real hardware conditions.
+
+Select the backend at CMake time via `-DSNOBOL_JIT_BACKEND=<name>` (default: `arm64`).
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for per-backend build instructions.
+
 ## JIT Compatibility Notes
 
 As of v0.9.0 the ARM64 micro-JIT compiles **all VM opcodes**. No opcode causes
@@ -429,12 +450,12 @@ For fully-compiled patterns `jit_bailouts_total` will be 0 and `jit_interp_time_
 
 | Suite         | Tests | Assertions | Status   |
 |---------------|-------|------------|----------|
-| C Tests       | 1,359 | -          | ✅ Pass   |
+| C Tests       | 1,600+| -          | ✅ Pass   |
 | PHP Tests     | 236   | 490        | ✅ Pass   |
-| Compatibility | 21    | -          | ✅ Pass   |
+| Compatibility | 34    | -          | ✅ Pass   |
 | Skipped       | 4     | -          | Expected |
 
-**Total:** 1,616 tests passing
+**Total:** 1,800+ tests passing
 
 ## Case-Insensitive Matching
 

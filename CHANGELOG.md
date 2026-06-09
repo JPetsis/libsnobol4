@@ -5,7 +5,7 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [unreleased] - 2026-06-07
+## [0.10.0] - 2026-06-09
 
 ### Added — Windows / Linux / macOS x86-64 JIT Backend (`jit-windows-x86`)
 
@@ -154,6 +154,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`vreg_next` type** in `jit_ir_region_t` changed from `uint8_t` to `uint16_t`
   to prevent silent wrap-around at the 256-register boundary.
+
+### Verified
+
+- **No breaking changes**: public API (`snobol.h`, `compiler.h`, `vm.h`, etc.) is unchanged. All internal refactoring (IR pipeline, backend vtable) is transparent to callers. Existing bytecode, patterns, and bindings continue to work without modification.
 
 ## [0.9.0] - 2026-05-22
 
