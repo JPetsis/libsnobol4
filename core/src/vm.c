@@ -467,14 +467,12 @@ bool vm_run(VM *vm) {
             return false;
         }
     }
+#ifdef SNOBOL_JIT
     snobol_jit_log("vm_run enter ip=%zu pos=%zu len=%zu bc_len=%zu jit=%d",
                    vm->ip, vm->pos, vm->len, vm->bc_len,
-#ifdef SNOBOL_JIT
                    vm->jit.enabled
-#else
-                   0
-#endif
     );
+#endif
 
     while (1) {
 #ifdef SNOBOL_PROFILE
@@ -608,24 +606,32 @@ bool vm_run(VM *vm) {
         uint64_t t_interp = (vm->jit.enabled && vm->jit.stats) ? snobol_jit_now_ns() : 0;
 #endif
         uint8_t op = vm->bc[vm->ip++];
+#ifdef SNOBOL_JIT
         snobol_jit_log("dispatch ip=%zu op=0x%02X pos=%zu choices_top=%zu",
                        (size_t)(vm->ip - 1), op, vm->pos, vm->choices_top);
+#endif
         switch (op) {
             case OP_NOP: break; /* fusion filler — skip one byte */
             case OP_ACCEPT:
+#ifdef SNOBOL_JIT
                 snobol_jit_log("vm_run exit reason=ACCEPT pos=%zu", vm->pos);
+#endif
                 if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
                 if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
                 return true;
             case OP_FAIL: {
                 bool had = vm_pop_choice(vm);
+#ifdef SNOBOL_JIT
                 snobol_jit_log("OP_FAIL pop=%d new_ip=%zu", (int)had, vm->ip);
+#endif
                 if (!had) goto fail_ret;
                 break;
             }
             case OP_JMP: { uint32_t tgt = read_u32(vm->bc, vm->bc_len, &vm->ip); vm->ip = (size_t)tgt; break; }
             case OP_SPLIT: { uint32_t a = read_u32(vm->bc, vm->bc_len, &vm->ip); uint32_t b = read_u32(vm->bc, vm->bc_len, &vm->ip);
+#ifdef SNOBOL_JIT
                 snobol_jit_log("OP_SPLIT a=%u b=%u pos=%zu", a, b, vm->pos);
+#endif
                 vm_push_choice(vm, (size_t)b, vm->pos); vm->ip = (size_t)a; break; }
             case OP_LIT: {
                 uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip); uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
@@ -1582,7 +1588,9 @@ bool vm_run(VM *vm) {
     if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
     return false;
  fail_ret:
+#ifdef SNOBOL_JIT
     snobol_jit_log("vm_run exit reason=FAIL");
+#endif
     if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
     if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
     return false;
