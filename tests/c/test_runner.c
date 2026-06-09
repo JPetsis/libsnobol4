@@ -99,6 +99,7 @@ static volatile int g_watchdog_active = 0;
 #ifdef _WIN32
 static HANDLE g_watchdog_thread = nullptr;
 static DWORD  g_watchdog_tid    = 0;
+static HANDLE g_watchdog_event  = nullptr;  /* signalled by watchdog_stop() */
 #else
 static pthread_t g_watchdog_thread;
 #endif
@@ -123,14 +124,11 @@ static void watchdog_log(const char *fmt, ...) {
 static DWORD WINAPI watchdog_proc(LPVOID arg) {
     (void)arg;
     int secs = g_timeout_secs;
-    for (int i = 0; i < secs * 10 && g_watchdog_active; i++) {
-        Sleep(100);
-    }
-    if (g_watchdog_active) {
+    /* Wait for either the stop-event (suite finished) or the timeout. */
+    DWORD result = WaitForSingleObject(g_watchdog_event, (DWORD)(secs * 1000));
+    if (result == WAIT_TIMEOUT && g_watchdog_active) {
         watchdog_log("TIMEOUT after %d s in suite: %s", secs, test_ctx.current_suite);
         fflush(stdout);
-        /* abort() is the most reliable way to terminate a hanging process
-         * across all platforms and produce a core dump. */
         abort();
     }
     return 0;
@@ -164,6 +162,11 @@ static void watchdog_start(void) {
     }
     g_watchdog_active = 1;
 #ifdef _WIN32
+    /* Create (or reset) the stop-event before spawning the thread. */
+    if (!g_watchdog_event)
+        g_watchdog_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    else
+        ResetEvent(g_watchdog_event);
     g_watchdog_thread = CreateThread(nullptr, 0, watchdog_proc, nullptr, 0, &g_watchdog_tid);
 #else
     pthread_create(&g_watchdog_thread, nullptr, watchdog_proc, nullptr);
@@ -173,6 +176,8 @@ static void watchdog_start(void) {
 static void watchdog_stop(void) {
     g_watchdog_active = 0;
 #ifdef _WIN32
+    /* Signal the event so the watchdog thread wakes immediately. */
+    if (g_watchdog_event) SetEvent(g_watchdog_event);
     if (g_watchdog_thread) {
         WaitForSingleObject(g_watchdog_thread, INFINITE);
         CloseHandle(g_watchdog_thread);
