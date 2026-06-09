@@ -29,6 +29,7 @@ typedef struct {
     uint32_t *p;           /**< Current write pointer (advanced by emit_instr) */
     uint32_t *code_start;  /**< Start of the allocated code buffer */
     size_t    code_size;   /**< Total size of the allocated code buffer in bytes */
+    size_t    n_blocks;    /**< Number of CFG blocks compiled in this region */
 } jit_region_t;
 
 /* -------------------------------------------------------------------------

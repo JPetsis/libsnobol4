@@ -1495,6 +1495,7 @@ static void *arm32_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
         }
     }
 
+    out->n_blocks = (size_t)n_blocks;
     /* Compute actual code size and seal */
     size_t actual_size = (size_t)(t2_wp - (uint8_t *)code);
     out->code_size = actual_size;

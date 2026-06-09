@@ -721,7 +721,7 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
         }
 
         /* Lower IR → machine code via backend */
-        jit_region_t code_region = { nullptr, nullptr, 0 };
+        jit_region_t code_region = { nullptr, nullptr, 0, 0 };
         snobol_jit_log("compile start_ip=%zu ir_count=%zu", start_ip, ir->count);
         void *code_ptr = active_backend->lower(ir, vm, &code_region);
         jit_ir_region_free(ir);
@@ -733,8 +733,10 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip, size_t *out_code_size) 
         snobol_jit_log("compile result=OK start_ip=%zu code_size=%zu",
                        start_ip, code_region.code_size);
 
-        /* Count CFG blocks from the region (approximate: count 1 for linear) */
-        global_jit_stats.jit_blocks_compiled_total += 1;
+        /* Count CFG blocks compiled in this region */
+        if (code_region.n_blocks == 0)
+            code_region.n_blocks = 1;
+        global_jit_stats.jit_blocks_compiled_total += code_region.n_blocks;
 
         if (out_code_size) *out_code_size = code_region.code_size;
         return (jit_trace_fn)code_ptr;

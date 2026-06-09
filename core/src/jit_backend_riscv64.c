@@ -1570,6 +1570,7 @@ static void *riscv64_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out)
         }
     }
 
+    out->n_blocks = (size_t)n_blocks;
     snobol_jit_seal_code(code, code_size);
     return (void *)code;
 }

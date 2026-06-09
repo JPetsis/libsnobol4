@@ -1788,6 +1788,7 @@ static void *x86_64_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) 
     x64_mov_ri64(out, X64_RAX, 1);
     x64_epilogue(out);
 
+    out->n_blocks = (size_t)n_blocks;
     /* Compute actual code size and seal */
     size_t actual_size = (size_t)((uint8_t *)out->p - code);
     out->code_size = actual_size;
