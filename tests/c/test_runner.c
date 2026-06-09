@@ -8,7 +8,6 @@
 #include <stdarg.h>
 
 #include "../../core/include/snobol/snobol_internal.h"
-#include "../../core/include/snobol/jit.h"
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -291,29 +290,6 @@ int main(void) {
     print_rule('=');
     printf("  SNOBOL4 C Core Test Suite\n");
     print_rule('=');
-
-    /* Early JIT init: move initialization before any test suites to isolate
-     * whether the Windows crash inside snobol_jit_init() (0xC0000409) is
-     * from snobol_jit_init() itself or from heap corruption by the preceding
-     * test suites (e.g. Table tests).  If this call crashes, the problem is
-     * in snobol_jit_init(); if it succeeds and the later call in
-     * test_dynamic_pattern_suite() still crashes, the Table tests are
-     * corrupting the heap. */
-    printf("[early] snobol_jit_init()...\n");
-    fflush(stdout);
-#if defined(_WIN32)
-    __try {
-        snobol_jit_init();
-        printf("[early] snobol_jit_init() OK\n");
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        printf("[early] snobol_jit_init() EXCEPTION code=0x%08lX (swallowed)\n",
-               GetExceptionCode());
-    }
-#else
-    snobol_jit_init();
-    printf("[early] snobol_jit_init() OK\n");
-#endif
-    fflush(stdout);
 
     signal(SIGILL,  signal_handler);
     signal(SIGSEGV, signal_handler);
