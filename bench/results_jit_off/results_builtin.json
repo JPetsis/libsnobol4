@@ -1,0 +1,278 @@
+{
+  "meta": {
+    "generated": "2026-04-14T22:30:00+02:00",
+    "change": "snobol4-builtin-functions",
+    "extensionVersion": "0.2.0",
+    "phpVersion": "8.4.18",
+    "os": "Linux (DDEV)",
+    "description": "Consolidated benchmark analysis for the snobol4-builtin-functions change. Performance acceptance criteria for replace, tokenize, transform, and unicode operations.",
+    "sources": [
+      "bench/results_replace.json",
+      "bench/results_tokenize.json",
+      "bench/results_transform.json",
+      "bench/results_unicode.json"
+    ]
+  },
+  "summary": {
+    "replace_parity": {
+      "verdict": "PASS",
+      "description": "Text::replace throughput vs PHP str_replace",
+      "snobol_ops_per_sec": 543416.68,
+      "baseline_ops_per_sec": 530803.17,
+      "ratio": 1.022,
+      "note": "Text::replace is ~2.2% faster than str_replace on a 9KB corpus (102% of native)"
+    },
+    "breakx_choice_pushes": {
+      "verdict": "PASS",
+      "description": "BREAKX reduces choice-stack pressure vs ARB+NOTANY",
+      "breakx_pushes_per_iter": 1000,
+      "arb_notany_pushes_per_iter": 8281,
+      "reduction_ratio": 8.28,
+      "note": "BREAKX uses 8.28× fewer choice pushes than ARB+NOTANY alternative"
+    },
+    "transform_performance": {
+      "verdict": "PASS",
+      "description": "Text::upper/lower/trim within 2× of native PHP functions",
+      "upper_ratio": 0.916,
+      "lower_ratio": 0.844,
+      "trim_ratio": 0.902,
+      "note": "All three functions stay within 1× of native PHP (84–92% of native throughput)"
+    },
+    "unicode_parity": {
+      "verdict": "PASS",
+      "description": "Text::size and Text::reverse parity on Unicode input",
+      "size_unicode_ratio": 0.987,
+      "reverse_unicode_ratio": 1.025,
+      "note": "Unicode size is 98.7% of mb_strlen; reverse_unicode is 2.5% faster than preg_split approach"
+    }
+  },
+  "detailed_results": {
+    "replace_benchmark": {
+      "description": "Pattern-based text replacement vs PCRE",
+      "input_bytes": 4500,
+      "warmup": 10,
+      "iterations": 200,
+      "results": [
+        {
+          "scenario": "remove_spaces",
+          "snobol_ops_per_sec": 993.73,
+          "pcre_ops_per_sec": 94640.96,
+          "ratio": 0.0105
+        },
+        {
+          "scenario": "replace_vowels",
+          "snobol_ops_per_sec": 850.29,
+          "pcre_ops_per_sec": 70753.66,
+          "ratio": 0.0120
+        },
+        {
+          "scenario": "replace_words",
+          "snobol_ops_per_sec": 390.15,
+          "pcre_ops_per_sec": 162932.79,
+          "ratio": 0.0024
+        },
+        {
+          "scenario": "remove_punctuation",
+          "snobol_ops_per_sec": 1023.28,
+          "pcre_ops_per_sec": 306944.78,
+          "ratio": 0.0033
+        }
+      ],
+      "note": "Pattern-based replace is naturally slower than PCRE due to VM overhead per character. This is expected for iterative scan-and-replace workflows."
+    },
+    "tokenize_benchmark": {
+      "description": "CSV/whitespace tokenization vs PCRE; includes BREAKX vs ARB comparison",
+      "input_bytes": 7889,
+      "warmup": 10,
+      "iterations": 500,
+      "results": [
+        {
+          "scenario": "tokenize_comma",
+          "snobol_ops_per_sec": 520.74,
+          "pcre_ops_per_sec": 60534.82
+        },
+        {
+          "scenario": "tokenize_whitespace",
+          "snobol_ops_per_sec": 507.51,
+          "pcre_ops_per_sec": 62540.39
+        },
+        {
+          "scenario": "tokenize_mixed",
+          "snobol_ops_per_sec": 306.29,
+          "pcre_ops_per_sec": 54586.64,
+          "choice_pushes_snobol": 4944000,
+          "choice_bytes_snobol": 237312000
+        }
+      ],
+      "breakx_vs_arb": {
+        "input_bytes": 7779,
+        "warmup": 5,
+        "iterations": 200,
+        "breakx": {
+          "ops_per_sec": 2347.55,
+          "choice_pushes": 200000,
+          "choice_pushes_per_iter": 1000,
+          "choice_bytes": 12800000
+        },
+        "arb_notany": {
+          "ops_per_sec": 1662.07,
+          "choice_pushes": 1656200,
+          "choice_pushes_per_iter": 8281,
+          "choice_bytes": 119246400
+        },
+        "pcre": {
+          "ops_per_sec": 53783.93
+        },
+        "choice_push_reduction": 8.28,
+        "choice_bytes_reduction": 9.32,
+        "throughput_improvement": 1.41
+      }
+    },
+    "transform_benchmark": {
+      "description": "Text::* built-in functions vs native PHP equivalents",
+      "input_bytes": 9000,
+      "warmup": 50,
+      "iterations": 2000,
+      "results": [
+        {
+          "scenario": "upper_case",
+          "snobol_text_ops_per_sec": 3528114.66,
+          "php_native_ops_per_sec": 3852020.77,
+          "php_native_fn": "strtoupper",
+          "ratio": 0.916
+        },
+        {
+          "scenario": "lower_case",
+          "snobol_text_ops_per_sec": 3107399.50,
+          "php_native_ops_per_sec": 3682108.82,
+          "php_native_fn": "strtolower",
+          "ratio": 0.844
+        },
+        {
+          "scenario": "trim_trailing",
+          "snobol_text_ops_per_sec": 4598578.58,
+          "php_native_ops_per_sec": 5099868.17,
+          "php_native_fn": "rtrim",
+          "ratio": 0.902
+        },
+        {
+          "scenario": "replace_word",
+          "snobol_text_ops_per_sec": 543416.68,
+          "php_native_ops_per_sec": 530803.17,
+          "php_native_fn": "str_replace",
+          "ratio": 1.022,
+          "verdict": "PASS"
+        },
+        {
+          "scenario": "dupl_100x",
+          "snobol_text_ops_per_sec": 6523518.92,
+          "php_native_ops_per_sec": 9582720.44,
+          "php_native_fn": "str_repeat",
+          "ratio": 0.681
+        },
+        {
+          "scenario": "replace_char",
+          "snobol_text_ops_per_sec": 36328.22,
+          "php_native_ops_per_sec": 324512.91,
+          "php_native_fn": "strtr",
+          "ratio": 0.112,
+          "note": "KNOWN LIMITATION: replace_char iterates O(n*m) via VM; strtr uses a hash table. Documented."
+        }
+      ]
+    },
+    "unicode_benchmark": {
+      "description": "Unicode-aware size and reverse vs PHP mb_* equivalents",
+      "warmup": 100,
+      "results": [
+        {
+          "scenario": "size_ascii",
+          "input_bytes": 2250,
+          "iterations": 5000,
+          "snobol_text_ops_per_sec": 753532.26,
+          "php_native_ops_per_sec": 18903591.68,
+          "php_native_fn": "strlen",
+          "ratio": 0.040,
+          "note": "KNOWN LIMITATION: strlen is O(1) (cached), snobol_text_size is O(n) UTF-8 scan"
+        },
+        {
+          "scenario": "size_unicode",
+          "input_bytes": 1750,
+          "iterations": 5000,
+          "snobol_text_ops_per_sec": 899361.45,
+          "php_native_ops_per_sec": 911265.52,
+          "php_native_fn": "mb_strlen",
+          "ratio": 0.987,
+          "verdict": "PASS"
+        },
+        {
+          "scenario": "reverse_ascii",
+          "input_bytes": 2250,
+          "iterations": 5000,
+          "snobol_text_ops_per_sec": 8654.39,
+          "php_native_ops_per_sec": 7841083.20,
+          "php_native_fn": "strrev",
+          "ratio": 0.0011,
+          "note": "KNOWN LIMITATION: strrev is essentially memcpy; snobol_text_reverse is O(n) Unicode scan"
+        },
+        {
+          "scenario": "reverse_unicode",
+          "input_bytes": 1750,
+          "iterations": 500,
+          "snobol_text_ops_per_sec": 19629.75,
+          "php_native_ops_per_sec": 19143.03,
+          "php_native_fn": "preg_split+array_reverse+implode",
+          "ratio": 1.025,
+          "verdict": "PASS"
+        },
+        {
+          "scenario": "substr_ascii",
+          "input_bytes": 2250,
+          "iterations": 5000,
+          "snobol_text_ops_per_sec": 5310911.37,
+          "php_native_ops_per_sec": 15251667.77,
+          "php_native_fn": "substr",
+          "ratio": 0.348
+        },
+        {
+          "scenario": "ord_ascii",
+          "input_bytes": 1,
+          "iterations": 5000,
+          "snobol_text_ops_per_sec": 11917757.94,
+          "php_native_ops_per_sec": 17281066.17,
+          "php_native_fn": "ord",
+          "ratio": 0.690
+        },
+        {
+          "scenario": "char_ascii",
+          "input_bytes": 1,
+          "iterations": 5000,
+          "snobol_text_ops_per_sec": 13103274.77,
+          "php_native_ops_per_sec": 17376194.61,
+          "php_native_fn": "chr",
+          "ratio": 0.754
+        }
+      ]
+    }
+  },
+  "analysis": {
+    "strengths": [
+      "Text::replace achieves parity with str_replace (ratio 1.022) — slight edge due to SSO in C layer",
+      "BREAKX reduces choice-stack pressure by 8.28× vs ARB+NOTANY equivalents",
+      "Text::upper/lower/trim operate within 84–92% of native PHP functions — no significant overhead",
+      "Unicode-aware Text::size matches mb_strlen within 2% (ratio 0.987)",
+      "Unicode-aware Text::reverse matches preg_split approach within 3% (ratio 1.025)",
+      "ord/char operations achieve 69–75% of native ord/chr (acceptable for cross-layer calls)",
+      "All functions stable at 2.00 MB peak memory throughout entire benchmark suite"
+    ],
+    "known_limitations": [
+      "replace_char is ~9× slower than PHP strtr due to O(n*m) VM iteration vs hash-table lookup (documented)",
+      "size_ascii is slower than strlen because strlen is O(1) (length cached in zval); snobol Text::size always does UTF-8 scan",
+      "reverse_ascii is much slower than strrev because strrev is essentially memcpy; snobol reverse decodes UTF-8 codepoints",
+      "Pattern-based replace/tokenize is 50–400× slower than PCRE on simple patterns — expected for an interpretive pattern VM",
+      "dupl_100x is 68% of str_repeat due to memory allocation overhead in C→PHP string construction"
+    ],
+    "peak_memory_mb": 2.00,
+    "environment": "DDEV container, PHP 8.4.18, Linux, libsnobol4 v0.2.0"
+  }
+}
+
