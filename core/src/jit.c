@@ -405,10 +405,13 @@ void *snobol_jit_alloc_code(size_t size) {
 
 void snobol_jit_seal_code(void *code, size_t size) {
 #ifdef SNOBOL_JIT_PLATFORM_WINDOWS
+    /* VirtualProtect requires a page-aligned address.  snobol_jit_alloc_code()
+     * returns ptr+16 (a 16-byte UBSan pad), so reverse the pad here. */
+    void *base = (void *)((uint8_t *)code - 16);
     DWORD old;
-    BOOL ok = VirtualProtect(code, size, PAGE_EXECUTE_READ, &old);
-    snobol_jit_log("seal_code platform=Windows code=%p size=%zu ok=%d",
-                   code, size, (int)ok);
+    BOOL ok = VirtualProtect(base, size + 16, PAGE_EXECUTE_READ, &old);
+    snobol_jit_log("seal_code platform=Windows code=%p base=%p size=%zu ok=%d",
+                   code, base, size, (int)ok);
     assert(ok && "VirtualProtect to PAGE_EXECUTE_READ failed");
     FlushInstructionCache(GetCurrentProcess(), code, size);
 #elif defined(SNOBOL_JIT_PLATFORM_MACOS)
