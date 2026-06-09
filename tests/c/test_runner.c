@@ -216,6 +216,7 @@ void test_assert(bool condition, const char *message) {
     int _p0 = test_ctx.passed, _f0 = test_ctx.failed;                  \
     struct timespec _t0, _t1;                                           \
     printf("\n▸ %s\n", (display_name));                                 \
+    fflush(stdout);                                                     \
     watchdog_start();                                                   \
     SNOBOL_CLOCK_GETTIME(&_t0);                                         \
     if (setjmp(test_jump) == 0) { fn(); }                               \
@@ -229,6 +230,7 @@ void test_assert(bool condition, const char *message) {
                _sp, _sf, _ms);                                              \
     else                                                                    \
         printf("  ↳  %d passed  |  0 failed  |  %.2f ms\n", _sp, _ms);     \
+    fflush(stdout);                                                     \
     if (suite_count < MAX_SUITES)                                       \
         suite_results[suite_count++] =                                  \
             (SuiteResult){ (display_name), _sp, _sf, _ms };             \
