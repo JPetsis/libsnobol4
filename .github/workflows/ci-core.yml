@@ -93,6 +93,8 @@ jobs:
     env:
       # Capture every JIT/VM event to a file so a CI hang can be diagnosed
       # post-mortem by inspecting the last few hundred lines of the log.
+      # CTest runs in build/, so the log is created in build/ alongside the
+      # test binary; the upload step globs both the working dir and build/.
       SNOBOL_JIT_LOG_FILE: snobol-jit-${{ matrix.os }}-${{ matrix.backend }}.log
       # Per-suite watchdog.  Aborts the test binary if a suite runs longer
       # than this; default 60 s.

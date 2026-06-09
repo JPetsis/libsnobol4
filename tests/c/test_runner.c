@@ -6,7 +6,8 @@
 #include <setjmp.h>
 #include <time.h>
 #include <stdarg.h>
-#include <errno.h>
+
+#include "../../core/include/snobol/snobol_internal.h"
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -103,8 +104,13 @@ static pthread_t g_watchdog_thread;
 #endif
 
 static void watchdog_log(const char *fmt, ...) {
+#ifdef _WIN32
+    FILE *fp = nullptr;
+    if (fopen_s(&fp, "watchdog.log", "a") != 0 || !fp) return;
+#else
     FILE *fp = fopen("watchdog.log", "a");
     if (!fp) return;
+#endif
     va_list ap;
     va_start(ap, fmt);
     vfprintf(fp, fmt, ap);
