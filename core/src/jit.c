@@ -151,15 +151,43 @@ void snobol_jit_load_config_from_env(void) {
 static FILE *jit_log_fp = nullptr;
 
 void snobol_jit_log_open(void) {
+#ifdef _WIN32
+    printf("[jit_log_open:a] entry\n"); fflush(stdout);
+#endif
     if (jit_log_fp) return;
+#ifdef _WIN32
+    printf("[jit_log_open:b] getenv\n"); fflush(stdout);
+#endif
     const char *path = getenv("SNOBOL_JIT_LOG_FILE");
+#ifdef _WIN32
+    printf("[jit_log_open:c] path=%p\n", (void*)path); fflush(stdout);
+#endif
     if (!path || !path[0]) return;
+#ifdef _WIN32
+    printf("[jit_log_open:d] fopen\n"); fflush(stdout);
+#endif
     jit_log_fp = fopen(path, "w");
+#ifdef _WIN32
+    printf("[jit_log_open:e] fp=%p\n", (void*)jit_log_fp); fflush(stdout);
+#endif
     if (jit_log_fp) {
-        setvbuf(jit_log_fp, nullptr, _IOLBF, 0); /* line-buffered for tail -f */
+#ifdef _WIN32
+        printf("[jit_log_open:f] setvbuf\n"); fflush(stdout);
+#endif
+        setvbuf(jit_log_fp, nullptr, _IOLBF, 0);
+#ifdef _WIN32
+        printf("[jit_log_open:g] fprintf\n"); fflush(stdout);
+#endif
         fprintf(jit_log_fp, "# snobol_jit log opened pid=%lu\n",
                 (unsigned long)snobol_jit_now_ns());
+#ifdef _WIN32
+        printf("[jit_log_open:h] fprintf done\n"); fflush(stdout);
+#endif
     }
+#ifdef _WIN32
+    printf("[jit_log_open:i] done\n"); fflush(stdout);
+#endif
+}
 }
 
 void snobol_jit_log_close(void) {
