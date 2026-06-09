@@ -83,6 +83,10 @@ if(MSVC)
         # compat #define nullptr NULL to work on MSVC 2022+.
         /std:c17
     )
+    # Diagnostic: disable /GS globally for the test binary
+    if(SNOBOL_JIT_NO_GS)
+        target_compile_options(snobol4_tests PRIVATE /GS-)
+    endif()
     # Suppress MSVC safe-CRT deprecation warnings in test sources
     target_compile_definitions(snobol4_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 else ()

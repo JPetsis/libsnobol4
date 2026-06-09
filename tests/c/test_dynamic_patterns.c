@@ -561,12 +561,44 @@ static void test_dynamic_pattern_concurrent_cache_access(void) {
     test_assert(true, "concurrent access simulation completed");
 }
 
+/* On Windows, __fastfail(FAST_FAIL_STACK_COOKIE_CHECK_FAILURE) terminates
+ * the process immediately and cannot be caught by any SEH handler, so we
+ * report the region the crash occurs in via stdout to narrow down the
+ * origin.  This is purely diagnostic — the line before snobol_jit_init()
+ * will be the last visible output if the crash occurs inside init.
+ *
+ * We also wrap the init call in __try/__except (MSVC) to report the
+ * exception address if the crash happens via the catchable path (Windows 7
+ * or any non-fast-fail exception).  On Windows 8+ __fastfail bypasses SEH
+ * so this only helps when the crash is not from /GS. */
 void test_dynamic_pattern_suite(void) {
+    printf("--- entering snobol_jit_init()\n");
+    fflush(stdout);
     /* dynamic_pattern_create() acquires a JIT context internally.  Initialize
      * and shut down the JIT for this suite so the cache entries are freed
      * (otherwise snobol_jit_release_context only decrements refcount and the
      * contexts leak until process exit). */
+#ifdef _WIN32
+    __try {
+        snobol_jit_init();
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        unsigned long code = GetExceptionCode();
+        fprintf(stderr, "[TEST] EXCEPTION in snobol_jit_init(): code=0x%08lX",
+                code);
+        if (code == 0xC0000409)
+            fprintf(stderr, " (STATUS_STACK_BUFFER_OVERRUN)");
+        else if (code == EXCEPTION_ACCESS_VIOLATION)
+            fprintf(stderr, " (ACCESS_VIOLATION)");
+        fputc('\n', stderr);
+        fflush(stderr);
+        /* Re-raise so the process still terminates with the original exit code */
+        RaiseException(code, 0, 0, nullptr);
+    }
+#else
     snobol_jit_init();
+#endif
+    printf("--- snobol_jit_init() done\n");
+    fflush(stdout);
     test_dynamic_pattern_create_free();
     test_dynamic_pattern_create_null_source();
     test_dynamic_pattern_create_invalid();
@@ -591,5 +623,9 @@ void test_dynamic_pattern_suite(void) {
     test_dynamic_pattern_invalid_source_handling();
     test_dynamic_pattern_ownership_lifecycle();
     test_dynamic_pattern_concurrent_cache_access();
+    printf("--- entering snobol_jit_shutdown()\n");
+    fflush(stdout);
     snobol_jit_shutdown();
+    printf("--- snobol_jit_shutdown() done\n");
+    fflush(stdout);
 }

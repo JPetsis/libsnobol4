@@ -72,6 +72,14 @@ else()
     )
 endif()
 
+# Diagnostic option: disable MSVC /GS buffer security check entirely.
+# Use this to determine whether a STATUS_STACK_BUFFER_OVERRUN crash originates
+# from the /GS cookie check or from another source.
+option(SNOBOL_JIT_NO_GS "Disable /GS buffer security check on MSVC (diagnostic)" OFF)
+if(MSVC AND SNOBOL_JIT_NO_GS)
+    target_compile_options(snobol4 PRIVATE /GS-)
+endif()
+
 # Optional: Enable VM profiling
 option(SNOBOL_PROFILE "Enable VM profiling" OFF)
 if(SNOBOL_PROFILE)
