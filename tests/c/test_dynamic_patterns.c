@@ -13,6 +13,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "../../core/include/snobol/snobol_internal.h"
 #include "snobol/dynamic_pattern.h"
 #include "snobol/vm.h"

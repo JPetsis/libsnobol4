@@ -84,6 +84,9 @@ if(MSVC)
         /wd4189  # local variable initialized but not referenced
         /wd4244  # conversion (possible loss of data)
         /wd4267  # conversion from 'size_t' to smaller type
+        /wd4310  # cast truncates constant value
+        /wd4333  # '>>': right shift by too large amount
+        /wd4389  # '==': signed/unsigned mismatch
         # Use C17 so nullptr is not a keyword (C23), allowing snobol_internal.h
         # compat #define nullptr NULL to work on MSVC 2022+.
         /std:c17
