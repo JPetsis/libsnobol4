@@ -188,7 +188,6 @@ void snobol_jit_log_open(void) {
     printf("[jit_log_open:i] done\n"); fflush(stdout);
 #endif
 }
-}
 
 void snobol_jit_log_close(void) {
     if (jit_log_fp) {
