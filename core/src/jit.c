@@ -333,25 +333,50 @@ void snobol_jit_reset_stats(void) {
  * --------------------------------------------------------------------------- */
 
 void snobol_jit_init(void) {
+#ifdef _WIN32
+    printf("[jit_init:1] memset stats\n"); fflush(stdout);
+#endif
     memset(&global_jit_stats, 0, sizeof(global_jit_stats));
+#ifdef _WIN32
+    printf("[jit_init:2] memset cache\n"); fflush(stdout);
+#endif
     memset(jit_cache, 0, sizeof(jit_cache));
+#ifdef _WIN32
+    printf("[jit_init:3] counters\n"); fflush(stdout);
+#endif
     jit_cache_count = 0;
     lru_clock = 0;
+#ifdef _WIN32
+    printf("[jit_init:4] load config\n"); fflush(stdout);
+#endif
     snobol_jit_load_config_from_env();
+#ifdef _WIN32
+    printf("[jit_init:5] log open\n"); fflush(stdout);
+#endif
     snobol_jit_log_open();
+#ifdef _WIN32
+    printf("[jit_init:6] log write\n"); fflush(stdout);
+#endif
     snobol_jit_log("init backend=%s hotness=%llu min_useful=%u",
                    jit_backend_name(),
                    (unsigned long long)global_jit_cfg.hotness_threshold,
                    (unsigned)global_jit_cfg.min_useful_ops);
     /* Register the compile-time selected backend */
 #if defined(__aarch64__) || defined(__arm64__)
+    printf("[jit_init:7] register arm64\n"); fflush(stdout);
     snobol_jit_arm64_register();
 #elif defined(__arm__) || defined(__thumb__) || defined(__ARM_ARCH_7A__)
+    printf("[jit_init:7] register arm32\n"); fflush(stdout);
     snobol_jit_arm32_register();
 #elif defined(__riscv) && __riscv_xlen == 64
+    printf("[jit_init:7] register riscv64\n"); fflush(stdout);
     snobol_jit_riscv64_register();
 #elif defined(__x86_64__) || defined(_M_X64)
+    printf("[jit_init:7] register x86_64\n"); fflush(stdout);
     snobol_jit_x86_64_register();
+#endif
+#ifdef _WIN32
+    printf("[jit_init:8] done\n"); fflush(stdout);
 #endif
 }
 
