@@ -418,6 +418,31 @@ static bool snobol_jit_helper_bal(VM *vm, uint32_t open_cp, uint32_t close_cp) {
     return ok;
 }
 
+/* POS(n): succeed when vm->pos is exactly n codepoints from start */
+static bool snobol_jit_helper_pos(VM *vm, uint32_t n) {
+    size_t target = 0;
+    for (uint32_t i = 0; i < n && target < vm->len; i++) {
+        target++;
+        while (target < vm->len && ((unsigned char)vm->s[target] & 0xC0) == 0x80)
+            target++;
+    }
+    return vm->pos == target;
+}
+
+/* TAB(n): advance vm->pos to n codepoints from start */
+static bool snobol_jit_helper_tab(VM *vm, uint32_t n) {
+    size_t target = 0;
+    for (uint32_t i = 0; i < n && target < vm->len; i++) {
+        target++;
+        while (target < vm->len && ((unsigned char)vm->s[target] & 0xC0) == 0x80)
+            target++;
+    }
+    if (target >= vm->len && n > 0) return false;
+    if (vm->pos > target) return false;
+    vm->pos = target;
+    return true;
+}
+
 static bool snobol_jit_helper_eval(VM *vm, uint16_t fn_id, uint8_t reg) {
     if (reg >= MAX_CAPS) return false;
     if (vm->cap_end[reg] < vm->cap_start[reg] || vm->cap_end[reg] > vm->len) return false;
@@ -581,6 +606,8 @@ static void ir_cfg_scan_block(const jit_ir_region_t *ir, size_t ir_start_idx,
         case JIT_IR_BREAK: case JIT_IR_BREAKX:
         case JIT_IR_LEN:
         case JIT_IR_REM: case JIT_IR_RPOS: case JIT_IR_RTAB:
+        case JIT_IR_POS: case JIT_IR_TAB:
+        case JIT_IR_ABORT: case JIT_IR_SUCCEED:
         case JIT_IR_EMIT_LITERAL: case JIT_IR_EMIT_CAPTURE: case JIT_IR_EMIT_EXPR:
         case JIT_IR_EMIT_FORMAT: case JIT_IR_EMIT_TABLE:
         case JIT_IR_TABLE_GET: case JIT_IR_TABLE_SET:
@@ -910,6 +937,40 @@ static bool emit_block_ops_ir(
             fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
             emit_instr(js, A64_B_HI(0));
             emit_instr(js, A64_MOV_X_X(2, 8));
+            break;
+        }
+
+        case JIT_IR_POS: {
+            uint32_t n = ins->u.rpos_rtab.n;
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_pos);
+            emit_mov_w32(js, 1, n);
+            emit_instr(js, 0xd63f0120u); /* blr x9 */
+            EMIT_CALLOUT_SAVE_RET(js);
+            EMIT_CALLOUT_RESTORE(js);
+            emit_instr(js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            emit_instr(js, A64_MOV_W_IMM(7, 0));
+            emit_instr(js, A64_CMP_W_W(9, 7));
+            fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
+            emit_instr(js, A64_B_EQ(0));
+            break;
+        }
+
+        case JIT_IR_TAB: {
+            uint32_t n = ins->u.rpos_rtab.n;
+            emit_instr(js, A64_STR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            EMIT_CALLOUT_SAVE(js);
+            emit_mov_x64(js, 9, (uint64_t)(uintptr_t)snobol_jit_helper_tab);
+            emit_mov_w32(js, 1, n);
+            emit_instr(js, 0xd63f0120u); /* blr x9 */
+            EMIT_CALLOUT_SAVE_RET(js);
+            EMIT_CALLOUT_RESTORE(js);
+            emit_instr(js, A64_LDR_X_X_IMM(2, 0, offsetof(VM, pos)));
+            emit_instr(js, A64_MOV_W_IMM(7, 0));
+            emit_instr(js, A64_CMP_W_W(9, 7));
+            fail_patches[(*fail_patch_count)++] = (FailPatch){ js->p, cur };
+            emit_instr(js, A64_B_EQ(0));
             break;
         }
 

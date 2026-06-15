@@ -94,8 +94,7 @@ class Text
         if ($pos < 1) {
             return false;
         }
-        $result = mb_substr($str, $pos - 1, $len, 'UTF-8');
-        return ($result === false) ? false : $result;
+        return mb_substr($str, $pos - 1, $len, 'UTF-8');
     }
 
     /**
@@ -198,8 +197,7 @@ class Text
         if ($codepoint >= 0xD800 && $codepoint <= 0xDFFF) {
             return false; // Surrogate range
         }
-        $result = mb_chr($codepoint, 'UTF-8');
-        return ($result === false) ? false : $result;
+        return mb_chr($codepoint, 'UTF-8');
     }
 
     /**
@@ -214,8 +212,7 @@ class Text
         if ($str === '') {
             return false;
         }
-        $cp = mb_ord($str, 'UTF-8');
-        return ($cp === false) ? false : $cp;
+        return mb_ord($str, 'UTF-8');
     }
 
     /**
@@ -311,6 +308,86 @@ class Text
     {
         // Native: snobol_lexgt
         return strcmp($a, $b) > 0;
+    }
+
+    /**
+     * EQ: numeric equality – returns true if a and b represent the same
+     * numeric value (e.g. eq("5","5.0") is true).
+     *
+     * @param  string  $a  First string
+     * @param  string  $b  Second string
+     * @return bool      true if numerically equal
+     */
+    public static function eq(string $a, string $b): bool
+    {
+        // Native: snobol_eq
+        return (float)$a === (float)$b;
+    }
+
+    /**
+     * NE: numeric not-equal – returns true if a and b represent different
+     * numeric values.
+     *
+     * @param  string  $a  First string
+     * @param  string  $b  Second string
+     * @return bool      true if numerically not-equal
+     */
+    public static function ne(string $a, string $b): bool
+    {
+        // Native: snobol_ne
+        return (float)$a !== (float)$b;
+    }
+
+    /**
+     * LT: numeric less-than – returns true if a < b numerically.
+     *
+     * @param  string  $a  First string
+     * @param  string  $b  Second string
+     * @return bool      true if a < b
+     */
+    public static function lt(string $a, string $b): bool
+    {
+        // Native: snobol_lt
+        return (float)$a < (float)$b;
+    }
+
+    /**
+     * GT: numeric greater-than – returns true if a > b numerically.
+     *
+     * @param  string  $a  First string
+     * @param  string  $b  Second string
+     * @return bool      true if a > b
+     */
+    public static function gt(string $a, string $b): bool
+    {
+        // Native: snobol_gt
+        return (float)$a > (float)$b;
+    }
+
+    /**
+     * LE: numeric less-than-or-equal – returns true if a <= b numerically.
+     *
+     * @param  string  $a  First string
+     * @param  string  $b  Second string
+     * @return bool      true if a <= b
+     */
+    public static function le(string $a, string $b): bool
+    {
+        // Native: snobol_le
+        return (float)$a <= (float)$b;
+    }
+
+    /**
+     * GE: numeric greater-than-or-equal – returns true if a >= b numerically.
+     *
+     * @param  string  $a  First string
+     * @param  string  $b  Second string
+     * @return bool      true if a >= b
+     */
+    public static function ge(string $a, string $b): bool
+    {
+        // Native: snobol_ge
+        return (float)$a >= (float)$b;
     }
 
     /**

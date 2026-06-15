@@ -268,12 +268,18 @@ int  test_stress_backtracking_main(void);
 void test_pattern_breakx_suite(void);
 void test_pattern_bal_suite(void);
 void test_pattern_fence_suite(void);
+void test_pattern_pos_suite(void);
+void test_pattern_tab_suite(void);
+void test_pattern_abort_suite(void);
+void test_pattern_fail_suite(void);
+void test_pattern_succeed_suite(void);
 void test_string_size_suite(void);
 void test_string_transform_suite(void);
 void test_string_ops_suite(void);
 void test_string_char_suite(void);
 void test_string_case_suite(void);
 void test_comparison_suite(void);
+void test_comparison_numeric_suite(void);
 void test_builtin_dispatch_suite(void);
 void test_search_runtime_suite(void);
 void test_search_jit_suite(void);
@@ -330,12 +336,18 @@ int main(void) {
     RUN_SUITE("Pattern: BREAKX",            test_pattern_breakx_suite);
     RUN_SUITE("Pattern: BAL",               test_pattern_bal_suite);
     RUN_SUITE("Pattern: FENCE/REM/RPOS/RTAB", test_pattern_fence_suite);
+    RUN_SUITE("Pattern: POS",               test_pattern_pos_suite);
+    RUN_SUITE("Pattern: TAB",               test_pattern_tab_suite);
+    RUN_SUITE("Pattern: ABORT",             test_pattern_abort_suite);
+    RUN_SUITE("Pattern: FAIL",              test_pattern_fail_suite);
+    RUN_SUITE("Pattern: SUCCEED",           test_pattern_succeed_suite);
     RUN_SUITE("String: SIZE",               test_string_size_suite);
     RUN_SUITE("String: TRIM/DUPL/REVERSE",  test_string_transform_suite);
     RUN_SUITE("String: SUBSTR/REPLACE/PAD", test_string_ops_suite);
     RUN_SUITE("String: CHAR/ORD",           test_string_char_suite);
     RUN_SUITE("String: UPPER/LOWER",        test_string_case_suite);
     RUN_SUITE("Comparison predicates",      test_comparison_suite);
+    RUN_SUITE("Comparison: Numeric (EQ/NE/LT/GT/LE/GE)", test_comparison_numeric_suite);
     RUN_SUITE("Built-in dispatch (OP_EVAL)", test_builtin_dispatch_suite);
 
     /* Search runtime */

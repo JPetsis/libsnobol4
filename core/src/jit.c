@@ -565,6 +565,20 @@ bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *c
                 scan += 4;
                 useful++;
                 break;
+            case OP_POS:
+                scan += 4;
+                useful++;
+                break;
+            case OP_TAB:
+                scan += 4;
+                useful++;
+                break;
+            case OP_ABORT:
+                useful++;
+                break;
+            case OP_SUCCEED:
+                useful++;
+                break;
             case OP_FENCE:
                 break;
             case OP_LABEL:

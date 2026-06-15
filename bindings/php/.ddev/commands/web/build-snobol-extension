@@ -12,7 +12,7 @@
 set -euo pipefail
 
 BINDINGS_DIR="/var/www/html"   # = bindings/php/ inside the container
-PROJECT_DIR="/var/www"         # = project root
+PROJECT_DIR="/var/www/html-root"  # = project root (mounted from repo root)
 
 # --- Locate core directory ---
 if [ -d "/var/www/core/src" ]; then
@@ -33,10 +33,11 @@ fi
 
 echo "🔨 Building libsnobol4 PHP extension..."
 echo "   core dir: $CORE_DIR"
+echo "   project dir: $PROJECT_DIR"
 
 # --- Step 1: Regenerate amalgam ---
 # Always regenerate so a freshly added/removed core .c file is never missed.
-AMALGAM_GEN="/var/www/dev/generate_amalgam.sh"
+AMALGAM_GEN="${PROJECT_DIR}/dev/generate_amalgam.sh"
 if [ -f "$AMALGAM_GEN" ]; then
     echo "🔄 Regenerating core_amalgam.c..."
     bash "$AMALGAM_GEN" generate
@@ -45,14 +46,27 @@ else
 fi
 
 # --- Step 2: Clean stale build artifacts ---
-# core_amalgam.dep / core_amalgam.lo encode absolute paths from a previous
-# build run and cause 'make' to fail looking for stale config.h locations.
+# Clean ALL compiled artifacts from previous builds.
+# The .lo files are in src/ subdirectory (e.g. src/php_snobol.lo), NOT at the
+# bindings root. If these are not cleaned before staging, 'make' sees the .lo
+# target as up-to-date and skips recompilation, linking stale .o files.
 echo "🧹 Cleaning stale artifacts from bindings/php/..."
 rm -f \
     "${BINDINGS_DIR}/core_amalgam.dep" \
     "${BINDINGS_DIR}/core_amalgam.lo" \
-    "${BINDINGS_DIR}/snobol.lo" \
-    "${BINDINGS_DIR}/php_snobol.lo"
+    "${BINDINGS_DIR}/src/php_snobol.lo" \
+    "${BINDINGS_DIR}/src/php_snobol.dep" \
+    "${BINDINGS_DIR}/src/snobol_pattern.lo" \
+    "${BINDINGS_DIR}/src/snobol_pattern.dep" \
+    "${BINDINGS_DIR}/src/snobol_table_php.lo" \
+    "${BINDINGS_DIR}/src/snobol_table_php.dep" \
+    "${BINDINGS_DIR}/src/snobol_dynamic_pattern_php.lo" \
+    "${BINDINGS_DIR}/src/snobol_dynamic_pattern_php.dep"
+rm -rf \
+    "${BINDINGS_DIR}/src/.libs" \
+    "${BINDINGS_DIR}/.libs" \
+    "${BINDINGS_DIR}/build" \
+    "${BINDINGS_DIR}/modules"
 
 # --- Step 3: Prepare build dir ---
 BUILD_DIR="/tmp/snobol_build"

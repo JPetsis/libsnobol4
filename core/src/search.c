@@ -124,6 +124,8 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
             case OP_LEN:
             case OP_RPOS:
             case OP_RTAB:
+            case OP_POS:
+            case OP_TAB:
                 if (ip + 4 > bc_len) return false;
                 ip += 4;
                 break;
@@ -133,6 +135,8 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
             case OP_FENCE:
             case OP_REM:
             case OP_NOP:
+            case OP_ABORT:
+            case OP_SUCCEED:
                 if (ip > bc_len) return false;
                 break;
             case OP_REPEAT_INIT:

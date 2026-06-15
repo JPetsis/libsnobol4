@@ -217,12 +217,17 @@ void snobol_ast_free(ast_node_t* node) {
         case AST_BAL:
         case AST_FENCE:
         case AST_REM:
-        case AST_RPOS:
-        case AST_RTAB:
-            /* no owned pointers */
-            break;
+    case AST_RPOS:
+    case AST_RTAB:
+    case AST_POS:
+    case AST_TAB:
+    case AST_ABORT:
+    case AST_FAIL:
+    case AST_SUCCEED:
+        /* no owned pointers */
+        break;
 
-        default:
+    default:
             /* No children to free */
             break;
     }
@@ -258,6 +263,11 @@ const char* snobol_ast_type_name(ast_type_t type) {
         case AST_REM:          return "REM";
         case AST_RPOS:         return "RPOS";
         case AST_RTAB:         return "RTAB";
+        case AST_POS:          return "POS";
+        case AST_TAB:          return "TAB";
+        case AST_ABORT:        return "ABORT";
+        case AST_FAIL:         return "FAIL";
+        case AST_SUCCEED:      return "SUCCEED";
         default:               return "UNKNOWN";
     }
 }
@@ -321,6 +331,14 @@ void snobol_ast_dump(const ast_node_t* node, FILE* out, int indent) {
             snobol_ast_dump(node->data.repetition.sub, out, indent + 2);
             break;
             
+        case AST_POS:
+            fprintf(out, "%*sPOS(%d)\n", indent, "", node->data.rpos_rtab.n);
+            break;
+
+        case AST_TAB:
+            fprintf(out, "%*sTAB(%d)\n", indent, "", node->data.rpos_rtab.n);
+            break;
+
         default:
             fprintf(out, "%*s%s\n", indent, "", type_name);
             break;
@@ -493,6 +511,43 @@ ast_node_t* snobol_ast_create_rtab(int32_t n) {
     if (!node) return nullptr;
     node->type = AST_RTAB;
     node->data.rpos_rtab.n = n;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_pos(int32_t n) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return nullptr;
+    node->type = AST_POS;
+    node->data.rpos_rtab.n = n;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_tab(int32_t n) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return nullptr;
+    node->type = AST_TAB;
+    node->data.rpos_rtab.n = n;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_abort(void) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return nullptr;
+    node->type = AST_ABORT;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_fail(void) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return nullptr;
+    node->type = AST_FAIL;
+    return node;
+}
+
+ast_node_t* snobol_ast_create_succeed(void) {
+    ast_node_t* node = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!node) return nullptr;
+    node->type = AST_SUCCEED;
     return node;
 }
 

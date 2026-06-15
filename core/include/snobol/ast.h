@@ -95,7 +95,12 @@ typedef enum {
     AST_FENCE,   /* FENCE – cut choice stack */
     AST_REM,     /* REM – consume remainder */
     AST_RPOS,    /* RPOS(n) – cursor n codepoints from end */
-    AST_RTAB     /* RTAB(n) – advance to n codepoints from end */
+    AST_RTAB,    /* RTAB(n) – advance to n codepoints from end */
+    AST_POS,     /* POS(n) – succeed when cursor at n codepoints from start */
+    AST_TAB,     /* TAB(n) – advance cursor to n codepoints from start */
+    AST_ABORT,   /* ABORT – terminate entire match */
+    AST_FAIL,    /* FAIL – force failure / backtrack */
+    AST_SUCCEED  /* SUCCEED – force immediate success */
 } ast_type_t;
 
 /**
@@ -413,4 +418,19 @@ ast_node_t* snobol_ast_create_rpos(int32_t n);
 
 /** Create AST_RTAB node */
 ast_node_t* snobol_ast_create_rtab(int32_t n);
+
+/** Create AST_POS node */
+ast_node_t* snobol_ast_create_pos(int32_t n);
+
+/** Create AST_TAB node */
+ast_node_t* snobol_ast_create_tab(int32_t n);
+
+/** Create AST_ABORT node (no args) */
+ast_node_t* snobol_ast_create_abort(void);
+
+/** Create AST_FAIL node (no args) */
+ast_node_t* snobol_ast_create_fail(void);
+
+/** Create AST_SUCCEED node (no args) */
+ast_node_t* snobol_ast_create_succeed(void);
 

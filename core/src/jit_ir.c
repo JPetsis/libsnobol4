@@ -531,6 +531,36 @@ jit_ir_region_t *jit_ir_lift_region(const VM *vm, size_t start_ip) {
             continue;
         }
 
+        if (op == OP_POS) {
+            if (oip + 4 > bc_len) break;
+            uint32_t n = ir_read_u32(bc + oip);
+            if (!jit_ir_append(r, JIT_IR_POS, JIT_IR_FLAG_SIDE_EFFECT,
+                               cur, JIT_IR_VREG_NONE, 0, 0)) break;
+            r->instrs[r->count - 1].u.rpos_rtab.n = n;
+            scan = oip + 4;
+            continue;
+        }
+
+        if (op == OP_TAB) {
+            if (oip + 4 > bc_len) break;
+            uint32_t n = ir_read_u32(bc + oip);
+            if (!jit_ir_append(r, JIT_IR_TAB, JIT_IR_FLAG_SIDE_EFFECT,
+                               cur, JIT_IR_VREG_NONE, 0, 0)) break;
+            r->instrs[r->count - 1].u.rpos_rtab.n = n;
+            scan = oip + 4;
+            continue;
+        }
+
+        if (op == OP_ABORT) {
+            LIFT_SE(r, JIT_IR_ABORT, cur);
+            break;
+        }
+
+        if (op == OP_SUCCEED) {
+            LIFT_SE(r, JIT_IR_SUCCEED, cur);
+            break;
+        }
+
         if (op == OP_FENCE) {
             LIFT_SE(r, JIT_IR_FENCE, cur);
             scan = oip;

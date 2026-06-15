@@ -151,6 +151,10 @@ typedef enum {
     OP_REM,           /**< Match remainder of subject to end; no operands */
     OP_RPOS,          /**< Succeed when cursor is n codepoints from end; n: u32 */
     OP_RTAB,          /**< Advance cursor to n codepoints from end; n: u32 */
+    OP_POS,           /**< Succeed when cursor is exactly n codepoints from start; n: u32 */
+    OP_TAB,           /**< Advance cursor to n codepoints from start; n: u32 */
+    OP_ABORT,         /**< Terminate entire match immediately; no operands */
+    OP_SUCCEED,       /**< Force immediate match success at current position; no operands */
 
     OP_NOP,           /**< No-op — skip one byte (emitted by fusion pass) */
 } OpCode;
@@ -211,7 +215,14 @@ typedef enum {
     SNOBOL_FN_INTEGER    = 19, /**< @see snobol_integer() */
     SNOBOL_FN_REAL       = 20, /**< @see snobol_real() */
     SNOBOL_FN_NUMERIC    = 21, /**< @see snobol_numeric() */
-    SNOBOL_FN_MAX        = 22, /**< Sentinel: all IDs < SNOBOL_FN_MAX are known built-ins */
+    /* Numeric comparison functions (multi-arg, routed to host eval_fn) */
+    SNOBOL_FN_EQ         = 22, /**< @see snobol_eq() */
+    SNOBOL_FN_NE         = 23, /**< @see snobol_ne() */
+    SNOBOL_FN_LT         = 24, /**< @see snobol_lt() */
+    SNOBOL_FN_GT         = 25, /**< @see snobol_gt() */
+    SNOBOL_FN_LE         = 26, /**< @see snobol_le() */
+    SNOBOL_FN_GE         = 27, /**< @see snobol_ge() */
+    SNOBOL_FN_MAX        = 28, /**< Sentinel: all IDs < SNOBOL_FN_MAX are known built-ins */
 } snobol_builtin_fn_t;
 
 /** @brief Maximum number of bounded-repetition loop counters per VM. */
@@ -348,6 +359,7 @@ typedef struct {
     size_t label_capacity;      /* Allocated capacity */
     uint16_t current_label;     /* Current label being processed */
     bool in_goto_fail;         /* True if in GOTO_F failure handling */
+    bool abort_flag;           /* True if ABORT opcode was executed */
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
     /* Dynamic pattern support */

@@ -12,6 +12,52 @@
 #include <string.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <math.h>
+
+/* --------------------------------------------------------------------------
+ * Numeric conversion helper
+ * -------------------------------------------------------------------------- */
+
+double snobol_str_to_double(const char *s, size_t len) {
+    if (!s || len == 0) return 0.0;
+    char *buf = (char *)snobol_malloc(len + 1);
+    if (!buf) return 0.0;
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    char *end = NULL;
+    double val = strtod(buf, &end);
+    snobol_free(buf);
+    return (end > buf) ? val : 0.0;
+}
+
+/* --------------------------------------------------------------------------
+ * Numeric comparison functions
+ * -------------------------------------------------------------------------- */
+
+bool snobol_eq(const char *a, size_t a_len, const char *b, size_t b_len) {
+    return snobol_str_to_double(a, a_len) == snobol_str_to_double(b, b_len);
+}
+
+bool snobol_ne(const char *a, size_t a_len, const char *b, size_t b_len) {
+    return snobol_str_to_double(a, a_len) != snobol_str_to_double(b, b_len);
+}
+
+bool snobol_lt(const char *a, size_t a_len, const char *b, size_t b_len) {
+    return snobol_str_to_double(a, a_len) < snobol_str_to_double(b, b_len);
+}
+
+bool snobol_gt(const char *a, size_t a_len, const char *b, size_t b_len) {
+    return snobol_str_to_double(a, a_len) > snobol_str_to_double(b, b_len);
+}
+
+bool snobol_le(const char *a, size_t a_len, const char *b, size_t b_len) {
+    return snobol_str_to_double(a, a_len) <= snobol_str_to_double(b, b_len);
+}
+
+bool snobol_ge(const char *a, size_t a_len, const char *b, size_t b_len) {
+    return snobol_str_to_double(a, a_len) >= snobol_str_to_double(b, b_len);
+}
 
 /* --------------------------------------------------------------------------
  * Internal comparison helper

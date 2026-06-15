@@ -1568,6 +1568,76 @@ bool vm_run(VM *vm) {
                 break;
             }
 
+            case OP_POS: {
+                /* POS(n): succeed only when the current match position
+                 * is exactly n codepoints from the start of the subject.
+                 *
+                 * Operand: n u32
+                 * Calculates the byte offset of the nth codepoint from
+                 * the start (by walking forward n codepoints) and fails
+                 * if vm->pos != that offset.
+                 */
+                uint32_t pos_n = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                size_t pos_target = 0;
+                for (uint32_t pos_i = 0; pos_i < pos_n && pos_target < vm->len; pos_i++) {
+                    pos_target++;
+                    while (pos_target < vm->len &&
+                           ((unsigned char)vm->s[pos_target] & 0xC0) == 0x80)
+                        pos_target++;
+                }
+                if (vm->pos != pos_target) { if (!vm_pop_choice(vm)) goto fail_ret; }
+                break;
+            }
+
+            case OP_TAB: {
+                /* TAB(n): advance cursor to n codepoints from the
+                 * start of the subject string.
+                 *
+                 * Operand: n u32
+                 * Fails if vm->pos is already past the target or if
+                 * n is beyond the string length.
+                 */
+                uint32_t tab_n = read_u32(vm->bc, vm->bc_len, &vm->ip);
+                size_t tab_target = 0;
+                for (uint32_t tab_i = 0; tab_i < tab_n && tab_target < vm->len; tab_i++) {
+                    tab_target++;
+                    while (tab_target < vm->len &&
+                           ((unsigned char)vm->s[tab_target] & 0xC0) == 0x80)
+                        tab_target++;
+                }
+                if (tab_target >= vm->len && tab_n > 0) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                } else if (vm->pos > tab_target) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                } else {
+                    vm->pos = tab_target;
+                }
+                break;
+            }
+
+            case OP_ABORT: {
+                /* ABORT: immediately terminate the entire match.
+                 * Sets a VM abort flag and unwinds all choice points,
+                 * returning failure with no further backtracking possible.
+                 * No operands.
+                 */
+                vm->abort_flag = 1;
+                vm->choices_top = 0;
+                if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
+                if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+                return false;
+            }
+
+            case OP_SUCCEED: {
+                /* SUCCEED: force immediate match success at the
+                 * current position, skipping any remaining pattern.
+                 * No operands.
+                 */
+                if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
+                if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+                return true;
+            }
+
             /* Note: ARB is not a separate opcode.
              * It is implemented at compile time as SPLIT + REPEAT
              * (equivalent to REPEAT_INIT(0,-1) + REPEAT_STEP on LEN(1)),
@@ -1598,6 +1668,7 @@ bool vm_run(VM *vm) {
 
 bool vm_exec(VM *vm) {
     vm->ip = 0; vm->pos = 0; vm->max_cap_used = 0; vm->max_counter_used = 0;
+    vm->abort_flag = false;
     memset(vm->counters, 0, sizeof(vm->counters));
     
     /* Initialize control flow state if not already done */
@@ -1659,6 +1730,7 @@ void vm_init_labels(VM *vm) {
     vm->label_capacity = 0;
     vm->current_label = 0;
     vm->in_goto_fail = false;
+    vm->abort_flag = false;
 }
 
 void vm_free_labels(VM *vm) {

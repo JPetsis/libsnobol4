@@ -61,5 +61,58 @@ class BuilderTest extends TestCase
         $this->assertEquals('goto', $ast['type']);
         $this->assertEquals('start', $ast['label']);
     }
+
+    /* -------- POS / TAB -------- */
+
+    public function testPosNode(): void
+    {
+        $ast = Builder::pos(3);
+        $this->assertIsArray($ast);
+        $this->assertEquals('pos', $ast['type']);
+        $this->assertEquals(3, $ast['n']);
+    }
+
+    public function testPosZero(): void
+    {
+        $ast = Builder::pos(0);
+        $this->assertEquals(0, $ast['n']);
+    }
+
+    public function testTabNode(): void
+    {
+        $ast = Builder::tab(5);
+        $this->assertIsArray($ast);
+        $this->assertEquals('tab', $ast['type']);
+        $this->assertEquals(5, $ast['n']);
+    }
+
+    public function testTabZero(): void
+    {
+        $ast = Builder::tab(0);
+        $this->assertEquals(0, $ast['n']);
+    }
+
+    /* -------- ABORT / FAIL / SUCCEED -------- */
+
+    public function testAbortNode(): void
+    {
+        $ast = Builder::abort();
+        $this->assertIsArray($ast);
+        $this->assertEquals('abort', $ast['type']);
+    }
+
+    public function testFailNode(): void
+    {
+        $ast = Builder::fail();
+        $this->assertIsArray($ast);
+        $this->assertEquals('fail', $ast['type']);
+    }
+
+    public function testSucceedNode(): void
+    {
+        $ast = Builder::succeed();
+        $this->assertIsArray($ast);
+        $this->assertEquals('succeed', $ast['type']);
+    }
 }
 

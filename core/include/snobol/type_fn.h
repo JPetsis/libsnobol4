@@ -14,6 +14,79 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+/* --------------------------------------------------------------------------
+ * Numeric comparison helpers (for internal use in type_fn.c and PHP binding)
+ * -------------------------------------------------------------------------- */
+/**
+ * Convert a length-bounded string to double, following SNOBOL4 numeric
+ * conversion semantics (non-numeric strings yield 0.0).
+ * @param s     Input string (UTF-8, not necessarily null-terminated)
+ * @param len   Byte length of input
+ * @return      Numeric value, or 0.0 if no numeric prefix is found
+ */
+double snobol_str_to_double(const char *s, size_t len);
+
+/**
+ * EQ: numeric equality – succeeds if a == b numerically.
+ * Both strings are converted to double before comparison.
+ * @param a      First string
+ * @param a_len  Byte length
+ * @param b      Second string
+ * @param b_len  Byte length
+ * @return       true if numeric values are equal
+ */
+bool snobol_eq(const char *a, size_t a_len, const char *b, size_t b_len);
+
+/**
+ * NE: numeric inequality – succeeds if a != b numerically.
+ * @param a      First string
+ * @param a_len  Byte length
+ * @param b      Second string
+ * @param b_len  Byte length
+ * @return       true if numeric values differ
+ */
+bool snobol_ne(const char *a, size_t a_len, const char *b, size_t b_len);
+
+/**
+ * LT: less-than – succeeds if a < b numerically.
+ * @param a      First string
+ * @param a_len  Byte length
+ * @param b      Second string
+ * @param b_len  Byte length
+ * @return       true if numeric value of a is less than b
+ */
+bool snobol_lt(const char *a, size_t a_len, const char *b, size_t b_len);
+
+/**
+ * GT: greater-than – succeeds if a > b numerically.
+ * @param a      First string
+ * @param a_len  Byte length
+ * @param b      Second string
+ * @param b_len  Byte length
+ * @return       true if numeric value of a is greater than b
+ */
+bool snobol_gt(const char *a, size_t a_len, const char *b, size_t b_len);
+
+/**
+ * LE: less-than-or-equal – succeeds if a <= b numerically.
+ * @param a      First string
+ * @param a_len  Byte length
+ * @param b      Second string
+ * @param b_len  Byte length
+ * @return       true if numeric value of a is <= b
+ */
+bool snobol_le(const char *a, size_t a_len, const char *b, size_t b_len);
+
+/**
+ * GE: greater-than-or-equal – succeeds if a >= b numerically.
+ * @param a      First string
+ * @param a_len  Byte length
+ * @param b      Second string
+ * @param b_len  Byte length
+ * @return       true if numeric value of a is >= b
+ */
+bool snobol_ge(const char *a, size_t a_len, const char *b, size_t b_len);
+
 /**
  * IDENT: identity predicate – succeeds if two strings are identical.
  * Equivalent to strcmp == 0 on strings.

@@ -446,6 +446,43 @@ PHP_FUNCTION(snobol_text_lexgt) {
     RETURN_BOOL(snobol_lexgt(a, alen, b_s, blen));
 }
 
+/* Numeric comparison functions */
+PHP_FUNCTION(snobol_text_eq) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_eq(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_ne) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_ne(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_lt) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_lt(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_gt) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_gt(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_le) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_le(a, alen, b_s, blen));
+}
+
+PHP_FUNCTION(snobol_text_ge) {
+    char *a, *b_s; size_t alen, blen;
+    if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
+    RETURN_BOOL(snobol_ge(a, alen, b_s, blen));
+}
+
 PHP_FUNCTION(snobol_text_integer) {
     char *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
@@ -519,6 +556,12 @@ static const zend_function_entry snobol_functions[] = {
     PHP_FE(snobol_text_lexeq,        ai_text_str2_bool)
     PHP_FE(snobol_text_lexlt,        ai_text_str2_bool)
     PHP_FE(snobol_text_lexgt,        ai_text_str2_bool)
+    PHP_FE(snobol_text_eq,           ai_text_str2_bool)
+    PHP_FE(snobol_text_ne,           ai_text_str2_bool)
+    PHP_FE(snobol_text_lt,           ai_text_str2_bool)
+    PHP_FE(snobol_text_gt,           ai_text_str2_bool)
+    PHP_FE(snobol_text_le,           ai_text_str2_bool)
+    PHP_FE(snobol_text_ge,           ai_text_str2_bool)
     PHP_FE(snobol_text_integer,      ai_text_str1_bool)
     PHP_FE(snobol_text_real,         ai_text_str1_bool)
     PHP_FE(snobol_text_numeric,      ai_text_str1_bool)

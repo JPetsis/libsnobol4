@@ -558,6 +558,61 @@ static ast_node_t* parse_function_call(snobol_parser_t* parser, snobol_lexer_t* 
         return parse_dynamic_eval(parser, lexer);
     }
     
+    if (strncmp(name, "POS", name_len) == 0) {
+        token_t arg = peek(lexer);
+        if (arg.type != TOKEN_LIT) {
+            set_error(parser, "POS expects integer argument",
+                     snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+            return nullptr;
+        }
+        advance(lexer);
+
+        if (!expect(parser, lexer, TOKEN_RPAREN)) {
+            return nullptr;
+        }
+
+        int32_t n = (int32_t)strtol(arg.data.string.text, nullptr, 10);
+        return snobol_ast_create_pos(n);
+    }
+    
+    if (strncmp(name, "TAB", name_len) == 0) {
+        token_t arg = peek(lexer);
+        if (arg.type != TOKEN_LIT) {
+            set_error(parser, "TAB expects integer argument",
+                     snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+            return nullptr;
+        }
+        advance(lexer);
+
+        if (!expect(parser, lexer, TOKEN_RPAREN)) {
+            return nullptr;
+        }
+
+        int32_t n = (int32_t)strtol(arg.data.string.text, nullptr, 10);
+        return snobol_ast_create_tab(n);
+    }
+    
+    if (strncmp(name, "ABORT", name_len) == 0) {
+        if (!expect(parser, lexer, TOKEN_RPAREN)) {
+            return nullptr;
+        }
+        return snobol_ast_create_abort();
+    }
+    
+    if (strncmp(name, "FAIL", name_len) == 0) {
+        if (!expect(parser, lexer, TOKEN_RPAREN)) {
+            return nullptr;
+        }
+        return snobol_ast_create_fail();
+    }
+    
+    if (strncmp(name, "SUCCEED", name_len) == 0) {
+        if (!expect(parser, lexer, TOKEN_RPAREN)) {
+            return nullptr;
+        }
+        return snobol_ast_create_succeed();
+    }
+    
     /* Unknown function */
     set_error(parser, "Unknown function",
              snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));

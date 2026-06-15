@@ -217,24 +217,40 @@ High-level helper methods for common pattern operations:
 
 Fluent API for constructing patterns:
 
-| Method                     | Description                    |
-|----------------------------|--------------------------------|
-| `lit($text)`               | Literal string match           |
-| `span($set)`               | Match run of characters in set |
-| `brk($set)`                | Match until character in set   |
-| `any($set)`                | Match any single character     |
-| `notany($set)`             | Match any character NOT in set |
-| `len($n)`                  | Match exactly n characters     |
-| `arbno($sub)`              | Zero or more repetitions       |
-| `repeat($sub, $min, $max)` | Bounded repetition             |
-| `cap($reg, $sub)`          | Capture match into register    |
-| `assign($var, $reg)`       | Assign register to variable    |
-| `concat($parts)`           | Concatenate patterns           |
-| `alt($left, $right)`       | Alternation (OR)               |
-| `emit($text)`              | Emit literal to output         |
-| `emitRef($reg)`            | Emit capture to output         |
-| `label($name, $sub)`       | Named label wrapping a pattern |
-| `goto($label)`             | Unconditional goto label       |
+| Method                              | Description                               |
+|-------------------------------------|-------------------------------------------|
+| `lit($text)`                        | Literal string match                      |
+| `span($set)`                        | Match run of characters in set            |
+| `brk($set)`                         | Match until character in set              |
+| `any($set)`                         | Match any single character                |
+| `notany($set)`                      | Match any character NOT in set            |
+| `len($n)`                           | Match exactly n characters                |
+| `arbno($sub)`                       | Zero or more repetitions                  |
+| `repeat($sub, $min, $max)`          | Bounded repetition                        |
+| `cap($reg, $sub)`                   | Capture match into register               |
+| `assign($var, $reg)`                | Assign register to variable               |
+| `concat($parts)`                    | Concatenate patterns                      |
+| `alt($left, $right)`                | Alternation (OR)                          |
+| `emit($text)`                       | Emit literal to output                    |
+| `emitRef($reg)`                     | Emit capture to output                    |
+| `anchor($type)`                     | Start or end anchor                       |
+| `label($name, $sub)`                | Named label wrapping a pattern            |
+| `goto($label)`                      | Unconditional goto label                  |
+| `dynamicEval($expr)`                | Dynamic pattern evaluation                |
+| `tableAccess($table, $key)`         | Table lookup                              |
+| `tableUpdate($table, $key, $value)` | Table update                              |
+| `breakx($set)`                      | Break with O(n) pre-scan optimisation     |
+| `bal($open, $close)`                | Balanced delimiter matching               |
+| `fence()`                           | Backtracking cut                          |
+| `rem()`                             | Match remainder of subject                |
+| `rpos($n)`                          | Succeed at n codepoints from end          |
+| `rtab($n)`                          | Advance to n codepoints from end          |
+| `arb()`                             | Match arbitrary characters (0 or more)    |
+| `pos($n)`                           | Succeed at n codepoints from start        |
+| `tab($n)`                           | Advance cursor to n codepoints from start |
+| `abort()`                           | Terminate entire match as failure         |
+| `fail()`                            | Force failure / trigger backtracking      |
+| `succeed()`                         | Force immediate success                   |
 
 ### Pattern
 
@@ -306,7 +322,7 @@ $minor = ($v >> 8) & 0xFF;   // 7
 $patch = $v & 0xFF;          // 0
 ```
 
-For v0.7.0 this returns `0x00000700` (1792 in decimal).
+For v0.8.0 this returns `0x00000800` (2048 in decimal).
 
 ## Running Tests
 

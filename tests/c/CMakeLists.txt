@@ -29,12 +29,15 @@ add_executable(snobol4_tests
     test_pattern_breakx.c
     test_pattern_bal.c
     test_pattern_fence.c
+    test_pattern_pos_tab.c
+    test_pattern_abort_fail_succeed.c
     test_string_size.c
     test_string_transform.c
     test_string_ops.c
     test_string_char.c
     test_string_case.c
     test_comparison.c
+    test_comparison_numeric.c
     test_builtin_dispatch.c
     test_search_runtime.c
     test_search_jit.c

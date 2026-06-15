@@ -589,6 +589,30 @@ static int emit_rtab(zval *n_zv, CodeBuf *c) {
     return 0;
 }
 
+static int emit_pos(zval *n_zv, CodeBuf *c) {
+    if (!n_zv || Z_TYPE_P(n_zv) != IS_LONG) return -1;
+    cb_emit_u8(c, OP_POS);
+    cb_emit_u32(c, (uint32_t)(long)Z_LVAL_P(n_zv));
+    return 0;
+}
+
+static int emit_tab(zval *n_zv, CodeBuf *c) {
+    if (!n_zv || Z_TYPE_P(n_zv) != IS_LONG) return -1;
+    cb_emit_u8(c, OP_TAB);
+    cb_emit_u32(c, (uint32_t)(long)Z_LVAL_P(n_zv));
+    return 0;
+}
+
+static int emit_abort(CodeBuf *c) {
+    cb_emit_u8(c, OP_ABORT);
+    return 0;
+}
+
+static int emit_succeed(CodeBuf *c) {
+    cb_emit_u8(c, OP_SUCCEED);
+    return 0;
+}
+
 /* cap/assign/len/eval */
 static int emit_cap(zval *reg_zv, zval *sub, CodeBuf *c) {
     if (!reg_zv || Z_TYPE_P(reg_zv) != IS_LONG) return -1;
@@ -808,6 +832,24 @@ static int emit_node(zval *node, CodeBuf *c) {
     if (zend_string_equals_literal(type, "rtab")) {
         zval *n = zend_hash_str_find(Z_ARRVAL_P(node), "n", sizeof("n")-1);
         return emit_rtab(n, c);
+    }
+    if (zend_string_equals_literal(type, "pos")) {
+        zval *n = zend_hash_str_find(Z_ARRVAL_P(node), "n", sizeof("n")-1);
+        return emit_pos(n, c);
+    }
+    if (zend_string_equals_literal(type, "tab")) {
+        zval *n = zend_hash_str_find(Z_ARRVAL_P(node), "n", sizeof("n")-1);
+        return emit_tab(n, c);
+    }
+    if (zend_string_equals_literal(type, "abort")) {
+        return emit_abort(c);
+    }
+    if (zend_string_equals_literal(type, "fail")) {
+        cb_emit_u8(c, OP_FAIL);
+        return 0;
+    }
+    if (zend_string_equals_literal(type, "succeed")) {
+        return emit_succeed(c);
     }
     if (zend_string_equals_literal(type, "dynamic_eval")) {
         /* dynamic_eval: compile pattern for runtime caching and execution.
@@ -1285,7 +1327,14 @@ int snobol_template_bind_tables(uint8_t *bc, size_t bc_len,
 
             case OP_RPOS:
             case OP_RTAB:
+            case OP_POS:
+            case OP_TAB:
                 ip += 4;
+                break;
+
+            case OP_ABORT:
+            case OP_SUCCEED:
+                /* no operands */
                 break;
 
             case OP_LABEL:
@@ -1681,6 +1730,28 @@ static int emit_rtab_c(int32_t n, CodeBuf *c) {
     return 0;
 }
 
+static int emit_pos_c(int32_t n, CodeBuf *c) {
+    cb_emit_u8(c, OP_POS);
+    cb_emit_u32(c, (uint32_t)n);
+    return 0;
+}
+
+static int emit_tab_c(int32_t n, CodeBuf *c) {
+    cb_emit_u8(c, OP_TAB);
+    cb_emit_u32(c, (uint32_t)n);
+    return 0;
+}
+
+static int emit_abort_c(CodeBuf *c) {
+    cb_emit_u8(c, OP_ABORT);
+    return 0;
+}
+
+static int emit_succeed_c(CodeBuf *c) {
+    cb_emit_u8(c, OP_SUCCEED);
+    return 0;
+}
+
 /**
  * Compile C AST to bytecode
  * @param ast Root AST node
@@ -2021,6 +2092,22 @@ static int emit_node_c(ast_node_t* node, CodeBuf *c) {
 
         case AST_RTAB:
             return emit_rtab_c(node->data.rpos_rtab.n, c);
+
+        case AST_POS:
+            return emit_pos_c(node->data.rpos_rtab.n, c);
+
+        case AST_TAB:
+            return emit_tab_c(node->data.rpos_rtab.n, c);
+
+        case AST_ABORT:
+            return emit_abort_c(c);
+
+        case AST_FAIL:
+            cb_emit_u8(c, OP_FAIL);
+            return 0;
+
+        case AST_SUCCEED:
+            return emit_succeed_c(c);
 
         case AST_LABEL: {
             /* Emit OP_LABEL opcode, register offset, detect duplicates */

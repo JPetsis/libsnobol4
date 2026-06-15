@@ -198,4 +198,54 @@ final class Builder
         // Implemented as ARBNO(LEN(1)) which tries 0, 1, 2, … chars.
         return self::arbno(self::len(1));
     }
+
+    /**
+     * POS(n) – succeed only when the cursor is exactly n codepoints from
+     * the beginning of the subject.  POS(0) is equivalent to a start-of-
+     * string anchor.
+     *
+     * @param  int  $n  Position from start (0 = at beginning)
+     */
+    public static function pos(int $n): array
+    {
+        return ['type' => 'pos', 'n' => $n];
+    }
+
+    /**
+     * TAB(n) – advance the cursor until it is exactly n codepoints from
+     * the beginning of the subject.  TAB(0) consumes nothing (no-op).
+     *
+     * @param  int  $n  Target position from start
+     */
+    public static function tab(int $n): array
+    {
+        return ['type' => 'tab', 'n' => $n];
+    }
+
+    /**
+     * ABORT – terminate the entire match immediately as a failure,
+     * without any possibility of backtracking to try alternatives.
+     */
+    public static function abort(): array
+    {
+        return ['type' => 'abort'];
+    }
+
+    /**
+     * FAIL – force the current match attempt to fail, triggering
+     * backtracking.  If no alternatives remain the overall match fails.
+     */
+    public static function fail(): array
+    {
+        return ['type' => 'fail'];
+    }
+
+    /**
+     * SUCCEED – force the current match to succeed immediately,
+     * committing the result and preventing further backtracking.
+     */
+    public static function succeed(): array
+    {
+        return ['type' => 'succeed'];
+    }
 }
