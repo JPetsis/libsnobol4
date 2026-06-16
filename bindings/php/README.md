@@ -217,40 +217,43 @@ High-level helper methods for common pattern operations:
 
 Fluent API for constructing patterns:
 
-| Method                              | Description                               |
-|-------------------------------------|-------------------------------------------|
-| `lit($text)`                        | Literal string match                      |
-| `span($set)`                        | Match run of characters in set            |
-| `brk($set)`                         | Match until character in set              |
-| `any($set)`                         | Match any single character                |
-| `notany($set)`                      | Match any character NOT in set            |
-| `len($n)`                           | Match exactly n characters                |
-| `arbno($sub)`                       | Zero or more repetitions                  |
-| `repeat($sub, $min, $max)`          | Bounded repetition                        |
-| `cap($reg, $sub)`                   | Capture match into register               |
-| `assign($var, $reg)`                | Assign register to variable               |
-| `concat($parts)`                    | Concatenate patterns                      |
-| `alt($left, $right)`                | Alternation (OR)                          |
-| `emit($text)`                       | Emit literal to output                    |
-| `emitRef($reg)`                     | Emit capture to output                    |
-| `anchor($type)`                     | Start or end anchor                       |
-| `label($name, $sub)`                | Named label wrapping a pattern            |
-| `goto($label)`                      | Unconditional goto label                  |
-| `dynamicEval($expr)`                | Dynamic pattern evaluation                |
-| `tableAccess($table, $key)`         | Table lookup                              |
-| `tableUpdate($table, $key, $value)` | Table update                              |
-| `breakx($set)`                      | Break with O(n) pre-scan optimisation     |
-| `bal($open, $close)`                | Balanced delimiter matching               |
-| `fence()`                           | Backtracking cut                          |
-| `rem()`                             | Match remainder of subject                |
-| `rpos($n)`                          | Succeed at n codepoints from end          |
-| `rtab($n)`                          | Advance to n codepoints from end          |
-| `arb()`                             | Match arbitrary characters (0 or more)    |
-| `pos($n)`                           | Succeed at n codepoints from start        |
-| `tab($n)`                           | Advance cursor to n codepoints from start |
-| `abort()`                           | Terminate entire match as failure         |
-| `fail()`                            | Force failure / trigger backtracking      |
-| `succeed()`                         | Force immediate success                   |
+| Method                                | Description                               |
+|---------------------------------------|-------------------------------------------|
+| `lit($text)`                          | Literal string match                      |
+| `span($set)`                          | Match run of characters in set            |
+| `brk($set)`                           | Match until character in set              |
+| `any($set)`                           | Match any single character                |
+| `notany($set)`                        | Match any character NOT in set            |
+| `len($n)`                             | Match exactly n characters                |
+| `arbno($sub)`                         | Zero or more repetitions                  |
+| `repeat($sub, $min, $max)`            | Bounded repetition                        |
+| `cap($reg, $sub)`                     | Capture match into register               |
+| `assign($var, $reg)`                  | Assign register to variable               |
+| `concat($parts)`                      | Concatenate patterns                      |
+| `alt($left, $right)`                  | Alternation (OR)                          |
+| `emit($text)`                         | Emit literal to output                    |
+| `emitRef($reg)`                       | Emit capture to output                    |
+| `anchor($type)`                       | Start or end anchor                       |
+| `label($name, $sub)`                  | Named label wrapping a pattern            |
+| `goto($label)`                        | Unconditional goto label                  |
+| `dynamicEval($expr)`                  | Dynamic pattern evaluation                |
+| `tableAccess($table, $key)`           | Table lookup                              |
+| `tableUpdate($table, $key, $value)`   | Table update                              |
+| `arrayAccess($array, $index)`         | Array indexed lookup                      |
+| `arrayUpdate($array, $index, $value)` | Array indexed update                      |
+| `arrayCreate($array, $size)`          | Array creation declaration                |
+| `breakx($set)`                        | Break with O(n) pre-scan optimisation     |
+| `bal($open, $close)`                  | Balanced delimiter matching               |
+| `fence()`                             | Backtracking cut                          |
+| `rem()`                               | Match remainder of subject                |
+| `rpos($n)`                            | Succeed at n codepoints from end          |
+| `rtab($n)`                            | Advance to n codepoints from end          |
+| `arb()`                               | Match arbitrary characters (0 or more)    |
+| `pos($n)`                             | Succeed at n codepoints from start        |
+| `tab($n)`                             | Advance cursor to n codepoints from start |
+| `abort()`                             | Terminate entire match as failure         |
+| `fail()`                              | Force failure / trigger backtracking      |
+| `succeed()`                           | Force immediate success                   |
 
 ### Pattern
 
@@ -270,6 +273,22 @@ Associative table for runtime lookups:
 $table = new Table("name");
 $table->set($key, $value);
 $value = $table->get($key);
+```
+
+### Array_
+
+Indexed sparse array with integer keys:
+
+```php
+$arr = new Array_(10);  // Optional size hint
+$arr->set(1, "hello");
+$value = $arr->get(1);       // "hello"
+$arr->has(1);                // true
+$arr->delete(1);             // Remove entry
+$arr->size();                // Number of populated entries
+$arr->keys();                // Array of integer keys
+$arr->values();              // Array of values
+$arr->clear();               // Remove all entries
 ```
 
 ## Template Syntax

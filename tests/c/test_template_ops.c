@@ -36,6 +36,7 @@ static void init_test_vm(VM *vm, const char *input, snobol_buf *out) {
     vm_init_labels(vm);
 #ifdef SNOBOL_DYNAMIC_PATTERN
     vm_init_tables(vm);
+    vm_init_arrays(vm);
 #endif
 }
 
@@ -46,6 +47,7 @@ static void cleanup_test_vm(VM *vm) {
     vm_free_labels(vm);
 #ifdef SNOBOL_DYNAMIC_PATTERN
     vm_free_tables(vm);
+    vm_free_arrays(vm);
 #endif
 }
 
@@ -425,11 +427,13 @@ static void run_template(const char *tpl_src, const char *subject,
     vm_init_labels(&vm);
 #ifdef SNOBOL_DYNAMIC_PATTERN
     vm_init_tables(&vm);
+    vm_init_arrays(&vm);
 #endif
     vm_run(&vm);
     vm_free_labels(&vm);
 #ifdef SNOBOL_DYNAMIC_PATTERN
     vm_free_tables(&vm);
+    vm_free_arrays(&vm);
 #endif
     if (bc) compiler_free(bc);
 }
@@ -605,9 +609,10 @@ static void test_e2e_table_literal_key(void) {
     vm.out = &out;
     vm_init_labels(&vm);
     vm_init_tables(&vm);
+    vm_init_arrays(&vm);
     uint16_t assigned; vm_register_table(&vm, table, &assigned);
     vm_run(&vm);
-    vm_free_tables(&vm); vm_free_labels(&vm);
+    vm_free_tables(&vm); vm_free_arrays(&vm); vm_free_labels(&vm);
 
     test_assert(out.len == 4 && memcmp(out.data, "blue", 4) == 0,
                 "literal key table lookup returns 'blue'");
@@ -642,9 +647,10 @@ static void test_e2e_table_capture_key(void) {
     vm.out = &out;
     vm_init_labels(&vm);
     vm_init_tables(&vm);
+    vm_init_arrays(&vm);
     uint16_t assigned; vm_register_table(&vm, table, &assigned);
     vm_run(&vm);
-    vm_free_tables(&vm); vm_free_labels(&vm);
+    vm_free_tables(&vm); vm_free_arrays(&vm); vm_free_labels(&vm);
 
     test_assert(out.len == 4 && memcmp(out.data, "gato", 4) == 0,
                 "capture-key table lookup returns 'gato' for 'cat'");

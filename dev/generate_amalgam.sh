@@ -26,6 +26,7 @@ CORE_FILES=(
     "compiler.c"
     "vm.c"
     "table.c"
+    "array.c"
     "dynamic_pattern.c"
     "jit_ir.c"
     "jit.c"

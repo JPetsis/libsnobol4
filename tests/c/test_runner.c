@@ -244,6 +244,7 @@ void test_assert(bool condition, const char *message) {
 /* ── Forward declarations ────────────────────────────────────────────────── */
 void test_vm_suite(void);
 void test_table_suite(void);
+void test_array_suite(void);
 void test_dynamic_pattern_suite(void);
 void test_table_ops_suite(void);
 void test_template_ops_suite(void);
@@ -306,6 +307,7 @@ int main(void) {
     /* Core VM / data structures */
     RUN_SUITE("VM",                         test_vm_suite);
     RUN_SUITE("Tables",                     test_table_suite);
+    RUN_SUITE("Arrays",                     test_array_suite);
     RUN_SUITE("Dynamic Patterns",           test_dynamic_pattern_suite);
     RUN_SUITE("Table Ops",                  test_table_ops_suite);
     RUN_SUITE("Template Ops",               test_template_ops_suite);

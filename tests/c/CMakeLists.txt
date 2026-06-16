@@ -5,6 +5,7 @@ add_executable(snobol4_tests
     test_runner.c
     test_vm.c
     test_tables.c
+    test_array.c
     test_dynamic_patterns.c
     test_table_ops.c
     test_template_ops.c

@@ -1,6 +1,7 @@
 #include "snobol/snobol_internal.h"
 #include "snobol/vm.h"
 #include "snobol/table.h"
+#include "snobol/array.h"
 #include "snobol/dynamic_pattern.h"
 #include "snobol/string_fn.h"
 #include "snobol/type_fn.h"
@@ -1203,6 +1204,109 @@ bool vm_run(VM *vm) {
                 snobol_free(value);
                 break;
             }
+            /* Array operations */
+            case OP_ARRAY_GET: {
+                uint16_t array_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t dest_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t name_len = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                vm->ip += name_len;
+
+                snobol_array_t *array = vm_get_array(vm, array_id);
+                if (!array) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+
+                if (key_reg >= MAX_CAPS || vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+
+                size_t key_start = vm->cap_start[key_reg];
+                size_t key_end = vm->cap_end[key_reg];
+                size_t key_len = key_end - key_start;
+
+                char *key_str = (char *)snobol_malloc(key_len + 1);
+                if (!key_str) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                memcpy(key_str, vm->s + key_start, key_len);
+                key_str[key_len] = '\0';
+
+                int32_t key = (int32_t)strtol(key_str, nullptr, 10);
+                snobol_free(key_str);
+
+                const char *value = snobol_array_get(array, key);
+                if (!value) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+
+                (void)dest_reg;
+                break;
+            }
+            case OP_ARRAY_SET: {
+                uint16_t array_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t value_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                uint8_t name_len = read_u8(vm->bc, vm->bc_len, &vm->ip);
+                vm->ip += name_len;
+
+                snobol_array_t *array = vm_get_array(vm, array_id);
+                if (!array) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+
+                if (key_reg >= MAX_CAPS || vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+
+                if (value_reg >= MAX_CAPS || vm->cap_end[value_reg] <= vm->cap_start[value_reg]) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+
+                size_t key_start = vm->cap_start[key_reg];
+                size_t key_end = vm->cap_end[key_reg];
+                size_t key_len = key_end - key_start;
+
+                size_t val_start = vm->cap_start[value_reg];
+                size_t val_end = vm->cap_end[value_reg];
+                size_t val_len = val_end - val_start;
+
+                char *key_str = (char *)snobol_malloc(key_len + 1);
+                if (!key_str) {
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                memcpy(key_str, vm->s + key_start, key_len);
+                key_str[key_len] = '\0';
+
+                char *value_str = (char *)snobol_malloc(val_len + 1);
+                if (!value_str) {
+                    snobol_free(key_str);
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+                memcpy(value_str, vm->s + val_start, val_len);
+                value_str[val_len] = '\0';
+
+                int32_t key = (int32_t)strtol(key_str, nullptr, 10);
+                snobol_free(key_str);
+
+                if (!snobol_array_set(array, key, value_str)) {
+                    snobol_free(value_str);
+                    if (!vm_pop_choice(vm)) goto fail_ret;
+                    break;
+                }
+
+                snobol_free(value_str);
+                break;
+            }
             case OP_DYNAMIC_DEF: {
                 /* Define dynamic pattern source and bytecode for runtime caching
                  * Format: source_len(u32) + source_text + bc_len(u32) + bytecode
@@ -1697,8 +1801,9 @@ bool vm_exec(VM *vm) {
     }
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
-    /* Initialize table registry if not already done */
+    /* Initialize table and array registries if not already done */
     if (!vm->tables) vm_init_tables(vm);
+    if (!vm->arrays) vm_init_arrays(vm);
 #endif
     
 #ifdef SNOBOL_PROFILE
@@ -1806,6 +1911,49 @@ bool vm_register_table(VM *vm, snobol_table_t *table, uint16_t *out_id) {
 snobol_table_t *vm_get_table(VM *vm, uint16_t table_id) {
     if (table_id < vm->table_count && vm->tables) {
         return vm->tables[table_id];
+    }
+    return nullptr;
+}
+
+/* Array registry functions */
+
+void vm_init_arrays(VM *vm) {
+    vm->arrays = nullptr;
+    vm->array_count = 0;
+    vm->array_capacity = 0;
+}
+
+void vm_free_arrays(VM *vm) {
+    if (vm->arrays) {
+        for (size_t i = 0; i < vm->array_count; i++) {
+            if (vm->arrays[i]) {
+                snobol_array_release(vm->arrays[i]);
+            }
+        }
+        snobol_free(vm->arrays);
+        vm->arrays = nullptr;
+    }
+    vm->array_count = 0;
+    vm->array_capacity = 0;
+}
+
+bool vm_register_array(VM *vm, snobol_array_t *array, uint16_t *out_id) {
+    if (vm->array_count >= vm->array_capacity) {
+        size_t new_cap = (vm->array_capacity == 0) ? 16 : vm->array_capacity * 2;
+        snobol_array_t **new_arrays = (snobol_array_t **)snobol_realloc(vm->arrays, new_cap * sizeof(snobol_array_t *));
+        if (!new_arrays) return false;
+        vm->arrays = new_arrays;
+        vm->array_capacity = new_cap;
+    }
+
+    *out_id = (uint16_t)vm->array_count;
+    vm->arrays[vm->array_count++] = snobol_array_retain(array);
+    return true;
+}
+
+snobol_array_t *vm_get_array(VM *vm, uint16_t array_id) {
+    if (array_id < vm->array_count && vm->arrays) {
+        return vm->arrays[array_id];
     }
     return nullptr;
 }

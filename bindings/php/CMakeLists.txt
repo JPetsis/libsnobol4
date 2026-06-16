@@ -103,6 +103,7 @@ add_library(snobol_php MODULE
     src/php_snobol.c
     src/snobol_pattern.c
     src/snobol_table_php.c
+    src/snobol_array_php.c
     src/snobol_dynamic_pattern_php.c
 )
 

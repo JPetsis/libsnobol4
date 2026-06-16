@@ -117,6 +117,22 @@ final class Builder
         return ['type' => 'table_update', 'table' => $tableName, 'key' => $keyExpr, 'value' => $valueExpr];
     }
 
+    // Array access/update nodes
+    public static function arrayAccess(string $arrayName, array $indexExpr): array
+    {
+        return ['type' => 'array_access', 'array' => $arrayName, 'index' => $indexExpr];
+    }
+
+    public static function arrayUpdate(string $arrayName, array $indexExpr, array $valueExpr): array
+    {
+        return ['type' => 'array_update', 'array' => $arrayName, 'index' => $indexExpr, 'value' => $valueExpr];
+    }
+
+    public static function arrayCreate(string $arrayName, int $size = 0): array
+    {
+        return ['type' => 'array_create', 'array' => $arrayName, 'size' => $size];
+    }
+
     // -----------------------------------------------------------------------
     // Pattern primitives
     // -----------------------------------------------------------------------

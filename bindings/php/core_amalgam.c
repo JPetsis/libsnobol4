@@ -26,6 +26,7 @@
 #include "../../core/src/compiler.c"
 #include "../../core/src/vm.c"
 #include "../../core/src/table.c"
+#include "../../core/src/array.c"
 #include "../../core/src/dynamic_pattern.c"
 #include "../../core/src/jit_ir.c"
 #include "../../core/src/jit.c"

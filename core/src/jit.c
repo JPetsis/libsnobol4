@@ -76,6 +76,8 @@ _Static_assert(MEM_COMMIT && MEM_RESERVE && PAGE_READWRITE && PAGE_EXECUTE_READ,
  * OP_EMIT_TABLE   call-out     (snobol_jit_helper_emit_table_ip)
  * OP_TABLE_GET    call-out     (snobol_jit_helper_table_get)
  * OP_TABLE_SET    call-out     (snobol_jit_helper_table_set)
+ * OP_ARRAY_GET    call-out     (snobol_jit_helper_array_get)
+ * OP_ARRAY_SET    call-out     (snobol_jit_helper_array_set)
  * OP_BAL          call-out     (snobol_jit_helper_bal)
  * OP_EVAL         call-out     (snobol_jit_helper_eval)
  * OP_DYNAMIC      call-out     (snobol_jit_helper_dynamic)
@@ -644,7 +646,9 @@ bool snobol_jit_should_compile(const VM *vm, size_t ip, const SnobolJitConfig *c
                 break;
             }
             case OP_TABLE_GET:
-            case OP_TABLE_SET: {
+            case OP_TABLE_SET:
+            case OP_ARRAY_GET:
+            case OP_ARRAY_SET: {
                 if (scan + 4 > vm->bc_len) goto done;
                 uint8_t nlen = vm->bc[scan + 4];
                 scan += 5 + nlen;

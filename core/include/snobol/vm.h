@@ -16,8 +16,9 @@
 /** @brief Enable dynamic pattern and table support */
 #define SNOBOL_DYNAMIC_PATTERN 1
 
-/* Forward declare table type */
+/* Forward declare table and array types */
 typedef struct snobol_table snobol_table_t;
+typedef struct snobol_array snobol_array_t;
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
 /* Include dynamic pattern types */
@@ -141,6 +142,8 @@ typedef enum {
     OP_GOTO_F,        /**< Jump to label if last match failed; label_id: u16 */
     OP_TABLE_GET,     /**< Lookup: dest_reg = table[key_reg]; table_id: u16, key_reg: u8, dest_reg: u8, name_len: u8, name: bytes[name_len] */
     OP_TABLE_SET,     /**< Update: table[key_reg] = value_reg; table_id: u16, key_reg: u8, value_reg: u8, name_len: u8, name: bytes[name_len] */
+    OP_ARRAY_GET,     /**< Lookup: dest_reg = array[key_reg]; array_id: u16, key_reg: u8, dest_reg: u8, name_len: u8, name: bytes[name_len] */
+    OP_ARRAY_SET,     /**< Update: array[key_reg] = value_reg; array_id: u16, key_reg: u8, value_reg: u8, name_len: u8, name: bytes[name_len] */
     OP_DYNAMIC,       /**< Evaluate dynamic pattern from pending definition; no operands */
     OP_DYNAMIC_DEF,   /**< Define inline dynamic pattern block; len: u32, bytecode... */
 
@@ -367,6 +370,9 @@ typedef struct {
     snobol_table_t **tables;                     /* Table registry */
     size_t table_count;                          /* Number of registered tables */
     size_t table_capacity;                       /* Table registry capacity */
+    snobol_array_t **arrays;                     /* Array registry */
+    size_t array_count;                          /* Number of registered arrays */
+    size_t array_capacity;                       /* Array registry capacity */
     char *dyn_pending_source;                    /* Pending dynamic pattern source text from OP_DYNAMIC_DEF */
     size_t dyn_pending_source_len;               /* Length of pending source text */
     uint8_t *dyn_pending_bc;                     /* Pending dynamic pattern bytecode from OP_DYNAMIC_DEF */
@@ -465,6 +471,14 @@ void vm_free_tables(VM *vm);
 bool vm_register_table(VM *vm, snobol_table_t *table, uint16_t *out_id);
 /** @brief Look up a table by runtime ID; returns NULL if not found. */
 snobol_table_t *vm_get_table(VM *vm, uint16_t table_id);
+/** @brief Initialise the VM's array registry. */
+void vm_init_arrays(VM *vm);
+/** @brief Free the VM's array registry. */
+void vm_free_arrays(VM *vm);
+/** @brief Register an array and return its runtime ID via @p out_id. */
+bool vm_register_array(VM *vm, snobol_array_t *array, uint16_t *out_id);
+/** @brief Look up an array by runtime ID; returns NULL if not found. */
+snobol_array_t *vm_get_array(VM *vm, uint16_t array_id);
 #endif
 
 /* Buffer management */

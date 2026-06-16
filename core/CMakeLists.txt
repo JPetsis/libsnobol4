@@ -13,6 +13,7 @@ add_library(snobol4 STATIC
     src/compiler.c
     src/vm.c
     src/table.c
+    src/array.c
     src/dynamic_pattern.c
     src/jit.c
     src/jit_ir.c

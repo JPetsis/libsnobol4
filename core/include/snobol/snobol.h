@@ -53,6 +53,7 @@ uint32_t snobol_get_api_version(void);
 #include "snobol/compiler.h"
 #include "snobol/vm.h"
 #include "snobol/table.h"
+#include "snobol/array.h"
 #include "snobol/dynamic_pattern.h"
 #include "snobol/jit.h"
 #include "snobol/string_fn.h"
@@ -89,6 +90,8 @@ typedef struct snobol_match snobol_match_t;
  * Runtime-owned string-keyed hash table for table-backed substitutions.
  */
 typedef struct snobol_table snobol_table_t;
+
+typedef struct snobol_array snobol_array_t;
 
 /* Context lifecycle */
 /**

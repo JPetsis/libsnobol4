@@ -423,6 +423,7 @@ static void test_table_get_jit(void) {
 
     VM vm = {0}; vm.bc = bc; vm.bc_len = 256;
     vm_init_tables(&vm);
+    vm_init_arrays(&vm);
 
     /* Register a table at ID 0 */
     snobol_table_t *tbl = table_create("TEST_TBL");
@@ -441,6 +442,7 @@ static void test_table_get_jit(void) {
 
     snobol_jit_release_context(ctx);
     vm_free_tables(&vm);
+    vm_free_arrays(&vm);
     table_release(tbl);
     snobol_jit_shutdown();
 }
@@ -489,6 +491,7 @@ static void test_table_set_jit(void) {
 
     VM vm = {0}; vm.bc = bc; vm.bc_len = 256;
     vm_init_tables(&vm);
+    vm_init_arrays(&vm);
 
     snobol_table_t *tbl = table_create("TEST_TBL2");
     test_assert(tbl != NULL, "TABLE_SET JIT: table_create succeeded");
@@ -504,6 +507,7 @@ static void test_table_set_jit(void) {
 
     snobol_jit_release_context(ctx);
     vm_free_tables(&vm);
+    vm_free_arrays(&vm);
     table_release(tbl);
     snobol_jit_shutdown();
 }

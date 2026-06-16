@@ -60,6 +60,8 @@ rm -f \
     "${BINDINGS_DIR}/src/snobol_pattern.dep" \
     "${BINDINGS_DIR}/src/snobol_table_php.lo" \
     "${BINDINGS_DIR}/src/snobol_table_php.dep" \
+    "${BINDINGS_DIR}/src/snobol_array_php.lo" \
+    "${BINDINGS_DIR}/src/snobol_array_php.dep" \
     "${BINDINGS_DIR}/src/snobol_dynamic_pattern_php.lo" \
     "${BINDINGS_DIR}/src/snobol_dynamic_pattern_php.dep"
 rm -rf \
@@ -115,6 +117,8 @@ echo "Using php-config: ${PHP_CONFIG_BIN}"
 # --- Step 5: Configure & build ---
 "$PHPIZE_BIN"
 ./configure --enable-snobol --with-php-config="$PHP_CONFIG_BIN"
+# Patch phpize's "Don't forget to run 'make test'" to say "ddev test"
+sed -i 's/make test/ddev test/g' Makefile
 make -j"$(nproc)"
 
 # --- Step 6: Install .so ---

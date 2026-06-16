@@ -380,6 +380,7 @@ PHP_METHOD(Snobol_Pattern, match) {
         if (eb.buf) efree(eb.buf);
 #ifdef SNOBOL_DYNAMIC_PATTERN
         vm_free_tables(&vm);
+        vm_free_arrays(&vm);
         if (vm.dyn_cache) {
             dynamic_pattern_cache_destroy(vm.dyn_cache);
         }
@@ -593,6 +594,7 @@ PHP_METHOD(Snobol_Pattern, subst) {
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
         if (tbl_count > 0) vm_free_tables(&vm);
+        if (vm.array_count > 0) vm_free_arrays(&vm);
 #endif
 
         /* Advance past the match */

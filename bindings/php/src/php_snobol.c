@@ -53,6 +53,9 @@ void snobol_pattern_minit(void);
 /* Extern declaration from snobol_table_php.c */
 void snobol_table_php_minit(void);
 
+/* Extern declaration from snobol_array_php.c */
+void snobol_array_php_minit(void);
+
 /* Extern declaration from snobol_dynamic_pattern_php.c */
 void snobol_dynamic_pattern_cache_php_minit(void);
 
@@ -99,6 +102,7 @@ PHP_MINIT_FUNCTION(snobol) {
 #endif
     snobol_pattern_minit();
     snobol_table_php_minit();
+    snobol_array_php_minit();
     snobol_dynamic_pattern_cache_php_minit();
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): DONE");
     return SUCCESS;
