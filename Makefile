@@ -9,7 +9,8 @@
 
 .PHONY: all build test clean distclean install uninstall help \
         build-debug build-release build-jit build-asan \
-        test-verbose test-valgrind test-valgrind-report test-asan bench docs format lint warnings
+        test-verbose test-valgrind test-valgrind-report test-asan bench docs format lint warnings \
+        gen-unicode-fold
 
 # Default build type
 BUILD_TYPE ?= Release
@@ -252,6 +253,14 @@ warnings:
 	@echo "==> Build with strict warnings complete!"
 	@echo "Note: -Werror omitted to allow unused placeholders in active development"
 
+# Generate Unicode fold tables from UCD
+gen-unicode-fold:
+	@echo "==> Generating Unicode fold tables..."
+	cc -o /tmp/gen_unicode_fold dev/gen_unicode_fold.c
+	/tmp/gen_unicode_fold > core/src/unicode_fold_data.c
+	@echo "==> core/src/unicode_fold_data.c regenerated"
+	@echo "==> Rebuild the project to pick up changes: make build"
+
 # PHP binding build
 build-php:
 	@echo "==> Building with PHP binding..."
@@ -277,6 +286,7 @@ help:
 	@echo "  build-jit      - Build with JIT and profiling enabled"
 	@echo "  build-asan     - Build with AddressSanitizer+UBSan (SNOBOL_SANITIZE=ON)"
 	@echo "  build-php      - Build with PHP binding (requires PHP dev headers)"
+	@echo "  gen-unicode-fold - Regenerate BMP case-folding tables from UCD"
 	@echo ""
 	@echo "Test targets:"
 	@echo "  test           - Run C test suite"

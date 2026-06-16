@@ -3,11 +3,14 @@
  * Unicode fold table functions.
  *
  * Verifies:
- *   - Latin-1 upper/lower round-trip
- *   - German sharp-s multi-char expansion (U+00DF → "SS")
- *   - Out-of-range identity mapping
  *   - ASCII fast path
+ *   - Latin-1 upper/lower round-trip
  *   - Latin Extended-A samples
+ *   - German sharp-s multi-char expansion (U+00DF → "SS")
+ *   - Greek multi-char expansion (U+0390 → {U+03B9, U+0308})
+ *   - Cyrillic upper/lower round-trip
+ *   - Non-case scripts identity (Arabic, Hebrew, CJK)
+ *   - Non-case characters identity (multiplication, division)
  */
 
 #include <stdio.h>
@@ -86,12 +89,51 @@ void test_unicode_fold_suite(void) {
     /* U+0101 ā → U+0100 Ā */
     snobol_to_upper_cp(0x0101, out, &out_len);
     test_assert(out_len == 1 && out[0] == 0x0100, "to_upper: U+0101 ā → U+0100 Ā");
+    /* --- Cyrillic --- */
+    /* U+0400 (IE with grave) uppercase is identity, lowercase → U+0450 */
+    snobol_to_upper_cp(0x0400, out, &out_len);
+    test_assert(out_len == 1 && out[0] == 0x0400, "to_upper: U+0400 (Cyrillic IE with grave) → identity");
+    test_assert(snobol_to_lower_cp(0x0400) == 0x0450, "to_lower: U+0400 → U+0450");
 
-    /* --- Out-of-range identity --- */
-    snobol_to_upper_cp(0x0400, out, &out_len); /* Cyrillic — beyond coverage */
-    test_assert(out_len == 1 && out[0] == 0x0400, "to_upper: U+0400 (Cyrillic) → identity");
+    /* U+0430 а (Cyrillic small a) → U+0410 А */
+    snobol_to_upper_cp(0x0430, out, &out_len);
+    test_assert(out_len == 1 && out[0] == 0x0410, "to_upper: U+0430 а → U+0410 А");
+    test_assert(snobol_to_lower_cp(0x0410) == 0x0430, "to_lower: U+0410 А → U+0430 а");
 
-    test_assert(snobol_to_lower_cp(0x0400) == 0x0400, "to_lower: U+0400 (Cyrillic) → identity");
+    /* U+044F я (Cyrillic small ya) → U+042F Я */
+    snobol_to_upper_cp(0x044F, out, &out_len);
+    test_assert(out_len == 1 && out[0] == 0x042F, "to_upper: U+044F я → U+042F Я");
+    test_assert(snobol_to_lower_cp(0x042F) == 0x044F, "to_lower: U+042F Я → U+044F я");
+
+    /* --- Greek --- */
+    /* U+03B1 α (Greek small alpha) → U+0391 Α */
+    snobol_to_upper_cp(0x03B1, out, &out_len);
+    test_assert(out_len == 1 && out[0] == 0x0391, "to_upper: U+03B1 α → U+0391 Α");
+    test_assert(snobol_to_lower_cp(0x0391) == 0x03B1, "to_lower: U+0391 Α → U+03B1 α");
+
+    /* U+03C9 ω (Greek small omega) → U+03A9 Ω */
+    snobol_to_upper_cp(0x03C9, out, &out_len);
+    test_assert(out_len == 1 && out[0] == 0x03A9, "to_upper: U+03C9 ω → U+03A9 Ω");
+    test_assert(snobol_to_lower_cp(0x03A9) == 0x03C9, "to_lower: U+03A9 Ω → U+03C9 ω");
+
+    /* U+0390 (iota with dialytika+tonos) → { U+03B9, U+0308 } (multi-char) */
+    snobol_to_upper_cp(0x0390, out, &out_len);
+    test_assert(out_len == 2 && out[0] == 0x03B9 && out[1] == 0x0308,
+                "to_upper: U+0390 → {U+03B9, U+0308} (multi-char)");
+    test_assert(snobol_to_lower_cp(0x0390) == 0x0390, "to_lower: U+0390 → identity");
+
+    /* --- Non-case scripts: identity --- */
+    snobol_to_upper_cp(0x0627, out, &out_len); /* Arabic alef */
+    test_assert(out_len == 1 && out[0] == 0x0627, "to_upper: U+0627 (Arabic) → identity");
+    test_assert(snobol_to_lower_cp(0x0627) == 0x0627, "to_lower: U+0627 (Arabic) → identity");
+
+    snobol_to_upper_cp(0x05D0, out, &out_len); /* Hebrew alef */
+    test_assert(out_len == 1 && out[0] == 0x05D0, "to_upper: U+05D0 (Hebrew) → identity");
+    test_assert(snobol_to_lower_cp(0x05D0) == 0x05D0, "to_lower: U+05D0 (Hebrew) → identity");
+
+    snobol_to_upper_cp(0x4E2D, out, &out_len); /* CJK 中 */
+    test_assert(out_len == 1 && out[0] == 0x4E2D, "to_upper: U+4E2D (CJK) → identity");
+    test_assert(snobol_to_lower_cp(0x4E2D) == 0x4E2D, "to_lower: U+4E2D (CJK) → identity");
 
     /* --- Non-case characters: identity --- */
     snobol_to_upper_cp(0x00D7, out, &out_len); /* × multiplication sign */

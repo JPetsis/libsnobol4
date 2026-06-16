@@ -10,11 +10,12 @@
  * Coverage:
  *   - U+0000–U+007F: ASCII fast path (arithmetic: ±32)
  *   - U+00C0–U+00FF: Latin-1 Supplement (UPPER_MAP[256] table)
- *   - U+0100–U+017E: Latin Extended-A (sorted pair array, binary search)
+ *   - U+0100–U+FFFF: Full Basic Multilingual Plane (generated pair tables,
+ *                     binary search)
  *
- * Codepoints outside these ranges are returned unchanged (identity mapping).
- * The German sharp-s U+00DF (ß) is a special case: uppercasing produces two
- * codepoints "SS" (U+0053 U+0053).
+ * Codepoints outside the BMP (U+10000+) are returned unchanged (identity
+ * mapping).  Some lowercase codepoints expand to multiple uppercase
+ * codepoints; the best-known case is U+00DF (ß) → "SS" (U+0053 U+0053).
  */
 
 #include <stdint.h>
@@ -28,7 +29,6 @@
  *                The buffer is written by the function; ownership stays with
  *                the caller.  Do NOT free the contents — they are scalar values.
  * @param out_len Set to the number of codepoints written to <out> (1 or 2).
- *                Two codepoints are produced only for U+00DF ß → "SS".
  */
 void snobol_to_upper_cp(uint32_t cp, uint32_t *out, int *out_len);
 

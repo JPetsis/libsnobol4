@@ -153,8 +153,8 @@ SNOBOL_NODISCARD bool snobol_ord(const char *str, size_t str_len, uint32_t *out_
 
 /**
  * UPPER: convert string to uppercase.
- * v1.0: ASCII fast path only (a-z → A-Z). Non-ASCII bytes are preserved.
- * v2.0 TODO: Full Unicode case folding.
+ * Full BMP case folding via snobol_to_upper_cp().  Astral plane codepoints
+ * (U+10000+) are passed through unchanged.
  * @param str      Input string
  * @param str_len  Byte length
  * @param out      Output buffer
@@ -164,8 +164,8 @@ SNOBOL_NODISCARD bool snobol_upper(const char *str, size_t str_len, snobol_buf *
 
 /**
  * LOWER: convert string to lowercase.
- * v1.0: ASCII fast path only (A-Z → a-z). Non-ASCII bytes are preserved.
- * v2.0 TODO: Full Unicode case folding.
+ * Full BMP case folding via snobol_to_lower_cp().  Astral plane codepoints
+ * (U+10000+) are passed through unchanged.
  * @param str      Input string
  * @param str_len  Byte length
  * @param out      Output buffer

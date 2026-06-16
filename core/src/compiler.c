@@ -1,6 +1,7 @@
 #include "snobol/snobol_internal.h"
 #include "snobol/vm.h"      /* MUST come before snobol/compiler.h to get CHARCLASS_BITMAP_BYTES */
 #include "snobol/compiler.h"
+#include "snobol/unicode_fold.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -120,11 +121,21 @@ static int add_or_get_charclass(const char *s, size_t len) {
             /* Expand X-Y range */
             add_range(ne, cp, end_cp);
             if (compiler_case_insensitive) {
-                /* Add case-folded partner range for ASCII alpha ranges */
                 if (cp >= 'A' && end_cp <= 'Z') {
-                    add_range(ne, cp + 32, end_cp + 32);     /* A-Z -> a-z */
+                    add_range(ne, cp + 32, end_cp + 32);
                 } else if (cp >= 'a' && end_cp <= 'z') {
-                    add_range(ne, cp - 32, end_cp - 32);     /* a-z -> A-Z */
+                    add_range(ne, cp - 32, end_cp - 32);
+                } else if (end_cp > 0x7F) {
+                    for (uint32_t c = cp; c <= end_cp; c++) {
+                        uint32_t up[2]; int len;
+                        snobol_to_upper_cp(c, up, &len);
+                        if (up[0] != c) {
+                            add_range(ne, up[0], up[0]);
+                            if (len > 1) add_range(ne, up[1], up[1]);
+                        }
+                        uint32_t lo = snobol_to_lower_cp(c);
+                        if (lo != c) add_range(ne, lo, lo);
+                    }
                 }
             }
             pos += cp_bytes + dash_bytes + end_bytes;
@@ -138,10 +149,15 @@ static int add_or_get_charclass(const char *s, size_t len) {
                 add_range(ne, cp + 32, cp + 32);
             } else if (cp >= 'a' && cp <= 'z') {
                 add_range(ne, cp - 32, cp - 32);
-            } else if (cp >= 0xC0 && cp <= 0xDE && cp != 0xD7) {
-                 add_range(ne, cp + 0x20, cp + 0x20);
-            } else if (cp >= 0xE0 && cp <= 0xFE && cp != 0xF7) {
-                 add_range(ne, cp - 0x20, cp - 0x20);
+            } else if (cp > 0x7F) {
+                uint32_t up[2]; int len;
+                snobol_to_upper_cp(cp, up, &len);
+                if (up[0] != cp) {
+                    add_range(ne, up[0], up[0]);
+                    if (len > 1) add_range(ne, up[1], up[1]);
+                }
+                uint32_t lo = snobol_to_lower_cp(cp);
+                if (lo != cp) add_range(ne, lo, lo);
             }
         }
 

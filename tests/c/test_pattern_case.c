@@ -109,6 +109,42 @@ void test_pattern_case_suite(void) {
     test_assert(compile_and_match("'CAF\xC3\x89'", "caf\xC3\xA9",
                                    SNOBOL_FLAG_CASE_INSENSITIVE),
                 "CI: 'CAFÉ' matches \"café\" (Latin-1 case-insensitive, reverse)");
+
+    test_suite("Pattern: case-insensitive BMP");
+
+    /* Greek alpha α (U+03B1) matches Α (U+0391) case-insensitively */
+    /* α UTF-8: CE B1; Α UTF-8: CE 91 */
+    test_assert(compile_and_match("'\xCE\xB1'", "\xCE\x91",
+                                   SNOBOL_FLAG_CASE_INSENSITIVE),
+                "CI: Greek α matches Α (case-insensitive)");
+
+    /* Greek omega ω (U+03C9) matches Ω (U+03A9) */
+    /* ω UTF-8: CF 89; Ω UTF-8: CE A9 */
+    test_assert(compile_and_match("'\xCF\x89'", "\xCE\xA9",
+                                   SNOBOL_FLAG_CASE_INSENSITIVE),
+                "CI: Greek ω matches Ω (case-insensitive)");
+
+    /* Cyrillic а (U+0430) matches А (U+0410) */
+    /* а UTF-8: D0 B0; А UTF-8: D0 90 */
+    test_assert(compile_and_match("'\xD0\xB0'", "\xD0\x90",
+                                   SNOBOL_FLAG_CASE_INSENSITIVE),
+                "CI: Cyrillic а matches А (case-insensitive)");
+
+    /* Cyrillic я (U+044F) matches Я (U+042F) */
+    /* я UTF-8: D1 8F; Я UTF-8: D0 AF */
+    test_assert(compile_and_match("'\xD1\x8F'", "\xD0\xAF",
+                                   SNOBOL_FLAG_CASE_INSENSITIVE),
+                "CI: Cyrillic я matches Я (case-insensitive)");
+
+    /* Cyrillic lowercase should NOT match different uppercase */
+    /* а (U+0430) should NOT match Б (U+0411) */
+    test_assert(!compile_and_match("'\xD0\xB0'", "\xD0\x91",
+                                    SNOBOL_FLAG_CASE_INSENSITIVE),
+                "CI: Cyrillic а does NOT match Б (different letter)");
+
+    /* Case-sensitive: α (U+03B1) should NOT match Α (U+0391) */
+    test_assert(!compile_and_match("'\xCE\xB1'", "\xCE\x91", 0),
+                "CS: Greek α does NOT match Α (case-sensitive)");
 }
 
 

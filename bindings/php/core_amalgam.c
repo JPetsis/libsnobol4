@@ -32,6 +32,7 @@
 #include "../../core/src/jit.c"
 #include "../../core/src/jit_backend_arm64.c"
 #include "../../core/src/version.c"
+#include "../../core/src/unicode_fold.c"
 #include "../../core/src/string_fn.c"
 #include "../../core/src/type_fn.c"
 #include "../../core/src/pattern_build.c"

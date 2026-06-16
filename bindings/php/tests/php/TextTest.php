@@ -83,6 +83,57 @@ class TextTest extends TestCase
         $this->assertSame('hello world!', Text::lower('Hello World!'));
     }
 
+    public function testUpperCyrillic(): void
+    {
+        $this->assertSame("\xD0\x90\xD0\xAF", Text::upper("\xD0\xB0\xD1\x8F")); // ая → АЯ
+    }
+
+    public function testLowerCyrillic(): void
+    {
+        $this->assertSame("\xD0\xB0\xD1\x8F", Text::lower("\xD0\x90\xD0\xAF")); // АЯ → ая
+    }
+
+    public function testUpperGreek(): void
+    {
+        $this->assertSame("\xCE\x91\xCE\xA9", Text::upper("\xCE\xB1\xCF\x89")); // αω → ΑΩ
+    }
+
+    public function testLowerGreek(): void
+    {
+        $this->assertSame("\xCE\xB1\xCF\x89", Text::lower("\xCE\x91\xCE\xA9")); // ΑΩ → αω
+    }
+
+    public function testUpperLatinExtendedA(): void
+    {
+        $this->assertSame("\xC4\x80", Text::upper("\xC4\x81")); // ā → Ā
+    }
+
+    public function testLowerLatinExtendedA(): void
+    {
+        $this->assertSame("\xC4\x81", Text::lower("\xC4\x80")); // Ā → ā
+    }
+
+    public function testUpperIdentityArabic(): void
+    {
+        // Arabic alef (U+0627) has no case — upper/lower are identity
+        $this->assertSame("\xD8\xA7", Text::upper("\xD8\xA7"));
+        $this->assertSame("\xD8\xA7", Text::lower("\xD8\xA7"));
+    }
+
+    public function testUpperIdentityHebrew(): void
+    {
+        // Hebrew alef (U+05D0) has no case — upper/lower are identity
+        $this->assertSame("\xD7\x90", Text::upper("\xD7\x90"));
+        $this->assertSame("\xD7\x90", Text::lower("\xD7\x90"));
+    }
+
+    public function testUpperIdentityCjk(): void
+    {
+        // CJK ideograph (U+4E2D) has no case — upper/lower are identity
+        $this->assertSame("\xE4\xB8\xAD", Text::upper("\xE4\xB8\xAD"));
+        $this->assertSame("\xE4\xB8\xAD", Text::lower("\xE4\xB8\xAD"));
+    }
+
     /* -------- REPLACE / REPLACE_CHAR -------- */
 
     public function testReplace(): void

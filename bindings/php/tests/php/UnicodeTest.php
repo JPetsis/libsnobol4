@@ -54,6 +54,43 @@ class UnicodeTest extends TestCase
         $this->assertEquals(2, $res['_match_len']);
     }
 
+    public function testCaseInsensitiveGreek(): void
+    {
+        // 'α' (U+03B1) matches 'Α' (U+0391)
+        $p = Pattern::compileFromAst(
+            Builder::any("\xCE\xB1"),
+            ['caseInsensitive' => true]
+        );
+
+        $res = $p->match("\xCE\x91");
+        $this->assertIsArray($res);
+        $this->assertEquals(2, $res['_match_len']);
+    }
+
+    public function testCaseInsensitiveCyrillic(): void
+    {
+        // 'а' (U+0430) matches 'А' (U+0410)
+        $p = Pattern::compileFromAst(
+            Builder::any("\xD0\xB0"),
+            ['caseInsensitive' => true]
+        );
+
+        $res = $p->match("\xD0\x90");
+        $this->assertIsArray($res);
+        $this->assertEquals(2, $res['_match_len']);
+    }
+
+    public function testCaseInsensitiveCaseSensitiveBmp(): void
+    {
+        // Without caseInsensitive, Greek 'α' should NOT match 'Α'
+        $p = Pattern::compileFromAst(
+            Builder::any("\xCE\xB1")
+        );
+
+        $res = $p->match("\xCE\x91");
+        $this->assertFalse($res);
+    }
+
     public function testMultiByteSpan(): void
     {
         // Emojis: 😀 (U+1F600), 😁 (U+1F601), 😂 (U+1F602)

@@ -32,6 +32,7 @@ CORE_FILES=(
     "jit.c"
     "jit_backend_arm64.c"
     "version.c"
+    "unicode_fold.c"
     "string_fn.c"
     "type_fn.c"
     "pattern_build.c"

@@ -1,15 +1,16 @@
 /**
  * @file unicode_fold.c
- * @brief Unicode case-folding lookup tables — Latin-1 and Latin Extended-A.
+ * @brief Unicode case-folding lookup tables — full BMP (U+0000–U+FFFF).
  *
  * No external ICU or libunicode dependency; all tables are compiled-in
  * static C arrays, keeping the library self-contained for embedded targets.
  *
- * Coverage is intentionally limited to the ranges most needed for European
- * languages.  The TODO markers below indicate where future changes can extend
- * the tables without breaking the API.
+ * Coverage:
+ *   - U+0000–U+007F: ASCII fast path (arithmetic: ±32)
+ *   - U+00C0–U+00FF: Latin-1 Supplement (UPPER_MAP/LOWER_MAP tables)
+ *   - U+0100–U+FFFF: Full BMP (generated pair tables)
  *
- * Tables verified against Unicode 15.0 UnicodeData.txt.
+ * Tables generated from Unicode CaseFolding.txt via dev/gen_unicode_fold.c.
  */
 
 #include "snobol/unicode_fold.h"
@@ -17,40 +18,14 @@
 #include <stdint.h>
 
 /* ---------------------------------------------------------------------------
- * MULTI-CHAR EXPANSION TABLE
+ * Latin-1 lookup tables (U+0000–U+00FF)
  *
- * Special cases where a single lowercase codepoint maps to multiple uppercase
- * codepoints.  Checked before the main lookup tables.
+ * UPPER_MAP[cp] gives the uppercase equivalent for Latin-1.
+ * LOWER_MAP[cp] gives the lowercase equivalent for Latin-1.
  *
- * Format: { lower_cp, upper_seq[2], upper_len }
- * --------------------------------------------------------------------------- */
-
-typedef struct {
-    uint32_t lower;        /**< Lowercase codepoint that triggers expansion */
-    uint32_t upper[2];     /**< Resulting uppercase codepoints */
-    int      len;          /**< Number of uppercase codepoints (1 or 2) */
-} MultiCharExpansion;
-
-static const MultiCharExpansion MULTI_CHAR_EXPANSIONS[] = {
-    /* U+00DF LATIN SMALL LETTER SHARP S → "SS" */
-    { 0x00DF, { 0x0053, 0x0053 }, 2 },
-    /* TODO(unicode-v3): U+FB00–U+FB06 ligatures if needed */
-};
-
-static const size_t N_MULTI_CHAR = sizeof(MULTI_CHAR_EXPANSIONS) / sizeof(MULTI_CHAR_EXPANSIONS[0]);
-
-/* ---------------------------------------------------------------------------
- * UPPER_MAP[256]
- *
- * For any Latin-1 codepoint cp (0x00–0xFF), UPPER_MAP[cp] gives the
- * uppercase equivalent.  Values for 0x00–0x60 and 0x7B–0xBF are identity.
- * ASCII a–z (0x61–0x7A) are given, though the fast path in the API
- * handles them arithmetically before reaching this table.
- *
- * Index 0xDF (ß) maps to itself here; the multi-char expansion table above
- * is checked first in snobol_to_upper_cp().
- *
- * Entry 0xFF (ÿ) maps to U+0178 (Ÿ), which is outside the 8-bit range.
+ * ASCII fast path handles 0x00–0x7F arithmetically before these tables.
+ * Index 0xDF (ß) maps to itself here; the multi-char expansion table
+ * below is checked first in snobol_to_upper_cp().
  * --------------------------------------------------------------------------- */
 
 /* clang-format off */
@@ -67,10 +42,10 @@ static const uint32_t UPPER_MAP[256] = {
     /* 48-4F */ 0x48,0x49,0x4A,0x4B,0x4C,0x4D,0x4E,0x4F,
     /* 50-57 */ 0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,
     /* 58-5F */ 0x58,0x59,0x5A,0x5B,0x5C,0x5D,0x5E,0x5F,
-    /* 60-67 */ 0x60,0x41,0x42,0x43,0x44,0x45,0x46,0x47,  /* a-g */
-    /* 68-6F */ 0x48,0x49,0x4A,0x4B,0x4C,0x4D,0x4E,0x4F,  /* h-o */
-    /* 70-77 */ 0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,  /* p-w */
-    /* 78-7F */ 0x58,0x59,0x5A,0x7B,0x7C,0x7D,0x7E,0x7F,  /* x-z + misc */
+    /* 60-67 */ 0x60,0x41,0x42,0x43,0x44,0x45,0x46,0x47,
+    /* 68-6F */ 0x48,0x49,0x4A,0x4B,0x4C,0x4D,0x4E,0x4F,
+    /* 70-77 */ 0x50,0x51,0x52,0x53,0x54,0x55,0x56,0x57,
+    /* 78-7F */ 0x58,0x59,0x5A,0x7B,0x7C,0x7D,0x7E,0x7F,
     /* 80-87 */ 0x80,0x81,0x82,0x83,0x84,0x85,0x86,0x87,
     /* 88-8F */ 0x88,0x89,0x8A,0x8B,0x8C,0x8D,0x8E,0x8F,
     /* 90-97 */ 0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,
@@ -79,22 +54,15 @@ static const uint32_t UPPER_MAP[256] = {
     /* A8-AF */ 0xA8,0xA9,0xAA,0xAB,0xAC,0xAD,0xAE,0xAF,
     /* B0-B7 */ 0xB0,0xB1,0xB2,0xB3,0xB4,0xB5,0xB6,0xB7,
     /* B8-BF */ 0xB8,0xB9,0xBA,0xBB,0xBC,0xBD,0xBE,0xBF,
-    /* C0-C7 */ 0xC0,0xC1,0xC2,0xC3,0xC4,0xC5,0xC6,0xC7,  /* À-Ç (already upper) */
-    /* C8-CF */ 0xC8,0xC9,0xCA,0xCB,0xCC,0xCD,0xCE,0xCF,  /* È-Ï */
-    /* D0-D7 */ 0xD0,0xD1,0xD2,0xD3,0xD4,0xD5,0xD6,0xD7,  /* Ð-× (×=identity) */
-    /* D8-DF */ 0xD8,0xD9,0xDA,0xDB,0xDC,0xDD,0xDE,0xDF,  /* Ø-ß (ß handled by expansion) */
-    /* E0-E7 */ 0xC0,0xC1,0xC2,0xC3,0xC4,0xC5,0xC6,0xC7,  /* à-ç → À-Ç */
-    /* E8-EF */ 0xC8,0xC9,0xCA,0xCB,0xCC,0xCD,0xCE,0xCF,  /* è-ï → È-Ï */
-    /* F0-F7 */ 0xD0,0xD1,0xD2,0xD3,0xD4,0xD5,0xD6,0xF7,  /* ð-ö → Ð-Ö, ÷=identity */
-    /* F8-FF */ 0xD8,0xD9,0xDA,0xDB,0xDC,0xDD,0xDE,0x0178, /* ø-þ → Ø-Þ, ÿ → Ÿ */
+    /* C0-C7 */ 0xC0,0xC1,0xC2,0xC3,0xC4,0xC5,0xC6,0xC7,
+    /* C8-CF */ 0xC8,0xC9,0xCA,0xCB,0xCC,0xCD,0xCE,0xCF,
+    /* D0-D7 */ 0xD0,0xD1,0xD2,0xD3,0xD4,0xD5,0xD6,0xD7,
+    /* D8-DF */ 0xD8,0xD9,0xDA,0xDB,0xDC,0xDD,0xDE,0xDF,
+    /* E0-E7 */ 0xC0,0xC1,0xC2,0xC3,0xC4,0xC5,0xC6,0xC7,
+    /* E8-EF */ 0xC8,0xC9,0xCA,0xCB,0xCC,0xCD,0xCE,0xCF,
+    /* F0-F7 */ 0xD0,0xD1,0xD2,0xD3,0xD4,0xD5,0xD6,0xF7,
+    /* F8-FF */ 0xD8,0xD9,0xDA,0xDB,0xDC,0xDD,0xDE,0x0178,
 };
-
-/* ---------------------------------------------------------------------------
- * LOWER_MAP[256]
- *
- * For any Latin-1 codepoint cp (0x00–0xFF), LOWER_MAP[cp] gives the
- * lowercase equivalent.
- * --------------------------------------------------------------------------- */
 
 static const uint32_t LOWER_MAP[256] = {
     /* 00-07 */ 0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
@@ -105,10 +73,10 @@ static const uint32_t LOWER_MAP[256] = {
     /* 28-2F */ 0x28,0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F,
     /* 30-37 */ 0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
     /* 38-3F */ 0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E,0x3F,
-    /* 40-47 */ 0x40,0x61,0x62,0x63,0x64,0x65,0x66,0x67,  /* A-G */
-    /* 48-4F */ 0x68,0x69,0x6A,0x6B,0x6C,0x6D,0x6E,0x6F,  /* H-O */
-    /* 50-57 */ 0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77,  /* P-W */
-    /* 58-5F */ 0x78,0x79,0x7A,0x5B,0x5C,0x5D,0x5E,0x5F,  /* X-Z + misc */
+    /* 40-47 */ 0x40,0x61,0x62,0x63,0x64,0x65,0x66,0x67,
+    /* 48-4F */ 0x68,0x69,0x6A,0x6B,0x6C,0x6D,0x6E,0x6F,
+    /* 50-57 */ 0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77,
+    /* 58-5F */ 0x78,0x79,0x7A,0x5B,0x5C,0x5D,0x5E,0x5F,
     /* 60-67 */ 0x60,0x61,0x62,0x63,0x64,0x65,0x66,0x67,
     /* 68-6F */ 0x68,0x69,0x6A,0x6B,0x6C,0x6D,0x6E,0x6F,
     /* 70-77 */ 0x70,0x71,0x72,0x73,0x74,0x75,0x76,0x77,
@@ -121,10 +89,10 @@ static const uint32_t LOWER_MAP[256] = {
     /* A8-AF */ 0xA8,0xA9,0xAA,0xAB,0xAC,0xAD,0xAE,0xAF,
     /* B0-B7 */ 0xB0,0xB1,0xB2,0xB3,0xB4,0xB5,0xB6,0xB7,
     /* B8-BF */ 0xB8,0xB9,0xBA,0xBB,0xBC,0xBD,0xBE,0xBF,
-    /* C0-C7 */ 0xE0,0xE1,0xE2,0xE3,0xE4,0xE5,0xE6,0xE7,  /* À-Ç → à-ç */
-    /* C8-CF */ 0xE8,0xE9,0xEA,0xEB,0xEC,0xED,0xEE,0xEF,  /* È-Ï → è-ï */
-    /* D0-D7 */ 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xD7,  /* Ð-Ö → ð-ö, ×=identity */
-    /* D8-DF */ 0xF8,0xF9,0xFA,0xFB,0xFC,0xFD,0xFE,0xDF,  /* Ø-Þ → ø-þ, ß=identity */
+    /* C0-C7 */ 0xE0,0xE1,0xE2,0xE3,0xE4,0xE5,0xE6,0xE7,
+    /* C8-CF */ 0xE8,0xE9,0xEA,0xEB,0xEC,0xED,0xEE,0xEF,
+    /* D0-D7 */ 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xD7,
+    /* D8-DF */ 0xF8,0xF9,0xFA,0xFB,0xFC,0xFD,0xFE,0xDF,
     /* E0-E7 */ 0xE0,0xE1,0xE2,0xE3,0xE4,0xE5,0xE6,0xE7,
     /* E8-EF */ 0xE8,0xE9,0xEA,0xEB,0xEC,0xED,0xEE,0xEF,
     /* F0-F7 */ 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
@@ -133,113 +101,42 @@ static const uint32_t LOWER_MAP[256] = {
 /* clang-format on */
 
 /* ---------------------------------------------------------------------------
- * LATIN EXTENDED-A SORTED PAIR TABLE (U+0100–U+017F)
+ * Generated BMP tables (U+0100–U+FFFF)
  *
- * Each entry maps a lowercase codepoint to its uppercase equivalent.
- * Sorted by the .lower field to allow binary search in snobol_to_upper_cp().
- * snobol_to_lower_cp() uses a linear scan on the .upper field (table is small).
+ * Includes:
+ *   - BMP_UPPER_TO_LOWER[]  — sorted by .lower (uppercase), binary search
+ *   - BMP_LOWER_TO_UPPER[]  — sorted by .lower (lowercase), binary search
+ *   - MULTI_CHAR_EXPANSIONS[]
  * --------------------------------------------------------------------------- */
 
-typedef struct {
-    uint32_t lower;
-    uint32_t upper;
-} FoldPair;
-
-/* clang-format off */
-static const FoldPair PAIRS_EXT_A[] = {
-    /* Each pair: lowercase → uppercase */
-    { 0x00FF, 0x0178 }, /* ÿ → Ÿ  (lower in Latin-1, upper in Ext-A) */
-    { 0x0101, 0x0100 }, /* ā → Ā */
-    { 0x0103, 0x0102 }, /* ă → Ă */
-    { 0x0105, 0x0104 }, /* ą → Ą */
-    { 0x0107, 0x0106 }, /* ć → Ć */
-    { 0x0109, 0x0108 }, /* ĉ → Ĉ */
-    { 0x010B, 0x010A }, /* ċ → Ċ */
-    { 0x010D, 0x010C }, /* č → Č */
-    { 0x010F, 0x010E }, /* ď → Ď */
-    { 0x0111, 0x0110 }, /* đ → Đ */
-    { 0x0113, 0x0112 }, /* ē → Ē */
-    { 0x0115, 0x0114 }, /* ĕ → Ĕ */
-    { 0x0117, 0x0116 }, /* ė → Ė */
-    { 0x0119, 0x0118 }, /* ę → Ę */
-    { 0x011B, 0x011A }, /* ě → Ě */
-    { 0x011D, 0x011C }, /* ĝ → Ĝ */
-    { 0x011F, 0x011E }, /* ğ → Ğ */
-    { 0x0121, 0x0120 }, /* ġ → Ġ */
-    { 0x0123, 0x0122 }, /* ģ → Ģ */
-    { 0x0125, 0x0124 }, /* ĥ → Ĥ */
-    { 0x0127, 0x0126 }, /* ħ → Ħ */
-    { 0x0129, 0x0128 }, /* ĩ → Ĩ */
-    { 0x012B, 0x012A }, /* ī → Ī */
-    { 0x012D, 0x012C }, /* ĭ → Ĭ */
-    { 0x012F, 0x012E }, /* į → Į */
-    { 0x0131, 0x0049 }, /* ı → I  (dotless i → Latin I) */
-    { 0x0133, 0x0132 }, /* ĳ → Ĳ */
-    { 0x0135, 0x0134 }, /* ĵ → Ĵ */
-    { 0x0137, 0x0136 }, /* ķ → Ķ */
-    /* 0x0138 ĸ (Kra): no case pair — omitted */
-    { 0x013A, 0x0139 }, /* ĺ → Ĺ */
-    { 0x013C, 0x013B }, /* ļ → Ļ */
-    { 0x013E, 0x013D }, /* ľ → Ľ */
-    { 0x0140, 0x013F }, /* ŀ → Ŀ */
-    { 0x0142, 0x0141 }, /* ł → Ł */
-    { 0x0144, 0x0143 }, /* ń → Ń */
-    { 0x0146, 0x0145 }, /* ņ → Ņ */
-    { 0x0148, 0x0147 }, /* ň → Ň */
-    /* 0x0149 ŉ: no uppercase — omitted */
-    { 0x014B, 0x014A }, /* ŋ → Ŋ */
-    { 0x014D, 0x014C }, /* ō → Ō */
-    { 0x014F, 0x014E }, /* ŏ → Ŏ */
-    { 0x0151, 0x0150 }, /* ő → Ő */
-    { 0x0153, 0x0152 }, /* œ → Œ */
-    { 0x0155, 0x0154 }, /* ŕ → Ŕ */
-    { 0x0157, 0x0156 }, /* ŗ → Ŗ */
-    { 0x0159, 0x0158 }, /* ř → Ř */
-    { 0x015B, 0x015A }, /* ś → Ś */
-    { 0x015D, 0x015C }, /* ŝ → Ŝ */
-    { 0x015F, 0x015E }, /* ş → Ş */
-    { 0x0161, 0x0160 }, /* š → Š */
-    { 0x0163, 0x0162 }, /* ţ → Ţ */
-    { 0x0165, 0x0164 }, /* ť → Ť */
-    { 0x0167, 0x0166 }, /* ŧ → Ŧ */
-    { 0x0169, 0x0168 }, /* ũ → Ũ */
-    { 0x016B, 0x016A }, /* ū → Ū */
-    { 0x016D, 0x016C }, /* ŭ → Ŭ */
-    { 0x016F, 0x016E }, /* ů → Ů */
-    { 0x0171, 0x0170 }, /* ű → Ű */
-    { 0x0173, 0x0172 }, /* ų → Ų */
-    { 0x0175, 0x0174 }, /* ŵ → Ŵ */
-    { 0x0177, 0x0176 }, /* ŷ → Ŷ */
-    { 0x017A, 0x0179 }, /* ź → Ź */
-    { 0x017C, 0x017B }, /* ż → Ż */
-    { 0x017E, 0x017D }, /* ž → Ž */
-};
-/* clang-format on */
-
-static const size_t N_PAIRS = sizeof(PAIRS_EXT_A) / sizeof(PAIRS_EXT_A[0]);
+#include "unicode_fold_data.c"
 
 /* ---------------------------------------------------------------------------
  * Binary search helpers
  * --------------------------------------------------------------------------- */
 
-/** Find the uppercase for a lowercase codepoint in PAIRS_EXT_A (sorted by .lower). */
-static uint32_t pairs_find_upper(uint32_t lower_cp) {
-    size_t lo = 0, hi = N_PAIRS;
+static uint32_t bmp_find_upper(uint32_t lower_cp) {
+    size_t lo = 0, hi = N_BMP_LOWER_TO_UPPER;
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
-        if (PAIRS_EXT_A[mid].lower == lower_cp) return PAIRS_EXT_A[mid].upper;
-        if (PAIRS_EXT_A[mid].lower < lower_cp) lo = mid + 1;
+        if (BMP_LOWER_TO_UPPER[mid].lower == lower_cp)
+            return BMP_LOWER_TO_UPPER[mid].upper;
+        if (BMP_LOWER_TO_UPPER[mid].lower < lower_cp) lo = mid + 1;
         else hi = mid;
     }
-    return lower_cp; /* identity */
+    return lower_cp;
 }
 
-/** Find the lowercase for an uppercase codepoint in PAIRS_EXT_A (linear scan on .upper). */
-static uint32_t pairs_find_lower(uint32_t upper_cp) {
-    for (size_t i = 0; i < N_PAIRS; i++) {
-        if (PAIRS_EXT_A[i].upper == upper_cp) return PAIRS_EXT_A[i].lower;
+static uint32_t bmp_find_lower(uint32_t upper_cp) {
+    size_t lo = 0, hi = N_BMP_UPPER_TO_LOWER;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (BMP_UPPER_TO_LOWER[mid].lower == upper_cp)
+            return BMP_UPPER_TO_LOWER[mid].upper;
+        if (BMP_UPPER_TO_LOWER[mid].lower < upper_cp) lo = mid + 1;
+        else hi = mid;
     }
-    return upper_cp; /* identity */
+    return upper_cp;
 }
 
 /* ---------------------------------------------------------------------------
@@ -247,14 +144,12 @@ static uint32_t pairs_find_lower(uint32_t upper_cp) {
  * --------------------------------------------------------------------------- */
 
 void snobol_to_upper_cp(uint32_t cp, uint32_t *out, int *out_len) {
-    /* ASCII fast path */
     if (cp < 0x80) {
         out[0] = (cp >= 0x61 && cp <= 0x7A) ? cp - 32u : cp;
         *out_len = 1;
         return;
     }
 
-    /* Multi-char expansion check (e.g. ß → SS) */
     for (size_t i = 0; i < N_MULTI_CHAR; i++) {
         if (MULTI_CHAR_EXPANSIONS[i].lower == cp) {
             out[0] = MULTI_CHAR_EXPANSIONS[i].upper[0];
@@ -264,49 +159,24 @@ void snobol_to_upper_cp(uint32_t cp, uint32_t *out, int *out_len) {
         }
     }
 
-    /* Latin-1 Supplement (U+0080–U+00FF) via UPPER_MAP */
     if (cp <= 0xFF) {
         out[0] = UPPER_MAP[cp];
         *out_len = 1;
         return;
     }
 
-    /* Latin Extended-A and U+00FF case (U+0100–U+017F) + Ÿ (0x0178) */
-    if (cp <= 0x017F) {
-        out[0] = pairs_find_upper(cp);
-        *out_len = 1;
-        return;
-    }
-
-    /* Out of covered range — identity */
-    /* TODO(unicode-v3): extend table for Latin Extended-B (U+0180–U+024F) */
-    out[0] = cp;
+    out[0] = bmp_find_upper(cp);
     *out_len = 1;
 }
 
 uint32_t snobol_to_lower_cp(uint32_t cp) {
-    /* ASCII fast path */
     if (cp < 0x80) {
         return (cp >= 0x41 && cp <= 0x5A) ? cp + 32u : cp;
     }
 
-    /* Latin-1 Supplement (U+0080–U+00FF) via LOWER_MAP */
     if (cp <= 0xFF) {
         return LOWER_MAP[cp];
     }
 
-    /* Ÿ (U+0178) special case: lower is ÿ (U+00FF) */
-    if (cp == 0x0178) {
-        return 0x00FF;
-    }
-
-    /* Latin Extended-A (U+0100–U+017F) */
-    if (cp <= 0x017F) {
-        return pairs_find_lower(cp);
-    }
-
-    /* Out of covered range — identity */
-    /* TODO(unicode-v3): extend table for Latin Extended-B (U+0180–U+024F) */
-    return cp;
+    return bmp_find_lower(cp);
 }
-

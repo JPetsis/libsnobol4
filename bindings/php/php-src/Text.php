@@ -218,31 +218,27 @@ class Text
     /**
      * UPPER: convert string to uppercase.
      *
-     * v1.0 note: ASCII-only (a-z → A-Z). Non-ASCII characters are unchanged.
-     * v2.0 TODO: full Unicode case folding.
+     * Full BMP Unicode case folding via the libsnobol4 core.
      *
      * @param  string  $str  Input string
      * @return string      Uppercase string
      */
     public static function upper(string $str): string
     {
-        // Native: snobol_upper (ASCII fast path; v2 will use full Unicode)
-        return strtoupper($str);
+        return snobol_text_upper($str);
     }
 
     /**
      * LOWER: convert string to lowercase.
      *
-     * v1.0 note: ASCII-only (A-Z → a-z). Non-ASCII characters are unchanged.
-     * v2.0 TODO: full Unicode case folding.
+     * Full BMP Unicode case folding via the libsnobol4 core.
      *
      * @param  string  $str  Input string
      * @return string      Lowercase string
      */
     public static function lower(string $str): string
     {
-        // Native: snobol_lower (ASCII fast path; v2 will use full Unicode)
-        return strtolower($str);
+        return snobol_text_lower($str);
     }
 
     /**
