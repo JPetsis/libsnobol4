@@ -47,28 +47,13 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           # Ubuntu noble's default repos do not ship php8.4-dev.
-          # shivammathur/setup-php already installed a working PHP via its
-          # built-in tap, but `php-config`/`php-dev` headers from PPA are
-          # needed for phpize to build the extension.  We add the Ondrej
-          # PPA (sury.org) so php-config and php-dev match the matrix PHP
-          # version for any of {8.3, 8.4, 8.5}.
+          # Add Ondrej's PPA for all PHP versions.  Use --no-update so
+          # add-apt-repository doesn't run apt-get update (which fails
+          # when other pre-existing sources are temporarily unreachable).
+          # We run apt-get update ourselves after adding the PPA.
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential autoconf dirmngr gnupg lsb-release ca-certificates apt-transport-https software-properties-common
-          # Fetch the Ondrej GPG key from a keyserver and dearmor it.
-          # dirmngr is required by gpg --recv-keys for keyserver access.
-          # We use a minimal per-user keyring to avoid root home dir issues.
-          sudo install -m 0755 -d /etc/apt/keyrings
-          sudo gpg --batch --no-default-keyring \
-                   --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg \
-                   --keyserver hkps://keyserver.ubuntu.com \
-                   --recv-keys 0x14aa40ec20817547f80d6a643a0fe6a937330cd7
-          sudo gpg --batch --no-default-keyring \
-                   --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg \
-                   --export 0x14aa40ec20817547f80d6a643a0fe6a937330cd7 \
-            | sudo gpg --dearmor -o /etc/apt/keyrings/ondrej-php.gpg
-          sudo chmod a+r /etc/apt/keyrings/ondrej-php.gpg
-          echo "deb [signed-by=/etc/apt/keyrings/ondrej-php.gpg] https://ppa.launchpadcontent.net/ondrej/php/ubuntu $(lsb_release -sc) main" \
-            | sudo tee /etc/apt/sources.list.d/ondrej-php.list > /dev/null
+          sudo apt-get install -y cmake build-essential autoconf software-properties-common
+          sudo add-apt-repository --no-update -y ppa:ondrej/php
           sudo apt-get update
           sudo apt-get install -y php${{ matrix.php-version }}-dev php${{ matrix.php-version }}-cli
           which php-config
