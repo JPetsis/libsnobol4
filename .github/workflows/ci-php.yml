@@ -46,13 +46,22 @@ jobs:
       - name: Install system dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
-          # PHP 8.4 is not in Ubuntu noble's default repos — use Ondrej's PPA
-          # for all PHP versions so php-config and php-dev are always available.
+          # Ubuntu noble's default repos do not ship php8.4-dev.
+          # Use Ondrej's PPA (sury.org) for all PHP versions so php-config
+          # and php-dev are always available, regardless of matrix value.
+          # We add the repo + GPG key manually because add-apt-repository
+          # is slow and emits noisy Python deprecation warnings on noble.
           sudo apt-get update
-          sudo apt-get install -y software-properties-common ca-certificates apt-transport-https lsb-release gnupg
-          sudo LC_ALL=C.UTF-8 add-apt-repository -y ppa:ondrej/php
+          sudo apt-get install -y cmake build-essential autoconf gnupg lsb-release ca-certificates apt-transport-https
+          # Fetch the Ondrej GPG key and add the repo directly to sources.list.d
+          sudo install -m 0755 -d /etc/apt/keyrings
+          sudo curl -fsSL https://keyserver.ubuntu.com/pks/lookup?op=get\&search=0x14aa40ec20817547f80d6a643a0fe6a937330cd7 \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/ondrej-php.gpg
+          sudo chmod a+r /etc/apt/keyrings/ondrej-php.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/ondrej-php.gpg] https://ppa.launchpadcontent.net/ondrej/php/ubuntu $(lsb_release -sc) main" \
+            | sudo tee /etc/apt/sources.list.d/ondrej-php.list > /dev/null
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential php${{ matrix.php-version }}-dev php${{ matrix.php-version }}-cli autoconf
+          sudo apt-get install -y php${{ matrix.php-version }}-dev php${{ matrix.php-version }}-cli
           which php-config
 
       - name: Install system dependencies (macOS)
