@@ -47,12 +47,13 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           # Ubuntu noble's default repos do not ship php8.4-dev.
-          # Add Ondrej's PPA for all PHP versions.  Use --no-update so
-          # add-apt-repository doesn't run apt-get update (which fails
-          # when other pre-existing sources are temporarily unreachable).
-          # We run apt-get update ourselves after adding the PPA.
+          # shivammathur/setup-php may have already added ppa:ondrej/php
+          # with an inline key, which conflicts with add-apt-repository's
+          # keyring format.  Remove any pre-existing ondrej source files
+          # before adding the PPA cleanly.
           sudo apt-get update
           sudo apt-get install -y cmake build-essential autoconf software-properties-common
+          sudo rm -f /etc/apt/sources.list.d/ondrej-php* /etc/apt/sources.list.d/*ondrej*
           sudo add-apt-repository --no-update -y ppa:ondrej/php
           sudo apt-get update
           sudo apt-get install -y php${{ matrix.php-version }}-dev php${{ matrix.php-version }}-cli

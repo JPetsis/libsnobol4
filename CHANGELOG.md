@@ -70,11 +70,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **6 missing arginfo entries** for no-param Builder methods (`fence`, `rem`, `arb`,
   `abort`, `fail`, `succeed`) — suppressed PHP 8.1+ "Missing arginfo" warnings.
 - **CI PHP 8.4 install** (`.github/workflows/ci-php.yml`): Ubuntu noble's default
-  apt repos do not ship `php8.4-dev`.  Added `ppa:ondrej/php` via
-  `add-apt-repository --no-update` (the `--no-update` flag prevents the
-  automatic `apt-get update` that was failing with "E: The list of sources
-  could not be read" when other pre-existing apt sources were temporarily
-  unreachable).  All matrix versions (8.3, 8.4, 8.5) install consistently.
+  apt repos do not ship `php8.4-dev`.  `shivammathur/setup-php` adds `ppa:ondrej/php`
+  with an inline PGP key block, which conflicts with `add-apt-repository`'s keyring
+  format ("E: Conflicting values set for option Signed-By").  Fixed by removing any
+  pre-existing ondrej source files (`rm -f /etc/apt/sources.list.d/ondrej-php*`)
+  before adding the PPA cleanly via `add-apt-repository --no-update`.  All matrix
+  versions (8.3, 8.4, 8.5) install consistently.
 
 ### Changed
 
