@@ -1,0 +1,518 @@
+#include "php.h"
+#include "php_snobol.h"
+#include "zend_exceptions.h"
+#include "Zend/zend_interfaces.h"
+#include "snobol/snobol.h"
+
+#define SNOBOL_LOG(fmt, ...) ((void)0)
+
+extern zend_class_entry *snobol_pattern_ce;
+
+zend_class_entry *snobol_pattern_helper_ce;
+
+/* ------------------------------------------------------------------ */
+/*  Internal helpers                                                   */
+/* ------------------------------------------------------------------ */
+
+static int php_phelper_call_from_string(zval *pattern_str, zval *options, zval *ret) {
+    zval args[2];
+    ZVAL_COPY(&args[0], pattern_str);
+    if (options && Z_TYPE_P(options) == IS_ARRAY) {
+        ZVAL_COPY(&args[1], options);
+    } else {
+        array_init(&args[1]);
+    }
+    zend_call_method(NULL, snobol_pattern_ce, NULL,
+        "fromString", sizeof("fromString")-1, ret, 2, &args[0], &args[1]);
+    zval_ptr_dtor(&args[0]);
+    zval_ptr_dtor(&args[1]);
+    return (Z_TYPE_P(ret) == IS_OBJECT) ? SUCCESS : FAILURE;
+}
+
+static int php_phelper_call_from_ast(zval *ast, zval *options, zval *ret) {
+    zval args[2];
+    ZVAL_COPY(&args[0], ast);
+    if (options && Z_TYPE_P(options) == IS_ARRAY) {
+        ZVAL_COPY(&args[1], options);
+    } else {
+        array_init(&args[1]);
+    }
+    zend_call_method(NULL, snobol_pattern_ce, NULL,
+        "compileFromAst", sizeof("compileFromAst")-1, ret, 2, &args[0], &args[1]);
+    zval_ptr_dtor(&args[0]);
+    zval_ptr_dtor(&args[1]);
+    return (Z_TYPE_P(ret) == IS_OBJECT) ? SUCCESS : FAILURE;
+}
+
+/* Resolve a pattern spec to a Pattern object.
+ * Returns SUCCESS and fills `out` (with refcount bumped) or FAILURE.
+ * (Caching is omitted for simplicity; callers who want caching should use
+ *  PatternCache directly.) */
+static int php_phelper_resolve(zval *pattern_or_ast, zval *options, zval *out) {
+    if (Z_TYPE_P(pattern_or_ast) == IS_OBJECT &&
+        instanceof_function(Z_OBJCE_P(pattern_or_ast), snobol_pattern_ce)) {
+        ZVAL_COPY(out, pattern_or_ast);
+        return SUCCESS;
+    }
+
+    if (Z_TYPE_P(pattern_or_ast) == IS_STRING) {
+        if (php_phelper_call_from_string(pattern_or_ast, options, out) == SUCCESS &&
+            Z_TYPE_P(out) == IS_OBJECT) {
+            return SUCCESS;
+        }
+        return FAILURE;
+    }
+
+    if (Z_TYPE_P(pattern_or_ast) == IS_ARRAY) {
+        if (php_phelper_call_from_ast(pattern_or_ast, options, out) == SUCCESS &&
+            Z_TYPE_P(out) == IS_OBJECT) {
+            return SUCCESS;
+        }
+        return FAILURE;
+    }
+
+    return FAILURE;
+}
+
+/* Extract boolean option from options array */
+static bool php_phelper_get_opt_bool(zval *options, const char *name) {
+    if (!options || Z_TYPE_P(options) != IS_ARRAY) return false;
+    zval *zv = zend_hash_str_find(Z_ARRVAL_P(options), name, strlen(name));
+    if (!zv) return false;
+    return (Z_TYPE_P(zv) == IS_TRUE ||
+            (Z_TYPE_P(zv) == IS_LONG && Z_LVAL_P(zv) != 0));
+}
+
+/* Strip _match_len and _match_start keys from a match result array */
+static void php_phelper_strip_meta(zval *result) {
+    if (Z_TYPE_P(result) != IS_ARRAY) return;
+    zend_hash_str_del(Z_ARRVAL_P(result), "_match_len", sizeof("_match_len")-1);
+    zend_hash_str_del(Z_ARRVAL_P(result), "_match_start", sizeof("_match_start")-1);
+}
+
+/* Extract cache option from options */
+static bool php_phelper_use_cache(zval *options) {
+    if (!options || Z_TYPE_P(options) != IS_ARRAY) return true;
+    zval *zv = zend_hash_str_find(Z_ARRVAL_P(options), "cache", sizeof("cache")-1);
+    if (!zv) return true;
+    return (Z_TYPE_P(zv) != IS_FALSE);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Argument info                                                      */
+/* ------------------------------------------------------------------ */
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_match_once, 0, 0, 2)
+    ZEND_ARG_INFO(0, patternOrAst)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_match_all, 0, 0, 2)
+    ZEND_ARG_INFO(0, patternOrAst)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_split, 0, 0, 2)
+    ZEND_ARG_INFO(0, patternOrAst)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_replace, 0, 0, 3)
+    ZEND_ARG_INFO(0, patternOrAst)
+    ZEND_ARG_TYPE_INFO(0, replacement, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_from_string, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, pattern, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_from_ast, 0, 0, 1)
+    ZEND_ARG_ARRAY_INFO(0, ast, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_eval_pattern, 0, 0, 2)
+    ZEND_ARG_TYPE_INFO(0, patternExpr, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_table_subst, 0, 0, 4)
+    ZEND_ARG_OBJ_INFO(0, table, Snobol\\Table, 0)
+    ZEND_ARG_TYPE_INFO(0, keyPattern, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, template, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_formatted_subst, 0, 0, 3)
+    ZEND_ARG_INFO(0, patternOrAst)
+    ZEND_ARG_TYPE_INFO(0, template, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_ph_clear_cache, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
+/* ------------------------------------------------------------------ */
+/*  PHP methods                                                        */
+/* ------------------------------------------------------------------ */
+
+PHP_METHOD(Snobol_PatternHelper, fromString) {
+    char *pattern; size_t pattern_len;
+    zval *options = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(1, 2)
+        Z_PARAM_STRING(pattern, pattern_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY(options)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zval pattern_zv;
+    ZVAL_STRINGL(&pattern_zv, pattern, pattern_len);
+    php_phelper_call_from_string(&pattern_zv, options, return_value);
+    zval_ptr_dtor(&pattern_zv);
+}
+
+PHP_METHOD(Snobol_PatternHelper, fromAst) {
+    zval *ast;
+    zval *options = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(1, 2)
+        Z_PARAM_ARRAY(ast)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY(options)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zval *type_zv = zend_hash_str_find(Z_ARRVAL_P(ast), "type", sizeof("type")-1);
+    if (!type_zv) {
+        zend_throw_exception(zend_ce_value_error,
+            "Invalid AST: missing \"type\" field", 0);
+        RETURN_NULL();
+    }
+
+    php_phelper_call_from_ast(ast, options, return_value);
+
+    if (Z_TYPE_P(return_value) != IS_OBJECT ||
+        !instanceof_function(Z_OBJCE_P(return_value), snobol_pattern_ce)) {
+        zend_throw_exception(zend_ce_value_error,
+            "Failed to compile pattern from AST", 0);
+    }
+}
+
+PHP_METHOD(Snobol_PatternHelper, matchOnce) {
+    zval *pattern_or_ast;
+    char *subject; size_t subject_len;
+    zval *options = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(2, 3)
+        Z_PARAM_ZVAL(pattern_or_ast)
+        Z_PARAM_STRING(subject, subject_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY(options)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zval pattern_obj;
+    if (php_phelper_resolve(pattern_or_ast, options, &pattern_obj) != SUCCESS) {
+        RETURN_FALSE;
+    }
+
+    zval args_match[1], match_ret;
+    ZVAL_STRINGL(&args_match[0], subject, subject_len);
+    zend_call_method_with_1_params(Z_OBJ_P(&pattern_obj),
+        Z_OBJCE_P(&pattern_obj), NULL, "match", &match_ret, &args_match[0]);
+
+    if (Z_TYPE(match_ret) == IS_FALSE || Z_TYPE(match_ret) == IS_NULL) {
+        zval_ptr_dtor(&match_ret);
+        zval_ptr_dtor(&args_match[0]);
+        zval_ptr_dtor(&pattern_obj);
+        RETURN_FALSE;
+    }
+
+    bool full = php_phelper_get_opt_bool(options, "full");
+    if (full && Z_TYPE(match_ret) == IS_ARRAY) {
+        zval *len_zv = zend_hash_str_find(Z_ARRVAL_P(&match_ret),
+            "_match_len", sizeof("_match_len")-1);
+        if (len_zv && Z_TYPE_P(len_zv) == IS_LONG &&
+            Z_LVAL_P(len_zv) == (zend_long)subject_len) {
+            ZVAL_COPY(return_value, &match_ret);
+        } else {
+            RETURN_FALSE;
+        }
+    } else {
+        ZVAL_COPY(return_value, &match_ret);
+    }
+
+    zval_ptr_dtor(&match_ret);
+    zval_ptr_dtor(&args_match[0]);
+    zval_ptr_dtor(&pattern_obj);
+}
+
+PHP_METHOD(Snobol_PatternHelper, matchAll) {
+    zval *pattern_or_ast;
+    char *subject; size_t subject_len;
+    zval *options = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(2, 3)
+        Z_PARAM_ZVAL(pattern_or_ast)
+        Z_PARAM_STRING(subject, subject_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY(options)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zval pattern_obj;
+    if (php_phelper_resolve(pattern_or_ast, options, &pattern_obj) != SUCCESS) {
+        array_init(return_value);
+        return;
+    }
+
+    zval args[1], search_ret;
+    ZVAL_STRINGL(&args[0], subject, subject_len);
+    zend_call_method_with_1_params(Z_OBJ_P(&pattern_obj),
+        Z_OBJCE_P(&pattern_obj), NULL, "searchAll", &search_ret, &args[0]);
+
+    if (Z_TYPE(search_ret) != IS_ARRAY) {
+        array_init(return_value);
+        zval_ptr_dtor(&search_ret);
+        zval_ptr_dtor(&args[0]);
+        zval_ptr_dtor(&pattern_obj);
+        return;
+    }
+
+    array_init(return_value);
+    zval *entry;
+    ZEND_HASH_FOREACH_VAL(Z_ARRVAL(search_ret), entry) {
+        if (Z_TYPE_P(entry) == IS_ARRAY) {
+            zval clean_entry;
+            ZVAL_COPY(&clean_entry, entry);
+            php_phelper_strip_meta(&clean_entry);
+            zend_hash_next_index_insert(Z_ARRVAL_P(return_value), &clean_entry);
+        } else {
+            zend_hash_next_index_insert(Z_ARRVAL_P(return_value), entry);
+        }
+    } ZEND_HASH_FOREACH_END();
+
+    zval_ptr_dtor(&search_ret);
+    zval_ptr_dtor(&args[0]);
+    zval_ptr_dtor(&pattern_obj);
+}
+
+PHP_METHOD(Snobol_PatternHelper, split) {
+    zval *pattern_or_ast;
+    char *subject; size_t subject_len;
+    zval *options = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(2, 3)
+        Z_PARAM_ZVAL(pattern_or_ast)
+        Z_PARAM_STRING(subject, subject_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY(options)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zval pattern_obj;
+    if (php_phelper_resolve(pattern_or_ast, options, &pattern_obj) != SUCCESS) {
+        array_init(return_value);
+        return;
+    }
+
+    zval args[1], split_ret;
+    ZVAL_STRINGL(&args[0], subject, subject_len);
+    zend_call_method_with_1_params(Z_OBJ_P(&pattern_obj),
+        Z_OBJCE_P(&pattern_obj), NULL, "searchSplit", &split_ret, &args[0]);
+    if (Z_TYPE(split_ret) == IS_ARRAY) {
+        ZVAL_COPY(return_value, &split_ret);
+    } else {
+        array_init(return_value);
+    }
+    zval_ptr_dtor(&split_ret);
+
+    zval_ptr_dtor(&args[0]);
+    zval_ptr_dtor(&pattern_obj);
+}
+
+PHP_METHOD(Snobol_PatternHelper, replace) {
+    zval *pattern_or_ast;
+    char *replacement; size_t replacement_len;
+    char *subject; size_t subject_len;
+    zval *options = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(3, 4)
+        Z_PARAM_ZVAL(pattern_or_ast)
+        Z_PARAM_STRING(replacement, replacement_len)
+        Z_PARAM_STRING(subject, subject_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY(options)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zval pattern_obj;
+    if (php_phelper_resolve(pattern_or_ast, options, &pattern_obj) != SUCCESS) {
+        ZVAL_STRINGL(return_value, subject, subject_len);
+        return;
+    }
+
+    bool has_dollar = (memchr(replacement, '$', replacement_len) != NULL);
+    const char *method = has_dollar ? "subst" : "searchReplace";
+
+    zval args[2], method_ret;
+    ZVAL_STRINGL(&args[0], subject, subject_len);
+    ZVAL_STRINGL(&args[1], replacement, replacement_len);
+    zend_call_method_with_2_params(Z_OBJ_P(&pattern_obj),
+        Z_OBJCE_P(&pattern_obj), NULL, method, &method_ret, &args[0], &args[1]);
+    if (Z_TYPE(method_ret) == IS_STRING) {
+        ZVAL_COPY(return_value, &method_ret);
+    } else {
+        ZVAL_STRINGL(return_value, subject, subject_len);
+    }
+    zval_ptr_dtor(&method_ret);
+
+    zval_ptr_dtor(&args[0]);
+    zval_ptr_dtor(&args[1]);
+    zval_ptr_dtor(&pattern_obj);
+}
+
+PHP_METHOD(Snobol_PatternHelper, clearCache) {
+    ZEND_PARSE_PARAMETERS_NONE();
+}
+
+PHP_METHOD(Snobol_PatternHelper, evalPattern) {
+    char *pattern_expr; size_t pattern_expr_len;
+    char *subject; size_t subject_len;
+    zval *options = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(2, 3)
+        Z_PARAM_STRING(pattern_expr, pattern_expr_len)
+        Z_PARAM_STRING(subject, subject_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY(options)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zval pattern_zv;
+    ZVAL_STRINGL(&pattern_zv, pattern_expr, pattern_expr_len);
+
+    zval pattern_obj;
+    if (php_phelper_call_from_string(&pattern_zv, options, &pattern_obj) != SUCCESS ||
+        Z_TYPE(pattern_obj) != IS_OBJECT) {
+        zval_ptr_dtor(&pattern_zv);
+        RETURN_FALSE;
+    }
+
+    zval args_match[1], match_ret;
+    ZVAL_STRINGL(&args_match[0], subject, subject_len);
+    zend_call_method_with_1_params(Z_OBJ_P(&pattern_obj),
+        Z_OBJCE_P(&pattern_obj), NULL, "match", &match_ret, &args_match[0]);
+    if (Z_TYPE(match_ret) != IS_FALSE && Z_TYPE(match_ret) != IS_NULL) {
+        ZVAL_COPY(return_value, &match_ret);
+    } else {
+        RETURN_FALSE;
+    }
+    zval_ptr_dtor(&match_ret);
+
+    zval_ptr_dtor(&args_match[0]);
+    zval_ptr_dtor(&pattern_obj);
+    zval_ptr_dtor(&pattern_zv);
+}
+
+PHP_METHOD(Snobol_PatternHelper, tableSubst) {
+    zval *table_zv;
+    char *key_pattern; size_t key_pattern_len;
+    char *template_str; size_t template_str_len;
+    char *subject; size_t subject_len;
+
+    ZEND_PARSE_PARAMETERS_START(4, 4)
+        Z_PARAM_OBJECT(table_zv)
+        Z_PARAM_STRING(key_pattern, key_pattern_len)
+        Z_PARAM_STRING(template_str, template_str_len)
+        Z_PARAM_STRING(subject, subject_len)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zval pattern_zv;
+    ZVAL_STRINGL(&pattern_zv, key_pattern, key_pattern_len);
+
+    zval pattern_obj;
+    if (php_phelper_call_from_string(&pattern_zv, NULL, &pattern_obj) != SUCCESS ||
+        Z_TYPE(pattern_obj) != IS_OBJECT) {
+        ZVAL_STRINGL(return_value, subject, subject_len);
+        zval_ptr_dtor(&pattern_zv);
+        return;
+    }
+
+    zval args_subst[2], subst_ret;
+    ZVAL_STRINGL(&args_subst[0], subject, subject_len);
+    ZVAL_STRINGL(&args_subst[1], template_str, template_str_len);
+    zend_call_method_with_2_params(Z_OBJ_P(&pattern_obj),
+        Z_OBJCE_P(&pattern_obj), NULL, "subst", &subst_ret, &args_subst[0], &args_subst[1]);
+    if (Z_TYPE(subst_ret) == IS_STRING) {
+        ZVAL_COPY(return_value, &subst_ret);
+    } else {
+        ZVAL_STRINGL(return_value, subject, subject_len);
+    }
+    zval_ptr_dtor(&subst_ret);
+
+    zval_ptr_dtor(&args_subst[0]);
+    zval_ptr_dtor(&args_subst[1]);
+    zval_ptr_dtor(&pattern_obj);
+    zval_ptr_dtor(&pattern_zv);
+}
+
+PHP_METHOD(Snobol_PatternHelper, formattedSubst) {
+    zval *pattern_or_ast;
+    char *template_str; size_t template_str_len;
+    char *subject; size_t subject_len;
+    zval *options = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(3, 4)
+        Z_PARAM_ZVAL(pattern_or_ast)
+        Z_PARAM_STRING(template_str, template_str_len)
+        Z_PARAM_STRING(subject, subject_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY(options)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zval pattern_obj;
+    if (php_phelper_resolve(pattern_or_ast, options, &pattern_obj) != SUCCESS) {
+        ZVAL_STRINGL(return_value, subject, subject_len);
+        return;
+    }
+
+    zval args_subst[2], subst_ret;
+    ZVAL_STRINGL(&args_subst[0], subject, subject_len);
+    ZVAL_STRINGL(&args_subst[1], template_str, template_str_len);
+    zend_call_method_with_2_params(Z_OBJ_P(&pattern_obj),
+        Z_OBJCE_P(&pattern_obj), NULL, "subst", &subst_ret, &args_subst[0], &args_subst[1]);
+    if (Z_TYPE(subst_ret) == IS_STRING) {
+        ZVAL_COPY(return_value, &subst_ret);
+    } else {
+        ZVAL_STRINGL(return_value, subject, subject_len);
+    }
+    zval_ptr_dtor(&subst_ret);
+
+    zval_ptr_dtor(&args_subst[0]);
+    zval_ptr_dtor(&args_subst[1]);
+    zval_ptr_dtor(&pattern_obj);
+}
+
+static const zend_function_entry snobol_pattern_helper_methods[] = {
+    PHP_ME(Snobol_PatternHelper, fromString,      ai_ph_from_string,      ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_PatternHelper, fromAst,         ai_ph_from_ast,         ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_PatternHelper, matchOnce,       ai_ph_match_once,       ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_PatternHelper, matchAll,        ai_ph_match_all,        ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_PatternHelper, split,           ai_ph_split,            ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_PatternHelper, replace,         ai_ph_replace,          ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_PatternHelper, clearCache,      ai_ph_clear_cache,      ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_PatternHelper, evalPattern,     ai_ph_eval_pattern,     ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_PatternHelper, tableSubst,      ai_ph_table_subst,      ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_ME(Snobol_PatternHelper, formattedSubst,  ai_ph_formatted_subst,  ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
+    PHP_FE_END
+};
+
+void snobol_pattern_helper_php_minit(void) {
+    zend_class_entry ce;
+    INIT_CLASS_ENTRY(ce, "Snobol\\PatternHelper", snobol_pattern_helper_methods);
+    snobol_pattern_helper_ce = zend_register_internal_class(&ce);
+}

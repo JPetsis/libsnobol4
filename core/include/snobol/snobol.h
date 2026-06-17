@@ -218,3 +218,200 @@ const char* snobol_match_get_output(snobol_match_t* match, size_t* len);
  */
 const char* snobol_match_get_variable(snobol_match_t* match, const char* name, size_t* len);
 
+/* -----------------------------------------------------------------------
+ * One-shot convenience match API
+ *
+ * snobol_match() bundles lex→parse→compile→VM execution into a single
+ * call, freeing all intermediate resources internally.  Use this for
+ * simple one-off matches; for repeated matching of the same pattern use
+ * snobol_pattern_compile() + snobol_pattern_match() instead.
+ * ----------------------------------------------------------------------- */
+
+/**
+ * @brief Result from the one-shot snobol_match() convenience API.
+ *
+ * Unlike the opaque snobol_match_t (which is used by the multi-step API),
+ * this struct is non-opaque so callers can directly read the fields.
+ */
+typedef struct snobol_match_result {
+    bool    success;      /**< Whether the pattern matched */
+    char   *error;        /**< Malloc'd error message (NULL on success);
+                               caller must free via snobol_match_result_free(). */
+    char   *output;       /**< Output buffer from OP_EMIT_* instructions
+                               (owned, freed by snobol_match_result_free()). */
+    size_t  output_len;   /**< Byte length of output (0 if no output). */
+
+    /** Captured variable values (index 0 = variable "1", etc.).
+     *  Each entry is a malloc'd NUL-terminated string (or NULL if not set).
+     *  Freed by snobol_match_result_free(). */
+    char   **captures;
+    size_t  *capture_lens; /**< Byte lengths of each capture string. */
+    int      capture_count; /**< Number of populated captures. */
+} snobol_match_result_t;
+
+/**
+ * @brief One-shot convenience match: compile and run a pattern in one call.
+ *
+ * Bundles the full pipeline: lexer → parser → compiler → VM execution.
+ * All intermediate objects are freed internally.
+ *
+ * @param[in]  pattern   Pattern source string (UTF-8).
+ * @param[in]  pat_len   Byte length of @p pattern.
+ * @param[in]  subject   Subject string (UTF-8).
+ * @param[in]  sub_len   Byte length of @p subject.
+ * @param[in]  flags     Bitmask of SNOBOL_FLAG_* constants (0 for default).
+ * @return Newly allocated snobol_match_result_t.  Always valid; check
+ *         the @c success and @c error fields.  Free with
+ *         snobol_match_result_free().
+ */
+snobol_match_result_t* snobol_match(const char* pattern, size_t pat_len,
+                                     const char* subject, size_t sub_len,
+                                     uint32_t flags);
+
+/**
+ * @brief Free a snobol_match_result_t and all its owned resources.
+ * @param[in] result Result to free.  NULL is safe.
+ */
+void snobol_match_result_free(snobol_match_result_t* result);
+
+/* -----------------------------------------------------------------------
+ * Builder API — programmatic AST construction
+ *
+ * Each snobol_pattern_build_*() function creates a single AST node of the
+ * corresponding type.  Compound functions (concat, alt, cap, etc.) accept
+ * child AST nodes and take ownership of them.  Use snobol_pattern_build_emit()
+ * to finalize the root node, then compile with compile_ast_to_bytecode_c()
+ * or snobol_pattern_compile() via the multi-step API.
+ *
+ * Example:
+ *   snobol_pattern_build_t *b = snobol_pattern_build_create();
+ *   ast_node_t *lit = snobol_pattern_build_lit(b, "hello", 5);
+ *   ast_node_t *root = snobol_pattern_build_emit(b, lit);
+ *   // root is ready for compile_ast_to_bytecode_c(root, ...)
+ *   // Ownership of root transferred; b can be destroyed or reused.
+ *   snobol_pattern_build_destroy(b);
+ * ----------------------------------------------------------------------- */
+
+/**
+ * @brief Opaque builder state.
+ */
+typedef struct snobol_pattern_build snobol_pattern_build_t;
+
+/** @brief Create a new builder. */
+snobol_pattern_build_t* snobol_pattern_build_create(void);
+
+/** @brief Destroy a builder. Does NOT free emitted AST nodes. */
+void snobol_pattern_build_destroy(snobol_pattern_build_t* build);
+
+/* --- Primitive nodes ---------------------------------------------------- */
+
+/** @brief Create a LITERAL AST node. */
+ast_node_t* snobol_pattern_build_lit(snobol_pattern_build_t* build,
+                                      const char* text, size_t len);
+
+/** @brief Create a SPAN AST node (match 1+ chars in set). */
+ast_node_t* snobol_pattern_build_span(snobol_pattern_build_t* build,
+                                       const char* set, size_t len);
+
+/** @brief Create a BREAK AST node (consume until char in set). */
+ast_node_t* snobol_pattern_build_brk(snobol_pattern_build_t* build,
+                                      const char* set, size_t len);
+
+/** @brief Create an ANY AST node (match single char in optional set). */
+ast_node_t* snobol_pattern_build_any(snobol_pattern_build_t* build,
+                                      const char* set, size_t len);
+
+/** @brief Create a NOTANY AST node (match single char NOT in set). */
+ast_node_t* snobol_pattern_build_notany(snobol_pattern_build_t* build,
+                                         const char* set, size_t len);
+
+/** @brief Create a LEN AST node (match exactly N codepoints). */
+ast_node_t* snobol_pattern_build_len(snobol_pattern_build_t* build,
+                                      int32_t n);
+
+/** @brief Create an ARBNO AST node (zero or more repetitions). */
+ast_node_t* snobol_pattern_build_arbno(snobol_pattern_build_t* build,
+                                        ast_node_t* sub);
+
+/* --- Capture / assignment ---------------------------------------------- */
+
+/** @brief Create a CAP AST node (capture sub-pattern into register). */
+ast_node_t* snobol_pattern_build_cap(snobol_pattern_build_t* build,
+                                      int reg, ast_node_t* sub);
+
+/** @brief Create an ASSIGN AST node (assign register to variable). */
+ast_node_t* snobol_pattern_build_assign(snobol_pattern_build_t* build,
+                                         int var, int reg);
+
+/* --- Compound nodes ---------------------------------------------------- */
+
+/** @brief Create a CONCAT AST node (sequence of parts).  Takes ownership
+ *         of @p parts array and all child nodes. */
+ast_node_t* snobol_pattern_build_concat(snobol_pattern_build_t* build,
+                                         ast_node_t** parts, size_t count);
+
+/** @brief Create an ALT AST node (alternation). */
+ast_node_t* snobol_pattern_build_alt(snobol_pattern_build_t* build,
+                                      ast_node_t* left, ast_node_t* right);
+
+/* --- Control flow ------------------------------------------------------ */
+
+/** @brief Create a LABEL AST node. */
+ast_node_t* snobol_pattern_build_label(snobol_pattern_build_t* build,
+                                        const char* name, ast_node_t* target);
+
+/** @brief Create a GOTO AST node. */
+ast_node_t* snobol_pattern_build_goto(snobol_pattern_build_t* build,
+                                       const char* label);
+
+/* --- Position primitives ----------------------------------------------- */
+
+/** @brief Create a POS AST node. */
+ast_node_t* snobol_pattern_build_pos(snobol_pattern_build_t* build, int32_t n);
+
+/** @brief Create a TAB AST node. */
+ast_node_t* snobol_pattern_build_tab(snobol_pattern_build_t* build, int32_t n);
+
+/** @brief Create a RPOS AST node. */
+ast_node_t* snobol_pattern_build_rpos(snobol_pattern_build_t* build, int32_t n);
+
+/** @brief Create a RTAB AST node. */
+ast_node_t* snobol_pattern_build_rtab(snobol_pattern_build_t* build, int32_t n);
+
+/** @brief Create a BREAKX AST node. */
+ast_node_t* snobol_pattern_build_breakx(snobol_pattern_build_t* build,
+                                         const char* set, size_t len);
+
+/** @brief Create a BAL AST node. */
+ast_node_t* snobol_pattern_build_bal(snobol_pattern_build_t* build,
+                                      uint32_t open_cp, uint32_t close_cp);
+
+/** @brief Create a FENCE AST node. */
+ast_node_t* snobol_pattern_build_fence(snobol_pattern_build_t* build);
+
+/** @brief Create a REM AST node. */
+ast_node_t* snobol_pattern_build_rem(snobol_pattern_build_t* build);
+
+/** @brief Create an ABORT AST node. */
+ast_node_t* snobol_pattern_build_abort(snobol_pattern_build_t* build);
+
+/** @brief Create a FAIL AST node. */
+ast_node_t* snobol_pattern_build_fail(snobol_pattern_build_t* build);
+
+/** @brief Create a SUCCEED AST node. */
+ast_node_t* snobol_pattern_build_succeed(snobol_pattern_build_t* build);
+
+/**
+ * @brief Finalize and emit an AST tree built with the builder.
+ *
+ * Takes ownership of @p root and returns it.  After this call the builder
+ * may be reused to build a new tree, or destroyed.  The returned node
+ * must eventually be freed via snobol_ast_free().
+ *
+ * @param[in] build Builder instance (may be NULL for stateless usage).
+ * @param[in] root  Root AST node to emit (ownership transferred).
+ * @return @p root (non-NULL if input non-NULL).
+ */
+ast_node_t* snobol_pattern_build_emit(snobol_pattern_build_t* build,
+                                       ast_node_t* root);
+

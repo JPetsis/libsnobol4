@@ -105,6 +105,9 @@ add_library(snobol_php MODULE
     src/snobol_table_php.c
     src/snobol_array_php.c
     src/snobol_dynamic_pattern_php.c
+    src/snobol_builder_php.c
+    src/snobol_pattern_cache_php.c
+    src/snobol_pattern_helper_php.c
 )
 
 # Link against core library and essential PHP libs

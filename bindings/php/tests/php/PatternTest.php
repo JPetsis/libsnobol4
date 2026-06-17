@@ -48,7 +48,7 @@ class PatternTest extends TestCase
 
     public function testFromAstInvalidStructure(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(\ValueError::class);
         $this->expectExceptionMessage('Invalid AST');
         PatternHelper::fromAst(['invalid' => 'structure']);
     }

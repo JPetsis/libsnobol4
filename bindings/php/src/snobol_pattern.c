@@ -422,7 +422,8 @@ PHP_METHOD(Snobol_Pattern, match) {
     add_assoc_long(&metrics, "choice_allocated", (zend_long)vm.choice_allocated);
     add_assoc_long(&metrics, "choice_peak_depth", (zend_long)vm.choice_peak_depth);
     add_assoc_long(&metrics, "choice_peak_memory", (zend_long)vm.choice_peak_memory);
-    add_assoc_zval(return_value, "_metrics", &metrics);
+    snobol_assoc_zval(return_value, "_metrics", 8, &metrics);
+    zval_ptr_dtor(&metrics);
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
     vm_free_tables(&vm);
@@ -753,7 +754,8 @@ PHP_METHOD(Snobol_Pattern, searchAll) {
         add_assoc_long(&metrics, "choice_allocated", (zend_long)vm.choice_allocated);
         add_assoc_long(&metrics, "choice_peak_depth", (zend_long)vm.choice_peak_depth);
         add_assoc_long(&metrics, "choice_peak_memory", (zend_long)vm.choice_peak_memory);
-        add_assoc_zval(&match_arr, "_metrics", &metrics);
+        snobol_assoc_zval(&match_arr, "_metrics", 8, &metrics);
+        zval_ptr_dtor(&metrics);
 
         add_next_index_zval(return_value, &match_arr);
 

@@ -264,6 +264,7 @@ void test_jit_x86_64_suite(void);
 void test_lexer_suite(void);
 void test_parser_suite(void);
 void test_ast_suite(void);
+void test_compiler_suite(void);
 int  test_stress_backtracking_main(void);
 /* Built-in function test suites */
 void test_pattern_breakx_suite(void);
@@ -290,6 +291,7 @@ void test_compact_choice_suite(void);
 void test_unicode_fold_suite(void);
 void test_pattern_case_suite(void);
 void test_api_version_suite(void);
+void test_api_match_suite(void);
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
@@ -333,6 +335,7 @@ int main(void) {
     RUN_SUITE("Lexer",                      test_lexer_suite);
     RUN_SUITE("Parser",                     test_parser_suite);
     RUN_SUITE("AST",                        test_ast_suite);
+    RUN_SUITE("Compiler",                   test_compiler_suite);
 
     /* Built-in functions */
     RUN_SUITE("Pattern: BREAKX",            test_pattern_breakx_suite);
@@ -361,6 +364,7 @@ int main(void) {
     RUN_SUITE("Unicode Fold Table",         test_unicode_fold_suite);
     RUN_SUITE("Pattern: Case-Insensitive",  test_pattern_case_suite);
     RUN_SUITE("API Version",                test_api_version_suite);
+    RUN_SUITE("API: snobol_match()",        test_api_match_suite);
 
     /* Stress test */
     {

@@ -48,6 +48,8 @@ add_executable(snobol4_tests
     test_unicode_fold.c
     test_pattern_case.c
     test_api_version.c
+    test_api_match.c
+    test_compiler.c
 )
 
 # Link against core library

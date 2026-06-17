@@ -33,7 +33,7 @@ $hasExtension = extension_loaded('snobol');
 
 use Snobol\Builder as B;
 use Snobol\PatternHelper as PH;
-use Snobol\Text;
+// Text class wrappers available via Snobol\Text; calling \snobol_text_*() directly below
 
 echo "libsnobol4 PHP Text Function Examples\n";
 echo "======================================\n\n";
@@ -43,12 +43,12 @@ echo "======================================\n\n";
 // -------------------------------------------------------------------------
 echo "SIZE\n";
 if ($hasExtension) {
-    echo "  Text::size('hello')    = ".Text::size('hello')."\n";      // 5
-    echo "  Text::size('café')     = ".Text::size('café')."\n";       // 4 codepoints
-    echo "  Text::size('こんにちは') = ".Text::size('こんにちは')."\n"; // 5
+    echo "  \snobol_text_size('hello')    = ".\snobol_text_size('hello')."\n";      // 5
+    echo "  \snobol_text_size('café')     = ".\snobol_text_size('café')."\n";       // 4 codepoints
+    echo "  \snobol_text_size('こんにちは') = ".\snobol_text_size('こんにちは')."\n"; // 5
 } else {
-    echo "  Text::size('hello')    → 5\n";
-    echo "  Text::size('café')     → 4  (codepoints, not bytes)\n";
+    echo "  \snobol_text_size('hello')    → 5\n";
+    echo "  \snobol_text_size('café')     → 4  (codepoints, not bytes)\n";
 }
 echo "\n";
 
@@ -58,9 +58,9 @@ echo "\n";
 echo "TRIM\n";
 if ($hasExtension) {
     $s = "hello   \t\n";
-    echo "  Text::trim('hello   \\t\\n')  = '".Text::trim($s)."'\n";
+    echo "  \snobol_text_trim('hello   \\t\\n')  = '".\snobol_text_trim($s)."'\n";
 } else {
-    echo "  Text::trim('hello   \\t\\n')  → 'hello'\n";
+    echo "  \snobol_text_trim('hello   \\t\\n')  → 'hello'\n";
 }
 echo "\n";
 
@@ -69,10 +69,10 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "DUPL\n";
 if ($hasExtension) {
-    echo "  Text::dupl('ab', 4)  = '".Text::dupl('ab', 4)."'\n"; // 'abababab'
-    echo "  Text::dupl('x', 0)   = '".Text::dupl('x', 0)."'\n";  // ''
+    echo "  \snobol_text_dupl('ab', 4)  = '".\snobol_text_dupl('ab', 4)."'\n"; // 'abababab'
+    echo "  \snobol_text_dupl('x', 0)   = '".\snobol_text_dupl('x', 0)."'\n";  // ''
 } else {
-    echo "  Text::dupl('ab', 4)  → 'abababab'\n";
+    echo "  \snobol_text_dupl('ab', 4)  → 'abababab'\n";
 }
 echo "\n";
 
@@ -81,11 +81,11 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "REVERSE\n";
 if ($hasExtension) {
-    echo "  Text::reverse('hello')  = '".Text::reverse('hello')."'\n"; // 'olleh'
-    echo "  Text::reverse('café')   = '".Text::reverse('café')."'\n";  // 'éfac'
+    echo "  \snobol_text_reverse('hello')  = '".\snobol_text_reverse('hello')."'\n"; // 'olleh'
+    echo "  \snobol_text_reverse('café')   = '".\snobol_text_reverse('café')."'\n";  // 'éfac'
 } else {
-    echo "  Text::reverse('hello')  → 'olleh'\n";
-    echo "  Text::reverse('café')   → 'éfac'  (codepoint-safe)\n";
+    echo "  \snobol_text_reverse('hello')  → 'olleh'\n";
+    echo "  \snobol_text_reverse('café')   → 'éfac'  (codepoint-safe)\n";
 }
 echo "\n";
 
@@ -94,10 +94,10 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "SUBSTR\n";
 if ($hasExtension) {
-    echo "  Text::substr('hello world', 7, 5)  = '".Text::substr('hello world', 7, 5)."'\n"; // 'world'
-    echo "  Text::substr('café', 3, 2)          = '".Text::substr('café', 3, 2)."'\n";        // 'fé'
+    echo "  \snobol_text_substr('hello world', 7, 5)  = '".\snobol_text_substr('hello world', 7, 5)."'\n"; // 'world'
+    echo "  \snobol_text_substr('café', 3, 2)          = '".\snobol_text_substr('café', 3, 2)."'\n";        // 'fé'
 } else {
-    echo "  Text::substr('hello world', 7, 5)  → 'world'  (1-based, codepoint)\n";
+    echo "  \snobol_text_substr('hello world', 7, 5)  → 'world'  (1-based, codepoint)\n";
 }
 echo "\n";
 
@@ -106,10 +106,10 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "REPLACE\n";
 if ($hasExtension) {
-    echo "  Text::replace('foo bar foo', 'foo', 'qux')  = '"
-        .Text::replace('foo bar foo', 'foo', 'qux')."'\n"; // 'qux bar qux'
+    echo "  \snobol_text_replace('foo bar foo', 'foo', 'qux')  = '"
+        .\snobol_text_replace('foo bar foo', 'foo', 'qux')."'\n"; // 'qux bar qux'
 } else {
-    echo "  Text::replace('foo bar foo', 'foo', 'qux')  → 'qux bar qux'\n";
+    echo "  \snobol_text_replace('foo bar foo', 'foo', 'qux')  → 'qux bar qux'\n";
 }
 echo "\n";
 
@@ -118,10 +118,10 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "REPLACE_CHAR\n";
 if ($hasExtension) {
-    echo "  Text::replaceChar('hello', 'aeiou', 'AEIOU')  = '"
-        .Text::replaceChar('hello', 'aeiou', 'AEIOU')."'\n"; // 'hEllO'
+    echo "  \snobol_text_replace_char('hello', 'aeiou', 'AEIOU')  = '"
+        .\snobol_text_replace_char('hello', 'aeiou', 'AEIOU')."'\n"; // 'hEllO'
 } else {
-    echo "  Text::replaceChar('hello', 'aeiou', 'AEIOU')  → 'hEllO'\n";
+    echo "  \snobol_text_replace_char('hello', 'aeiou', 'AEIOU')  → 'hEllO'\n";
 }
 echo "\n";
 
@@ -130,11 +130,11 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "LPAD / RPAD\n";
 if ($hasExtension) {
-    echo "  Text::lpad('hi', 10)       = '".Text::lpad('hi', 10)."'\n";
-    echo "  Text::rpad('hi', 10, '-')  = '".Text::rpad('hi', 10, '-')."'\n";
+    echo "  \snobol_text_lpad('hi', 10)       = '".\snobol_text_lpad('hi', 10)."'\n";
+    echo "  \snobol_text_rpad('hi', 10, '-')  = '".\snobol_text_rpad('hi', 10, '-')."'\n";
 } else {
-    echo "  Text::lpad('hi', 10)       → '        hi'\n";
-    echo "  Text::rpad('hi', 10, '-')  → 'hi--------'\n";
+    echo "  \snobol_text_lpad('hi', 10)       → '        hi'\n";
+    echo "  \snobol_text_rpad('hi', 10, '-')  → 'hi--------'\n";
 }
 echo "\n";
 
@@ -143,15 +143,15 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "CHAR / ORD\n";
 if ($hasExtension) {
-    echo "  Text::char(65)       = '".Text::char(65)."'\n";       // 'A'
-    echo "  Text::char(0x1F98A)  = '".Text::char(0x1F98A)."'\n"; // '🦊'
-    echo "  Text::ord('A')       = ".Text::ord('A')."\n";       // 65
-    echo "  Text::ord('🦊')      = ".Text::ord('🦊')."\n";      // 129674
+    echo "  \snobol_text_char(65)       = '".\snobol_text_char(65)."'\n";       // 'A'
+    echo "  \snobol_text_char(0x1F98A)  = '".\snobol_text_char(0x1F98A)."'\n"; // '🦊'
+    echo "  \snobol_text_ord('A')       = ".\snobol_text_ord('A')."\n";       // 65
+    echo "  \snobol_text_ord('🦊')      = ".\snobol_text_ord('🦊')."\n";      // 129674
 } else {
-    echo "  Text::char(65)       → 'A'\n";
-    echo "  Text::char(0x1F98A)  → '🦊'\n";
-    echo "  Text::ord('A')       → 65\n";
-    echo "  Text::ord('🦊')      → 129674\n";
+    echo "  \snobol_text_char(65)       → 'A'\n";
+    echo "  \snobol_text_char(0x1F98A)  → '🦊'\n";
+    echo "  \snobol_text_ord('A')       → 65\n";
+    echo "  \snobol_text_ord('🦊')      → 129674\n";
 }
 echo "\n";
 
@@ -160,11 +160,11 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "UPPER / LOWER  (v1.0: ASCII fast path)\n";
 if ($hasExtension) {
-    echo "  Text::upper('Hello World!')  = '".Text::upper('Hello World!')."'\n";
-    echo "  Text::lower('Hello World!')  = '".Text::lower('Hello World!')."'\n";
+    echo "  \snobol_text_upper('Hello World!')  = '".\snobol_text_upper('Hello World!')."'\n";
+    echo "  \snobol_text_lower('Hello World!')  = '".\snobol_text_lower('Hello World!')."'\n";
 } else {
-    echo "  Text::upper('Hello World!')  → 'HELLO WORLD!'\n";
-    echo "  Text::lower('Hello World!')  → 'hello world!'\n";
+    echo "  \snobol_text_upper('Hello World!')  → 'HELLO WORLD!'\n";
+    echo "  \snobol_text_lower('Hello World!')  → 'hello world!'\n";
 }
 echo "\n";
 
@@ -173,11 +173,11 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "IDENT / DIFFER\n";
 if ($hasExtension) {
-    var_dump(Text::ident('abc', 'abc'));   // bool(true)
-    var_dump(Text::differ('abc', 'xyz')); // bool(true)
+    var_dump(\snobol_text_ident('abc', 'abc'));   // bool(true)
+    var_dump(\snobol_text_differ('abc', 'xyz')); // bool(true)
 } else {
-    echo "  Text::ident('abc', 'abc')    → true\n";
-    echo "  Text::differ('abc', 'xyz')   → true\n";
+    echo "  \snobol_text_ident('abc', 'abc')    → true\n";
+    echo "  \snobol_text_differ('abc', 'xyz')   → true\n";
 }
 echo "\n";
 
@@ -186,12 +186,12 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "LEX* comparisons\n";
 if ($hasExtension) {
-    var_dump(Text::lexlt('abc', 'abd')); // bool(true)
-    var_dump(Text::lexgt('xyz', 'abc')); // bool(true)
-    var_dump(Text::lexeq('hi', 'hi'));   // bool(true)
+    var_dump(\snobol_text_lexlt('abc', 'abd')); // bool(true)
+    var_dump(\snobol_text_lexgt('xyz', 'abc')); // bool(true)
+    var_dump(\snobol_text_lexeq('hi', 'hi'));   // bool(true)
 } else {
-    echo "  Text::lexlt('abc', 'abd')  → true\n";
-    echo "  Text::lexgt('xyz', 'abc')  → true\n";
+    echo "  \snobol_text_lexlt('abc', 'abd')  → true\n";
+    echo "  \snobol_text_lexgt('xyz', 'abc')  → true\n";
 }
 echo "\n";
 
@@ -200,18 +200,18 @@ echo "\n";
 // -------------------------------------------------------------------------
 echo "Type predicates\n";
 if ($hasExtension) {
-    var_dump(Text::integer('42'));      // bool(true)
-    var_dump(Text::integer('42.5'));    // bool(false)
-    var_dump(Text::real('3.14'));       // bool(true)
-    var_dump(Text::real('1.2e-3'));     // bool(true)
-    var_dump(Text::numeric('100'));     // bool(true)
-    var_dump(Text::numeric('hello'));   // bool(false)
+    var_dump(\snobol_text_integer('42'));      // bool(true)
+    var_dump(\snobol_text_integer('42.5'));    // bool(false)
+    var_dump(\snobol_text_real('3.14'));       // bool(true)
+    var_dump(\snobol_text_real('1.2e-3'));     // bool(true)
+    var_dump(\snobol_text_numeric('100'));     // bool(true)
+    var_dump(\snobol_text_numeric('hello'));   // bool(false)
 } else {
-    echo "  Text::integer('42')     → true\n";
-    echo "  Text::integer('42.5')   → false\n";
-    echo "  Text::real('3.14')      → true\n";
-    echo "  Text::numeric('100')    → true\n";
-    echo "  Text::numeric('hello')  → false\n";
+    echo "  \snobol_text_integer('42')     → true\n";
+    echo "  \snobol_text_integer('42.5')   → false\n";
+    echo "  \snobol_text_real('3.14')      → true\n";
+    echo "  \snobol_text_numeric('100')    → true\n";
+    echo "  \snobol_text_numeric('hello')  → false\n";
 }
 echo "\n";
 

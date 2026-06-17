@@ -24,7 +24,7 @@ class PatternCacheTest extends TestCase
 
     public function testCacheCapacityMustBePositive(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(\ValueError::class);
         new PatternCache(0);
     }
 

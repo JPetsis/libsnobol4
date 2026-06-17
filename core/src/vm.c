@@ -717,6 +717,15 @@ bool vm_run(VM *vm) {
                     }
                     vm->cap_end[r] = vm->pos;
                     if (r >= vm->max_cap_used) vm->max_cap_used = r + 1;
+                    /* Also expose the capture register as variable v<r> so
+                       it appears in the match result without an explicit
+                       OP_ASSIGN.  Cap registers and var indices are 1:1. */
+                    if (r < MAX_VARS) {
+                        vm->var_start[r] = vm->cap_start[r];
+                        vm->var_end[r]   = vm->cap_end[r];
+                        if ((size_t)r + 1 > vm->var_count)
+                            vm->var_count = (size_t)r + 1;
+                    }
                 }
                 break;
             }

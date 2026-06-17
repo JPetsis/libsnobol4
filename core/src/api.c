@@ -270,3 +270,295 @@ const char* snobol_match_get_variable(snobol_match_t* match, const char* name, s
     return match->var_values[i];
 }
 
+/* ---------------------------------------------------------------------------
+ * One-shot convenience match API
+ * --------------------------------------------------------------------------- */
+
+#define MATCH_MAX_CAPTURES 64
+
+snobol_match_result_t* snobol_match(const char* pattern, size_t pat_len,
+                                     const char* subject, size_t sub_len,
+                                     uint32_t flags)
+{
+    snobol_match_result_t *result = (snobol_match_result_t *)
+        snobol_malloc(sizeof(snobol_match_result_t));
+    if (!result) return NULL;
+    memset(result, 0, sizeof(snobol_match_result_t));
+
+    /* Compile pattern */
+    bool case_insensitive = (flags & SNOBOL_FLAG_CASE_INSENSITIVE) != 0;
+    snobol_context_t *ctx = NULL; /* not needed for compile, but required by API */
+    char *compile_error = NULL;
+    snobol_pattern_t *pat = do_compile(pattern, pat_len, case_insensitive, &compile_error);
+
+    if (!pat) {
+        if (compile_error) {
+            result->error = compile_error; /* transfer ownership */
+        } else {
+            result->error = snobol_malloc(16);
+            if (result->error) memcpy(result->error, "unknown error", 14);
+        }
+        return result;
+    }
+
+    /* Set up output buffer */
+    snobol_buf out_buf = {0};
+    snobol_buf_init(&out_buf);
+
+    /* Initialise VM */
+    VM vm;
+    memset(&vm, 0, sizeof(VM));
+    vm.bc     = pat->bc;
+    vm.bc_len = pat->bc_len;
+    vm.s      = subject;
+    vm.len    = sub_len;
+    vm.out    = &out_buf;
+
+    bool ok = vm_run(&vm);
+    result->success = ok;
+
+    if (ok && out_buf.len > 0) {
+        result->output = (char *)snobol_malloc(out_buf.len + 1);
+        if (result->output) {
+            memcpy(result->output, out_buf.data, out_buf.len);
+            result->output[out_buf.len] = '\0';
+            result->output_len = out_buf.len;
+        }
+    }
+
+    /* Copy named variables */
+    int n = (int)vm.var_count;
+    if (n > MATCH_MAX_CAPTURES) n = MATCH_MAX_CAPTURES;
+    result->capture_count = n;
+
+    if (n > 0) {
+        result->captures = (char **)snobol_calloc((size_t)n, sizeof(char *));
+        result->capture_lens = (size_t *)snobol_calloc((size_t)n, sizeof(size_t));
+        if (result->captures && result->capture_lens) {
+            for (int i = 0; i < n; i++) {
+                size_t vs = vm.var_start[i];
+                size_t ve = vm.var_end[i];
+                if (ve > vs && ve <= sub_len) {
+                    size_t vlen = ve - vs;
+                    result->captures[i] = (char *)snobol_malloc(vlen + 1);
+                    if (result->captures[i]) {
+                        memcpy(result->captures[i], subject + vs, vlen);
+                        result->captures[i][vlen] = '\0';
+                        result->capture_lens[i] = vlen;
+                    }
+                }
+            }
+        }
+    }
+
+    snobol_buf_free(&out_buf);
+    vm_free_labels(&vm);
+    snobol_pattern_free(pat);
+    snobol_free(compile_error);
+
+    return result;
+}
+
+void snobol_match_result_free(snobol_match_result_t* result) {
+    if (!result) return;
+    snobol_free(result->error);
+    snobol_free(result->output);
+    if (result->captures) {
+        for (int i = 0; i < result->capture_count; i++) {
+            snobol_free(result->captures[i]);
+        }
+        snobol_free(result->captures);
+    }
+    snobol_free(result->capture_lens);
+    snobol_free(result);
+}
+
+/* ---------------------------------------------------------------------------
+ * Builder API
+ * --------------------------------------------------------------------------- */
+
+struct snobol_pattern_build {
+    int _reserved;
+};
+
+snobol_pattern_build_t* snobol_pattern_build_create(void) {
+    snobol_pattern_build_t *b = (snobol_pattern_build_t *)
+        snobol_malloc(sizeof(snobol_pattern_build_t));
+    if (b) b->_reserved = 0;
+    return b;
+}
+
+void snobol_pattern_build_destroy(snobol_pattern_build_t* build) {
+    if (build) snobol_free(build);
+}
+
+ast_node_t* snobol_pattern_build_lit(snobol_pattern_build_t* build,
+                                      const char* text, size_t len)
+{
+    (void)build;
+    return snobol_ast_create_lit(text, len);
+}
+
+ast_node_t* snobol_pattern_build_span(snobol_pattern_build_t* build,
+                                       const char* set, size_t len)
+{
+    (void)build;
+    return snobol_ast_create_span(set, len);
+}
+
+ast_node_t* snobol_pattern_build_brk(snobol_pattern_build_t* build,
+                                      const char* set, size_t len)
+{
+    (void)build;
+    return snobol_ast_create_break(set, len);
+}
+
+ast_node_t* snobol_pattern_build_any(snobol_pattern_build_t* build,
+                                      const char* set, size_t len)
+{
+    (void)build;
+    return snobol_ast_create_any(set, len);
+}
+
+ast_node_t* snobol_pattern_build_notany(snobol_pattern_build_t* build,
+                                         const char* set, size_t len)
+{
+    (void)build;
+    return snobol_ast_create_notany(set, len);
+}
+
+ast_node_t* snobol_pattern_build_len(snobol_pattern_build_t* build,
+                                      int32_t n)
+{
+    (void)build;
+    return snobol_ast_create_len(n);
+}
+
+ast_node_t* snobol_pattern_build_arbno(snobol_pattern_build_t* build,
+                                        ast_node_t* sub)
+{
+    (void)build;
+    return snobol_ast_create_arbno(sub);
+}
+
+ast_node_t* snobol_pattern_build_cap(snobol_pattern_build_t* build,
+                                      int reg, ast_node_t* sub)
+{
+    (void)build;
+    return snobol_ast_create_cap(reg, sub);
+}
+
+ast_node_t* snobol_pattern_build_assign(snobol_pattern_build_t* build,
+                                         int var, int reg)
+{
+    (void)build;
+    return snobol_ast_create_assign(var, reg);
+}
+
+ast_node_t* snobol_pattern_build_concat(snobol_pattern_build_t* build,
+                                         ast_node_t** parts, size_t count)
+{
+    (void)build;
+    return snobol_ast_create_concat(parts, count);
+}
+
+ast_node_t* snobol_pattern_build_alt(snobol_pattern_build_t* build,
+                                      ast_node_t* left, ast_node_t* right)
+{
+    (void)build;
+    return snobol_ast_create_alt(left, right);
+}
+
+ast_node_t* snobol_pattern_build_label(snobol_pattern_build_t* build,
+                                        const char* name, ast_node_t* target)
+{
+    (void)build;
+    /* snobol_ast_create_label takes ownership of name */
+    char *name_copy = (char *)snobol_malloc(strlen(name) + 1);
+    if (name_copy) strcpy(name_copy, name);
+    return snobol_ast_create_label(name_copy, target);
+}
+
+ast_node_t* snobol_pattern_build_goto(snobol_pattern_build_t* build,
+                                       const char* label)
+{
+    (void)build;
+    return snobol_ast_create_goto(label);
+}
+
+ast_node_t* snobol_pattern_build_pos(snobol_pattern_build_t* build, int32_t n)
+{
+    (void)build;
+    return snobol_ast_create_pos(n);
+}
+
+ast_node_t* snobol_pattern_build_tab(snobol_pattern_build_t* build, int32_t n)
+{
+    (void)build;
+    return snobol_ast_create_tab(n);
+}
+
+ast_node_t* snobol_pattern_build_rpos(snobol_pattern_build_t* build, int32_t n)
+{
+    (void)build;
+    return snobol_ast_create_rpos(n);
+}
+
+ast_node_t* snobol_pattern_build_rtab(snobol_pattern_build_t* build, int32_t n)
+{
+    (void)build;
+    return snobol_ast_create_rtab(n);
+}
+
+ast_node_t* snobol_pattern_build_breakx(snobol_pattern_build_t* build,
+                                         const char* set, size_t len)
+{
+    (void)build;
+    return snobol_ast_create_breakx(set, len);
+}
+
+ast_node_t* snobol_pattern_build_bal(snobol_pattern_build_t* build,
+                                      uint32_t open_cp, uint32_t close_cp)
+{
+    (void)build;
+    return snobol_ast_create_bal(open_cp, close_cp);
+}
+
+ast_node_t* snobol_pattern_build_fence(snobol_pattern_build_t* build)
+{
+    (void)build;
+    return snobol_ast_create_fence();
+}
+
+ast_node_t* snobol_pattern_build_rem(snobol_pattern_build_t* build)
+{
+    (void)build;
+    return snobol_ast_create_rem();
+}
+
+ast_node_t* snobol_pattern_build_abort(snobol_pattern_build_t* build)
+{
+    (void)build;
+    return snobol_ast_create_abort();
+}
+
+ast_node_t* snobol_pattern_build_fail(snobol_pattern_build_t* build)
+{
+    (void)build;
+    return snobol_ast_create_fail();
+}
+
+ast_node_t* snobol_pattern_build_succeed(snobol_pattern_build_t* build)
+{
+    (void)build;
+    return snobol_ast_create_succeed();
+}
+
+ast_node_t* snobol_pattern_build_emit(snobol_pattern_build_t* build,
+                                       ast_node_t* root)
+{
+    (void)build;
+    /* Ownership is transferred to the caller; just return the root. */
+    return root;
+}
+

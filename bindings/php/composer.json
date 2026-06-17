@@ -18,10 +18,10 @@
   },
   "autoload": {
     "psr-4": {
-      "Snobol\\": "php-src/"
+      "Snobol\\": "stubs/"
     },
     "files": [
-      "php-src/functions.php"
+      "stubs/functions.php"
     ]
   },
   "autoload-dev": {

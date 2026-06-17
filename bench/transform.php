@@ -45,7 +45,7 @@ $harness->bench(
     'upper_case',
     'snobol_text',
     function () use ($text) {
-        $r = Text::upper($text);
+        $r = \snobol_text_upper($text);
     },
     $warmup, $iterations, $textSize
 );
@@ -66,7 +66,7 @@ $harness->bench(
     'lower_case',
     'snobol_text',
     function () use ($text) {
-        $r = Text::lower($text);
+        $r = \snobol_text_lower($text);
     },
     $warmup, $iterations, $textSize
 );
@@ -90,7 +90,7 @@ $harness->bench(
     'trim_trailing',
     'snobol_text',
     function () use ($paddedText) {
-        $r = Text::trim($paddedText);
+        $r = \snobol_text_trim($paddedText);
     },
     $warmup, $iterations, $paddedSize
 );
@@ -111,7 +111,7 @@ $harness->bench(
     'replace_word',
     'snobol_text',
     function () use ($text) {
-        $r = Text::replace($text, 'Fox', 'CAT');
+        $r = \snobol_text_replace($text, 'Fox', 'CAT');
     },
     $warmup, $iterations, $textSize
 );
@@ -133,7 +133,7 @@ $harness->bench(
     'dupl_100x',
     'snobol_text',
     function () use ($shortStr) {
-        $r = Text::dupl($shortStr, 100);
+        $r = \snobol_text_dupl($shortStr, 100);
     },
     $warmup, $iterations, strlen($shortStr)
 );
@@ -154,7 +154,7 @@ $harness->bench(
     'replace_char',
     'snobol_text',
     function () use ($text) {
-        $r = Text::replaceChar($text, 'aeiou', 'AEIOU');
+        $r = \snobol_text_replace_char($text, 'aeiou', 'AEIOU');
     },
     $warmup, $iterations, $textSize
 );

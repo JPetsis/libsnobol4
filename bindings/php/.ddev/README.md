@@ -116,7 +116,7 @@ bindings/php/
 │   └── docker-compose.local.yaml            # Your local override (git-ignored)
 ├── config.m4                                # PHP extension build config
 ├── src/                                     # PHP extension C source
-├── php-src/                                 # PHP helper classes
+├── stubs/                                   # IDE stubs (classes now in .so)
 └── tests/                                   # PHPUnit tests
 ```
 

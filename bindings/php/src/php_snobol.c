@@ -59,6 +59,15 @@ void snobol_array_php_minit(void);
 /* Extern declaration from snobol_dynamic_pattern_php.c */
 void snobol_dynamic_pattern_cache_php_minit(void);
 
+/* Extern declaration from snobol_builder_php.c */
+void snobol_builder_php_minit(void);
+
+/* Extern declaration from snobol_pattern_cache_php.c */
+void snobol_pattern_cache_php_minit(void);
+
+/* Extern declaration from snobol_pattern_helper_php.c */
+void snobol_pattern_helper_php_minit(void);
+
 PHP_MINFO_FUNCTION(snobol);
 #ifdef SNOBOL_JIT
 #include "snobol/jit.h"
@@ -104,6 +113,9 @@ PHP_MINIT_FUNCTION(snobol) {
     snobol_table_php_minit();
     snobol_array_php_minit();
     snobol_dynamic_pattern_cache_php_minit();
+    snobol_builder_php_minit();
+    snobol_pattern_cache_php_minit();
+    snobol_pattern_helper_php_minit();
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): DONE");
     return SUCCESS;
 }

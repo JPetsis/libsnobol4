@@ -17,8 +17,6 @@ require $autoload;
 require __DIR__.'/Harness.php';
 
 use Bench\Harness;
-use Snobol\Text;
-
 $harness = new Harness();
 
 // Test inputs
@@ -45,7 +43,7 @@ $harness->bench(
     'size_ascii',
     'snobol_text',
     function () use ($asciiStr) {
-        $n = Text::size($asciiStr);
+        $n = \snobol_text_size($asciiStr);
     },
     $warmup, $iterations, $asciiSize
 );
@@ -66,7 +64,7 @@ $harness->bench(
     'size_unicode',
     'snobol_text',
     function () use ($unicodeStr) {
-        $n = Text::size($unicodeStr);
+        $n = \snobol_text_size($unicodeStr);
     },
     $warmup, $iterations, $unicodeSize
 );
@@ -87,7 +85,7 @@ $harness->bench(
     'reverse_ascii',
     'snobol_text',
     function () use ($asciiStr) {
-        $r = Text::reverse($asciiStr);
+        $r = \snobol_text_reverse($asciiStr);
     },
     $warmup, $iterations, $asciiSize
 );
@@ -110,7 +108,7 @@ $harness->bench(
     'reverse_unicode',
     'snobol_text',
     function () use ($unicodeStr) {
-        $r = Text::reverse($unicodeStr);
+        $r = \snobol_text_reverse($unicodeStr);
     },
     $warmup, $iterations2, $unicodeSize
 );
@@ -132,7 +130,7 @@ $harness->bench(
     'substr_ascii',
     'snobol_text',
     function () use ($asciiStr) {
-        $r = Text::substr($asciiStr, 10, 20);
+        $r = \snobol_text_substr($asciiStr, 10, 20);
     },
     $warmup, $iterations, $asciiSize
 );
@@ -156,7 +154,7 @@ $harness->bench(
     'ord_ascii',
     'snobol_text',
     function () use ($aChar) {
-        $n = Text::ord($aChar);
+        $n = \snobol_text_ord($aChar);
     },
     $warmup, $iterations, 1
 );
@@ -177,7 +175,7 @@ $harness->bench(
     'char_ascii',
     'snobol_text',
     function () {
-        $c = Text::char(65);
+        $c = \snobol_text_char(65);
     },
     $warmup, $iterations, 1
 );

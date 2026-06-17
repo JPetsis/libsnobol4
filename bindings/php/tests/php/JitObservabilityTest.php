@@ -105,10 +105,13 @@ class JitObservabilityTest extends TestCase
         // The profitability gate (skip_backtrack_heavy + min_useful_ops) should skip JIT.
         $pattern = Builder::alt(
             Builder::lit("alpha"),
-            Builder::lit("beta"),
-            Builder::lit("gamma"),
-            Builder::lit("delta"),
-            Builder::lit("epsilon")
+            Builder::alt(
+                Builder::lit("beta"),
+                Builder::alt(
+                    Builder::lit("gamma"),
+                    Builder::alt(Builder::lit("delta"), Builder::lit("epsilon"))
+                )
+            )
         );
         $p = Pattern::compileFromAst($pattern);
         $p->setJit(true);

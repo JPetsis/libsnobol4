@@ -25,4 +25,13 @@ int compile_ast_to_bytecode_wrapper(ast_node_t *ast, zval *options, uint8_t **ou
 typedef struct snobol_table snobol_table_t;
 size_t php_snobol_get_all_tables(snobol_table_t ***out_tables);
 
+/* PHP 8.5 removed the refcount increment from add_assoc_zval. Use this helper
+   instead when storing reference-counted zvals (arrays, objects). */
+static zend_always_inline void snobol_assoc_zval(zval *arr, const char *key,
+                                                  size_t key_len, zval *value) {
+    zval copy;
+    ZVAL_COPY(&copy, value);
+    zend_hash_str_update(Z_ARRVAL_P(arr), key, key_len, &copy);
+}
+
 #endif /* PHP_SNOBOL_H */

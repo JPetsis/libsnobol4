@@ -113,21 +113,46 @@ $result = PatternHelper::matchOnce($pattern, "abc123");
 
 ### Captures and Assignments
 
+`Builder::cap(reg, sub)` captures the text matched by `sub` into capture
+register `reg` (0–255).  Capture register `reg` is also exposed in the
+match result as `v<reg>`, so you don't need a separate `assign()` call:
+
 ```php
 <?php
 use Snobol\Builder;
 use Snobol\PatternHelper;
 
-// Capture digits after "id:"
+// Capture digits after "id:" — register 0 is exposed as 'v0' automatically
 $pattern = Builder::concat([
     Builder::lit("id:"),
     Builder::cap(0, Builder::span("0123456789")),
-    Builder::assign(0, 0)  // Assign capture 0 to variable v0
 ]);
 
 $result = PatternHelper::matchOnce($pattern, "id:12345");
 // Returns: ['v0' => '12345', '_match_len' => 8, '_output' => '']
 ```
+
+Multiple captures:
+
+```php
+$ast = Builder::concat([
+    Builder::cap(0, Builder::span("a-z")),  // captures "foo"
+    Builder::lit("@"),
+    Builder::cap(1, Builder::span("a-z")),  // captures "example"
+    Builder::lit("."),
+    Builder::cap(2, Builder::span("a-z")),  // captures "com"
+]);
+$result = PatternHelper::matchOnce($ast, "foo@example.com");
+// Returns: ['v0' => 'foo', 'v1' => 'example', 'v2' => 'com', '_match_len' => 13, ...]
+```
+
+> **Why the implicit `v<reg>` exposure?**
+> Before this feature, `Builder::cap(reg, sub)` required a separate
+> `Builder::assign(var, reg)` call to make captures visible in the
+> match result.  The `OP_CAP_END` VM opcode now also writes
+> `vm.var_start[reg]` / `vm.var_end[reg]` and bumps `vm.var_count`, so
+> the `v<reg>` key is populated automatically.  This makes
+> `Builder::cap(reg, sub)` a self-contained capture primitive.
 
 ### Pattern Replacement
 
@@ -290,6 +315,49 @@ $arr->keys();                // Array of integer keys
 $arr->values();              // Array of values
 $arr->clear();               // Remove all entries
 ```
+
+### PatternCache
+
+LRU cache for compiled patterns, keyed by a user-supplied string.  Use when the
+key is in the application and the pattern body must be built from a closure:
+
+```php
+use Snobol\PatternCache;
+use Snobol\PatternHelper;
+
+$cache = new PatternCache(128);  // optional capacity, default 128
+$ast = \Snobol\Builder::lit("hello");
+$pattern = $cache->get('hello-key', fn() => PatternHelper::fromAst($ast));
+// Second call with the same key returns the same Pattern instance.
+$same = $cache->get('hello-key', fn() => PatternHelper::fromAst($ast));
+```
+
+When the cache is full, the least-recently-used entry is evicted.
+
+### DynamicPatternCache
+
+Caches patterns by their **source text** (the string passed to `Pattern::fromString`).
+Use when the pattern is already in source form:
+
+```php
+use Snobol\DynamicPatternCache;
+
+$cache = new DynamicPatternCache();
+
+// Compile once, reuse for many evaluations.
+$result = $cache->evaluate("'world'", "hello world");
+// $result = ['cached' => false, 'evaluated' => true, 'matches' => [...]]
+
+$result = $cache->evaluate("'world'", "world");
+// $result = ['cached' => true,  'evaluated' => true, 'matches' => [...]]
+
+$stats = $cache->stats();
+// $stats = ['size' => 1, 'max_size' => 128, 'compile_count' => 1, 'evaluate_count' => 2]
+```
+
+`compile()` returns `['cached' => bool, 'compiled' => bool, 'pattern' => string]`.
+`evaluate()` returns `['cached' => bool, 'evaluated' => bool, 'matches' => array|null]`.
+Invalid patterns return `compiled => false` or `evaluated => false` without throwing.
 
 ## Template Syntax
 

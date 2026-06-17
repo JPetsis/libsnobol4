@@ -5,6 +5,78 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Convenience API for PHP binding
+
+### Added
+
+- **`snobol_match()` one-shot C API** (`core/src/api.c`): bundles lex→parse→compile→VM
+  into a single call returning a heap-allocated `snobol_match_result_t` with `success`,
+  `error`, `output`, and positional `captures[]`.  Ideal for one-off matches; for repeated
+  matching of the same pattern use the multi-step API instead.
+- **`snobol_pattern_build_*()` C builder API** in `core/src/api.c`: programmatic AST
+  construction for all 22 pattern primitives (lit, span, brk, any, notany, len, arbno,
+  cap, assign, concat, alt, label, goto, pos, tab, abort, fail, succeed, …).
+- **PHP binding** (`bindings/php`):
+  - `Snobol\Builder` C class wrapping `snobol_pattern_build_*()` — 35 static methods
+    (lit, span, concat, alt, cap, label, tableAccess, etc.).
+  - `Snobol\PatternCache` and `Snobol\DynamicPatternCache` migrated from PHP to C
+    (LRU eviction, dynamic pattern compilation cache).
+  - `Snobol\PatternHelper` migrated to C with all 10 methods (fromString, fromAst,
+    matchOnce, matchAll, split, replace, evalPattern, tableSubst, formattedSubst, clearCache).
+  - `Pattern::match()` and `Pattern::*` migrated to C — no PHP-level pattern processing
+    (enforced by `ArchitecturalConstraintsTest`).
+  - `Snobol\Text` PHP class removed; all `snobol_text_*()` helpers (size, trim, dupl,
+    reverse, substr, replace, char, ord, upper, lower, eq, ne, lt, gt, le, ge, ident,
+    differ, lexeq, lexlt, lexgt, integer, real, numeric) implemented as C `PHP_FUNCTION()`s.
+- **PHP 8.5 compatibility** (DDEV 8.5.7, API 20250925):
+  - Replaced removed `zend_call_static_method` with direct `zend_call_method` on objects.
+  - Updated `zend_call_method_with_*_params` invocations to new inline-function signatures
+    taking `zend_object*` first arg.
+  - Replaced `zend_ce_invalid_argument` with `zend_ce_value_error` and `zend_ce_std` with
+    `Z_PARAM_OBJECT`.
+- **Examples**: `examples/c/one_shot_match.c` demonstrates the new one-shot C API.
+- **Tests**:
+  - New `tests/c/test_api_match.c` with 33 assertions for `snobol_match()` API.
+  - New `tests/c/test_compiler.c` with 19 assertions for the AST→bytecode compiler,
+    including regression tests for the capture-exposure bug.
+  - New `bindings/php/tests/php/ConvenienceApiTest.php` with 35 tests for the PHP
+    convenience layer (3 of which are capture tests for `Builder::cap`).
+  - C core test suite now 1621 tests (up from 1569).
+  - PHP test suite now 356 tests (up from 321).
+
+### Fixed
+
+- **PHP 8.5 `add_assoc_zval` no longer increments refcount** (root cause of all 321+ PHP
+  test crashes).  Added `snobol_assoc_zval()` helper in `php_snobol.h` that uses
+  `ZVAL_COPY` + `zend_hash_str_update` to properly retain sub-pattern references.
+  Replaced all 22 `add_assoc_zval` calls across builder, dynamic cache, and pattern code.
+- **`Builder::cap(reg, sub)` did not expose captures in the match result**.
+  `OP_CAP_END` only updated `cap_start[reg]` / `cap_end[reg]`; `vm.var_count`
+  was bumped only by `OP_ASSIGN`.  Fixed `core/src/vm.c::OP_CAP_END` to also
+  write `var_start[reg]` / `var_end[reg]` and bump `var_count` so capture
+  register `reg` is exposed as `v<reg>` in `Pattern::match()` and in
+  `snobol_match()` results.  This removes the need for an explicit
+  `Builder::assign(var, reg)` after every `Builder::cap(...)`.
+- **Use-after-free in cache `touch` functions** (`php_dyncache_touch`, `php_pcache_touch`):
+  `zend_hash_next_index_insert(&kv)` does not bump refcount, but `zval_ptr_dtor(&kv)`
+  was called immediately after, freeing the string that the hash table still referenced.
+- **`zend_call_method` returns retval pointer, never NULL** — exception detection was
+  wrong (`if (!call_result)` would never trigger).  Replaced with `Z_TYPE(retval) == IS_OBJECT`
+  checks; added `zend_clear_exception()` so failure paths return structured error results
+  instead of propagating exceptions.
+- **Missing capacity check + LRU eviction** in `DynamicPatternCache::compile`/`evaluate`.
+- **Type string length typo**: `"table_access"` was stored with length 11 instead of 12,
+  silently truncating the type to `"table_acces"` and breaking AST conversion.
+- **6 missing arginfo entries** for no-param Builder methods (`fence`, `rem`, `arb`,
+  `abort`, `fail`, `succeed`) — suppressed PHP 8.1+ "Missing arginfo" warnings.
+
+### Changed
+
+- **PHP binding now self-contained**: removed `bindings/php/php-src/` entirely (9 files
+  deleted); all class bodies live in C.  The `.so` no longer depends on Composer
+  autoloading for class definitions — only IDE stubs under `bindings/php/stubs/`.
+- **Composer's PSR-4 autoload** now points at `bindings/php/stubs/` (IDE-only).
+
 ## [0.10.0] - 2026-06-09
 
 ### Added — Windows / Linux / macOS x86-64 JIT Backend (`jit-windows-x86`)

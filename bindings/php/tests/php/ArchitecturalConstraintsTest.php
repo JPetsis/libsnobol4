@@ -15,15 +15,15 @@ use PHPUnit\Framework\TestCase;
  */
 class ArchitecturalConstraintsTest extends TestCase
 {
-    private static string $phpSrcDir = __DIR__ . '/../../php-src';
+    private static string $stubsDir = __DIR__ . '/../../stubs';
 
-    /** Return all *.php file paths under bindings/php/php-src/ */
+    /** Return all *.php file paths under bindings/php/stubs/ */
     private function phpSrcFiles(): array
     {
         $files = [];
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator(
-                self::$phpSrcDir,
+                self::$stubsDir,
                 \RecursiveDirectoryIterator::SKIP_DOTS
             )
         );
@@ -59,7 +59,7 @@ class ArchitecturalConstraintsTest extends TestCase
         $this->assertCount(
             0,
             $occurrences,
-            "PHP-native Lexer instantiation found under bindings/php/php-src/ — "
+            "PHP-native Lexer instantiation found under bindings/php/stubs/ — "
             . "all SNOBOL4 parsing must go through the C extension.\n"
             . implode("\n", $occurrences)
         );
@@ -89,7 +89,7 @@ class ArchitecturalConstraintsTest extends TestCase
         $this->assertCount(
             0,
             $occurrences,
-            "PHP-native Parser instantiation found under bindings/php/php-src/ — "
+            "PHP-native Parser instantiation found under bindings/php/stubs/ — "
             . "all SNOBOL4 parsing must go through the C extension.\n"
             . implode("\n", $occurrences)
         );
@@ -102,10 +102,10 @@ class ArchitecturalConstraintsTest extends TestCase
      */
     public function testLexerPhpFileDoesNotExist(): void
     {
-        $lexerPath = self::$phpSrcDir . '/Lexer.php';
+        $lexerPath = self::$stubsDir . '/Lexer.php';
         $this->assertFileDoesNotExist(
             $lexerPath,
-            'bindings/php/php-src/Lexer.php must not exist — '
+            'bindings/php/stubs/Lexer.php must not exist — '
             . 'SNOBOL4 lexing belongs in the C core (snobol_lexer_create()).'
         );
     }
@@ -117,10 +117,10 @@ class ArchitecturalConstraintsTest extends TestCase
      */
     public function testParserPhpFileDoesNotExist(): void
     {
-        $parserPath = self::$phpSrcDir . '/Parser.php';
+        $parserPath = self::$stubsDir . '/Parser.php';
         $this->assertFileDoesNotExist(
             $parserPath,
-            'bindings/php/php-src/Parser.php must not exist — '
+            'bindings/php/stubs/Parser.php must not exist — '
             . 'SNOBOL4 parsing belongs in the C core (snobol_parser_parse()).'
         );
     }
