@@ -46,6 +46,11 @@ jobs:
       - name: Install system dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
+          # PHP 8.4 is not in Ubuntu noble's default repos — use Ondrej's PPA
+          # for all PHP versions so php-config and php-dev are always available.
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common ca-certificates apt-transport-https lsb-release gnupg
+          sudo LC_ALL=C.UTF-8 add-apt-repository -y ppa:ondrej/php
           sudo apt-get update
           sudo apt-get install -y cmake build-essential php${{ matrix.php-version }}-dev php${{ matrix.php-version }}-cli autoconf
           which php-config

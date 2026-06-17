@@ -69,6 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently truncating the type to `"table_acces"` and breaking AST conversion.
 - **6 missing arginfo entries** for no-param Builder methods (`fence`, `rem`, `arb`,
   `abort`, `fail`, `succeed`) — suppressed PHP 8.1+ "Missing arginfo" warnings.
+- **CI PHP 8.4 install** (`.github/workflows/ci-php.yml`): Ubuntu noble's default
+  apt repos do not ship `php8.4-dev`.  Added the `ppa:ondrej/php` repository
+  (via `add-apt-repository`) before `apt-get install php${{ matrix.php-version }}-dev`
+  so all matrix versions (8.3, 8.4, 8.5) install consistently.
 
 ### Changed
 
