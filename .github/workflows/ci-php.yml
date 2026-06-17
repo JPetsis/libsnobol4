@@ -47,15 +47,24 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           # Ubuntu noble's default repos do not ship php8.4-dev.
-          # Use Ondrej's PPA (sury.org) for all PHP versions so php-config
-          # and php-dev are always available, regardless of matrix value.
-          # We add the repo + GPG key manually because add-apt-repository
-          # is slow and emits noisy Python deprecation warnings on noble.
+          # shivammathur/setup-php already installed a working PHP via its
+          # built-in tap, but `php-config`/`php-dev` headers from PPA are
+          # needed for phpize to build the extension.  We add the Ondrej
+          # PPA (sury.org) so php-config and php-dev match the matrix PHP
+          # version for any of {8.3, 8.4, 8.5}.
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential autoconf gnupg lsb-release ca-certificates apt-transport-https
-          # Fetch the Ondrej GPG key and add the repo directly to sources.list.d
+          sudo apt-get install -y cmake build-essential autoconf gnupg lsb-release ca-certificates apt-transport-https software-properties-common
+          # Fetch the Ondrej GPG key from Launchpad's keyserver (Ubuntu's
+          # keyserver.ubuntu.com path is /pks/lookup, not the full URL
+          # used in some older recipes).
           sudo install -m 0755 -d /etc/apt/keyrings
-          sudo curl -fsSL https://keyserver.ubuntu.com/pks/lookup?op=get\&search=0x14aa40ec20817547f80d6a643a0fe6a937330cd7 \
+          sudo gpg --no-default-keyring \
+                   --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg \
+                   --keyserver hkps://keyserver.ubuntu.com \
+                   --recv-keys 0x14aa40ec20817547f80d6a643a0fe6a937330cd7
+          sudo gpg --no-default-keyring \
+                   --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg \
+                   --export 0x14aa40ec20817547f80d6a643a0fe6a937330cd7 \
             | sudo gpg --dearmor -o /etc/apt/keyrings/ondrej-php.gpg
           sudo chmod a+r /etc/apt/keyrings/ondrej-php.gpg
           echo "deb [signed-by=/etc/apt/keyrings/ondrej-php.gpg] https://ppa.launchpadcontent.net/ondrej/php/ubuntu $(lsb_release -sc) main" \
