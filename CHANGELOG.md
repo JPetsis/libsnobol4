@@ -70,13 +70,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **6 missing arginfo entries** for no-param Builder methods (`fence`, `rem`, `arb`,
   `abort`, `fail`, `succeed`) — suppressed PHP 8.1+ "Missing arginfo" warnings.
 - **CI PHP 8.4 install** (`.github/workflows/ci-php.yml`): Ubuntu noble's default
-  apt repos do not ship `php8.4-dev`.  Manually added the `ppa:ondrej/php` repository
-  by importing the Ondrej GPG key (`0x14aa40ec20817547f80d6a643a0fe6a937330cd7`)
-  via `gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys` (replacing the
-  earlier `curl` keyserver-lookup path which 404'd on noble), dearmoring to
-  `/etc/apt/keyrings/ondrej-php.gpg`, and writing the signed `deb` line to
-  `/etc/apt/sources.list.d/ondrej-php.list`.  All matrix versions (8.3, 8.4, 8.5)
-  install consistently.
+  apt repos do not ship `php8.4-dev`.  Added the `ppa:ondrej/php` repository by
+  importing the Ondrej GPG key (`0x14aa40ec20817547f80d6a643a0fe6a937330cd7`)
+  via `gpg --recv-keys`, dearmoring to `/etc/apt/keyrings/ondrej-php.gpg`, and
+  writing the signed `deb` line to `/etc/apt/sources.list.d/ondrej-php.list`.
+  The `dirmngr` package is required for `gpg --recv-keys` keyserver access and
+  is installed explicitly.  All matrix versions (8.3, 8.4, 8.5) install consistently.
 
 ### Changed
 

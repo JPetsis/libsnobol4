@@ -53,16 +53,16 @@ jobs:
           # PPA (sury.org) so php-config and php-dev match the matrix PHP
           # version for any of {8.3, 8.4, 8.5}.
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential autoconf gnupg lsb-release ca-certificates apt-transport-https software-properties-common
-          # Fetch the Ondrej GPG key from Launchpad's keyserver (Ubuntu's
-          # keyserver.ubuntu.com path is /pks/lookup, not the full URL
-          # used in some older recipes).
+          sudo apt-get install -y cmake build-essential autoconf dirmngr gnupg lsb-release ca-certificates apt-transport-https software-properties-common
+          # Fetch the Ondrej GPG key from a keyserver and dearmor it.
+          # dirmngr is required by gpg --recv-keys for keyserver access.
+          # We use a minimal per-user keyring to avoid root home dir issues.
           sudo install -m 0755 -d /etc/apt/keyrings
-          sudo gpg --no-default-keyring \
+          sudo gpg --batch --no-default-keyring \
                    --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg \
                    --keyserver hkps://keyserver.ubuntu.com \
                    --recv-keys 0x14aa40ec20817547f80d6a643a0fe6a937330cd7
-          sudo gpg --no-default-keyring \
+          sudo gpg --batch --no-default-keyring \
                    --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg \
                    --export 0x14aa40ec20817547f80d6a643a0fe6a937330cd7 \
             | sudo gpg --dearmor -o /etc/apt/keyrings/ondrej-php.gpg
