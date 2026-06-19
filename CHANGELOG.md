@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### AST Clone & Clean Build — 2026-06-19
+
+### Added
+
+- **`snobol_ast_clone()`** (`core/include/snobol/ast.h`, `core/src/ast.c`): deep-clone
+  function for AST nodes. Recursively copies all 25 node types including owned string
+  data and child subtrees.
+
+### Fixed
+
+- **Double-free in `x+` pattern repetition** (`core/src/parser.c`): `parse_repetition`
+  used a shallow pointer copy (`clone = primary`) for the `+` operator, causing both
+  the cloned node and `arbno(primary)` to point to the same AST node. When freed, the
+  node was freed twice. Fixed by using `snobol_ast_clone(primary)` to produce a true
+  deep copy.
+
+### Changed
+
+- **`make clean` now wildcarded** (`Makefile`): replaced explicit `rm -rf` of six build
+  directories with a single `rm -rf build*/ cmake-build-*/` pattern, automatically
+  catching any future build directories (e.g. `build-fuzz/`, `build-asan/`, etc.).
+- **`docs/why-snobol-vs-pcre.md` examples** updated to use `Snobol\Builder` API instead
+  of unsupported pattern string syntax (`BREAK`, `POS`, `RPOS`).
+
 ### Core Primitives & Builtins — 2026-06-15
 
 ### Added

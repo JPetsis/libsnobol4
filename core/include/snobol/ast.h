@@ -326,6 +326,13 @@ ast_node_t* snobol_ast_create_label(char* name, ast_node_t* target);
 ast_node_t* snobol_ast_create_goto(const char* label);
 
 /**
+ * Deep-clone an AST node and all children recursively
+ * @param node Node to clone (NULL returns NULL)
+ * @return New AST node (caller owns, must free with snobol_ast_free)
+ */
+ast_node_t* snobol_ast_clone(const ast_node_t* node);
+
+/**
  * Free an AST node and all children recursively
  * @param node Node to free (NULL is safe)
  */

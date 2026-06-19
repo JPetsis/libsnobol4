@@ -362,11 +362,17 @@ static ast_node_t* parse_repetition(snobol_parser_t* parser, snobol_lexer_t* lex
             advance(lexer);
             /* x+ = x x* = concat(x, arbno(x)) */
             {
+                ast_node_t* clone = snobol_ast_clone(primary);
                 ast_node_t* arbno = snobol_ast_create_arbno(primary);
-                ast_node_t* clone = primary;  /* Simplified - should clone */
                 ast_node_t** parts = (ast_node_t**)malloc(2 * sizeof(ast_node_t*));
                 if (!parts) {
                     snobol_ast_free(arbno);
+                    snobol_ast_free(clone);
+                    return nullptr;
+                }
+                if (!clone) {
+                    snobol_ast_free(arbno);
+                    free(parts);
                     return nullptr;
                 }
                 parts[0] = clone;

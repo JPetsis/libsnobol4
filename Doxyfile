@@ -1,0 +1,40 @@
+# Doxyfile for libsnobol4
+
+PROJECT_NAME           = "libsnobol4"
+PROJECT_NUMBER         = 0.11.0
+PROJECT_BRIEF          = "High-performance SNOBOL4-style pattern matching library"
+OUTPUT_DIRECTORY       = docs/api
+INPUT                  = core/include/snobol
+FILE_PATTERNS          = *.h
+RECURSIVE              = NO
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+EXTRACT_LOCAL_CLASSES  = NO
+CASE_SENSE_NAMES       = YES
+INPUT_ENCODING         = UTF-8
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_CODE_COMMENTS    = YES
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+HTML_EXTRA_STYLESHEET  =
+HTML_COLORSTYLE_HUE    = 220
+HTML_COLORSTYLE_SAT    = 100
+HTML_COLORSTYLE_GAMMA  = 80
+DISABLE_INDEX          = NO
+GENERATE_TREEVIEW      = YES
+TREEVIEW_WIDTH         = 250
+SEARCHENGINE           = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = SNOBOL_NODISCARD= "SNOBOL_NODISCARD " \
+                          SNOBOL_DYNAMIC_PATTERN=1
+INCLUDE_PATH           = core/include
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_FORMAT            = "$file:$line: $text"

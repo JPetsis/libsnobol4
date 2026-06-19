@@ -148,6 +148,130 @@ ast_node_t* snobol_ast_create_label(char* name, ast_node_t* target) {
     return node;
 }
 
+ast_node_t* snobol_ast_clone(const ast_node_t* node) {
+    if (!node) return nullptr;
+
+    ast_node_t* clone = (ast_node_t*)calloc(1, sizeof(ast_node_t));
+    if (!clone) return nullptr;
+
+    clone->type = node->type;
+
+    switch (node->type) {
+        case AST_LITERAL:
+            clone->data.literal.text = str_dup(node->data.literal.text, node->data.literal.len);
+            clone->data.literal.len = node->data.literal.len;
+            break;
+
+        case AST_EMIT:
+            clone->data.emit.text = str_dup(node->data.emit.text,
+                node->data.emit.text ? strlen(node->data.emit.text) : 0);
+            clone->data.emit.reg = node->data.emit.reg;
+            break;
+
+        case AST_CONCAT: {
+            clone->data.concat.count = node->data.concat.count;
+            clone->data.concat.parts = (ast_node_t**)calloc(clone->data.concat.count, sizeof(ast_node_t*));
+            if (!clone->data.concat.parts) { free(clone); return nullptr; }
+            for (size_t i = 0; i < clone->data.concat.count; i++)
+                clone->data.concat.parts[i] = snobol_ast_clone(node->data.concat.parts[i]);
+            break;
+        }
+
+        case AST_ALT:
+            clone->data.alt.left = snobol_ast_clone(node->data.alt.left);
+            clone->data.alt.right = snobol_ast_clone(node->data.alt.right);
+            break;
+
+        case AST_REPETITION:
+        case AST_ARBNO:
+            clone->data.repetition.sub = snobol_ast_clone(node->data.repetition.sub);
+            clone->data.repetition.min = node->data.repetition.min;
+            clone->data.repetition.max = node->data.repetition.max;
+            break;
+
+        case AST_CAP:
+            clone->data.cap.reg = node->data.cap.reg;
+            clone->data.cap.sub = snobol_ast_clone(node->data.cap.sub);
+            break;
+
+        case AST_SPAN:
+        case AST_BREAK:
+        case AST_ANY:
+        case AST_NOTANY:
+            clone->data.charclass.set = str_dup(node->data.charclass.set, node->data.charclass.len);
+            clone->data.charclass.len = node->data.charclass.len;
+            break;
+
+        case AST_BREAKX:
+            clone->data.breakx.set = str_dup(node->data.breakx.set, node->data.breakx.len);
+            clone->data.breakx.len = node->data.breakx.len;
+            break;
+
+        case AST_LABEL:
+            clone->data.label.name = str_dup(node->data.label.name, strlen(node->data.label.name));
+            clone->data.label.target = snobol_ast_clone(node->data.label.target);
+            break;
+
+        case AST_GOTO:
+            clone->data.goto_stmt.label = str_dup(node->data.goto_stmt.label, strlen(node->data.goto_stmt.label));
+            break;
+
+        case AST_TABLE_ACCESS:
+            clone->data.table_access.table = str_dup(node->data.table_access.table, strlen(node->data.table_access.table));
+            clone->data.table_access.key = snobol_ast_clone(node->data.table_access.key);
+            break;
+
+        case AST_TABLE_UPDATE:
+            clone->data.table_update.table = str_dup(node->data.table_update.table, strlen(node->data.table_update.table));
+            clone->data.table_update.key = snobol_ast_clone(node->data.table_update.key);
+            clone->data.table_update.value = snobol_ast_clone(node->data.table_update.value);
+            break;
+
+        case AST_DYNAMIC_EVAL:
+            clone->data.dynamic_eval.expr = snobol_ast_clone(node->data.dynamic_eval.expr);
+            break;
+
+        case AST_ASSIGN:
+            clone->data.assign.var = node->data.assign.var;
+            clone->data.assign.reg = node->data.assign.reg;
+            break;
+
+        case AST_LEN:
+            clone->data.len.n = node->data.len.n;
+            break;
+
+        case AST_EVAL:
+            clone->data.eval.fn = node->data.eval.fn;
+            clone->data.eval.reg = node->data.eval.reg;
+            break;
+
+        case AST_ANCHOR:
+            clone->data.anchor.atype = node->data.anchor.atype;
+            break;
+
+        case AST_BAL:
+            clone->data.bal.open_cp = node->data.bal.open_cp;
+            clone->data.bal.close_cp = node->data.bal.close_cp;
+            break;
+
+        case AST_RPOS:
+        case AST_RTAB:
+        case AST_POS:
+        case AST_TAB:
+            clone->data.rpos_rtab.n = node->data.rpos_rtab.n;
+            break;
+
+        case AST_FENCE:
+        case AST_REM:
+        case AST_ABORT:
+        case AST_FAIL:
+        case AST_SUCCEED:
+            break;
+    }
+
+    return clone;
+}
+
 void snobol_ast_free(ast_node_t* node) {
     if (!node) return;
     

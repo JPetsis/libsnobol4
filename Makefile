@@ -130,13 +130,9 @@ test-asan:
 # and transient benchmark result files.
 clean:
 	@echo "==> Cleaning all build directories..."
-	rm -rf build/
-	rm -rf build_test/
-	rm -rf build-asan/
-	rm -rf build-win/
-	rm -rf cmake-build-debug/
-	rm -rf cmake-build-debug-llvm-clang/
+	rm -rf build*/ cmake-build-*/
 	@echo "==> Cleaning benchmark results..."
+	rm -f bench/BENCHMARKS.md
 	find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' ! -name 'results_builtin.json' ! -name 'results_layered_search.json' -delete 2>/dev/null || true
 	@echo "==> Clean complete!"
 
@@ -183,6 +179,18 @@ bench:
 				php "$$bench"; \
 			fi; \
 		done; \
+	else \
+		echo "PHP not found. Benchmarks require PHP extension."; \
+		echo "Run 'make build-php' to build PHP binding first."; \
+	fi
+
+# Head-to-head comparison benchmarks (requires PHP + snobol extension)
+# Generates bench/BENCHMARKS.md with results.
+bench-comparison:
+	@echo "==> Running PCRE2 comparison benchmarks..."
+	@if command -v php >/dev/null 2>&1; then \
+		php bench/compare_pcre2.php; \
+		echo "==> Results written to bench/BENCHMARKS.md"; \
 	else \
 		echo "PHP not found. Benchmarks require PHP extension."; \
 		echo "Run 'make build-php' to build PHP binding first."; \
@@ -296,7 +304,7 @@ help:
 	@echo "  test-asan      - Run tests under AddressSanitizer+UBSan (requires make build-asan first)"
 	@echo ""
 	@echo "Clean targets:"
-	@echo "  clean          - Remove all build directories (build/, build-asan/, cmake-build-*/, etc.) and transient benchmark results"
+	@echo "  clean          - Remove all build directories (build/, build-asan/, cmake-build-*/, etc.) and transient benchmark artifacts"
 	@echo "  uninstall      - Remove installed files (headers, lib, cmake config, libsnobol4.pc); uses build/install_manifest.txt or falls back to INSTALL_PREFIX paths"
 	@echo "  distclean      - clean + uninstall + remove generated config files"
 	@echo ""

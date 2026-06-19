@@ -292,6 +292,7 @@ void test_unicode_fold_suite(void);
 void test_pattern_case_suite(void);
 void test_api_version_suite(void);
 void test_api_match_suite(void);
+void test_property_based_suite(void);
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
@@ -365,6 +366,7 @@ int main(void) {
     RUN_SUITE("Pattern: Case-Insensitive",  test_pattern_case_suite);
     RUN_SUITE("API Version",                test_api_version_suite);
     RUN_SUITE("API: snobol_match()",        test_api_match_suite);
+    RUN_SUITE("Property-Based Tests",       test_property_based_suite);
 
     /* Stress test */
     {

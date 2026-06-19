@@ -9,6 +9,7 @@ option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(SNOBOL_PROFILE "Enable VM profiling" OFF)
 option(SNOBOL_JIT "Enable micro-JIT" ON)
 option(SNOBOL_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+option(SNOBOL_FUZZ "Build libFuzzer fuzz harnesses (requires Clang)" OFF)
 
 # Sanitizer guard: not supported on MSVC
 if(SNOBOL_SANITIZE AND MSVC)
@@ -22,6 +23,15 @@ add_subdirectory(core)
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests/c)
+endif()
+
+# Optional: libFuzzer fuzz harnesses (Clang only)
+if(SNOBOL_FUZZ)
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+        add_subdirectory(tests/fuzz)
+    else()
+        message(WARNING "SNOBOL_FUZZ=ON requires Clang; ignoring")
+    endif()
 endif()
 
 # Optional: PHP binding

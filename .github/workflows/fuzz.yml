@@ -1,0 +1,71 @@
+name: Fuzz Testing (nightly)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  fuzz-compiler:
+    name: Fuzz Compiler (Clang, 30 min)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure with Clang + fuzz
+        run: >
+          cmake -B build
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DBUILD_TESTS=OFF
+          -DBUILD_PHP=OFF
+          -DSNOBOL_FUZZ=ON
+
+      - name: Build fuzz harnesses
+        run: cmake --build build --config Release
+
+      - name: Fuzz compiler (30 min)
+        working-directory: build
+        run: ./tests/fuzz/fuzz_compiler -max_total_time=1800 -artifact_prefix=artifacts-compiler/ || true
+
+      - name: Upload compiler crash artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-compiler-artifacts
+          path: build/artifacts-compiler/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  fuzz-vm:
+    name: Fuzz VM (Clang, 30 min)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure with Clang + fuzz
+        run: >
+          cmake -B build
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DBUILD_TESTS=OFF
+          -DBUILD_PHP=OFF
+          -DSNOBOL_FUZZ=ON
+
+      - name: Build fuzz harnesses
+        run: cmake --build build --config Release
+
+      - name: Fuzz VM (30 min)
+        working-directory: build
+        run: ./tests/fuzz/fuzz_vm -max_total_time=1800 -artifact_prefix=artifacts-vm/ || true
+
+      - name: Upload VM crash artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-vm-artifacts
+          path: build/artifacts-vm/
+          if-no-files-found: ignore
+          retention-days: 7
