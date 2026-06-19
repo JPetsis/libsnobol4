@@ -1,9 +1,14 @@
 <?php
 /**
- * Head-to-head benchmark: libsnobol4 vs PCRE2
+ * Head-to-head benchmark: PHP Binding — libsnobol4 vs PCRE2
  *
- * Runs representative workloads on both engines and records performance.
- * Results are saved to results_pcre2_comparison.json.
+ * Measures END-TO-END PHP binding throughput (PatternHelper + compilation + VM + JIT),
+ * including PHP-to-C overhead, per-call pattern compilation, and result construction —
+ * NOT raw C engine speed.
+ *
+ * For a fair C-level comparison see bench/c/ (C microbenchmark suite).
+ *
+ * Results are saved to results_pcre2_comparison.json and BENCHMARKS.md.
  *
  * Usage:
  *   php bench/compare_pcre2.php

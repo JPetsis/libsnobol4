@@ -65,17 +65,13 @@ preg_match('/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/', $email);
 use Snobol\PatternHelper;
 use Snobol\Builder as B;
 
-$local_chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._%+-';
-$domain_chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-';
-$tld_chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
 $pattern = B::concat([
     B::pos(0),
-    B::cap(0, B::span($local_chars)), B::assign(0, 0),
+    B::cap(0, B::span('a-z0-9._%+-')), B::assign(0, 0),
     B::lit('@'),
-    B::cap(1, B::span($domain_chars)), B::assign(1, 1),
+    B::cap(1, B::span('a-z0-9.-')), B::assign(1, 1),
     B::lit('.'),
-    B::cap(2, B::span($tld_chars)), B::assign(2, 2),
+    B::cap(2, B::span('a-z')), B::assign(2, 2),
     B::rpos(0),
 ]);
 $result = PatternHelper::matchOnce($pattern, $email);
