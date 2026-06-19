@@ -5,7 +5,95 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Convenience API for PHP binding
+## [Unreleased]
+
+### Core Primitives & Builtins — 2026-06-15
+
+### Added
+
+- **`POS(n)` positional primitive** (`core/src/vm.c`): new `OP_POS` opcode succeeds only
+  when the current match cursor is exactly `n` codepoints from the start of the subject.
+  Includes AST node (`AST_POS`), parser support, JIT call-out entry, and negative/invalid
+  argument handling.
+- **`TAB(n)` positional primitive** (`core/src/vm.c`): new `OP_TAB` opcode advances the
+  cursor to `n` codepoints from the start.  Fails if already past the target or if `n`
+  exceeds subject length.  Full AST/parser/JIT coverage.
+- **`ABORT` control primitive** (`core/src/vm.c`): new `OP_ABORT` opcode sets the VM
+  `abort_flag`, unwinds all choice points, and terminates the entire match immediately
+  with no further backtracking.  AST/parser/JIT support.
+- **`FAIL` control primitive** (`core/src/vm.c`): forces immediate backtrack by falling
+  through to `OP_FAIL` dispatch.  AST/parser/JIT support.
+- **`SUCCEED` control primitive** (`core/src/vm.c`): new `OP_SUCCEED` opcode forces
+  immediate match success at the current cursor position, skipping the remainder of the
+  pattern.  No-op for JIT (already handled by the compiled region).
+- **Numeric comparison builtins** (`core/src/type_fn.c`): `snobol_eq()`, `snobol_ne()`,
+  `snobol_lt()`, `snobol_gt()`, `snobol_le()`, `snobol_ge()` — string-to-double
+  conversion via `snobol_str_to_double()` following SNOBOL4 numeric semantics
+  (non-numeric yields 0.0).  Registered as `SNOBOL_FN_EQ` through `SNOBOL_FN_GE`
+  (IDs 22–27) in the built-in dispatch table.
+- **PHP Builder methods**: `Builder::pos(n)`, `Builder::tab(n)`, `Builder::abort()`,
+  `Builder::fail()`, `Builder::succeed()` with `php_ast_to_c` conversion.
+- **PHP `snobol_text_eq/ne/lt/gt/le/ge/integer()` functions** exposed as
+  `Snobol\Text::*` PHP callables.
+- **C tests**: `tests/c/test_pattern_pos_tab.c` (186 assertions), `tests/c/test_pattern_abort_fail_succeed.c` (172 assertions), `tests/c/test_comparison_numeric.c` (80 assertions).
+- **PHP tests**: `tests/php/PrimitivesTest.php` (90 tests), `tests/php/ComparisonsTest.php` (183 tests).
+- **`snobol_str_to_double()`** helper exposed in `core/include/snobol/type_fn.h` for reuse.
+
+### Array Data Type — 2026-06-16
+
+### Added
+
+- **C ARRAY type** (`core/src/array.c`, `core/include/snobol/array.h`): sparse hash-map
+  backed indexed storage with open-addressing and FNV-1a hashing.  1-based indexing by
+  default following SNOBOL4 semantics.  API:
+  - `snobol_array_create(bounds_hint)` / `snobol_array_retain()` / `snobol_array_release()`
+  - `snobol_array_get()` / `snobol_array_set()` / `snobol_array_delete()` / `snobol_array_has()`
+  - `snobol_array_size()` / `snobol_array_keys()` / `snobol_array_values()` / `snobol_array_clear()`
+  - Automatic resize with tombstone tracking; initial capacity `ARRAY_INITIAL_CAPACITY (16)`.
+- **VM opcodes** (`core/src/vm.c`): `OP_ARRAY_GET` and `OP_ARRAY_SET` — register-based
+  lookups using capture register keys with name-resolution and table-style encoding.
+  JIT call-out entries for both opcodes.
+- **VM array registry**: `vm_init_arrays()` / `vm_free_arrays()` / `vm_register_array()` /
+  `vm_get_array()` — parallel to the existing table registry.
+- **PHP `Snobol\Array_` class** (`bindings/php/src/snobol_array_php.c`, `bindings/php/src/snobol_array_php.h`):
+  C extension class with `get()`, `set()`, `delete()`, `size()`, `keys()`, `values()` methods.
+  PHP stub in `bindings/php/php-src/Array_.php` (IDE autocomplete).
+- **`Builder::arrayRef()` method** for constructing array-access sub-patterns.
+- **C tests**: `tests/c/test_array.c` (214 assertions) covering create/set/get/delete/size/
+  keys/values/resize/tombstone/rehash.
+- **PHP tests**: `tests/compat/ArrayTest.php` (176 assertions) covering all `Snobol\Array_`
+  operations including edge cases (empty array, single element, many elements, deletion).
+
+### Full BMP Unicode — 2026-06-16
+
+### Added
+
+- **Full BMP case-folding tables** (`core/src/unicode_fold_data.c`): ~2500 lines of
+  generated pair tables covering the entire Basic Multilingual Plane (U+0000–U+FFFF).
+  Generated from UCD CaseFolding.txt via `dev/gen_unicode_fold.c`.  Replaces the
+  previous Latin-1 + Latin Extended-A tables.
+- **`dev/gen_unicode_fold.c`**: new C generator program that reads Unicode Character
+  Database CaseFolding.txt and emits self-contained static tables.  Invoked via
+  `make gen-unicode-fold`.
+- **BMP-aware case conversion** (`core/src/unicode_fold.c`): `snobol_to_upper_cp()` and
+  `snobol_to_lower_cp()` now cover Greek, Cyrillic, Arabic, Hebrew, CJK, and all other
+  BMP scripts.  Multi-character expansion preserved (e.g., ß → SS).  ASCII fast path
+  still applies for U+0000–U+007F.
+- **BMP-aware `UPPER` / `LOWER`** (`core/src/string_fn.c`): full BMP case folding via
+  codepoint-level delegation; astral plane codepoints (U+10000+) pass through unchanged.
+- **BMP-aware case-insensitive matching** (`core/src/compiler.c`): `SNOBOL_FLAG_CASE_INSENSITIVE`
+  now folds charclass ranges and single codepoints across the entire BMP using the
+  generated tables.  Cyrillic, Greek, and CJK case pairs are correctly handled in
+  `ANY` / `NOTANY` / `SPAN` / `BREAK` opcodes.
+- **PHP `Snobol\Text::upper()` / `Snobol\Text::lower()`** now delegate to the BMP-aware
+  C implementation (was previously ASCII-only).
+- **C tests**: expanded `tests/c/test_unicode_fold.c` (60 assertions) with Cyrillic,
+  Greek, Arabic, Hebrew, CJK case-fold test cases; expanded `tests/c/test_pattern_case.c`
+  (36 new assertions) for BMP case-insensitive matching with Greek and Cyrillic patterns.
+- **PHP tests**: `tests/php/UnicodeTest.php` (37 tests) covering BMP UPPER/LOWER with
+  Greek, Cyrillic, CJK, and mixed-script strings.
+
+### Convenience API for PHP binding — 2026-06-18
 
 ### Added
 
