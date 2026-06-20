@@ -1904,8 +1904,18 @@ static void *x86_64_lower(const jit_ir_region_t *ir, VM *vm,
   /* Prologue: push callee-saved registers */
   x64_prologue(out);
 
-  /* Load VM pointer into rbx */
-  x64_mov_ri64(out, X64_RBX, (uint64_t)(uintptr_t)vm);
+  /* Copy the VM pointer argument (rdi on SysV / rcx on Win64) into
+   * the callee-saved rbx. This MUST be a register-to-register move,
+   * not a literal load of the compile-time `vm` value: each call
+   * site passes a different (stack-allocated) VM, and the trace
+   * code persists across many calls inside the JIT code cache.
+   * Using the literal here would access stale stack memory on every
+   * call after the first. */
+#ifdef SNOBOL_JIT_WIN64_ABI
+  x64_mov_rr(out, X64_RBX, X64_RCX); /* rcx = 1st arg = vm (Win64) */
+#else
+  x64_mov_rr(out, X64_RBX, X64_RDI); /* rdi = 1st arg = vm (SysV) */
+#endif
 
   /* Load initial state from VM struct */
   x64_reload_state(out);
