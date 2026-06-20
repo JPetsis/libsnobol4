@@ -27,7 +27,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
 
       - name: Install Doxygen
         run: sudo apt-get update && sudo apt-get install -y doxygen
@@ -36,10 +36,25 @@ jobs:
         run: doxygen Doxyfile
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: docs/api/html
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        # Pages deploy returns HTTP 404 until the GitHub Pages site is
+        # enabled in the repository settings. Until then the artifact is
+        # still produced and uploaded; the live deploy is a no-op. This
+        # step's failure must not block the workflow — see the
+        # "Pages status" step below for an explicit warning.
+        continue-on-error: true
+
+      - name: Pages status
+        if: steps.deployment.outcome == 'failure' || steps.deployment.conclusion == 'failure'
+        run: |
+          echo "::warning::GitHub Pages deploy failed. This usually means the" \
+            "Pages site has not been enabled in the repository settings." \
+            "Enable it at: https://github.com/JPetsis/libsnobol4/settings/pages" \
+            "(Source: GitHub Actions). The build artifact was still produced" \
+            "and uploaded successfully."

@@ -13,6 +13,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#endif
+
+/* Portable count-trailing-zeros for 64-bit. MSVC has no
+ * __builtin_ctzll, so use _BitScanForward64 there. */
+static inline int snobol_ctz64(uint64_t v) {
+#if defined(_MSC_VER) && !defined(__clang__)
+  unsigned long idx;
+  _BitScanForward64(&idx, v);
+  return (int)idx;
+#else
+  return __builtin_ctzll(v);
+#endif
+}
 
 /* Return the single ASCII byte represented by a bitmap, or -1 if the
  * bitmap contains zero or more than one byte.  Only examines bytes 0-127. */
@@ -20,10 +35,10 @@ static inline int bitmap_single_ascii_byte(const uint64_t map[2]) {
   uint64_t lo = map[0];
   uint64_t hi = map[1];
   if (hi == 0 && lo != 0 && (lo & (lo - 1)) == 0) {
-    return __builtin_ctzll(lo);
+    return snobol_ctz64(lo);
   }
   if (lo == 0 && hi != 0 && (hi & (hi - 1)) == 0) {
-    return 64 + __builtin_ctzll(hi);
+    return 64 + snobol_ctz64(hi);
   }
   return -1;
 }
