@@ -7,6 +7,204 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### searchSplit Bulk-Result Buffer — 2026-06-20
+
+### Added
+
+- **`Pattern::searchSplit` two-pass bulk path** (`bindings/php/src/snobol_pattern.c`):
+  for large subjects (`>= 1 MB`) the binding now runs a pre-pass to count matches,
+  allocates one C buffer of `subject_len + 1` bytes, `memcpy`s every segment from
+  the subject into the buffer at a running cursor, wraps the buffer in a single
+  parent `zend_string`, and inserts N+1 child zend_strings via `zend_string_init`
+  over sub-ranges. Extracted into `snobol_searchsplit_bulk_path` so the small-
+  subject fast path's I-cache footprint is unchanged.
+- **Small-subject fast path preserved bit-for-bit**: the original
+  `add_next_index_stringl` loop is retained for subjects below
+  `SNOBOL_SEARCHSPLIT_BULK_THRESHOLD` (1 MB), so the binding has zero
+  regression on the existing `JitCPhpCouplingTest::tokenize_php` workload
+  (260-byte subject).
+- **Diagnostic baselines** (`bench/baselines/`): C probe and PHP probe
+  before/after captures committed so the bulk-path tuning is reproducible.
+
+### Changed
+
+- **Threshold-based dispatch** in `PHP_METHOD(Snobol_Pattern, searchSplit)`:
+  the `PHP_METHOD` body is now a thin dispatcher (`if (subject_len < THRESHOLD)
+  fast_path else bulk_path`), keeping the per-call hot path small.
+- **Probe before/after numbers** recorded in
+  `openspec/changes/archive/2026-06-20-searchsplit-bulk-result-buffer/tasks.md`:
+  C `tokenize` 397 → 385 ns/iter (-3.0%), PHP `tokenize_php` 98,445 → 97,341
+  ns/iter (-1.1%), `JitCPhpCouplingTest` unchanged (4 tests, 22 assertions).
+
+### Note
+
+- The bulk path is currently **~3.7% slower than the fast path at 100 KB** because
+  the second `snobol_pattern_search_ex` pass outweighs the hash-table rehash
+  savings at the current search-region cost. The threshold is set to 1 MB so
+  the bulk path is reserved for very large subjects (and for future tuning
+  when the search region becomes cheaper, e.g. via SSA IR in Phase 11).
+
+### JIT Search Performance Baseline — 2026-06-20
+
+### Added
+
+- **Stateful search C API** (`core/src/api.c`, `core/include/snobol/snobol.h`):
+  new `snobol_pattern_search_ex()` plus opaque `snobol_pattern_search_state_t`
+  that reuses a pre-initialized VM across calls. Eliminates per-iteration
+  VM init, JIT context lookup, and search metadata derivation in hot loops.
+  The stateful API is used by `bindings/php/src/snobol_pattern.c` for
+  `Pattern::searchSplit`, `Pattern::searchAll`, and `Pattern::searchReplace`.
+- **Search metadata caching** (`core/src/api.c`): `snobol_search_derive_meta`
+  is now called once at compile time; the derived `snobol_search_meta_t` is
+  stored on the `snobol_pattern` struct and reused on every search call.
+  Previously this walked the bytecode per `snobol_pattern_search` invocation.
+- **C-side `search_reset_vm` minimal-reset** (`core/src/search.c`): the
+  per-candidate VM reset now touches only the fields that change between
+  candidates (`ip`, `pos`, `var_count`, `max_cap_used`, `max_counter_used`,
+  `cap_*` entries, `loop_*` entries), not the full VM struct. JIT state
+  (`vm->jit.ip_counts`, `vm->jit.traces`, `vm->jit.ctx`) is preserved across
+  iterations.
+- **Public introspection API** (`core/include/snobol/snobol.h`):
+  `snobol_pattern_get_bc()` / `snobol_pattern_get_bc_len()` for downstream
+  tooling.
+- **C tests**: `tests/c/test_search_meta_cache.c` verifies identical results
+  before and after caching, and that `snobol_jit_get_stats()` reports the
+  same JIT counters.
+
+### Changed
+
+- **PHP binding search paths** (`bindings/php/src/snobol_pattern.c`) migrated
+  from the per-call `php_snobol_init_vm_for_search` helper to the stateful
+  `snobol_pattern_search_state_t` API. Per-call `memset(VM, 0, sizeof(VM))`
+  is amortised across the loop (one per `searchSplit` invocation, not per
+  match).
+- **JitCPhpCouplingTest extended** with per-scenario performance regression
+  guard: the test fails if `tokenize_php` regresses by more than 10%
+  relative to the captured baseline, catching the case where a JIT
+  optimization helps the C path but the PHP binding is forgotten.
+
+### Diagnostic Probe — 2026-06-20
+
+### Added
+
+- **`snobol4_probe` C probe** (`bench/c/bench_probe.c`): standalone tool
+  for per-iteration cost attribution. Runs 7 representative patterns
+  (`literal_fail`, `literal_ok`, `span_comma`, `span_search`, `alternation`,
+  `alt_search`, `tokenize`) in tight C loops and prints per-scenario
+  timings + JIT stat deltas (entries, bailouts, choice push/pop, exec_ns,
+  interp_ns).
+- **PHP probe** (`bench/php/probe.php`): runs the same 7 scenarios via the
+  public PHP API (`Pattern::fromString`, `Pattern::searchSplit`,
+  `snobol_get_jit_stats`) and prints a comparable table. Measures the real
+  user-facing cost including the binding layer.
+- **`JitCPhpCouplingTest`** (`bindings/php/tests/php/JitCPhpCouplingTest.php`):
+  runs both probes and asserts the binding is not silently drifting from
+  the engine. The 10x-C guard is intentionally loose to accommodate
+  legitimate architectural differences; the goal is to catch the case
+  where a JIT optimization helps the C path but the PHP binding is
+  forgotten.
+- **`ddev build-c-probe`** command for automated in-container probe builds.
+- **`BUILD_BENCH_C=ON`** CMake option in the top-level `CMakeLists.txt` to
+  include the C probe in the build.
+
+### Changed
+
+- **`bench/README.md`** extended with usage instructions, scenario
+  descriptions, and performance analysis guidance.
+- **AGENTS.md** updated with the "JIT changes must cover both C and PHP
+  binding" rule and the diagnostic-probe workflow.
+
+### Activate C JIT — 2026-06-20
+
+### Added
+
+- **`SNOBOL_FLAG_SEARCH_MODE` flag** (`core/include/snobol/snobol.h`): new
+  `0x0002` flag for `snobol_pattern_compile_ex()` stored on the compiled
+  pattern so the match function knows to use the JIT-accelerated search
+  path.
+- **`snobol_pattern_search()` C API** (`core/src/api.c`): wraps
+  `snobol_search_exec()` with search metadata derivation, JIT context
+  acquisition, and search-mode VM setup. C callers can now opt into the
+  same acceleration tiers (literal `memchr`/`memmem`, BREAK/SPAN bitmap
+  scan, automaton, JIT traces) that the PHP binding uses.
+- **Idempotent `snobol_jit_init()`** (`core/src/jit.c`): static guard
+  added so `snobol_context_create()` can safely call it once per process
+  without leaking.
+- **JIT context lifecycle on patterns** (`core/src/api.c`): patterns
+  compiled with `SNOBOL_FLAG_SEARCH_MODE` acquire a JIT context at
+  compile time and release it on `snobol_pattern_free`.
+- **C benchmark search-mode columns** (`bench/c/bench_literal.c`,
+  `bench_alternation.c`, `bench_tokenization.c`, `bench_substitution.c`,
+  `bench_complex_http.c`, `bench_runner.c`): all five C microbenchmark
+  suites now compare interpreter mode (current) against search/JIT mode,
+  side by side with PCRE2.
+
+### Binding Performance & Range Syntax — 2026-06-20
+
+### Added
+
+- **C microbenchmark suite** (`bench/c/`): dedicated C-level benchmarks
+  that compile the pattern once and match many times, isolating core
+  engine performance from PHP binding overhead. Enables fair head-to-head
+  with PCRE2 at the C level.
+- **PatternHelper pattern cache** (`bindings/php/src/snobol_pattern_helper_php.c`):
+  fixed-size cache integrates `PatternCache` into
+  `PatternHelper::matchOnce`/`matchAll` so string patterns are compiled
+  once and reused. Eliminates per-call lex→parse→compile overhead.
+- **VM reuse in `searchAll`** (`bindings/php/src/snobol_pattern.c`):
+  refactored to reuse the VM struct, choice stack, and dynamic pattern
+  cache across iterations instead of allocating/zeroing/freeing per match.
+  Batch results are produced as C arrays and converted to PHP once.
+- **JIT search-mode profitability** (`core/src/jit.c`, `core/src/jit_ir.c`):
+  lowered hotness threshold for search-mode patterns so the JIT fires
+  earlier in delimiter-heavy workloads.
+- **`memchr`/SIMD fast path** (`core/src/vm.c`): `OP_BREAK` and
+  `OP_SPAN` use `memchr` (and SIMD intrinsics where available) for ASCII
+  charclass scanning in the interpreter.
+- **Builder range notation** (`bindings/php/src/snobol_pattern_php.c`):
+  `Builder::span()`, `Builder::brk()`, `Builder::any()`, `Builder::notany()`
+  accept range notation (`A-Z`, `0-9`); ranges are expanded at the
+  PHP-to-C AST conversion layer. All `docs/why-snobol-vs-pcre.md`
+  examples updated to use range syntax where appropriate.
+- **Range syntax tests** (`bindings/php/tests/php/BuilderTest.php`):
+  edge cases (literal hyphens, uppercase ranges, mixed range+literal
+  chars) covered.
+- **C microbenchmark CMake/Makefile integration** (`bench/c/CMakeLists.txt`,
+  `Makefile`): dedicated `make bench-c` target.
+
+### Changed
+
+- **`docs/why-snobol-vs-pcre.md`** and `docs/examples/*.php` updated
+  to use range syntax in illustrative examples.
+
+### Testing & Docs Meta — 2026-06-19
+
+### Added
+
+- **Fuzz harness** (`tests/fuzz/`): libFuzzer targets for the compiler
+  path (pattern string → compiled bytecode) and the VM execution path
+  (compiled bytecode + subject → match result).
+- **Property-based tests** (`tests/c/test_property_based.c`): invariant
+  tests for match results — capture consistency, backtracking correctness,
+  substitution round-trips.
+- **`docs/why-snobol-vs-pcre.md`**: new guide explaining SNOBOL4
+  advantages, tradeoffs, and when to use each over PCRE2.
+- **Hosted Doxygen** (`.github/workflows/doxygen-gh-pages.yml`):
+  GitHub Pages deployment of the Doxygen-generated API reference on push
+  to main.
+- **Head-to-head benchmarks** (`bench/results/pcre2_comparison.md`):
+  published PCRE2 head-to-head benchmark methodology and results.
+- **Community bindings section** (`CONTRIBUTING.md`): explicit statement
+  of core maintainer scope (C + PHP only) and contributor guidance for
+  community-contributed language bindings (Python, Rust, Go, Java, etc.).
+- **ROADMAP.md** updated to reflect the v0.11.0 / v1.0.0 plan and the
+  official scope; current status table for testing & documentation.
+
+### Changed
+
+- **`README.md`** and **`CONTRIBUTING.md`** updated for the v0.11.0 /
+  v1.0.0 plan and the official scope statement.
+
 ### AST Clone & Clean Build — 2026-06-19
 
 ### Added
