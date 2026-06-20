@@ -91,6 +91,39 @@ void bench_tokenization_suite(bench_results_t *out) {
         snobol_context_destroy(ctx);
     }
 
+    /* snobol4 search-mode (JIT): anchored search in a loop */
+    {
+        snobol_context_t *ctx = snobol_context_create();
+        snobol_pattern_t *pats[NFIELD];
+        for (size_t i = 0; i < NFIELD; i++) {
+            pats[i] = compile_field_pattern(ctx, field_labels[i]);
+            if (!pats[i]) { snobol_context_destroy(ctx); return; }
+        }
+
+        int64_t start = bench_ns();
+        for (int iter = 0; iter < 1000; iter++) {
+            size_t pos = 0;
+            for (int t = 0; t < 100 && pos < subj_len; t++) {
+                int fi = t % NFIELD;
+                snobol_match_t *m = snobol_pattern_search(pats[fi], subject_csv + pos, subj_len - pos);
+                bool ok = snobol_match_success(m);
+                if (ok) {
+                    const char *out_str = snobol_match_get_output(m, NULL);
+                    size_t match_len = out_str ? strlen(out_str) : 0;
+                    pos += match_len;
+                    if (pos < subj_len && subject_csv[pos] == ',') pos++;
+                } else {
+                    if (pos < subj_len) pos++;
+                }
+                snobol_match_free(m);
+            }
+        }
+        out->search_ns = bench_ns() - start;
+
+        for (size_t i = 0; i < NFIELD; i++) snobol_pattern_free(pats[i]);
+        snobol_context_destroy(ctx);
+    }
+
 #ifdef HAVE_PCRE2
     /* pcre2: tokenize via repeated anchored match advancing through subject */
     {

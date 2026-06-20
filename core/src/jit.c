@@ -342,7 +342,11 @@ void snobol_jit_reset_stats(void) {
  * Init / Shutdown
  * --------------------------------------------------------------------------- */
 
+static bool jit_initialised = false;
+
 void snobol_jit_init(void) {
+    if (jit_initialised) return;
+    jit_initialised = true;
     memset(&global_jit_stats, 0, sizeof(global_jit_stats));
     memset(jit_cache, 0, sizeof(jit_cache));
     jit_cache_count = 0;

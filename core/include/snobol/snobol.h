@@ -128,6 +128,16 @@ void snobol_context_destroy(snobol_context_t* ctx);
  */
 #define SNOBOL_FLAG_CASE_INSENSITIVE  0x0001u
 
+/**
+ * Enable search-mode compilation. The compiled pattern is optimised for
+ * substring search (un-anchored) rather than full-string anchored match.
+ * For search-mode you typically call snobol_pattern_search() instead of
+ * snobol_pattern_match().
+ *
+ * Pass to snobol_pattern_compile_ex() via the flags bitmask.
+ */
+#define SNOBOL_FLAG_SEARCH_MODE      0x0002u
+
 /* Pattern compilation */
 /**
  * @brief Compile a SNOBOL4 pattern string to a compiled pattern object.
@@ -177,6 +187,22 @@ void snobol_pattern_free(snobol_pattern_t* pattern);
  *         determine whether the match succeeded.
  */
 snobol_match_t* snobol_pattern_match(snobol_pattern_t* pattern, const char* subject, size_t len);
+
+/**
+ * @brief Execute a compiled pattern in search (un-anchored) mode.
+ *
+ * Uses the JIT search path to find the first occurrence of the pattern
+ * anywhere in the subject string (like SNOBOL4's @c ? or @c POS(0) match).
+ * Falls back to the interpreter VM when JIT is unavailable.
+ *
+ * @param[in] pattern Compiled pattern to execute.
+ * @param[in] subject Subject string (UTF-8).
+ * @param[in] len     Byte length of @p subject.
+ * @return New match result that the caller must free with snobol_match_free().
+ *         Always returns a valid pointer; call snobol_match_success() to
+ *         determine whether the match succeeded.
+ */
+snobol_match_t* snobol_pattern_search(snobol_pattern_t* pattern, const char* subject, size_t len);
 
 /**
  * @brief Free a match result.

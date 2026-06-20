@@ -23,6 +23,7 @@ add_executable(snobol4_tests
     test_jit_arm32.c
     test_jit_riscv64.c
     test_jit_x86_64.c
+    test_jit_c_api.c
     test_lexer.c
     test_parser.c
     test_ast.c

@@ -18,6 +18,10 @@
 #include "snobol/ast.h"
 #include "snobol/compiler.h"
 #include "snobol/vm.h"
+#include "snobol/search.h"
+#ifdef SNOBOL_JIT
+#include "snobol/jit.h"
+#endif
 
 #include <string.h>
 #include <stdlib.h>
@@ -37,6 +41,10 @@ struct snobol_pattern {
     uint8_t *bc;
     size_t   bc_len;
     bool     case_insensitive; /* stored for future JIT dispatch guard */
+    bool     search_mode;
+#ifdef SNOBOL_JIT
+    struct SnobolJitContext *jit_ctx;
+#endif
 };
 
 /* Maximum named variables returned from a match */
@@ -65,6 +73,9 @@ struct snobol_match {
 snobol_context_t* snobol_context_create(void) {
     snobol_context_t *ctx = (snobol_context_t *)snobol_malloc(sizeof(snobol_context_t));
     if (ctx) ctx->_reserved = 0;
+#ifdef SNOBOL_JIT
+    snobol_jit_init();
+#endif
     return ctx;
 }
 
@@ -80,7 +91,7 @@ void snobol_context_destroy(snobol_context_t* ctx) {
  * Core compilation helper: lex → parse → compile → allocate pattern.
  */
 static snobol_pattern_t* do_compile(const char* source, size_t len,
-                                    bool case_insensitive, char** error)
+                                    bool case_insensitive, bool search_mode, char** error)
 {
     if (error) *error = NULL;
 
@@ -132,6 +143,10 @@ static snobol_pattern_t* do_compile(const char* source, size_t len,
     pat->bc              = bc;
     pat->bc_len          = bc_len;
     pat->case_insensitive = case_insensitive;
+    pat->search_mode     = search_mode;
+#ifdef SNOBOL_JIT
+    pat->jit_ctx         = NULL;
+#endif
     return pat;
 }
 
@@ -141,8 +156,9 @@ snobol_pattern_t* snobol_pattern_compile_ex(snobol_context_t* ctx,
 {
     (void)ctx; /* context owns the pattern conceptually; no registry yet */
     bool case_insensitive = (flags & SNOBOL_FLAG_CASE_INSENSITIVE) != 0;
+    bool search_mode      = (flags & SNOBOL_FLAG_SEARCH_MODE) != 0;
     /* Unknown flag bits are intentionally ignored (forward-compatible). */
-    return do_compile(source, len, case_insensitive, error);
+    return do_compile(source, len, case_insensitive, search_mode, error);
 }
 
 snobol_pattern_t* snobol_pattern_compile(snobol_context_t* ctx,
@@ -154,6 +170,12 @@ snobol_pattern_t* snobol_pattern_compile(snobol_context_t* ctx,
 
 void snobol_pattern_free(snobol_pattern_t* pattern) {
     if (!pattern) return;
+#ifdef SNOBOL_JIT
+    if (pattern->jit_ctx) {
+        snobol_jit_release_context(pattern->jit_ctx);
+        pattern->jit_ctx = NULL;
+    }
+#endif
     compiler_free(pattern->bc);
     snobol_free(pattern);
 }
@@ -201,6 +223,78 @@ snobol_match_t* snobol_pattern_match(snobol_pattern_t* pattern,
     }
 
     /* Copy named variables (1-based: var_start[0] = variable "1") */
+    int n = (int)vm.var_count;
+    if (n > API_MAX_VARS) n = API_MAX_VARS;
+    m->var_count = n;
+    for (int i = 0; i < n; i++) {
+        size_t vs = vm.var_start[i];
+        size_t ve = vm.var_end[i];
+        if (ve > vs && ve <= len) {
+            size_t vlen = ve - vs;
+            m->var_values[i] = (char *)snobol_malloc(vlen + 1);
+            if (m->var_values[i]) {
+                memcpy(m->var_values[i], subject + vs, vlen);
+                m->var_values[i][vlen] = '\0';
+                m->var_lens[i] = vlen;
+            }
+        }
+    }
+
+    snobol_buf_free(&out_buf);
+    vm_free_labels(&vm);
+    return m;
+}
+
+snobol_match_t* snobol_pattern_search(snobol_pattern_t* pattern,
+                                       const char* subject, size_t len)
+{
+    if (!pattern || !subject) return NULL;
+
+    snobol_match_t *m = (snobol_match_t *)snobol_malloc(sizeof(snobol_match_t));
+    if (!m) return NULL;
+    memset(m, 0, sizeof(snobol_match_t));
+
+    snobol_buf out_buf = {0};
+    snobol_buf_init(&out_buf);
+
+    VM vm;
+    memset(&vm, 0, sizeof(VM));
+    vm.bc     = pattern->bc;
+    vm.bc_len = pattern->bc_len;
+    vm.s      = subject;
+    vm.len    = len;
+    vm.out    = &out_buf;
+
+#ifdef SNOBOL_JIT
+    if (!pattern->jit_ctx) {
+        pattern->jit_ctx = snobol_jit_acquire_context(pattern->bc, pattern->bc_len);
+    }
+    if (pattern->jit_ctx) {
+        vm.jit.ip_counts   = pattern->jit_ctx->ip_counts;
+        vm.jit.traces      = pattern->jit_ctx->traces;
+        vm.jit.ctx         = pattern->jit_ctx;
+    }
+    vm.jit.enabled     = true;
+    vm.jit.search_mode = true;
+    vm.jit.stats       = snobol_jit_get_stats();
+#endif
+
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(pattern->bc, pattern->bc_len, &meta);
+
+    snobol_search_result_t sr;
+    bool ok = snobol_search_exec(&vm, subject, len, 0, &meta, &sr, NULL);
+    m->success = ok;
+
+    if (ok && out_buf.len > 0) {
+        m->output = (char *)snobol_malloc(out_buf.len + 1);
+        if (m->output) {
+            memcpy(m->output, out_buf.data, out_buf.len);
+            m->output[out_buf.len] = '\0';
+            m->output_len = out_buf.len;
+        }
+    }
+
     int n = (int)vm.var_count;
     if (n > API_MAX_VARS) n = API_MAX_VARS;
     m->var_count = n;
@@ -287,9 +381,10 @@ snobol_match_result_t* snobol_match(const char* pattern, size_t pat_len,
 
     /* Compile pattern */
     bool case_insensitive = (flags & SNOBOL_FLAG_CASE_INSENSITIVE) != 0;
+    bool search_mode      = (flags & SNOBOL_FLAG_SEARCH_MODE) != 0;
     snobol_context_t *ctx = NULL; /* not needed for compile, but required by API */
     char *compile_error = NULL;
-    snobol_pattern_t *pat = do_compile(pattern, pat_len, case_insensitive, &compile_error);
+    snobol_pattern_t *pat = do_compile(pattern, pat_len, case_insensitive, search_mode, &compile_error);
 
     if (!pat) {
         if (compile_error) {

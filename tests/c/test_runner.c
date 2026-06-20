@@ -261,6 +261,7 @@ void test_jit_ir_suite(void);
 void test_jit_arm32_suite(void);
 void test_jit_riscv64_suite(void);
 void test_jit_x86_64_suite(void);
+void test_jit_c_api_suite(void);
 void test_lexer_suite(void);
 void test_parser_suite(void);
 void test_ast_suite(void);
@@ -331,6 +332,7 @@ int main(void) {
     RUN_SUITE("JIT: ARM32 Backend",         test_jit_arm32_suite);
     RUN_SUITE("JIT: RISCV64 Backend",       test_jit_riscv64_suite);
     RUN_SUITE("JIT: x86_64 Backend",        test_jit_x86_64_suite);
+    RUN_SUITE("JIT: C API Integration",     test_jit_c_api_suite);
 
     /* Lexer / Parser / AST */
     RUN_SUITE("Lexer",                      test_lexer_suite);

@@ -37,6 +37,29 @@ void bench_complex_http_suite(bench_results_t *out) {
         snobol_context_destroy(ctx);
     }
 
+    /* snobol4 search-mode (JIT): same pattern via snobol_pattern_search */
+    {
+        snobol_context_t *ctx = snobol_context_create();
+        char *err = NULL;
+        snobol_pattern_t *pat = snobol_pattern_compile(ctx,
+            "SPAN('A-Z') ' ' SPAN('/?&a-z0-9=.') ' ' 'HTTP/' SPAN('0-9.')",
+            63, &err);
+        if (!pat) { fprintf(stderr, "snobol search compile failed: %s\n", err ? err : "??"); free(err); snobol_context_destroy(ctx); return; }
+        free(err);
+
+        int64_t start = bench_ns();
+        for (int i = 0; i < BENCH_ITERATIONS; i++) {
+            snobol_match_t *m = snobol_pattern_search(pat, http_request, subj_len);
+            bool ok = snobol_match_success(m);
+            (void)ok;
+            snobol_match_free(m);
+        }
+        out->search_ns = bench_ns() - start;
+
+        snobol_pattern_free(pat);
+        snobol_context_destroy(ctx);
+    }
+
 #ifdef HAVE_PCRE2
     {
         pcre2_code *re;
