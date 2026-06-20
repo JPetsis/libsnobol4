@@ -1,0 +1,28 @@
+
+libsnobol4 diagnostic probe — per-scenario timing + JIT stat deltas
+==================================================================
+JIT: ENABLED (public stats available via snobol_jit_get_stats)
+
+Iterations per scenario: 100000 (override with PROBE_ITERS)
+Tokenize uses 10000 outer iters (multi-pass of subject).
+
+scenario            ns/iter    iters    jit_ent   jit_bail  s_entries   choice_p choice_pop      exec_ns    interp_ns
+-------             -------    -----    -------    -------  ---------  ---------  ---------      -------     --------
+literal_fail            550   100000          0          0          0          0          0            0            0
+literal_ok              358   100000          0          0          0          0          0            0            0
+span_comma              336   100000          0          0          0          0          0            0            0
+span_search             445   100000      99980      99980      99980          0          0      1528000      4068000
+alternation             339   100000          0          0          0          0          0            0            0
+alt_search             2232   100000      99980      99980      99980          0          0      1546000     91228000
+tokenize                397 10410000   10409980          0   10409980          0          0    171407000         1000
+
+Legend:
+  ns/iter      : wall time per match attempt (lower = faster)
+  iters        : match attempts executed in the scenario
+  jit_ent      : JIT-compiled trace entries (delta)
+  jit_bail     : JIT bailout count (delta)
+  s_entries    : search-mode trace entries (delta)
+  choice_p/pop : VM choice stack push/pop count (delta)
+  exec_ns      : time inside JIT-compiled traces (delta, ns)
+  interp_ns    : time in interpreter dispatch (delta, ns)
+

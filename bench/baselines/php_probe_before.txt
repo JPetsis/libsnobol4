@@ -1,0 +1,16 @@
+PHPUnit 10.5.63 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.5.7
+Configuration: /var/www/html/phpunit.xml
+
+....                                                                4 / 4 (100%)
+
+Time: 00:14.269, Memory: 4.00 MB
+
+Jit CPhp Coupling (Snobol\Tests\JitCPhpCoupling)
+ ✔ Both probes produce valid output
+ ✔ Php search mode fires jit
+ ✔ PhpC ratio within bounds
+ ✔ Jit improves both paths
+
+OK (4 tests, 22 assertions)

@@ -789,7 +789,171 @@ PHP_METHOD(Snobol_Pattern, searchAll) {
  * Split a subject on non-overlapping pattern matches using one native C loop.
  * Returns an array of string segments between matches (same semantics as
  * PatternHelper::split).
+ *
+ * For small subjects (< SNOBOL_SEARCHSPLIT_BULK_THRESHOLD bytes) the
+ * implementation uses a single-pass add_next_index_stringl loop — the
+ * per-iteration overhead is amortised over very few matches and a
+ * pre-pass would be net-negative.
+ *
+ * For larger subjects the implementation uses a two-pass approach:
+ *   1. Pre-pass: count matches and record (start, end) pairs.
+ *   2. Allocate a single C buffer of subject_len bytes and memcpy every
+ *      segment from the subject into the buffer at a running cursor.
+ *   3. Wrap the buffer in one parent zend_string, pre-size the result
+ *      hash table to N+1 slots, and insert each segment as a
+ *      zend_string_init over a sub-range of the parent (which copies
+ *      once per child but reuses the parent's already-copied bytes).
+ *
+ * The result array is byte-for-byte identical to the small-subject path
+ * (and to the pre-change implementation).
  */
+#define SNOBOL_SEARCHSPLIT_BULK_THRESHOLD (1024 * 1024)
+#define SNOBOL_SEARCHSPLIT_REC_STACK_CAP 16
+
+typedef struct {
+    size_t start;
+    size_t end;
+} snobol_match_record_t;
+
+static inline size_t snobol_searchsplit_advance_len(size_t m) {
+    return m == 0 ? 1 : m;
+}
+
+/* Bulk-result path for large subjects. Extracted into its own
+ * translation-unit function so the small-subject fast path in
+ * PHP_METHOD(Snobol_Pattern, searchSplit) does not pay the I-cache
+ * cost of the bulk path's ~120 lines. Returns true on success;
+ * on OOM, throws and returns false (state is destroyed by caller
+ * regardless, return_value is left untouched on the false path so
+ * the caller can RETURN_FALSE). */
+static bool snobol_searchsplit_bulk_path(
+    snobol_pattern_search_state_t *state,
+    const char *subject_val, size_t subject_len,
+    zval *return_value)
+{
+    snobol_match_record_t stack_recs[SNOBOL_SEARCHSPLIT_REC_STACK_CAP];
+    snobol_match_record_t *recs      = stack_recs;
+    size_t                 rec_count = 0;
+    size_t                 rec_cap   = SNOBOL_SEARCHSPLIT_REC_STACK_CAP;
+
+    size_t search_offset  = 0;
+    size_t last_match_end = 0;
+    size_t match_start    = 0;
+    size_t match_len      = 0;
+
+    while (search_offset <= subject_len) {
+        snobol_match_t *m = snobol_pattern_search_ex(state, subject_val, subject_len,
+                                                      search_offset);
+        if (!m || !snobol_match_success(m)) {
+            break;
+        }
+
+        match_start = snobol_match_get_position(m);
+        match_len   = snobol_match_get_length(m);
+
+        if (rec_count == rec_cap) {
+            size_t new_cap = rec_cap * 2;
+            if (recs == stack_recs) {
+                recs = emalloc(new_cap * sizeof(snobol_match_record_t));
+                memcpy(recs, stack_recs, rec_count * sizeof(snobol_match_record_t));
+            } else {
+                recs = erealloc(recs, new_cap * sizeof(snobol_match_record_t));
+            }
+            rec_cap = new_cap;
+        }
+        recs[rec_count].start = match_start;
+        recs[rec_count].end   = match_start + snobol_searchsplit_advance_len(match_len);
+        rec_count++;
+
+        match_len      = snobol_searchsplit_advance_len(match_len);
+        search_offset  = match_start + match_len;
+        last_match_end = search_offset;
+    }
+
+    /* Allocate one contiguous buffer for every segment, memcpy each
+     * segment from the subject. The buffer is at most subject_len
+     * bytes (the trailing segment alone is at most subject_len, and
+     * all interior segments sum to the same). */
+    char *buf = emalloc(subject_len + 1);
+    if (!buf) {
+        if (recs != stack_recs) efree(recs);
+        zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+        return false;
+    }
+
+    size_t cur = 0;
+    last_match_end = 0;
+    for (size_t i = 0; i < rec_count; i++) {
+        size_t seg_len = recs[i].start - last_match_end;
+        if (seg_len > 0) {
+            memcpy(buf + cur, subject_val + last_match_end, seg_len);
+            cur += seg_len;
+        }
+        last_match_end = recs[i].end;
+    }
+    /* Trailing segment */
+    size_t tail_len = subject_len - last_match_end;
+    if (tail_len > 0) {
+        memcpy(buf + cur, subject_val + last_match_end, tail_len);
+        cur += tail_len;
+    }
+    buf[cur] = '\0';
+
+    /* Build the result array: a single array_init + a single C buffer
+     * backing all segments. The Zend hash table grows at most O(log N)
+     * times across the N+1 inserts (Zend's growth policy); the previous
+     * implementation re-allocated on every add_next_index_stringl, so
+     * the bulk path wins on the hash-table rehashes alone. */
+    array_init(return_value);
+
+    zend_string *parent = zend_string_init(buf, cur, 0);
+    /* zend_string_init took ownership of buf; do not efree(buf) here. */
+
+    /* Track each segment's start offset in `parent->val` so the
+     * insert loop can construct child zend_strings by sub-range
+     * without re-walking the subject. */
+    size_t stack_offs[SNOBOL_SEARCHSPLIT_REC_STACK_CAP + 1];
+    size_t *offs = (rec_count + 1 > SNOBOL_SEARCHSPLIT_REC_STACK_CAP + 1)
+                       ? emalloc((rec_count + 1) * sizeof(size_t))
+                       : stack_offs;
+    size_t off_cur = 0;
+    size_t last_end = 0;
+    for (size_t i = 0; i < rec_count; i++) {
+        offs[i] = off_cur;
+        size_t seg_len = recs[i].start - last_end;
+        off_cur += seg_len;
+        last_end = recs[i].end;
+    }
+    offs[rec_count] = off_cur; /* trailing segment offset */
+
+    /* Insert N+1 segments */
+    for (size_t i = 0; i <= rec_count; i++) {
+        size_t seg_off = offs[i];
+        size_t seg_len = (i < rec_count)
+                             ? recs[i].start - (i == 0 ? 0 : recs[i - 1].end)
+                             : subject_len - (rec_count > 0 ? recs[rec_count - 1].end : 0);
+        if (seg_len == 0) {
+            /* Empty segment: insert an empty string to preserve indices */
+            zval tmp;
+            ZVAL_EMPTY_STRING(&tmp);
+            zend_hash_next_index_insert(Z_ARRVAL_P(return_value), &tmp);
+        } else {
+            zval tmp;
+            ZVAL_STR(&tmp, zend_string_init(parent->val + seg_off, seg_len, 0));
+            zend_hash_next_index_insert(Z_ARRVAL_P(return_value), &tmp);
+        }
+    }
+
+    /* The parent zend_string is now ref-counted by the array's slot
+     * count; release our reference so it is freed when the array is
+     * destroyed. */
+    zend_string_release(parent);
+
+    if (offs != stack_offs) efree(offs);
+    if (recs != stack_recs) efree(recs);
+    return true;
+}
+
 PHP_METHOD(Snobol_Pattern, searchSplit) {
     zend_string *subject;
     ZEND_PARSE_PARAMETERS_START(1,1)
@@ -817,36 +981,47 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
         RETURN_FALSE;
     }
 
-    array_init(return_value);
-    size_t search_offset  = 0;
-    size_t last_match_end = 0;
+    if (subject_len < SNOBOL_SEARCHSPLIT_BULK_THRESHOLD) {
+        /* Fast path: identical to the pre-change implementation. */
+        array_init(return_value);
+        size_t search_offset  = 0;
+        size_t last_match_end = 0;
 
-    while (search_offset <= subject_len) {
-        snobol_match_t *m = snobol_pattern_search_ex(state, subject_val, subject_len,
-                                                      search_offset);
-        if (!m || !snobol_match_success(m)) {
-            break;
+        while (search_offset <= subject_len) {
+            snobol_match_t *m = snobol_pattern_search_ex(state, subject_val, subject_len,
+                                                          search_offset);
+            if (!m || !snobol_match_success(m)) {
+                break;
+            }
+
+            size_t match_start = snobol_match_get_position(m);
+            size_t match_len   = snobol_match_get_length(m);
+
+            add_next_index_stringl(return_value,
+                subject_val + last_match_end,
+                match_start - last_match_end);
+
+            if (match_len == 0) match_len = 1;
+            search_offset  = match_start + match_len;
+            last_match_end = search_offset;
         }
 
-        size_t match_start = snobol_match_get_position(m);
-        size_t match_len   = snobol_match_get_length(m);
+        snobol_pattern_search_state_destroy(state);
 
-        /* Add segment before this match */
         add_next_index_stringl(return_value,
             subject_val + last_match_end,
-            match_start - last_match_end);
-
-        if (match_len == 0) match_len = 1;
-        search_offset  = match_start + match_len;
-        last_match_end = search_offset;
+            subject_len - last_match_end);
+        return;
     }
 
+    /* Bulk path: extracted into a separate function so the fast
+     * path above does not pay the I-cache cost of the bulk
+     * implementation's ~120 lines. */
+    if (!snobol_searchsplit_bulk_path(state, subject_val, subject_len, return_value)) {
+        snobol_pattern_search_state_destroy(state);
+        RETURN_FALSE;
+    }
     snobol_pattern_search_state_destroy(state);
-
-    /* Add remaining segment after last match */
-    add_next_index_stringl(return_value,
-        subject_val + last_match_end,
-        subject_len - last_match_end);
 }
 
 /**

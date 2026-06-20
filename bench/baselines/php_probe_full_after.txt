@@ -1,0 +1,81 @@
+
+libsnobol4 diagnostic probe (PHP binding)
+==========================================
+JIT: ENABLED (stats available)
+Iterations per scenario: 100000 (override with PROBE_ITERS)
+Tokenize uses 10000 outer iters (one searchSplit call each).
+
+[
+    {
+        "name": "literal_fail",
+        "iters": 100000,
+        "total_ns": 17416192,
+        "ns_per_iter": 174,
+        "jit_entries": 0,
+        "jit_bailouts": 0,
+        "jit_choice_push": 0,
+        "jit_choice_pop": 0,
+        "jit_exec_ns": 0,
+        "jit_interp_ns": 0
+    },
+    {
+        "name": "literal_ok",
+        "iters": 100000,
+        "total_ns": 18558208,
+        "ns_per_iter": 185,
+        "jit_entries": 0,
+        "jit_bailouts": 0,
+        "jit_choice_push": 0,
+        "jit_choice_pop": 0,
+        "jit_exec_ns": 0,
+        "jit_interp_ns": 0
+    },
+    {
+        "name": "span_comma",
+        "iters": 100000,
+        "total_ns": 16500992,
+        "ns_per_iter": 165,
+        "jit_entries": 0,
+        "jit_bailouts": 0,
+        "jit_choice_push": 0,
+        "jit_choice_pop": 0,
+        "jit_exec_ns": 0,
+        "jit_interp_ns": 0
+    },
+    {
+        "name": "alternation",
+        "iters": 100000,
+        "total_ns": 17878016,
+        "ns_per_iter": 178,
+        "jit_entries": 0,
+        "jit_bailouts": 0,
+        "jit_choice_push": 0,
+        "jit_choice_pop": 0,
+        "jit_exec_ns": 0,
+        "jit_interp_ns": 0
+    },
+    {
+        "name": "tokenize_php",
+        "iters": 10000,
+        "total_ns": 973410816,
+        "ns_per_iter": 97341,
+        "jit_entries": 5205180,
+        "jit_bailouts": 0,
+        "jit_choice_push": 0,
+        "jit_choice_pop": 0,
+        "jit_exec_ns": 104699811,
+        "jit_interp_ns": 622
+    }
+]
+scenario            ns/iter      iters    jit_ent   jit_bail   choice_p choice_pop                 exec_ns    interp_ns
+-------             -------      -----    -------    -------  ---------  ---------                 -------     --------
+literal_fail            174     100000          0          0          0          0                       0            0
+literal_ok              185     100000          0          0          0          0                       0            0
+span_comma              165     100000          0          0          0          0                       0            0
+alternation             178     100000          0          0          0          0                       0            0
+tokenize_php          97341      10000    5205180          0          0          0               104699811          622
+
+Legend: see bench/c/bench_probe.c for column definitions.
+PHP probe measures the full user-facing path (binding cost included).
+Run bench/c/bench_probe.c to compare against the pure C path.
+
