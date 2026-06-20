@@ -46,4 +46,22 @@ if(PCRE2_FOUND)
     target_link_libraries(snobol4_bench PRIVATE ${PCRE2_LIBRARIES})
 endif()
 
+# Diagnostic probe — per-scenario JIT stat deltas + timing breakdown.
+# Read-only measurement tool; no PCRE2 dependency.
+add_executable(snobol4_probe
+    bench_probe.c
+)
+target_link_libraries(snobol4_probe PRIVATE snobol4)
+target_compile_features(snobol4_probe PRIVATE c_std_23)
+# Match the test suite: enable JIT for the probe on architectures that have a backend.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]|arm|riscv64|AMD64|x86_64|amd64|i686|x86)$")
+    target_compile_definitions(snobol4_probe PRIVATE SNOBOL_JIT=1)
+endif()
+if(MSVC)
+    target_compile_options(snobol4_probe PRIVATE /std:c17 /W4)
+    target_compile_definitions(snobol4_probe PRIVATE _CRT_SECURE_NO_WARNINGS)
+else()
+    target_compile_options(snobol4_probe PRIVATE -Wall -Wextra -Wno-unused-variable)
+endif()
+
 # Build only when bench/c is explicitly added (controlled by top-level option)

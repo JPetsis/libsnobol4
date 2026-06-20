@@ -1,0 +1,73 @@
+#!/bin/bash
+#
+# Command: build-c-probe
+# Description: Build the C diagnostic probe inside ddev.
+#              Required by JitCPhpCouplingTest to compare the
+#              C-side and PHP-side per-iteration cost.
+# Usage: ddev build-c-probe
+#
+# This complements build-snobol-extension (which builds the PHP
+# extension). Both build from the same core/ source.
+
+set -euo pipefail
+
+PROJECT_DIR="/var/www/html-root"   # = repo root
+CORE_DIR="/var/www/core"
+BENCH_DIR="${PROJECT_DIR}/bench/c"
+BUILD_DIR="/tmp/snobol_probe_build"
+
+# --- Install cmake if missing ---
+if ! command -v cmake >/dev/null 2>&1; then
+    echo "📦 cmake not found — installing..."
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        cmake libpcre2-dev
+fi
+
+# --- Verify core and bench sources exist ---
+if [ ! -f "${CORE_DIR}/CMakeLists.txt" ]; then
+    echo "❌ core/CMakeLists.txt not found at ${CORE_DIR}"
+    exit 1
+fi
+if [ ! -f "${BENCH_DIR}/bench_probe.c" ]; then
+    echo "❌ bench/c/bench_probe.c not found at ${BENCH_DIR}"
+    exit 1
+fi
+
+# --- Stage build ---
+echo "🔨 Building C diagnostic probe..."
+echo "   core dir:  $CORE_DIR"
+echo "   bench dir: $BENCH_DIR"
+
+sudo rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+# Stage the entire project (top-level CMakeLists + core + bench + tests + examples)
+# Exclude the host's build/ dir to avoid the stale CMakeCache.txt confusing
+# in-container cmake (cache references host paths).
+rsync -a --exclude='build/' --exclude='.git/' --exclude='vendor/' \
+    "${PROJECT_DIR}/" "$BUILD_DIR/"
+
+cd "$BUILD_DIR"
+cmake -S . -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTS=OFF \
+    -DBUILD_PHP=OFF \
+    -DBUILD_BENCH_C=ON
+cmake --build build --target snobol4_probe -j"$(nproc)"
+
+# --- Install probe to a stable location ---
+PROBE_BIN="${BUILD_DIR}/build/bench/c/snobol4_probe"
+if [ ! -x "$PROBE_BIN" ]; then
+    echo "❌ snobol4_probe not built"
+    exit 1
+fi
+
+PROBE_DEST="/usr/local/bin/snobol4_probe"
+sudo cp "$PROBE_BIN" "$PROBE_DEST"
+sudo chmod +x "$PROBE_DEST"
+
+echo "✅ C diagnostic probe installed at ${PROBE_DEST}"
+echo "   JitCPhpCouplingTest can now compare the C and PHP probes."
+
+# --- Cleanup ---
+sudo rm -rf "$BUILD_DIR"
