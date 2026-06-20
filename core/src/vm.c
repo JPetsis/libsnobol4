@@ -14,6 +14,20 @@
 #include <time.h>
 #include <stdarg.h>
 
+/* Return the single ASCII byte represented by a bitmap, or -1 if the
+ * bitmap contains zero or more than one byte.  Only examines bytes 0-127. */
+static inline int bitmap_single_ascii_byte(const uint64_t map[2]) {
+    uint64_t lo = map[0];
+    uint64_t hi = map[1];
+    if (hi == 0 && lo != 0 && (lo & (lo - 1)) == 0) {
+        return __builtin_ctzll(lo);
+    }
+    if (lo == 0 && hi != 0 && (hi & (hi - 1)) == 0) {
+        return 64 + __builtin_ctzll(hi);
+    }
+    return -1;
+}
+
 /* Minimal code buffer for dynamic pattern compilation in VM */
 typedef struct {
     uint8_t *buf;
@@ -274,6 +288,34 @@ size_t vm_compact_choice_record_size(const CompactChoiceHeader *hdr) {
     return sz;
 }
 
+/* Reset VM between match attempts while preserving choice allocation */
+void snobol_vm_reset(VM *vm) {
+    memset(vm->cap_start, 0, sizeof(vm->cap_start));
+    memset(vm->cap_end, 0, sizeof(vm->cap_end));
+    vm->var_count = 0;
+    memset(vm->var_start, 0, sizeof(vm->var_start));
+    memset(vm->var_end, 0, sizeof(vm->var_end));
+    memset(vm->counters, 0, sizeof(vm->counters));
+    memset(vm->loop_min, 0, sizeof(vm->loop_min));
+    memset(vm->loop_max, 0, sizeof(vm->loop_max));
+    memset(vm->loop_last_pos, 0, sizeof(vm->loop_last_pos));
+    vm->max_cap_used = 0;
+    vm->max_counter_used = 0;
+    vm->ip = 0;
+    vm->pos = 0;
+    vm->abort_flag = false;
+    vm->in_goto_fail = false;
+    vm->current_label = 0;
+    vm->choices_top = 0;
+    vm->choice_allocated = 0;
+    vm->choice_push_count = 0;
+    vm->choice_peak_depth = 0;
+    vm->choice_peak_memory = 0;
+    if (vm->write_log) {
+        vm_write_log_clear(vm);
+    }
+}
+
 /* Choice stack statistics */
 size_t vm_choice_stack_memory_usage(VM *vm) {
     return vm->choices_top;
@@ -454,18 +496,27 @@ void snobol_buf_free(snobol_buf *b) { if (b->data) { snobol_free(b->data); b->da
 
 bool vm_run(VM *vm) {
     size_t initial_cap = 4096;
-    vm->choices = snobol_malloc(initial_cap);
-    if (!vm->choices) return false;
-    vm->choices_cap = initial_cap; vm->choices_top = 0;
+    if (!vm->choices) {
+        vm->choices = snobol_malloc(initial_cap);
+        if (!vm->choices) return false;
+        vm->choices_cap = initial_cap;
+    }
+    vm->choices_top = 0;
     vm->use_compact_choice = (getenv("SNOBOL_LEGACY_CHOICE") == nullptr);
     if (vm->use_compact_choice) {
-        vm_write_log_init(vm);
-        vm->write_log_cap = MAX_CAPS;
-        vm->write_log = snobol_malloc(vm->write_log_cap * sizeof(WriteLogEntry));
         if (!vm->write_log) {
-            snobol_free(vm->choices);
-            vm->choices = nullptr;
-            return false;
+            vm_write_log_init(vm);
+            vm->write_log_cap = MAX_CAPS;
+            vm->write_log = snobol_malloc(vm->write_log_cap * sizeof(WriteLogEntry));
+            if (!vm->write_log) {
+                if (!vm->keep_choices) {
+                    snobol_free(vm->choices);
+                    vm->choices = nullptr;
+                }
+                return false;
+            }
+        } else {
+            vm_write_log_clear(vm);
         }
     }
 #ifdef SNOBOL_JIT
@@ -617,8 +668,10 @@ bool vm_run(VM *vm) {
 #ifdef SNOBOL_JIT
                 snobol_jit_log("vm_run exit reason=ACCEPT pos=%zu", vm->pos);
 #endif
-                if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
-                if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+                if (!vm->keep_choices) {
+                    if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
+                    if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+                }
                 return true;
             case OP_FAIL: {
                 bool had = vm_pop_choice(vm);
@@ -694,8 +747,22 @@ bool vm_run(VM *vm) {
                 uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip); uint16_t count, ci;
                 const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
                 uint64_t map[2]; bool is_ascii = ranges && ranges_to_ascii_bitmap(ranges, count, map);
-                if (is_ascii) { while (vm->pos < vm->len && !bitmap_test(map, (uint8_t)vm->s[vm->pos])) vm->pos++; }
-                else { uint32_t cp; int bytes; while (utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes) && (!ranges || !range_contains(ranges, count, cp))) vm->pos += bytes; }
+                if (is_ascii) {
+                    int single = bitmap_single_ascii_byte(map);
+                    if (single >= 0 && vm->pos < vm->len) {
+                        const void *p = memchr(vm->s + vm->pos, (unsigned char)single,
+                                                vm->len - vm->pos);
+                        if (p) vm->pos = (size_t)((const uint8_t *)p - (const uint8_t *)vm->s);
+                        else   vm->pos = vm->len;
+                    } else {
+                        while (vm->pos < vm->len && !bitmap_test(map, (uint8_t)vm->s[vm->pos]))
+                            vm->pos++;
+                    }
+                } else {
+                    uint32_t cp; int bytes;
+                    while (utf8_peek_next(vm->s, vm->len, vm->pos, &cp, &bytes) &&
+                           (!ranges || !range_contains(ranges, count, cp))) vm->pos += bytes;
+                }
                 break;
             }
             case OP_CAP_START: {
@@ -1565,8 +1632,16 @@ bool vm_run(VM *vm) {
 
                 /* Advance past non-break characters (like OP_BREAK) */
                 if (bx_ascii) {
-                    while (vm->pos < vm->len && !bitmap_test(bx_map, (uint8_t)vm->s[vm->pos]))
-                        vm->pos++;
+                    int bx_single = bitmap_single_ascii_byte(bx_map);
+                    if (bx_single >= 0 && vm->pos < vm->len) {
+                        const void *bx_p = memchr(vm->s + vm->pos, (unsigned char)bx_single,
+                                                   vm->len - vm->pos);
+                        if (bx_p) vm->pos = (size_t)((const uint8_t *)bx_p - (const uint8_t *)vm->s);
+                        else      vm->pos = vm->len;
+                    } else {
+                        while (vm->pos < vm->len && !bitmap_test(bx_map, (uint8_t)vm->s[vm->pos]))
+                            vm->pos++;
+                    }
                 } else {
                     uint32_t bx_cp; int bx_bytes;
                     while (utf8_peek_next(vm->s, vm->len, vm->pos, &bx_cp, &bx_bytes) &&
@@ -1736,8 +1811,10 @@ bool vm_run(VM *vm) {
                  */
                 vm->abort_flag = 1;
                 vm->choices_top = 0;
-                if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
-                if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+                if (!vm->keep_choices) {
+                    if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
+                    if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+                }
                 return false;
             }
 
@@ -1746,8 +1823,10 @@ bool vm_run(VM *vm) {
                  * current position, skipping any remaining pattern.
                  * No operands.
                  */
-                if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
-                if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+                if (!vm->keep_choices) {
+                    if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
+                    if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+                }
                 return true;
             }
 
@@ -1767,15 +1846,19 @@ bool vm_run(VM *vm) {
         }
 #endif
     }
-    if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
-    if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+    if (!vm->keep_choices) {
+        if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
+        if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+    }
     return false;
  fail_ret:
 #ifdef SNOBOL_JIT
     snobol_jit_log("vm_run exit reason=FAIL");
 #endif
-    if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
-    if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+    if (!vm->keep_choices) {
+        if (vm->choices) { snobol_free(vm->choices); vm->choices = nullptr; }
+        if (vm->use_compact_choice && vm->write_log) { vm_write_log_free(vm); }
+    }
     return false;
 }
 

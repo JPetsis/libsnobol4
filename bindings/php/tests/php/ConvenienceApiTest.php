@@ -136,6 +136,20 @@ class ConvenienceApiTest extends TestCase
         $this->assertFalse($res);
     }
 
+    public function testMatchOnceCachingSameResult(): void
+    {
+        $res1 = PatternHelper::matchOnce("'hello'", "hello world");
+        $res2 = PatternHelper::matchOnce("'hello'", "hello world");
+        $this->assertEquals($res1, $res2);
+    }
+
+    public function testMatchOnceCachingAffectedByOptions(): void
+    {
+        $partial = PatternHelper::matchOnce("'hello'", "hello world");
+        $full    = PatternHelper::matchOnce("'hello'", "hello world", ['full' => true]);
+        $this->assertNotEquals($partial, $full);
+    }
+
     /* ============================================================
      *  PatternHelper::matchAll()
      * ============================================================ */

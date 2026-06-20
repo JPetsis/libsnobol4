@@ -42,6 +42,12 @@ endif()
 # Examples
 add_subdirectory(examples/c)
 
+# Optional: C microbenchmark suite (off by default)
+option(BUILD_BENCH_C "Build C microbenchmark suite" OFF)
+if(BUILD_BENCH_C)
+    add_subdirectory(bench/c)
+endif()
+
 # Custom targets
 add_custom_target(clean-all
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}
@@ -121,6 +127,15 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/bench)
         COMMENT "Benchmark placeholder"
     )
 endif()
+
+# C benchmark target (runs snobol4_bench binary)
+add_custom_target(bench-c
+    COMMAND ${CMAKE_COMMAND} -E echo "==> Running C microbenchmarks..."
+    COMMAND ${CMAKE_BINARY_DIR}/bench/c/snobol4_bench
+    DEPENDS snobol4_bench
+    COMMENT "Run C microbenchmark suite"
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
 
 # Installation summary
 include(GNUInstallDirs)

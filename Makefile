@@ -9,7 +9,7 @@
 
 .PHONY: all build test clean distclean install uninstall help \
         build-debug build-release build-jit build-asan \
-        test-verbose test-valgrind test-valgrind-report test-asan bench docs format lint warnings \
+        test-verbose test-valgrind test-valgrind-report test-asan bench bench-c docs format lint warnings \
         gen-unicode-fold
 
 # Default build type
@@ -184,6 +184,20 @@ bench:
 		echo "Run 'make build-php' to build PHP binding first."; \
 	fi
 
+# C microbenchmark suite (compile libsnobol4 vs PCRE2 at C level)
+bench-c:
+	@echo "==> Building and running C microbenchmarks..."
+	$(CMAKE) -B build \
+		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
+		-DBUILD_TESTS=ON \
+		-DBUILD_PHP=OFF \
+		-DBUILD_BENCH_C=ON \
+		-DSNOBOL_JIT=ON \
+		$(CMAKE_EXTRA_FLAGS)
+	$(CMAKE_BUILD) --target snobol4_bench
+	@echo ""
+	./build/bench/c/snobol4_bench
+
 # Head-to-head comparison benchmarks (requires PHP + snobol extension)
 # Generates bench/BENCHMARKS.md with results.
 bench-comparison:
@@ -312,6 +326,7 @@ help:
 	@echo "  install        - Install to INSTALL_PREFIX (default: /usr/local); requires sudo if prefix needs root"
 	@echo "  uninstall      - Uninstall from INSTALL_PREFIX (default: /usr/local)"
 	@echo "  bench          - Run benchmark suite (requires PHP)"
+	@echo "  bench-c        - Build & run C microbenchmarks (core vs PCRE2)"
 	@echo "  docs           - Generate documentation (requires Doxygen)"
 	@echo "  format         - Format code (requires clang-format)"
 	@echo "  lint           - Run clang-tidy (requires LLVM toolchain)"

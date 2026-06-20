@@ -183,6 +183,21 @@ class JitObservabilityTest extends TestCase
         snobol_reset_jit_stats();
     }
 
+    public function testSearchModeSmallPatternJitEntries(): void
+    {
+        // search_min_useful_ops=1 means searchAll/split patterns with few ops
+        // should JIT-compile when hot enough.
+        snobol_reset_jit_stats();
+        for ($i = 0; $i < 150; $i++) {
+            \Snobol\PatternHelper::split("','", "word,test;foo|bar");
+        }
+        $stats = snobol_get_jit_stats();
+        $this->assertGreaterThan(0, $stats['jit_search_entries_total'],
+            'Small search pattern should trigger JIT entries with search_min_useful_ops=1');
+        $this->assertGreaterThan(0, $stats['jit_entries_total'],
+            'Small search pattern should also trigger general JIT entries');
+    }
+
     public function testJitBlocksCompiledTotalIsAccessibleAndNonZero(): void
     {
         if (!function_exists('snobol_get_jit_stats')) {

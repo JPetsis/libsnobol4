@@ -114,5 +114,73 @@ class BuilderTest extends TestCase
         $this->assertIsArray($ast);
         $this->assertEquals('succeed', $ast['type']);
     }
+
+    /* ============================================================
+     *  Range syntax — C compiler expands X-Y notation
+     * ============================================================ */
+
+    public function testSpanSingleRange(): void
+    {
+        $p = \Snobol\Pattern::compileFromAst(Builder::span("a-z"));
+        $r = $p->match("hello");
+        $this->assertIsArray($r);
+        $this->assertEquals(5, $r['_match_len']);
+        $this->assertFalse($p->match("HELLO"));
+    }
+
+    public function testSpanMultipleRanges(): void
+    {
+        $p = \Snobol\Pattern::compileFromAst(Builder::span("a-z0-9"));
+        $r1 = $p->match("abc123");
+        $this->assertIsArray($r1);
+        $this->assertEquals(6, $r1['_match_len']);
+        $r2 = $p->match("___");
+        $this->assertFalse($r2);
+    }
+
+    public function testBrkSingleRange(): void
+    {
+        $p = \Snobol\Pattern::compileFromAst(Builder::brk("0-9"));
+        $r = $p->match("hello123");
+        $this->assertIsArray($r);
+        $this->assertEquals(5, $r['_match_len']);
+    }
+
+    public function testAnySingleRange(): void
+    {
+        $p = \Snobol\Pattern::compileFromAst(Builder::any("a-m"));
+        $this->assertIsArray($p->match("hello"));
+        $this->assertFalse($p->match("zoo"));
+    }
+
+    public function testNotanySingleRange(): void
+    {
+        $p = \Snobol\Pattern::compileFromAst(Builder::notany("a-z"));
+        $this->assertIsArray($p->match("123"));
+        $this->assertFalse($p->match("abc"));
+    }
+
+    public function testHyphenAtStartIsLiteral(): void
+    {
+        $p = \Snobol\Pattern::compileFromAst(Builder::span("-a"));
+        $r = $p->match("-aaa");
+        $this->assertIsArray($r);
+        $this->assertEquals(4, $r['_match_len']);
+    }
+
+    public function testHyphenAtEndIsLiteral(): void
+    {
+        $p = \Snobol\Pattern::compileFromAst(Builder::span("a-"));
+        $r = $p->match("aaa-");
+        $this->assertIsArray($r);
+        $this->assertEquals(4, $r['_match_len']);
+    }
+
+    public function testRangeWithUpperCase(): void
+    {
+        $p = \Snobol\Pattern::compileFromAst(Builder::span("A-Z"));
+        $this->assertIsArray($p->match("HELLO"));
+        $this->assertFalse($p->match("hello"));
+    }
 }
 

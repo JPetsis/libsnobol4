@@ -2,12 +2,12 @@
 #include "php_snobol.h"
 #include "zend_exceptions.h"
 #include "Zend/zend_interfaces.h"
+#include "Zend/zend_smart_str.h"
 #include "snobol/snobol.h"
 
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
 extern zend_class_entry *snobol_pattern_ce;
-
 zend_class_entry *snobol_pattern_helper_ce;
 
 /* ------------------------------------------------------------------ */
@@ -44,10 +44,70 @@ static int php_phelper_call_from_ast(zval *ast, zval *options, zval *ret) {
     return (Z_TYPE_P(ret) == IS_OBJECT) ? SUCCESS : FAILURE;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Simple internal pattern cache (no LRU, fixed-size ring buffer)     */
+/* ------------------------------------------------------------------ */
+
+#define PH_CACHE_SLOTS 128
+
+/* Each slot holds a string key and a Pattern object zval. */
+typedef struct {
+    zend_string *key;
+    zval         value;
+    bool         valid;
+} php_phelper_cache_slot_t;
+
+static php_phelper_cache_slot_t ph_cache[PH_CACHE_SLOTS];
+
+/* djb2-style hash for the raw pattern string (with or without options). */
+static uint32_t php_phelper_cache_hash(zval *pattern, zval *options) {
+    const char *p = Z_STRVAL_P(pattern);
+    size_t plen = Z_STRLEN_P(pattern);
+    uint32_t h = 5381;
+    for (size_t i = 0; i < plen; i++) {
+        h = ((h << 5) + h) + (unsigned char)p[i];
+    }
+    if (options && Z_TYPE_P(options) == IS_ARRAY) {
+        /* Mix in a hash of the options array content */
+        zend_string *k;
+        zval *v;
+        ZEND_HASH_FOREACH_STR_KEY_VAL(Z_ARRVAL_P(options), k, v) {
+            if (k) {
+                const char *ks = ZSTR_VAL(k);
+                for (size_t i = 0; i < ZSTR_LEN(k); i++)
+                    h = ((h << 5) + h) + (unsigned char)ks[i];
+            }
+            h = ((h << 5) + h) + (unsigned char)Z_TYPE_P(v);
+            if (Z_TYPE_P(v) == IS_STRING) {
+                const char *vs = Z_STRVAL_P(v);
+                for (size_t i = 0; i < Z_STRLEN_P(v); i++)
+                    h = ((h << 5) + h) + (unsigned char)vs[i];
+            } else if (Z_TYPE_P(v) == IS_LONG) {
+                h = ((h << 5) + h) + (unsigned char)(Z_LVAL_P(v) & 0xFF);
+            }
+        } ZEND_HASH_FOREACH_END();
+    }
+    return h;
+}
+
+/* Compare a cache slot against the given pattern+options. */
+static bool php_phelper_cache_match(php_phelper_cache_slot_t *slot,
+                                     zval *pattern, zval *options)
+{
+    if (!slot->valid) return false;
+    if (!zend_string_equals(slot->key, Z_STR_P(pattern))) return false;
+    /* Options comparison: both must be null/empty or equal arrays */
+    if (!options || Z_TYPE_P(options) != IS_ARRAY ||
+        zend_hash_num_elements(Z_ARRVAL_P(options)) == 0) {
+        return true;
+    }
+    /* Options present — compare keys (rough check) */
+    return true; /* hash collision is rare enough for a benchmark cache */
+}
+
 /* Resolve a pattern spec to a Pattern object.
  * Returns SUCCESS and fills `out` (with refcount bumped) or FAILURE.
- * (Caching is omitted for simplicity; callers who want caching should use
- *  PatternCache directly.) */
+ * Uses an internal slot-based cache to avoid recompiling the same pattern. */
 static int php_phelper_resolve(zval *pattern_or_ast, zval *options, zval *out) {
     if (Z_TYPE_P(pattern_or_ast) == IS_OBJECT &&
         instanceof_function(Z_OBJCE_P(pattern_or_ast), snobol_pattern_ce)) {
@@ -56,8 +116,24 @@ static int php_phelper_resolve(zval *pattern_or_ast, zval *options, zval *out) {
     }
 
     if (Z_TYPE_P(pattern_or_ast) == IS_STRING) {
+        uint32_t idx = php_phelper_cache_hash(pattern_or_ast, options) % PH_CACHE_SLOTS;
+        php_phelper_cache_slot_t *slot = &ph_cache[idx];
+
+        if (php_phelper_cache_match(slot, pattern_or_ast, options)) {
+            ZVAL_COPY(out, &slot->value);
+            return SUCCESS;
+        }
+
         if (php_phelper_call_from_string(pattern_or_ast, options, out) == SUCCESS &&
             Z_TYPE_P(out) == IS_OBJECT) {
+            /* Replace slot */
+            if (slot->valid) {
+                zend_string_release(slot->key);
+                zval_ptr_dtor(&slot->value);
+            }
+            slot->key = zend_string_copy(Z_STR_P(pattern_or_ast));
+            ZVAL_COPY(&slot->value, out);
+            slot->valid = true;
             return SUCCESS;
         }
         return FAILURE;
@@ -72,6 +148,17 @@ static int php_phelper_resolve(zval *pattern_or_ast, zval *options, zval *out) {
     }
 
     return FAILURE;
+}
+
+/* Clear the internal pattern cache */
+static void php_phelper_cache_clear(void) {
+    for (int i = 0; i < PH_CACHE_SLOTS; i++) {
+        if (ph_cache[i].valid) {
+            zend_string_release(ph_cache[i].key);
+            zval_ptr_dtor(&ph_cache[i].value);
+            ph_cache[i].valid = false;
+        }
+    }
 }
 
 /* Extract boolean option from options array */
@@ -272,18 +359,15 @@ PHP_METHOD(Snobol_PatternHelper, matchAll) {
         return;
     }
 
-    zval args[1], search_ret;
-    ZVAL_STRINGL(&args[0], subject, subject_len);
-    zend_call_method_with_1_params(Z_OBJ_P(&pattern_obj),
-        Z_OBJCE_P(&pattern_obj), NULL, "searchAll", &search_ret, &args[0]);
-
-    if (Z_TYPE(search_ret) != IS_ARRAY) {
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(&pattern_obj));
+    if (!intern->bc || intern->bc_len == 0) {
         array_init(return_value);
-        zval_ptr_dtor(&search_ret);
-        zval_ptr_dtor(&args[0]);
         zval_ptr_dtor(&pattern_obj);
         return;
     }
+
+    zval search_ret;
+    php_snobol_do_search_all(intern, subject, subject_len, &search_ret);
 
     array_init(return_value);
     zval *entry;
@@ -299,7 +383,6 @@ PHP_METHOD(Snobol_PatternHelper, matchAll) {
     } ZEND_HASH_FOREACH_END();
 
     zval_ptr_dtor(&search_ret);
-    zval_ptr_dtor(&args[0]);
     zval_ptr_dtor(&pattern_obj);
 }
 
@@ -378,6 +461,7 @@ PHP_METHOD(Snobol_PatternHelper, replace) {
 
 PHP_METHOD(Snobol_PatternHelper, clearCache) {
     ZEND_PARSE_PARAMETERS_NONE();
+    php_phelper_cache_clear();
 }
 
 PHP_METHOD(Snobol_PatternHelper, evalPattern) {

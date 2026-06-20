@@ -363,6 +363,7 @@ typedef struct {
     uint16_t current_label;     /* Current label being processed */
     bool in_goto_fail;         /* True if in GOTO_F failure handling */
     bool abort_flag;           /* True if ABORT opcode was executed */
+    bool keep_choices;         /* If true, vm_run preserves choice stack across calls */
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
     /* Dynamic pattern support */
@@ -496,6 +497,11 @@ void snobol_buf_free(snobol_buf *b);
 void vm_push_choice(VM *vm, size_t ip, size_t pos);
 /** @brief Pop the most recent choice point; return false if stack is empty. */
 bool vm_pop_choice(VM *vm);
+
+/** @brief Reset VM state between match attempts while keeping choice/allocation.
+ *  Clears captures, counters, and rewinds the choice stack.
+ *  The caller is responsible for setting ip/pos to appropriate values. */
+void snobol_vm_reset(VM *vm);
 
 /* Write-log management for compact choice stack */
 /** @brief Allocate write-log circular buffer. */

@@ -1,0 +1,83 @@
+#include "bench_shared.h"
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+
+/* Forward declarations */
+BENCH_SUITE(literal);
+BENCH_SUITE(alternation);
+BENCH_SUITE(tokenization);
+BENCH_SUITE(substitution);
+BENCH_SUITE(complex_http);
+
+static bench_results_t results[16];
+static int result_count = 0;
+
+static void run_one(void (*suite)(bench_results_t *)) {
+    if (result_count >= 16) return;
+    bench_results_t *r = &results[result_count++];
+    memset(r, 0, sizeof(*r));
+    suite(r);
+}
+
+int main(void) {
+    int maj, min, pat;
+    snobol_version(&maj, &min, &pat);
+
+    printf("libsnobol4 C Microbenchmarks\n");
+    printf("============================\n");
+    printf("Version: %d.%d.%d\n", maj, min, pat);
+#ifdef HAVE_PCRE2
+    printf("PCRE2:   available\n");
+#else
+    printf("PCRE2:   NOT available (install libpcre2-dev)\n");
+#endif
+    printf("Iterations per scenario: %d\n\n", BENCH_ITERATIONS);
+
+    run_one(bench_literal_suite);
+    run_one(bench_alternation_suite);
+    run_one(bench_tokenization_suite);
+    run_one(bench_substitution_suite);
+    run_one(bench_complex_http_suite);
+
+    printf("%-30s %16s %16s %10s\n",
+           "Scenario", "snobol4 (ns)", "pcre2 (ns)", "ratio");
+    printf("%-30s %16s %16s %10s\n",
+           "-------", "------------", "-----------", "-----");
+
+    for (int i = 0; i < result_count; i++) {
+        bench_results_t *r = &results[i];
+        double snobol_us = (double)r->snobol_ns / 1000.0;
+        double ratio = 0.0;
+        char ratio_str[32] = "N/A";
+
+        if (r->pcre2_ns > 0) {
+            double pcre2_us = (double)r->pcre2_ns / 1000.0;
+            ratio = snobol_us / pcre2_us;
+            snprintf(ratio_str, sizeof(ratio_str), "%.2f", ratio);
+            printf("%-30s %8.0f us (%lld) %8.0f us (%lld) %10s\n",
+                   r->label,
+                   snobol_us, (long long)r->snobol_ns,
+                   pcre2_us, (long long)r->pcre2_ns,
+                   ratio_str);
+        } else {
+            printf("%-30s %8.0f us (%lld) %16s %10s\n",
+                   r->label,
+                   snobol_us, (long long)r->snobol_ns,
+                   "N/A", ratio_str);
+        }
+
+        double ops_per_sec = (double)BENCH_ITERATIONS / (snobol_us / 1e6);
+        printf("  %30s ops/sec (snobol4): %.0f\n", "", ops_per_sec);
+
+        if (r->pcre2_ns > 0) {
+            double pcre2_ops = (double)BENCH_ITERATIONS / ((double)r->pcre2_ns / 1e9);
+            printf("  %30s ops/sec (pcre2):   %.0f\n", "", pcre2_ops);
+        }
+        printf("\n");
+    }
+
+    printf("---\n");
+    printf("Ratio = snobol4 time / pcre2 time.  <1.0 = snobol4 faster.\n");
+    return 0;
+}

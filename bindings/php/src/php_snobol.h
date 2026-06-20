@@ -28,10 +28,30 @@ size_t php_snobol_get_all_tables(snobol_table_t ***out_tables);
 /* PHP 8.5 removed the refcount increment from add_assoc_zval. Use this helper
    instead when storing reference-counted zvals (arrays, objects). */
 static zend_always_inline void snobol_assoc_zval(zval *arr, const char *key,
-                                                  size_t key_len, zval *value) {
+                                                   size_t key_len, zval *value) {
     zval copy;
     ZVAL_COPY(&copy, value);
     zend_hash_str_update(Z_ARRVAL_P(arr), key, key_len, &copy);
 }
+
+/* Core object struct: zend_object at the END */
+typedef struct snobol_pattern {
+    uint8_t *bc;
+    size_t bc_len;
+#ifdef SNOBOL_JIT
+    struct SnobolJitContext *jit_ctx;
+    bool jit_enabled;
+#endif
+    zend_object std;
+} snobol_pattern_t;
+
+static inline snobol_pattern_t* php_snobol_fetch(zend_object *obj) {
+    return (snobol_pattern_t *)((char *)(obj) - XtOffsetOf(snobol_pattern_t, std));
+}
+
+/* Core search loop used by Pattern::searchAll and PatternHelper::matchAll */
+void php_snobol_do_search_all(snobol_pattern_t *intern,
+                               const char *subject_val, size_t subject_len,
+                               zval *result);
 
 #endif /* PHP_SNOBOL_H */
