@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 
 #include "snobol/dynamic_pattern.h"
 #include "snobol/snobol_internal.h"
@@ -1710,8 +1711,12 @@ static void *arm32_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
 static void arm32_flush_icache(void *code, size_t size) {
 #if defined(__linux__)
   /* __builtin___clear_cache emits the ISB barrier on ARM Linux.
-   * On QEMU user-mode, also use cacheflush syscall for robustness. */
+   * On QEMU user-mode, also issue the cacheflush syscall for robustness —
+   * QEMU's JIT translator may otherwise keep the old TB cached and execute
+   * stale instructions after we just wrote new machine code to the
+   * executable mapping. */
   __builtin___clear_cache((char *)code, (char *)code + size);
+  syscall(__NR_cacheflush, code, size, 0);
 #elif defined(SNOBOL_JIT_PLATFORM_LINUX)
   __builtin___clear_cache((char *)code, (char *)code + size);
 #else

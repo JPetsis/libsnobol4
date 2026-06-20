@@ -1742,6 +1742,10 @@ static void *riscv64_lower(const jit_ir_region_t *ir, VM *vm,
  * riscv64_flush_icache()
  * ========================================================================= */
 static void riscv64_flush_icache(void *code, size_t size) {
+  /* __builtin___clear_cache emits a fence.i on RISC-V, which QEMU
+   * user-mode handles. No additional cacheflush syscall is required
+   * on RISC-V (the __NR_riscv_flush_icache syscall was added in
+   * Linux 5.19 and is not portable enough to require). */
   __builtin___clear_cache((char *)code, (char *)code + size);
 }
 
