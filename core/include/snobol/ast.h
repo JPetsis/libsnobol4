@@ -1,8 +1,8 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 #include <stdio.h>
 
 /**
@@ -32,83 +32,83 @@
  * Check if AST version is compatible
  * Returns true if major version matches and minor version >= required
  */
-#define SNOBOL_AST_VERSION_CHECK(major, minor) \
-    ((major) == SNOBOL_AST_VERSION_MAJOR && (minor) <= SNOBOL_AST_VERSION_MINOR)
+#define SNOBOL_AST_VERSION_CHECK(major, minor)                                 \
+  ((major) == SNOBOL_AST_VERSION_MAJOR && (minor) <= SNOBOL_AST_VERSION_MINOR)
 
 /**
  * AST version structure for runtime queries
  */
 typedef struct {
-    uint16_t major;
-    uint16_t minor;
-    uint16_t patch;
-    const char* string;
+  uint16_t major;
+  uint16_t minor;
+  uint16_t patch;
+  const char *string;
 } snobol_ast_version_t;
 
 /**
  * AST node type tags
  */
 typedef enum {
-    /* Core pattern types */
-    AST_LITERAL,      /* Literal string match */
-    AST_CONCAT,       /* Concatenation of patterns */
-    AST_ALT,          /* Alternation (pattern1 | pattern2) */
-    AST_REPETITION,   /* Bounded repetition: repeat(P, min, max) */
-    
-    /* Character class types */
-    AST_SPAN,         /* Match span of characters in set */
-    AST_BREAK,        /* Match until break character */
-    AST_ANY,          /* Match any character (optionally in set) */
-    AST_NOTANY,       /* Match any character NOT in set */
-    
-    /* Quantifiers */
-    AST_ARBNO,        /* Arbitrary number (zero or more) */
-    
-    /* Capture and assignment */
-    AST_CAP,          /* Capture match into register */
-    AST_ASSIGN,       /* Assign register to variable */
-    
-    /* Length matching */
-    AST_LEN,          /* Match exactly N characters */
-    
-    /* Dynamic evaluation */
-    AST_EVAL,         /* Evaluate function result as pattern */
-    AST_DYNAMIC_EVAL, /* Dynamic pattern from source text */
-    
-    /* Anchors */
-    AST_ANCHOR,       /* Start/end anchor */
-    
-    /* Output/emission */
-    AST_EMIT,         /* Emit literal or capture to output */
-    
-    /* Control flow */
-    AST_LABEL,        /* Label definition */
-    AST_GOTO,         /* Goto label reference */
-    
-    /* Table operations */
-    AST_TABLE_ACCESS, /* Table lookup */
-    AST_TABLE_UPDATE, /* Table assignment */
+  /* Core pattern types */
+  AST_LITERAL,    /* Literal string match */
+  AST_CONCAT,     /* Concatenation of patterns */
+  AST_ALT,        /* Alternation (pattern1 | pattern2) */
+  AST_REPETITION, /* Bounded repetition: repeat(P, min, max) */
 
-    /* Pattern primitives */
-    AST_BREAKX,  /* BREAKX – break with retry choice point */
-    AST_BAL,     /* BAL – balanced delimiter match */
-    AST_FENCE,   /* FENCE – cut choice stack */
-    AST_REM,     /* REM – consume remainder */
-    AST_RPOS,    /* RPOS(n) – cursor n codepoints from end */
-    AST_RTAB,    /* RTAB(n) – advance to n codepoints from end */
-    AST_POS,     /* POS(n) – succeed when cursor at n codepoints from start */
-    AST_TAB,     /* TAB(n) – advance cursor to n codepoints from start */
-    AST_ABORT,   /* ABORT – terminate entire match */
-    AST_FAIL,    /* FAIL – force failure / backtrack */
-    AST_SUCCEED  /* SUCCEED – force immediate success */
+  /* Character class types */
+  AST_SPAN,   /* Match span of characters in set */
+  AST_BREAK,  /* Match until break character */
+  AST_ANY,    /* Match any character (optionally in set) */
+  AST_NOTANY, /* Match any character NOT in set */
+
+  /* Quantifiers */
+  AST_ARBNO, /* Arbitrary number (zero or more) */
+
+  /* Capture and assignment */
+  AST_CAP,    /* Capture match into register */
+  AST_ASSIGN, /* Assign register to variable */
+
+  /* Length matching */
+  AST_LEN, /* Match exactly N characters */
+
+  /* Dynamic evaluation */
+  AST_EVAL,         /* Evaluate function result as pattern */
+  AST_DYNAMIC_EVAL, /* Dynamic pattern from source text */
+
+  /* Anchors */
+  AST_ANCHOR, /* Start/end anchor */
+
+  /* Output/emission */
+  AST_EMIT, /* Emit literal or capture to output */
+
+  /* Control flow */
+  AST_LABEL, /* Label definition */
+  AST_GOTO,  /* Goto label reference */
+
+  /* Table operations */
+  AST_TABLE_ACCESS, /* Table lookup */
+  AST_TABLE_UPDATE, /* Table assignment */
+
+  /* Pattern primitives */
+  AST_BREAKX, /* BREAKX – break with retry choice point */
+  AST_BAL,    /* BAL – balanced delimiter match */
+  AST_FENCE,  /* FENCE – cut choice stack */
+  AST_REM,    /* REM – consume remainder */
+  AST_RPOS,   /* RPOS(n) – cursor n codepoints from end */
+  AST_RTAB,   /* RTAB(n) – advance to n codepoints from end */
+  AST_POS,    /* POS(n) – succeed when cursor at n codepoints from start */
+  AST_TAB,    /* TAB(n) – advance cursor to n codepoints from start */
+  AST_ABORT,  /* ABORT – terminate entire match */
+  AST_FAIL,   /* FAIL – force failure / backtrack */
+  AST_SUCCEED /* SUCCEED – force immediate success */
 } ast_type_t;
 
 /**
  * Anchor type enumeration
  */
 typedef enum {
-    ANCHOR_START,     /* Beginning of string (^) */
-    ANCHOR_END        /* End of string ($) */
+  ANCHOR_START, /* Beginning of string (^) */
+  ANCHOR_END    /* End of string ($) */
 } anchor_type_t;
 
 /**
@@ -118,141 +118,142 @@ typedef struct ast_node ast_node_t;
 
 /**
  * AST node - tagged union representation
- * 
+ *
  * Memory layout:
  * - type: identifies which union member is active
  * - data: union of node-specific data
  * - Children are owned by parent (freed recursively)
  */
 struct ast_node {
-    ast_type_t type;
-    
-    union {
-        /* AST_LITERAL */
-        struct {
-            char* text;       /* Owned: literal string content */
-            size_t len;       /* Length of text */
-        } literal;
-        
-        /* AST_CONCAT */
-        struct {
-            ast_node_t** parts;  /* Owned array of child nodes */
-            size_t count;        /* Number of parts */
-        } concat;
-        
-        /* AST_ALT */
-        struct {
-            ast_node_t* left;    /* Owned: left alternative */
-            ast_node_t* right;   /* Owned: right alternative */
-        } alt;
-        
-        /* AST_REPETITION */
-        struct {
-            ast_node_t* sub;     /* Owned: sub-pattern to repeat */
-            int32_t min;         /* Minimum repetitions (-1 = unbounded) */
-            int32_t max;         /* Maximum repetitions (-1 = unbounded) */
-        } repetition;
-        
-        /* AST_SPAN, AST_BREAK, AST_ANY, AST_NOTANY */
-        struct {
-            char* set;           /* Owned: character set string */
-            size_t len;          /* Length of set */
-        } charclass;
-        
-        /* AST_ARBNO */
-        struct {
-            ast_node_t* sub;     /* Owned: sub-pattern */
-        } arbno;
-        
-        /* AST_CAP */
-        struct {
-            int reg;             /* Register number for capture */
-            ast_node_t* sub;     /* Owned: sub-pattern to capture */
-        } cap;
-        
-        /* AST_ASSIGN */
-        struct {
-            int var;             /* Variable number */
-            int reg;             /* Register number */
-        } assign;
-        
-        /* AST_LEN */
-        struct {
-            int32_t n;           /* Exact length to match */
-        } len;
-        
-        /* AST_EVAL */
-        struct {
-            int fn;              /* Function ID */
-            int reg;             /* Register for result */
-        } eval;
-        
-        /* AST_DYNAMIC_EVAL */
-        struct {
-            ast_node_t* expr;    /* Owned: expression to evaluate */
-        } dynamic_eval;
-        
-        /* AST_ANCHOR */
-        struct {
-            anchor_type_t atype; /* Start or end anchor */
-        } anchor;
-        
-        /* AST_EMIT */
-        struct {
-            char* text;          /* Owned: literal text to emit (or NULL) */
-            int reg;             /* Register to emit (-1 if text only) */
-        } emit;
-        
-        /* AST_LABEL */
-        struct {
-            char* name;          /* Owned: label name */
-            ast_node_t* target;  /* Owned: target pattern */
-        } label;
-        
-        /* AST_GOTO */
-        struct {
-            char* label;         /* Owned: target label name */
-        } goto_stmt;
-        
-        /* AST_TABLE_ACCESS */
-        struct {
-            char* table;         /* Owned: table name */
-            ast_node_t* key;     /* Owned: key expression */
-        } table_access;
-        
-        /* AST_TABLE_UPDATE */
-        struct {
-            char* table;         /* Owned: table name */
-            ast_node_t* key;     /* Owned: key expression */
-            ast_node_t* value;   /* Owned: value expression */
-        } table_update;
+  ast_type_t type;
 
-        /* AST_BREAKX */
-        struct {
-            char* set;           /* Owned: break character set */
-            size_t len;
-        } breakx;
+  union {
+    /* AST_LITERAL */
+    struct {
+      char *text; /* Owned: literal string content */
+      size_t len; /* Length of text */
+    } literal;
 
-        /* AST_BAL */
-        struct {
-            uint32_t open_cp;    /* Opening delimiter codepoint */
-            uint32_t close_cp;   /* Closing delimiter codepoint */
-        } bal;
+    /* AST_CONCAT */
+    struct {
+      ast_node_t **parts; /* Owned array of child nodes */
+      size_t count;       /* Number of parts */
+    } concat;
 
-        /* AST_RPOS / AST_RTAB */
-        struct {
-            int32_t n;           /* Distance from end */
-        } rpos_rtab;
-    } data;
+    /* AST_ALT */
+    struct {
+      ast_node_t *left;  /* Owned: left alternative */
+      ast_node_t *right; /* Owned: right alternative */
+    } alt;
+
+    /* AST_REPETITION */
+    struct {
+      ast_node_t *sub; /* Owned: sub-pattern to repeat */
+      int32_t min;     /* Minimum repetitions (-1 = unbounded) */
+      int32_t max;     /* Maximum repetitions (-1 = unbounded) */
+    } repetition;
+
+    /* AST_SPAN, AST_BREAK, AST_ANY, AST_NOTANY */
+    struct {
+      char *set;  /* Owned: character set string */
+      size_t len; /* Length of set */
+    } charclass;
+
+    /* AST_ARBNO */
+    struct {
+      ast_node_t *sub; /* Owned: sub-pattern */
+    } arbno;
+
+    /* AST_CAP */
+    struct {
+      int reg;         /* Register number for capture */
+      ast_node_t *sub; /* Owned: sub-pattern to capture */
+    } cap;
+
+    /* AST_ASSIGN */
+    struct {
+      int var; /* Variable number */
+      int reg; /* Register number */
+    } assign;
+
+    /* AST_LEN */
+    struct {
+      int32_t n; /* Exact length to match */
+    } len;
+
+    /* AST_EVAL */
+    struct {
+      int fn;  /* Function ID */
+      int reg; /* Register for result */
+    } eval;
+
+    /* AST_DYNAMIC_EVAL */
+    struct {
+      ast_node_t *expr; /* Owned: expression to evaluate */
+    } dynamic_eval;
+
+    /* AST_ANCHOR */
+    struct {
+      anchor_type_t atype; /* Start or end anchor */
+    } anchor;
+
+    /* AST_EMIT */
+    struct {
+      char *text; /* Owned: literal text to emit (or NULL) */
+      int reg;    /* Register to emit (-1 if text only) */
+    } emit;
+
+    /* AST_LABEL */
+    struct {
+      char *name;         /* Owned: label name */
+      ast_node_t *target; /* Owned: target pattern */
+    } label;
+
+    /* AST_GOTO */
+    struct {
+      char *label; /* Owned: target label name */
+    } goto_stmt;
+
+    /* AST_TABLE_ACCESS */
+    struct {
+      char *table;     /* Owned: table name */
+      ast_node_t *key; /* Owned: key expression */
+    } table_access;
+
+    /* AST_TABLE_UPDATE */
+    struct {
+      char *table;       /* Owned: table name */
+      ast_node_t *key;   /* Owned: key expression */
+      ast_node_t *value; /* Owned: value expression */
+    } table_update;
+
+    /* AST_BREAKX */
+    struct {
+      char *set; /* Owned: break character set */
+      size_t len;
+    } breakx;
+
+    /* AST_BAL */
+    struct {
+      uint32_t open_cp;  /* Opening delimiter codepoint */
+      uint32_t close_cp; /* Closing delimiter codepoint */
+    } bal;
+
+    /* AST_RPOS / AST_RTAB */
+    struct {
+      int32_t n; /* Distance from end */
+    } rpos_rtab;
+  } data;
 };
 
 /**
  * Create a literal AST node
- * @param text Literal text (copied, must be freed by caller if not using create_lit)
+ * @param text Literal text (copied, must be freed by caller if not using
+ * create_lit)
  * @param len Length of text
  * @return New AST node (caller owns, must free with snobol_ast_free)
  */
-ast_node_t* snobol_ast_create_lit(const char* text, size_t len);
+ast_node_t *snobol_ast_create_lit(const char *text, size_t len);
 
 /**
  * Create a concatenation AST node
@@ -260,7 +261,7 @@ ast_node_t* snobol_ast_create_lit(const char* text, size_t len);
  * @param count Number of parts
  * @return New AST node (caller owns)
  */
-ast_node_t* snobol_ast_create_concat(ast_node_t** parts, size_t count);
+ast_node_t *snobol_ast_create_concat(ast_node_t **parts, size_t count);
 
 /**
  * Create an alternation AST node
@@ -268,14 +269,14 @@ ast_node_t* snobol_ast_create_concat(ast_node_t** parts, size_t count);
  * @param right Right alternative (ownership transferred)
  * @return New AST node (caller owns)
  */
-ast_node_t* snobol_ast_create_alt(ast_node_t* left, ast_node_t* right);
+ast_node_t *snobol_ast_create_alt(ast_node_t *left, ast_node_t *right);
 
 /**
  * Create an arbno (zero-or-more) AST node
  * @param sub Sub-pattern (ownership transferred)
  * @return New AST node (caller owns)
  */
-ast_node_t* snobol_ast_create_arbno(ast_node_t* sub);
+ast_node_t *snobol_ast_create_arbno(ast_node_t *sub);
 
 /**
  * Create a capture AST node
@@ -283,7 +284,7 @@ ast_node_t* snobol_ast_create_arbno(ast_node_t* sub);
  * @param sub Sub-pattern to capture (ownership transferred)
  * @return New AST node (caller owns)
  */
-ast_node_t* snobol_ast_create_cap(int reg, ast_node_t* sub);
+ast_node_t *snobol_ast_create_cap(int reg, ast_node_t *sub);
 
 /**
  * Create a span AST node
@@ -291,7 +292,7 @@ ast_node_t* snobol_ast_create_cap(int reg, ast_node_t* sub);
  * @param len Length of set
  * @return New AST node (caller owns)
  */
-ast_node_t* snobol_ast_create_span(const char* set, size_t len);
+ast_node_t *snobol_ast_create_span(const char *set, size_t len);
 
 /**
  * Create an any AST node
@@ -299,7 +300,7 @@ ast_node_t* snobol_ast_create_span(const char* set, size_t len);
  * @param len Length of set (0 if NULL)
  * @return New AST node (caller owns)
  */
-ast_node_t* snobol_ast_create_any(const char* set, size_t len);
+ast_node_t *snobol_ast_create_any(const char *set, size_t len);
 
 /**
  * Create a repetition AST node
@@ -308,7 +309,7 @@ ast_node_t* snobol_ast_create_any(const char* set, size_t len);
  * @param max Maximum repetitions (-1 for unbounded)
  * @return New AST node (caller owns)
  */
-ast_node_t* snobol_ast_create_repeat(ast_node_t* sub, int32_t min, int32_t max);
+ast_node_t *snobol_ast_create_repeat(ast_node_t *sub, int32_t min, int32_t max);
 
 /**
  * Create a label AST node
@@ -316,34 +317,34 @@ ast_node_t* snobol_ast_create_repeat(ast_node_t* sub, int32_t min, int32_t max);
  * @param target Target pattern (ownership transferred)
  * @return New AST node (caller owns)
  */
-ast_node_t* snobol_ast_create_label(char* name, ast_node_t* target);
+ast_node_t *snobol_ast_create_label(char *name, ast_node_t *target);
 
 /**
  * Create a goto AST node
  * @param label Target label name (copied)
  * @return New AST node (caller owns)
  */
-ast_node_t* snobol_ast_create_goto(const char* label);
+ast_node_t *snobol_ast_create_goto(const char *label);
 
 /**
  * Deep-clone an AST node and all children recursively
  * @param node Node to clone (NULL returns NULL)
  * @return New AST node (caller owns, must free with snobol_ast_free)
  */
-ast_node_t* snobol_ast_clone(const ast_node_t* node);
+ast_node_t *snobol_ast_clone(const ast_node_t *node);
 
 /**
  * Free an AST node and all children recursively
  * @param node Node to free (NULL is safe)
  */
-void snobol_ast_free(ast_node_t* node);
+void snobol_ast_free(ast_node_t *node);
 
 /**
  * Get a string representation of AST node type for debugging
  * @param type Node type
  * @return Static string (do not free)
  */
-const char* snobol_ast_type_name(ast_type_t type);
+const char *snobol_ast_type_name(ast_type_t type);
 
 /**
  * Dump AST to file for debugging
@@ -351,7 +352,7 @@ const char* snobol_ast_type_name(ast_type_t type);
  * @param out File to write to (e.g., stdout)
  * @param indent Current indentation level (0 for root)
  */
-void snobol_ast_dump(const ast_node_t* node, FILE* out, int indent);
+void snobol_ast_dump(const ast_node_t *node, FILE *out, int indent);
 
 /**
  * Get AST version information
@@ -371,73 +372,73 @@ bool snobol_ast_version_check(uint16_t required_major, uint16_t required_minor);
  * Get AST version as a string (e.g., "1.0.0")
  * @return Version string (static, do not free)
  */
-const char* snobol_ast_version_string(void);
+const char *snobol_ast_version_string(void);
 
 /* Additional AST creation functions for PHP binding */
 
 /** Alias for snobol_ast_create_lit */
-ast_node_t* snobol_ast_create_literal(const char* text, size_t len);
+ast_node_t *snobol_ast_create_literal(const char *text, size_t len);
 
 /** Create AST_BREAK node */
-ast_node_t* snobol_ast_create_break(const char* set, size_t len);
+ast_node_t *snobol_ast_create_break(const char *set, size_t len);
 
 /** Create AST_NOTANY node */
-ast_node_t* snobol_ast_create_notany(const char* set, size_t len);
+ast_node_t *snobol_ast_create_notany(const char *set, size_t len);
 
 /** Create AST_ASSIGN node */
-ast_node_t* snobol_ast_create_assign(int var, int reg);
+ast_node_t *snobol_ast_create_assign(int var, int reg);
 
 /** Create AST_LEN node */
-ast_node_t* snobol_ast_create_len(int32_t n);
+ast_node_t *snobol_ast_create_len(int32_t n);
 
 /** Create AST_ANCHOR node */
-ast_node_t* snobol_ast_create_anchor(anchor_type_t atype);
+ast_node_t *snobol_ast_create_anchor(anchor_type_t atype);
 
 /** Create AST_EMIT node */
-ast_node_t* snobol_ast_create_emit(const char* text, size_t len, int reg);
+ast_node_t *snobol_ast_create_emit(const char *text, size_t len, int reg);
 
 /** Create AST_DYNAMIC_EVAL node */
-ast_node_t* snobol_ast_create_dynamic_eval(ast_node_t* expr);
+ast_node_t *snobol_ast_create_dynamic_eval(ast_node_t *expr);
 
 /** Create AST_EVAL node */
-ast_node_t* snobol_ast_create_eval(int fn, int reg);
+ast_node_t *snobol_ast_create_eval(int fn, int reg);
 
 /** Create AST_TABLE_ACCESS node */
-ast_node_t* snobol_ast_create_table_access(const char* table, ast_node_t* key);
+ast_node_t *snobol_ast_create_table_access(const char *table, ast_node_t *key);
 
 /** Create AST_TABLE_UPDATE node */
-ast_node_t* snobol_ast_create_table_update(const char* table, ast_node_t* key, ast_node_t* value);
+ast_node_t *snobol_ast_create_table_update(const char *table, ast_node_t *key,
+                                           ast_node_t *value);
 
 /** Create AST_BREAKX node */
-ast_node_t* snobol_ast_create_breakx(const char* set, size_t len);
+ast_node_t *snobol_ast_create_breakx(const char *set, size_t len);
 
 /** Create AST_BAL node */
-ast_node_t* snobol_ast_create_bal(uint32_t open_cp, uint32_t close_cp);
+ast_node_t *snobol_ast_create_bal(uint32_t open_cp, uint32_t close_cp);
 
 /** Create AST_FENCE node (no args) */
-ast_node_t* snobol_ast_create_fence(void);
+ast_node_t *snobol_ast_create_fence(void);
 
 /** Create AST_REM node (no args) */
-ast_node_t* snobol_ast_create_rem(void);
+ast_node_t *snobol_ast_create_rem(void);
 
 /** Create AST_RPOS node */
-ast_node_t* snobol_ast_create_rpos(int32_t n);
+ast_node_t *snobol_ast_create_rpos(int32_t n);
 
 /** Create AST_RTAB node */
-ast_node_t* snobol_ast_create_rtab(int32_t n);
+ast_node_t *snobol_ast_create_rtab(int32_t n);
 
 /** Create AST_POS node */
-ast_node_t* snobol_ast_create_pos(int32_t n);
+ast_node_t *snobol_ast_create_pos(int32_t n);
 
 /** Create AST_TAB node */
-ast_node_t* snobol_ast_create_tab(int32_t n);
+ast_node_t *snobol_ast_create_tab(int32_t n);
 
 /** Create AST_ABORT node (no args) */
-ast_node_t* snobol_ast_create_abort(void);
+ast_node_t *snobol_ast_create_abort(void);
 
 /** Create AST_FAIL node (no args) */
-ast_node_t* snobol_ast_create_fail(void);
+ast_node_t *snobol_ast_create_fail(void);
 
 /** Create AST_SUCCEED node (no args) */
-ast_node_t* snobol_ast_create_succeed(void);
-
+ast_node_t *snobol_ast_create_succeed(void);

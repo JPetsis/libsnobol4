@@ -1,8 +1,8 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 /**
  * @file snobol_lexer.h
@@ -16,41 +16,41 @@
  * Token types matching SNOBOL pattern syntax
  */
 typedef enum {
-    TOKEN_EOF,          /* End of input */
-    TOKEN_LIT,          /* Literal string: 'text' */
-    TOKEN_IDENT,        /* Identifier: name */
-    TOKEN_CHARCLASS,    /* Character class: [abc] */
-    TOKEN_PIPE,         /* Alternation: | */
-    TOKEN_LPAREN,       /* Left paren: ( */
-    TOKEN_RPAREN,       /* Right paren: ) */
-    TOKEN_STAR,         /* Zero-or-more: * */
-    TOKEN_PLUS,         /* One-or-more: + */
-    TOKEN_QUESTION,     /* Optional: ? */
-    TOKEN_ANCHOR_START, /* Start anchor: ^ */
-    TOKEN_ANCHOR_END,   /* End anchor: $ */
-    TOKEN_AT,           /* Capture: @ */
-    TOKEN_COLON,        /* Label/goto marker: : */
-    TOKEN_LBRACKET,     /* Left bracket: [ */
-    TOKEN_RBRACKET,     /* Right bracket: ] */
-    TOKEN_EQUALS,       /* Assignment: = */
-    TOKEN_COMMA         /* Comma: , */
+  TOKEN_EOF,          /* End of input */
+  TOKEN_LIT,          /* Literal string: 'text' */
+  TOKEN_IDENT,        /* Identifier: name */
+  TOKEN_CHARCLASS,    /* Character class: [abc] */
+  TOKEN_PIPE,         /* Alternation: | */
+  TOKEN_LPAREN,       /* Left paren: ( */
+  TOKEN_RPAREN,       /* Right paren: ) */
+  TOKEN_STAR,         /* Zero-or-more: * */
+  TOKEN_PLUS,         /* One-or-more: + */
+  TOKEN_QUESTION,     /* Optional: ? */
+  TOKEN_ANCHOR_START, /* Start anchor: ^ */
+  TOKEN_ANCHOR_END,   /* End anchor: $ */
+  TOKEN_AT,           /* Capture: @ */
+  TOKEN_COLON,        /* Label/goto marker: : */
+  TOKEN_LBRACKET,     /* Left bracket: [ */
+  TOKEN_RBRACKET,     /* Right bracket: ] */
+  TOKEN_EQUALS,       /* Assignment: = */
+  TOKEN_COMMA         /* Comma: , */
 } token_type_t;
 
 /**
  * Token value representation
  */
 typedef struct {
-    token_type_t type;
-    
-    union {
-        /* TOKEN_LIT, TOKEN_IDENT, TOKEN_CHARCLASS */
-        struct {
-            const char* text;  /* Pointer into source (not owned) */
-            size_t len;        /* Length of token text */
-        } string;
-        
-        /* Single-character tokens use no additional data */
-    } data;
+  token_type_t type;
+
+  union {
+    /* TOKEN_LIT, TOKEN_IDENT, TOKEN_CHARCLASS */
+    struct {
+      const char *text; /* Pointer into source (not owned) */
+      size_t len;       /* Length of token text */
+    } string;
+
+    /* Single-character tokens use no additional data */
+  } data;
 } token_t;
 
 /**
@@ -64,45 +64,45 @@ typedef struct snobol_lexer snobol_lexer_t;
  * @param len Length of source (or -1 for strlen)
  * @return New lexer (caller owns, must free with snobol_lexer_destroy)
  */
-snobol_lexer_t* snobol_lexer_create(const char* source, size_t len);
+snobol_lexer_t *snobol_lexer_create(const char *source, size_t len);
 
 /**
  * Get the next token from the lexer
  * @param lexer Lexer instance
  * @return Next token (TOKEN_EOF when done)
  */
-token_t snobol_lexer_next(snobol_lexer_t* lexer);
+token_t snobol_lexer_next(snobol_lexer_t *lexer);
 
 /**
  * Peek at the next token without consuming it
  * @param lexer Lexer instance
  * @return Next token (TOKEN_EOF when done)
  */
-token_t snobol_lexer_peek(snobol_lexer_t* lexer);
+token_t snobol_lexer_peek(snobol_lexer_t *lexer);
 
 /**
  * Get current position in source (for error reporting)
  * @param lexer Lexer instance
  * @return 0-based byte offset in source
  */
-size_t snobol_lexer_get_pos(snobol_lexer_t* lexer);
+size_t snobol_lexer_get_pos(snobol_lexer_t *lexer);
 
 /**
  * Get current line number (for error reporting)
  * @param lexer Lexer instance
  * @return 1-based line number
  */
-size_t snobol_lexer_get_line(snobol_lexer_t* lexer);
+size_t snobol_lexer_get_line(snobol_lexer_t *lexer);
 
 /**
  * Lexer state for save/restore
  */
 typedef struct {
-    size_t pos;
-    size_t line;
-    size_t column;
-    token_t peek_token;
-    bool has_peek;
+  size_t pos;
+  size_t line;
+  size_t column;
+  token_t peek_token;
+  bool has_peek;
 } snobol_lexer_state_t;
 
 /**
@@ -110,25 +110,24 @@ typedef struct {
  * @param lexer Lexer instance
  * @return Saved state
  */
-snobol_lexer_state_t snobol_lexer_save(snobol_lexer_t* lexer);
+snobol_lexer_state_t snobol_lexer_save(snobol_lexer_t *lexer);
 
 /**
  * Restore lexer state
  * @param lexer Lexer instance
  * @param state State to restore
  */
-void snobol_lexer_restore(snobol_lexer_t* lexer, snobol_lexer_state_t state);
+void snobol_lexer_restore(snobol_lexer_t *lexer, snobol_lexer_state_t state);
 
 /**
  * Destroy lexer and free resources
  * @param lexer Lexer to destroy (NULL is safe)
  */
-void snobol_lexer_destroy(snobol_lexer_t* lexer);
+void snobol_lexer_destroy(snobol_lexer_t *lexer);
 
 /**
  * Get human-readable token type name for error messages
  * @param type Token type
  * @return Static string (do not free)
  */
-const char* snobol_token_name(token_type_t type);
-
+const char *snobol_token_name(token_type_t type);

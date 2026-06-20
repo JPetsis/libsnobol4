@@ -3,8 +3,9 @@
  * @brief SNOBOL4 built-in string transformation functions
  *
  * All functions operate on UTF-8 encoded strings.
- * Codepoint semantics: positions and lengths are in Unicode codepoints, not bytes.
- * ASCII fast path: if all bytes are < 0x80, faster byte-level operations are used.
+ * Codepoint semantics: positions and lengths are in Unicode codepoints, not
+ * bytes. ASCII fast path: if all bytes are < 0x80, faster byte-level operations
+ * are used.
  *
  * Output is always written to a snobol_buf (from vm.h).
  * Functions return true on success, false on error/invalid input.
@@ -12,12 +13,12 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
-#include "snobol/vm.h"   /* for snobol_buf */
 #include "snobol/snobol_attrs.h"
+#include "snobol/vm.h" /* for snobol_buf */
 
 /**
  * SIZE: count Unicode codepoints (not bytes).
@@ -36,7 +37,8 @@ size_t snobol_size(const char *str, size_t len);
  * @param out     Output buffer (cleared and filled)
  * @return        true always (function cannot fail on valid input)
  */
-SNOBOL_NODISCARD bool snobol_trim(const char *in, size_t in_len, snobol_buf *out);
+SNOBOL_NODISCARD bool snobol_trim(const char *in, size_t in_len,
+                                  snobol_buf *out);
 
 /**
  * DUPL: duplicate a string n times.
@@ -47,7 +49,8 @@ SNOBOL_NODISCARD bool snobol_trim(const char *in, size_t in_len, snobol_buf *out
  * @param out      Output buffer
  * @return         true on success
  */
-SNOBOL_NODISCARD bool snobol_dupl(const char *str, size_t str_len, size_t n, snobol_buf *out);
+SNOBOL_NODISCARD bool snobol_dupl(const char *str, size_t str_len, size_t n,
+                                  snobol_buf *out);
 
 /**
  * REVERSE: reverse a string by Unicode codepoints (not bytes).
@@ -57,7 +60,8 @@ SNOBOL_NODISCARD bool snobol_dupl(const char *str, size_t str_len, size_t n, sno
  * @param out      Output buffer
  * @return         true on success
  */
-SNOBOL_NODISCARD bool snobol_reverse(const char *str, size_t str_len, snobol_buf *out);
+SNOBOL_NODISCARD bool snobol_reverse(const char *str, size_t str_len,
+                                     snobol_buf *out);
 
 /**
  * SUBSTR: extract substring by 1-based codepoint position and codepoint length.
@@ -68,8 +72,8 @@ SNOBOL_NODISCARD bool snobol_reverse(const char *str, size_t str_len, snobol_buf
  * @param out      Output buffer
  * @return         true on success, false if pos is out of range
  */
-SNOBOL_NODISCARD bool snobol_substr(const char *str, size_t str_len, size_t pos, size_t len,
-                   snobol_buf *out);
+SNOBOL_NODISCARD bool snobol_substr(const char *str, size_t str_len, size_t pos,
+                                    size_t len, snobol_buf *out);
 
 /**
  * REPLACE: replace all occurrences of [from] with [to].
@@ -84,13 +88,13 @@ SNOBOL_NODISCARD bool snobol_substr(const char *str, size_t str_len, size_t pos,
  * @return          true on success
  */
 SNOBOL_NODISCARD bool snobol_replace(const char *str, size_t str_len,
-                    const char *from, size_t from_len,
-                    const char *to, size_t to_len,
-                    snobol_buf *out);
+                                     const char *from, size_t from_len,
+                                     const char *to, size_t to_len,
+                                     snobol_buf *out);
 
 /**
- * REPLACE_CHAR: character-by-character translation using a 256-byte lookup table.
- * Equivalent to POSIX tr. Each character in [from] is replaced by the
+ * REPLACE_CHAR: character-by-character translation using a 256-byte lookup
+ * table. Equivalent to POSIX tr. Each character in [from] is replaced by the
  * corresponding character in [to]. Characters in [from] beyond the length of
  * [to] are left unchanged.
  * O(n) single-pass implementation.
@@ -104,13 +108,14 @@ SNOBOL_NODISCARD bool snobol_replace(const char *str, size_t str_len,
  * @return          true on success
  */
 SNOBOL_NODISCARD bool snobol_replace_char(const char *str, size_t str_len,
-                         const char *from, size_t from_len,
-                         const char *to, size_t to_len,
-                         snobol_buf *out);
+                                          const char *from, size_t from_len,
+                                          const char *to, size_t to_len,
+                                          snobol_buf *out);
 
 /**
- * LPAD: left-pad a string to [width] codepoints using [pad_cp] as fill character.
- * If string is already as wide as or wider than [width], returns the string unchanged.
+ * LPAD: left-pad a string to [width] codepoints using [pad_cp] as fill
+ * character. If string is already as wide as or wider than [width], returns the
+ * string unchanged.
  * @param str      Input string
  * @param str_len  Byte length
  * @param width    Target width in codepoints
@@ -118,12 +123,13 @@ SNOBOL_NODISCARD bool snobol_replace_char(const char *str, size_t str_len,
  * @param out      Output buffer
  * @return         true on success
  */
-SNOBOL_NODISCARD bool snobol_lpad(const char *str, size_t str_len, size_t width, uint32_t pad_cp,
-                 snobol_buf *out);
+SNOBOL_NODISCARD bool snobol_lpad(const char *str, size_t str_len, size_t width,
+                                  uint32_t pad_cp, snobol_buf *out);
 
 /**
- * RPAD: right-pad a string to [width] codepoints using [pad_cp] as fill character.
- * If string is already as wide as or wider than [width], returns the string unchanged.
+ * RPAD: right-pad a string to [width] codepoints using [pad_cp] as fill
+ * character. If string is already as wide as or wider than [width], returns the
+ * string unchanged.
  * @param str      Input string
  * @param str_len  Byte length
  * @param width    Target width in codepoints
@@ -131,8 +137,8 @@ SNOBOL_NODISCARD bool snobol_lpad(const char *str, size_t str_len, size_t width,
  * @param out      Output buffer
  * @return         true on success
  */
-SNOBOL_NODISCARD bool snobol_rpad(const char *str, size_t str_len, size_t width, uint32_t pad_cp,
-                 snobol_buf *out);
+SNOBOL_NODISCARD bool snobol_rpad(const char *str, size_t str_len, size_t width,
+                                  uint32_t pad_cp, snobol_buf *out);
 
 /**
  * CHAR: convert a Unicode codepoint to a UTF-8 string.
@@ -149,7 +155,8 @@ SNOBOL_NODISCARD bool snobol_char_fn(uint32_t cp, snobol_buf *out);
  * @param out_cp  Output codepoint
  * @return        true on success, false if string is empty or invalid UTF-8
  */
-SNOBOL_NODISCARD bool snobol_ord(const char *str, size_t str_len, uint32_t *out_cp);
+SNOBOL_NODISCARD bool snobol_ord(const char *str, size_t str_len,
+                                 uint32_t *out_cp);
 
 /**
  * UPPER: convert string to uppercase.
@@ -160,7 +167,8 @@ SNOBOL_NODISCARD bool snobol_ord(const char *str, size_t str_len, uint32_t *out_
  * @param out      Output buffer
  * @return         true on success
  */
-SNOBOL_NODISCARD bool snobol_upper(const char *str, size_t str_len, snobol_buf *out);
+SNOBOL_NODISCARD bool snobol_upper(const char *str, size_t str_len,
+                                   snobol_buf *out);
 
 /**
  * LOWER: convert string to lowercase.
@@ -171,5 +179,5 @@ SNOBOL_NODISCARD bool snobol_upper(const char *str, size_t str_len, snobol_buf *
  * @param out      Output buffer
  * @return         true on success
  */
-SNOBOL_NODISCARD bool snobol_lower(const char *str, size_t str_len, snobol_buf *out);
-
+SNOBOL_NODISCARD bool snobol_lower(const char *str, size_t str_len,
+                                   snobol_buf *out);

@@ -9,16 +9,17 @@
  * Keys are int32_t; values are strings (copied on insert).
  *
  * Ownership/Lifetime Rules:
- * - Arrays are created with snobol_array_create() and must be freed with snobol_array_release()
+ * - Arrays are created with snobol_array_create() and must be freed with
+ * snobol_array_release()
  * - Arrays use reference counting for safe sharing
  * - When reference count reaches 0, the array and all entries are freed
  * - A NULL value indicates a deleted entry (tombstone)
  */
 
+#include "snobol/snobol_attrs.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
-#include "snobol/snobol_attrs.h"
 
 /** @brief Initial capacity for a new array. */
 #define ARRAY_INITIAL_CAPACITY 16
@@ -27,22 +28,22 @@
  * @brief A single entry in the sparse array.
  */
 typedef struct array_entry {
-    int32_t key;       /**< Integer key (1-based by convention). */
-    char *value;       /**< Owned string value (NULL = tombstone). */
-    uint32_t hash;     /**< Pre-computed hash of key. */
-    bool active;       /**< Entry is active (not deleted). */
+  int32_t key;   /**< Integer key (1-based by convention). */
+  char *value;   /**< Owned string value (NULL = tombstone). */
+  uint32_t hash; /**< Pre-computed hash of key. */
+  bool active;   /**< Entry is active (not deleted). */
 } array_entry_t;
 
 /**
  * @brief Sparse array state.
  */
 typedef struct snobol_array {
-    array_entry_t *entries; /**< Hash table entries. */
-    size_t capacity;        /**< Allocated capacity. */
-    size_t size;            /**< Number of active entries. */
-    size_t tombstones;      /**< Number of deleted (tombstone) entries. */
-    uint32_t refcount;      /**< Reference count for safe sharing. */
-    int32_t bounds_hint;    /**< Hint for expected key range (may be 0). */
+  array_entry_t *entries; /**< Hash table entries. */
+  size_t capacity;        /**< Allocated capacity. */
+  size_t size;            /**< Number of active entries. */
+  size_t tombstones;      /**< Number of deleted (tombstone) entries. */
+  uint32_t refcount;      /**< Reference count for safe sharing. */
+  int32_t bounds_hint;    /**< Hint for expected key range (may be 0). */
 } snobol_array_t;
 
 /**
@@ -72,7 +73,8 @@ void snobol_array_release(snobol_array_t *array);
  * @param value NUL-terminated string value (copied internally).
  * @return true on success, false on allocation failure.
  */
-SNOBOL_NODISCARD bool snobol_array_set(snobol_array_t *array, int32_t key, const char *value);
+SNOBOL_NODISCARD bool snobol_array_set(snobol_array_t *array, int32_t key,
+                                       const char *value);
 
 /**
  * @brief Get the value at a given key.

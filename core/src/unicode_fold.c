@@ -26,7 +26,8 @@
  * ASCII fast path handles 0x00–0x7F arithmetically before these tables.
  * Index 0xDF (ß) maps to itself here; the multi-char expansion table
  * below is checked first in snobol_to_upper_cp().
- * --------------------------------------------------------------------------- */
+ * ---------------------------------------------------------------------------
+ */
 
 /* clang-format off */
 static const uint32_t UPPER_MAP[256] = {
@@ -107,76 +108,83 @@ static const uint32_t LOWER_MAP[256] = {
  *   - BMP_UPPER_TO_LOWER[]  — sorted by .lower (uppercase), binary search
  *   - BMP_LOWER_TO_UPPER[]  — sorted by .lower (lowercase), binary search
  *   - MULTI_CHAR_EXPANSIONS[]
- * --------------------------------------------------------------------------- */
+ * ---------------------------------------------------------------------------
+ */
 
 #include "unicode_fold_data.c"
 
 /* ---------------------------------------------------------------------------
  * Binary search helpers
- * --------------------------------------------------------------------------- */
+ * ---------------------------------------------------------------------------
+ */
 
 static uint32_t bmp_find_upper(uint32_t lower_cp) {
-    size_t lo = 0, hi = N_BMP_LOWER_TO_UPPER;
-    while (lo < hi) {
-        size_t mid = lo + (hi - lo) / 2;
-        if (BMP_LOWER_TO_UPPER[mid].lower == lower_cp)
-            return BMP_LOWER_TO_UPPER[mid].upper;
-        if (BMP_LOWER_TO_UPPER[mid].lower < lower_cp) lo = mid + 1;
-        else hi = mid;
-    }
-    return lower_cp;
+  size_t lo = 0, hi = N_BMP_LOWER_TO_UPPER;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (BMP_LOWER_TO_UPPER[mid].lower == lower_cp)
+      return BMP_LOWER_TO_UPPER[mid].upper;
+    if (BMP_LOWER_TO_UPPER[mid].lower < lower_cp)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  return lower_cp;
 }
 
 static uint32_t bmp_find_lower(uint32_t upper_cp) {
-    size_t lo = 0, hi = N_BMP_UPPER_TO_LOWER;
-    while (lo < hi) {
-        size_t mid = lo + (hi - lo) / 2;
-        if (BMP_UPPER_TO_LOWER[mid].lower == upper_cp)
-            return BMP_UPPER_TO_LOWER[mid].upper;
-        if (BMP_UPPER_TO_LOWER[mid].lower < upper_cp) lo = mid + 1;
-        else hi = mid;
-    }
-    return upper_cp;
+  size_t lo = 0, hi = N_BMP_UPPER_TO_LOWER;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (BMP_UPPER_TO_LOWER[mid].lower == upper_cp)
+      return BMP_UPPER_TO_LOWER[mid].upper;
+    if (BMP_UPPER_TO_LOWER[mid].lower < upper_cp)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  return upper_cp;
 }
 
 /* ---------------------------------------------------------------------------
  * Public API
- * --------------------------------------------------------------------------- */
+ * ---------------------------------------------------------------------------
+ */
 
 void snobol_to_upper_cp(uint32_t cp, uint32_t *out, int *out_len) {
-    if (cp < 0x80) {
-        out[0] = (cp >= 0x61 && cp <= 0x7A) ? cp - 32u : cp;
-        *out_len = 1;
-        return;
-    }
-
-    for (size_t i = 0; i < N_MULTI_CHAR; i++) {
-        if (MULTI_CHAR_EXPANSIONS[i].lower == cp) {
-            out[0] = MULTI_CHAR_EXPANSIONS[i].upper[0];
-            out[1] = MULTI_CHAR_EXPANSIONS[i].upper[1];
-            *out_len = MULTI_CHAR_EXPANSIONS[i].len;
-            return;
-        }
-    }
-
-    if (cp <= 0xFF) {
-        out[0] = UPPER_MAP[cp];
-        *out_len = 1;
-        return;
-    }
-
-    out[0] = bmp_find_upper(cp);
+  if (cp < 0x80) {
+    out[0] = (cp >= 0x61 && cp <= 0x7A) ? cp - 32u : cp;
     *out_len = 1;
+    return;
+  }
+
+  for (size_t i = 0; i < N_MULTI_CHAR; i++) {
+    if (MULTI_CHAR_EXPANSIONS[i].lower == cp) {
+      out[0] = MULTI_CHAR_EXPANSIONS[i].upper[0];
+      out[1] = MULTI_CHAR_EXPANSIONS[i].upper[1];
+      *out_len = MULTI_CHAR_EXPANSIONS[i].len;
+      return;
+    }
+  }
+
+  if (cp <= 0xFF) {
+    out[0] = UPPER_MAP[cp];
+    *out_len = 1;
+    return;
+  }
+
+  out[0] = bmp_find_upper(cp);
+  *out_len = 1;
 }
 
 uint32_t snobol_to_lower_cp(uint32_t cp) {
-    if (cp < 0x80) {
-        return (cp >= 0x41 && cp <= 0x5A) ? cp + 32u : cp;
-    }
+  if (cp < 0x80) {
+    return (cp >= 0x41 && cp <= 0x5A) ? cp + 32u : cp;
+  }
 
-    if (cp <= 0xFF) {
-        return LOWER_MAP[cp];
-    }
+  if (cp <= 0xFF) {
+    return LOWER_MAP[cp];
+  }
 
-    return bmp_find_lower(cp);
+  return bmp_find_lower(cp);
 }

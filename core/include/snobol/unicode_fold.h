@@ -27,7 +27,8 @@
  * @param out     Caller-provided output buffer of at least 2 uint32_t elements.
  *                On return, holds the resulting uppercase codepoint(s).
  *                The buffer is written by the function; ownership stays with
- *                the caller.  Do NOT free the contents — they are scalar values.
+ *                the caller.  Do NOT free the contents — they are scalar
+ * values.
  * @param out_len Set to the number of codepoints written to <out> (1 or 2).
  */
 void snobol_to_upper_cp(uint32_t cp, uint32_t *out, int *out_len);
@@ -39,4 +40,3 @@ void snobol_to_upper_cp(uint32_t cp, uint32_t *out, int *out_len);
  * @return    Lowercase codepoint, or cp itself if no mapping is found.
  */
 uint32_t snobol_to_lower_cp(uint32_t cp);
-

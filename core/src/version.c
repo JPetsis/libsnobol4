@@ -5,15 +5,17 @@
 
 #include "snobol/snobol.h"
 
-void snobol_version(int* major, int* minor, int* patch) {
-    if (major) *major = SNOBOL_VERSION_MAJOR;
-    if (minor) *minor = SNOBOL_VERSION_MINOR;
-    if (patch) *patch = SNOBOL_VERSION_PATCH;
+void snobol_version(int *major, int *minor, int *patch) {
+  if (major)
+    *major = SNOBOL_VERSION_MAJOR;
+  if (minor)
+    *minor = SNOBOL_VERSION_MINOR;
+  if (patch)
+    *patch = SNOBOL_VERSION_PATCH;
 }
 
 uint32_t snobol_get_api_version(void) {
-    return ((uint32_t)SNOBOL_VERSION_MAJOR << 16)
-         | ((uint32_t)SNOBOL_VERSION_MINOR <<  8)
-         | ((uint32_t)SNOBOL_VERSION_PATCH);
+  return ((uint32_t)SNOBOL_VERSION_MAJOR << 16) |
+         ((uint32_t)SNOBOL_VERSION_MINOR << 8) |
+         ((uint32_t)SNOBOL_VERSION_PATCH);
 }
-

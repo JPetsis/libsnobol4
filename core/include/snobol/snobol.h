@@ -11,9 +11,9 @@
  * @version 0.1.0
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 /* Version macros */
 /** @brief Library major version number. */
@@ -31,7 +31,7 @@
  * @param minor Output parameter for minor version (can be NULL)
  * @param patch Output parameter for patch version (can be NULL)
  */
-void snobol_version(int* major, int* minor, int* patch);
+void snobol_version(int *major, int *minor, int *patch);
 
 /**
  * Get library API version as a single encoded integer.
@@ -47,18 +47,18 @@ void snobol_version(int* major, int* minor, int* patch);
 uint32_t snobol_get_api_version(void);
 
 /* Include common headers */
-#include "snobol/ast.h"
-#include "snobol/lexer.h"
-#include "snobol/parser.h"
-#include "snobol/compiler.h"
-#include "snobol/vm.h"
-#include "snobol/table.h"
 #include "snobol/array.h"
+#include "snobol/ast.h"
+#include "snobol/compiler.h"
 #include "snobol/dynamic_pattern.h"
 #include "snobol/jit.h"
-#include "snobol/string_fn.h"
-#include "snobol/type_fn.h"
+#include "snobol/lexer.h"
+#include "snobol/parser.h"
 #include "snobol/search.h"
+#include "snobol/string_fn.h"
+#include "snobol/table.h"
+#include "snobol/type_fn.h"
+#include "snobol/vm.h"
 
 /**
  * @brief Pattern matching context (opaque handle)
@@ -102,7 +102,7 @@ typedef struct snobol_array snobol_array_t;
  *
  * @return New context, or NULL on allocation failure.
  */
-snobol_context_t* snobol_context_create(void);
+snobol_context_t *snobol_context_create(void);
 
 /**
  * @brief Destroy a pattern matching context and free all associated resources.
@@ -112,7 +112,7 @@ snobol_context_t* snobol_context_create(void);
  *
  * @param[in] ctx Context to destroy.
  */
-void snobol_context_destroy(snobol_context_t* ctx);
+void snobol_context_destroy(snobol_context_t *ctx);
 
 /* -----------------------------------------------------------------------
  * Pattern compilation flags
@@ -126,7 +126,7 @@ void snobol_context_destroy(snobol_context_t* ctx);
  * JIT is disabled when this flag is set; patterns fall back to the interpreter.
  * Pass to snobol_pattern_compile_ex() via the flags bitmask.
  */
-#define SNOBOL_FLAG_CASE_INSENSITIVE  0x0001u
+#define SNOBOL_FLAG_CASE_INSENSITIVE 0x0001u
 
 /**
  * Enable search-mode compilation. The compiled pattern is optimised for
@@ -136,7 +136,7 @@ void snobol_context_destroy(snobol_context_t* ctx);
  *
  * Pass to snobol_pattern_compile_ex() via the flags bitmask.
  */
-#define SNOBOL_FLAG_SEARCH_MODE      0x0002u
+#define SNOBOL_FLAG_SEARCH_MODE 0x0002u
 
 /* Pattern compilation */
 /**
@@ -152,7 +152,9 @@ void snobol_context_destroy(snobol_context_t* ctx);
  * @return Compiled pattern owned by @p ctx, or NULL on parse/compile error.
  *         Free with snobol_pattern_free() before destroying the context.
  */
-snobol_pattern_t* snobol_pattern_compile(snobol_context_t* ctx, const char* source, size_t len, char** error);
+snobol_pattern_t *snobol_pattern_compile(snobol_context_t *ctx,
+                                         const char *source, size_t len,
+                                         char **error);
 
 /**
  * Compile a pattern with option flags.
@@ -166,28 +168,30 @@ snobol_pattern_t* snobol_pattern_compile(snobol_context_t* ctx, const char* sour
  * @return Compiled pattern owned by ctx, or NULL on parse/compile error.
  *         Free with snobol_pattern_free() before destroying the context.
  */
-snobol_pattern_t* snobol_pattern_compile_ex(snobol_context_t* ctx, const char* source, size_t len, uint32_t flags, char** error);
+snobol_pattern_t *snobol_pattern_compile_ex(snobol_context_t *ctx,
+                                            const char *source, size_t len,
+                                            uint32_t flags, char **error);
 
 /**
  * @brief Get the bytecode pointer from a compiled pattern.
  * @param[in] pattern Compiled pattern.
  * @return Read-only pointer to the bytecode, or NULL if pattern is NULL.
  */
-const uint8_t* snobol_pattern_get_bc(const snobol_pattern_t* pattern);
+const uint8_t *snobol_pattern_get_bc(const snobol_pattern_t *pattern);
 
 /**
  * @brief Get the bytecode length from a compiled pattern.
  * @param[in] pattern Compiled pattern.
  * @return Byte length, or 0 if pattern is NULL.
  */
-size_t snobol_pattern_get_bc_len(const snobol_pattern_t* pattern);
+size_t snobol_pattern_get_bc_len(const snobol_pattern_t *pattern);
 
 /**
  * @brief Free a compiled pattern.
  *
  * @param[in] pattern Pattern to free.  NULL is safe.
  */
-void snobol_pattern_free(snobol_pattern_t* pattern);
+void snobol_pattern_free(snobol_pattern_t *pattern);
 
 /* Pattern matching */
 /**
@@ -200,7 +204,8 @@ void snobol_pattern_free(snobol_pattern_t* pattern);
  *         Always returns a valid pointer; call snobol_match_success() to
  *         determine whether the match succeeded.
  */
-snobol_match_t* snobol_pattern_match(snobol_pattern_t* pattern, const char* subject, size_t len);
+snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
+                                     const char *subject, size_t len);
 
 /**
  * @brief Execute a compiled pattern in search (un-anchored) mode.
@@ -216,7 +221,8 @@ snobol_match_t* snobol_pattern_match(snobol_pattern_t* pattern, const char* subj
  *         Always returns a valid pointer; call snobol_match_success() to
  *         determine whether the match succeeded.
  */
-snobol_match_t* snobol_pattern_search(snobol_pattern_t* pattern, const char* subject, size_t len);
+snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
+                                      const char *subject, size_t len);
 
 /**
  * @brief Opaque state for snobol_pattern_search_ex().
@@ -241,8 +247,8 @@ typedef struct snobol_pattern_search_state snobol_pattern_search_state_t;
  * @return Newly allocated state, or NULL on allocation failure.
  *         Free with snobol_pattern_search_state_destroy().
  */
-snobol_pattern_search_state_t *snobol_pattern_search_state_create(
-    const uint8_t *bc, size_t bc_len);
+snobol_pattern_search_state_t *
+snobol_pattern_search_state_create(const uint8_t *bc, size_t bc_len);
 
 /**
  * @brief Destroy a search state object. NULL-safe.
@@ -251,8 +257,7 @@ snobol_pattern_search_state_t *snobol_pattern_search_state_create(
  * reference to the pattern's JIT context. Does NOT free the pattern
  * itself.
  */
-void snobol_pattern_search_state_destroy(
-    snobol_pattern_search_state_t *state);
+void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state);
 
 /**
  * @brief Stateful search that reuses VM, output buffer, and match result
@@ -275,10 +280,10 @@ void snobol_pattern_search_state_destroy(
  *         until the next call on the same state or state destruction.
  *         The caller must NOT free this pointer.
  */
-snobol_match_t *snobol_pattern_search_ex(
-    snobol_pattern_search_state_t *state,
-    const char *subject, size_t subject_len,
-    size_t start_offset);
+snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
+                                         const char *subject,
+                                         size_t subject_len,
+                                         size_t start_offset);
 
 /**
  * @brief Get the absolute offset where the match started within the subject.
@@ -307,7 +312,7 @@ size_t snobol_match_get_length(const snobol_match_t *match);
  *
  * @param[in] match Match result to free.  NULL is safe.
  */
-void snobol_match_free(snobol_match_t* match);
+void snobol_match_free(snobol_match_t *match);
 
 /* Match result access */
 /**
@@ -316,20 +321,20 @@ void snobol_match_free(snobol_match_t* match);
  * @param[in] match Match result from snobol_pattern_match().
  * @return true if the pattern matched; false otherwise.
  */
-bool snobol_match_success(snobol_match_t* match);
+bool snobol_match_success(snobol_match_t *match);
 
 /**
  * @brief Retrieve the output buffer produced by a successful match.
  *
- * The output contains any text emitted by @c OP_EMIT_LITERAL / @c OP_EMIT_CAPTURE
- * instructions during the match.
+ * The output contains any text emitted by @c OP_EMIT_LITERAL / @c
+ * OP_EMIT_CAPTURE instructions during the match.
  *
  * @param[in]  match Match result from snobol_pattern_match().
  * @param[out] len   If non-NULL, set to the byte length of the returned string.
  * @return Pointer to the output string (owned by @p match, do not free),
  *         or NULL if there is no output.
  */
-const char* snobol_match_get_output(snobol_match_t* match, size_t* len);
+const char *snobol_match_get_output(snobol_match_t *match, size_t *len);
 
 /**
  * @brief Retrieve the value of a named capture variable from a match result.
@@ -340,7 +345,8 @@ const char* snobol_match_get_output(snobol_match_t* match, size_t* len);
  * @return Pointer to the variable value (owned by @p match, do not free),
  *         or NULL if the variable was not set during the match.
  */
-const char* snobol_match_get_variable(snobol_match_t* match, const char* name, size_t* len);
+const char *snobol_match_get_variable(snobol_match_t *match, const char *name,
+                                      size_t *len);
 
 /* -----------------------------------------------------------------------
  * One-shot convenience match API
@@ -358,19 +364,19 @@ const char* snobol_match_get_variable(snobol_match_t* match, const char* name, s
  * this struct is non-opaque so callers can directly read the fields.
  */
 typedef struct snobol_match_result {
-    bool    success;      /**< Whether the pattern matched */
-    char   *error;        /**< Malloc'd error message (NULL on success);
-                               caller must free via snobol_match_result_free(). */
-    char   *output;       /**< Output buffer from OP_EMIT_* instructions
-                               (owned, freed by snobol_match_result_free()). */
-    size_t  output_len;   /**< Byte length of output (0 if no output). */
+  bool success;      /**< Whether the pattern matched */
+  char *error;       /**< Malloc'd error message (NULL on success);
+                          caller must free via snobol_match_result_free(). */
+  char *output;      /**< Output buffer from OP_EMIT_* instructions
+                          (owned, freed by snobol_match_result_free()). */
+  size_t output_len; /**< Byte length of output (0 if no output). */
 
-    /** Captured variable values (index 0 = variable "1", etc.).
-     *  Each entry is a malloc'd NUL-terminated string (or NULL if not set).
-     *  Freed by snobol_match_result_free(). */
-    char   **captures;
-    size_t  *capture_lens; /**< Byte lengths of each capture string. */
-    int      capture_count; /**< Number of populated captures. */
+  /** Captured variable values (index 0 = variable "1", etc.).
+   *  Each entry is a malloc'd NUL-terminated string (or NULL if not set).
+   *  Freed by snobol_match_result_free(). */
+  char **captures;
+  size_t *capture_lens; /**< Byte lengths of each capture string. */
+  int capture_count;    /**< Number of populated captures. */
 } snobol_match_result_t;
 
 /**
@@ -388,15 +394,15 @@ typedef struct snobol_match_result {
  *         the @c success and @c error fields.  Free with
  *         snobol_match_result_free().
  */
-snobol_match_result_t* snobol_match(const char* pattern, size_t pat_len,
-                                     const char* subject, size_t sub_len,
-                                     uint32_t flags);
+snobol_match_result_t *snobol_match(const char *pattern, size_t pat_len,
+                                    const char *subject, size_t sub_len,
+                                    uint32_t flags);
 
 /**
  * @brief Free a snobol_match_result_t and all its owned resources.
  * @param[in] result Result to free.  NULL is safe.
  */
-void snobol_match_result_free(snobol_match_result_t* result);
+void snobol_match_result_free(snobol_match_result_t *result);
 
 /* -----------------------------------------------------------------------
  * Builder API — programmatic AST construction
@@ -422,108 +428,107 @@ void snobol_match_result_free(snobol_match_result_t* result);
 typedef struct snobol_pattern_build snobol_pattern_build_t;
 
 /** @brief Create a new builder. */
-snobol_pattern_build_t* snobol_pattern_build_create(void);
+snobol_pattern_build_t *snobol_pattern_build_create(void);
 
 /** @brief Destroy a builder. Does NOT free emitted AST nodes. */
-void snobol_pattern_build_destroy(snobol_pattern_build_t* build);
+void snobol_pattern_build_destroy(snobol_pattern_build_t *build);
 
 /* --- Primitive nodes ---------------------------------------------------- */
 
 /** @brief Create a LITERAL AST node. */
-ast_node_t* snobol_pattern_build_lit(snobol_pattern_build_t* build,
-                                      const char* text, size_t len);
+ast_node_t *snobol_pattern_build_lit(snobol_pattern_build_t *build,
+                                     const char *text, size_t len);
 
 /** @brief Create a SPAN AST node (match 1+ chars in set). */
-ast_node_t* snobol_pattern_build_span(snobol_pattern_build_t* build,
-                                       const char* set, size_t len);
+ast_node_t *snobol_pattern_build_span(snobol_pattern_build_t *build,
+                                      const char *set, size_t len);
 
 /** @brief Create a BREAK AST node (consume until char in set). */
-ast_node_t* snobol_pattern_build_brk(snobol_pattern_build_t* build,
-                                      const char* set, size_t len);
+ast_node_t *snobol_pattern_build_brk(snobol_pattern_build_t *build,
+                                     const char *set, size_t len);
 
 /** @brief Create an ANY AST node (match single char in optional set). */
-ast_node_t* snobol_pattern_build_any(snobol_pattern_build_t* build,
-                                      const char* set, size_t len);
+ast_node_t *snobol_pattern_build_any(snobol_pattern_build_t *build,
+                                     const char *set, size_t len);
 
 /** @brief Create a NOTANY AST node (match single char NOT in set). */
-ast_node_t* snobol_pattern_build_notany(snobol_pattern_build_t* build,
-                                         const char* set, size_t len);
+ast_node_t *snobol_pattern_build_notany(snobol_pattern_build_t *build,
+                                        const char *set, size_t len);
 
 /** @brief Create a LEN AST node (match exactly N codepoints). */
-ast_node_t* snobol_pattern_build_len(snobol_pattern_build_t* build,
-                                      int32_t n);
+ast_node_t *snobol_pattern_build_len(snobol_pattern_build_t *build, int32_t n);
 
 /** @brief Create an ARBNO AST node (zero or more repetitions). */
-ast_node_t* snobol_pattern_build_arbno(snobol_pattern_build_t* build,
-                                        ast_node_t* sub);
+ast_node_t *snobol_pattern_build_arbno(snobol_pattern_build_t *build,
+                                       ast_node_t *sub);
 
 /* --- Capture / assignment ---------------------------------------------- */
 
 /** @brief Create a CAP AST node (capture sub-pattern into register). */
-ast_node_t* snobol_pattern_build_cap(snobol_pattern_build_t* build,
-                                      int reg, ast_node_t* sub);
+ast_node_t *snobol_pattern_build_cap(snobol_pattern_build_t *build, int reg,
+                                     ast_node_t *sub);
 
 /** @brief Create an ASSIGN AST node (assign register to variable). */
-ast_node_t* snobol_pattern_build_assign(snobol_pattern_build_t* build,
-                                         int var, int reg);
+ast_node_t *snobol_pattern_build_assign(snobol_pattern_build_t *build, int var,
+                                        int reg);
 
 /* --- Compound nodes ---------------------------------------------------- */
 
 /** @brief Create a CONCAT AST node (sequence of parts).  Takes ownership
  *         of @p parts array and all child nodes. */
-ast_node_t* snobol_pattern_build_concat(snobol_pattern_build_t* build,
-                                         ast_node_t** parts, size_t count);
+ast_node_t *snobol_pattern_build_concat(snobol_pattern_build_t *build,
+                                        ast_node_t **parts, size_t count);
 
 /** @brief Create an ALT AST node (alternation). */
-ast_node_t* snobol_pattern_build_alt(snobol_pattern_build_t* build,
-                                      ast_node_t* left, ast_node_t* right);
+ast_node_t *snobol_pattern_build_alt(snobol_pattern_build_t *build,
+                                     ast_node_t *left, ast_node_t *right);
 
 /* --- Control flow ------------------------------------------------------ */
 
 /** @brief Create a LABEL AST node. */
-ast_node_t* snobol_pattern_build_label(snobol_pattern_build_t* build,
-                                        const char* name, ast_node_t* target);
+ast_node_t *snobol_pattern_build_label(snobol_pattern_build_t *build,
+                                       const char *name, ast_node_t *target);
 
 /** @brief Create a GOTO AST node. */
-ast_node_t* snobol_pattern_build_goto(snobol_pattern_build_t* build,
-                                       const char* label);
+ast_node_t *snobol_pattern_build_goto(snobol_pattern_build_t *build,
+                                      const char *label);
 
 /* --- Position primitives ----------------------------------------------- */
 
 /** @brief Create a POS AST node. */
-ast_node_t* snobol_pattern_build_pos(snobol_pattern_build_t* build, int32_t n);
+ast_node_t *snobol_pattern_build_pos(snobol_pattern_build_t *build, int32_t n);
 
 /** @brief Create a TAB AST node. */
-ast_node_t* snobol_pattern_build_tab(snobol_pattern_build_t* build, int32_t n);
+ast_node_t *snobol_pattern_build_tab(snobol_pattern_build_t *build, int32_t n);
 
 /** @brief Create a RPOS AST node. */
-ast_node_t* snobol_pattern_build_rpos(snobol_pattern_build_t* build, int32_t n);
+ast_node_t *snobol_pattern_build_rpos(snobol_pattern_build_t *build, int32_t n);
 
 /** @brief Create a RTAB AST node. */
-ast_node_t* snobol_pattern_build_rtab(snobol_pattern_build_t* build, int32_t n);
+ast_node_t *snobol_pattern_build_rtab(snobol_pattern_build_t *build, int32_t n);
 
 /** @brief Create a BREAKX AST node. */
-ast_node_t* snobol_pattern_build_breakx(snobol_pattern_build_t* build,
-                                         const char* set, size_t len);
+ast_node_t *snobol_pattern_build_breakx(snobol_pattern_build_t *build,
+                                        const char *set, size_t len);
 
 /** @brief Create a BAL AST node. */
-ast_node_t* snobol_pattern_build_bal(snobol_pattern_build_t* build,
-                                      uint32_t open_cp, uint32_t close_cp);
+ast_node_t *snobol_pattern_build_bal(snobol_pattern_build_t *build,
+                                     uint32_t open_cp, uint32_t close_cp);
 
 /** @brief Create a FENCE AST node. */
-ast_node_t* snobol_pattern_build_fence(snobol_pattern_build_t* build);
+ast_node_t *snobol_pattern_build_fence(snobol_pattern_build_t *build);
 
 /** @brief Create a REM AST node. */
-ast_node_t* snobol_pattern_build_rem(snobol_pattern_build_t* build);
+ast_node_t *snobol_pattern_build_rem(snobol_pattern_build_t *build);
 
 /** @brief Create an ABORT AST node. */
-ast_node_t* snobol_pattern_build_abort(snobol_pattern_build_t* build);
+ast_node_t *snobol_pattern_build_abort(snobol_pattern_build_t *build);
 
 /** @brief Create a FAIL AST node. */
-ast_node_t* snobol_pattern_build_fail(snobol_pattern_build_t* build);
+ast_node_t *snobol_pattern_build_fail(snobol_pattern_build_t *build);
 
 /** @brief Create a SUCCEED AST node. */
-ast_node_t* snobol_pattern_build_succeed(snobol_pattern_build_t* build);
+ast_node_t *snobol_pattern_build_succeed(snobol_pattern_build_t *build);
 
 /**
  * @brief Finalize and emit an AST tree built with the builder.
@@ -536,6 +541,5 @@ ast_node_t* snobol_pattern_build_succeed(snobol_pattern_build_t* build);
  * @param[in] root  Root AST node to emit (ownership transferred).
  * @return @p root (non-NULL if input non-NULL).
  */
-ast_node_t* snobol_pattern_build_emit(snobol_pattern_build_t* build,
-                                       ast_node_t* root);
-
+ast_node_t *snobol_pattern_build_emit(snobol_pattern_build_t *build,
+                                      ast_node_t *root);

@@ -1,8 +1,8 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 /**
  * @file compiler.h
@@ -17,21 +17,25 @@
  * Compile AST to bytecode
  * @param ast AST node to compile
  * @param case_insensitive Enable case-insensitive matching
- * @param out_bc Output bytecode buffer (allocated, caller must free via compiler_free())
+ * @param out_bc Output bytecode buffer (allocated, caller must free via
+ * compiler_free())
  * @param out_len Output bytecode length
  * @return 0 on success, -1 on error
  */
-int compile_ast_to_bytecode_c(ast_node_t* ast, bool case_insensitive, uint8_t **out_bc, size_t *out_len);
+int compile_ast_to_bytecode_c(ast_node_t *ast, bool case_insensitive,
+                              uint8_t **out_bc, size_t *out_len);
 
 /**
  * Compile template string to bytecode
  * @param tpl Template string
  * @param len Template length
- * @param out_bc Output bytecode buffer (allocated, caller must free via compiler_free())
+ * @param out_bc Output bytecode buffer (allocated, caller must free via
+ * compiler_free())
  * @param out_len Output bytecode length
  * @return 0 on success, -1 on error
  */
-int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc, size_t *out_len);
+int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
+                                 size_t *out_len);
 
 /**
  * Free compiled bytecode
@@ -62,7 +66,5 @@ void compiler_free(uint8_t *bc);
  * @param n       Number of entries in @p names and @p ids
  * @return 0 on complete success, -1 if any name was unresolvable
  */
-int snobol_template_bind_tables(uint8_t *bc, size_t bc_len,
-                                 const char **names, const uint16_t *ids,
-                                 size_t n);
-
+int snobol_template_bind_tables(uint8_t *bc, size_t bc_len, const char **names,
+                                const uint16_t *ids, size_t n);

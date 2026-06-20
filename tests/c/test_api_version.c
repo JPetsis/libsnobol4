@@ -5,8 +5,8 @@
  * for the current v0.8.0 library.
  */
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "snobol/snobol.h"
 
@@ -14,33 +14,33 @@ extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
 
 void test_api_version_suite(void) {
-    test_suite("API version");
+  test_suite("API version");
 
-    uint32_t ver = snobol_get_api_version();
+  uint32_t ver = snobol_get_api_version();
 
-    /* For v0.8.0: (0 << 16) | (8 << 8) | 0 == 0x00000800 */
-    test_assert(ver == 0x00000800u,
-                "snobol_get_api_version() == 0x00000800u (v0.8.0)");
+  /* For v0.8.0: (0 << 16) | (8 << 8) | 0 == 0x00000800 */
+  test_assert(ver == 0x00000800u,
+              "snobol_get_api_version() == 0x00000800u (v0.8.0)");
 
-    /* Major version extraction */
-    uint32_t major = ver >> 16;
-    test_assert(major == SNOBOL_VERSION_MAJOR,
-                "snobol_get_api_version() >> 16 == SNOBOL_VERSION_MAJOR");
+  /* Major version extraction */
+  uint32_t major = ver >> 16;
+  test_assert(major == SNOBOL_VERSION_MAJOR,
+              "snobol_get_api_version() >> 16 == SNOBOL_VERSION_MAJOR");
 
-    /* Minor version extraction */
-    uint32_t minor = (ver >> 8) & 0xFF;
-    test_assert(minor == SNOBOL_VERSION_MINOR,
-                "snobol_get_api_version() minor field == SNOBOL_VERSION_MINOR");
+  /* Minor version extraction */
+  uint32_t minor = (ver >> 8) & 0xFF;
+  test_assert(minor == SNOBOL_VERSION_MINOR,
+              "snobol_get_api_version() minor field == SNOBOL_VERSION_MINOR");
 
-    /* Patch version extraction */
-    uint32_t patch = ver & 0xFF;
-    test_assert(patch == SNOBOL_VERSION_PATCH,
-                "snobol_get_api_version() patch field == SNOBOL_VERSION_PATCH");
+  /* Patch version extraction */
+  uint32_t patch = ver & 0xFF;
+  test_assert(patch == SNOBOL_VERSION_PATCH,
+              "snobol_get_api_version() patch field == SNOBOL_VERSION_PATCH");
 
-    /* Consistency with snobol_version() */
-    int vi_major, vi_minor, vi_patch;
-    snobol_version(&vi_major, &vi_minor, &vi_patch);
-    test_assert((int)major == vi_major && (int)minor == vi_minor && (int)patch == vi_patch,
-                "snobol_get_api_version() consistent with snobol_version()");
+  /* Consistency with snobol_version() */
+  int vi_major, vi_minor, vi_patch;
+  snobol_version(&vi_major, &vi_minor, &vi_patch);
+  test_assert((int)major == vi_major && (int)minor == vi_minor &&
+                  (int)patch == vi_patch,
+              "snobol_get_api_version() consistent with snobol_version()");
 }
-

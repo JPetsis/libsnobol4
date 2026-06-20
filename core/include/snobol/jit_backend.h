@@ -12,9 +12,9 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 #ifdef SNOBOL_JIT
 
@@ -26,10 +26,10 @@
  * -------------------------------------------------------------------------
  */
 typedef struct {
-    uint32_t *p;           /**< Current write pointer (advanced by emit_instr) */
-    uint32_t *code_start;  /**< Start of the allocated code buffer */
-    size_t    code_size;   /**< Total size of the allocated code buffer in bytes */
-    size_t    n_blocks;    /**< Number of CFG blocks compiled in this region */
+  uint32_t *p;          /**< Current write pointer (advanced by emit_instr) */
+  uint32_t *code_start; /**< Start of the allocated code buffer */
+  size_t code_size;     /**< Total size of the allocated code buffer in bytes */
+  size_t n_blocks;      /**< Number of CFG blocks compiled in this region */
 } jit_region_t;
 
 /* -------------------------------------------------------------------------
@@ -37,28 +37,28 @@ typedef struct {
  * -------------------------------------------------------------------------
  */
 typedef struct jit_backend {
-    /** Identifying name of the backend, e.g. "arm64".  Must match the CMake
-     *  SNOBOL_JIT_BACKEND string.  Static storage. */
-    const char *name;
+  /** Identifying name of the backend, e.g. "arm64".  Must match the CMake
+   *  SNOBOL_JIT_BACKEND string.  Static storage. */
+  const char *name;
 
-    /**
-     * Lower IR instructions to machine code.
-     *
-     * @param ir    IR region produced by jit_ir_lift_region().
-     * @param vm    VM state (charclass tables, bytecode for data-only accesses).
-     * @param out   Output code region; caller allocates and passes a pointer.
-     *              On success the backend fills out->p and out->code_size.
-     * @return Pointer to the compiled function (cast of out->code_start on
-     *         success), or NULL on failure.  The backend is responsible for
-     *         calling snobol_jit_seal_code() before returning.
-     */
-    void *(*lower)(const jit_ir_region_t *ir, VM *vm, jit_region_t *out);
+  /**
+   * Lower IR instructions to machine code.
+   *
+   * @param ir    IR region produced by jit_ir_lift_region().
+   * @param vm    VM state (charclass tables, bytecode for data-only accesses).
+   * @param out   Output code region; caller allocates and passes a pointer.
+   *              On success the backend fills out->p and out->code_size.
+   * @return Pointer to the compiled function (cast of out->code_start on
+   *         success), or NULL on failure.  The backend is responsible for
+   *         calling snobol_jit_seal_code() before returning.
+   */
+  void *(*lower)(const jit_ir_region_t *ir, VM *vm, jit_region_t *out);
 
-    /**
-     * Flush the instruction cache for the given code range.
-     * Called by the backend after writing machine code to a RWX page.
-     */
-    void (*flush_icache)(void *code, size_t size);
+  /**
+   * Flush the instruction cache for the given code range.
+   * Called by the backend after writing machine code to a RWX page.
+   */
+  void (*flush_icache)(void *code, size_t size);
 } jit_backend_t;
 
 /* -------------------------------------------------------------------------
@@ -68,13 +68,13 @@ typedef struct jit_backend {
 
 /** Register the active backend.  Call from an arch-specific init function
  *  during snobol_jit_init().  Only one backend may be active. */
-void                  jit_backend_register(const jit_backend_t *backend);
+void jit_backend_register(const jit_backend_t *backend);
 
 /** Return the currently registered backend, or NULL if none. */
-const jit_backend_t  *jit_backend_get(void);
+const jit_backend_t *jit_backend_get(void);
 
 /** Return the name of the active backend, or "(none)" if unregistered. */
-const char           *jit_backend_name(void);
+const char *jit_backend_name(void);
 
 /* -------------------------------------------------------------------------
  * Backend init declarations (definitions in jit_backend_arm64.c,
@@ -95,6 +95,3 @@ void snobol_jit_x86_64_register(void);
 #endif
 
 #endif /* SNOBOL_JIT */
-
-
-

@@ -1,16 +1,17 @@
 #pragma once
 
+#include "snobol/snobol_attrs.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
-#include "snobol/snobol_attrs.h"
 
 /**
  * @file snobol_table.h
  * @brief Runtime-owned associative table objects for SNOBOL4
- * 
+ *
  * Ownership/Lifetime Rules:
- * - Tables are created with table_create() and must be freed with table_release()
+ * - Tables are created with table_create() and must be freed with
+ * table_release()
  * - Tables use reference counting for safe sharing across pattern executions
  * - When reference count reaches 0, the table and all entries are freed
  * - Table keys are strings (copied on insert)
@@ -23,27 +24,27 @@
 
 /* Hash table entry */
 typedef struct table_entry {
-    char *key;           /* Owned: must be freed */
-    char *value;         /* Owned: must be freed (NULL = tombstone) */
-    uint32_t hash;       /* Pre-computed hash of key */
-    bool active;         /* Entry is active (not deleted) */
+  char *key;     /* Owned: must be freed */
+  char *value;   /* Owned: must be freed (NULL = tombstone) */
+  uint32_t hash; /* Pre-computed hash of key */
+  bool active;   /* Entry is active (not deleted) */
 } table_entry_t;
 
 /* Runtime table object */
 typedef struct snobol_table {
-    table_entry_t *entries;     /* Hash table entries */
-    size_t capacity;            /* Total slots in hash table */
-    size_t size;                /* Number of active entries */
-    size_t tombstones;          /* Number of deleted entries */
-    uint32_t refcount;          /* Reference count for ownership */
-    char *name;                 /* Optional table name (for debugging) */
+  table_entry_t *entries; /* Hash table entries */
+  size_t capacity;        /* Total slots in hash table */
+  size_t size;            /* Number of active entries */
+  size_t tombstones;      /* Number of deleted entries */
+  uint32_t refcount;      /* Reference count for ownership */
+  char *name;             /* Optional table name (for debugging) */
 } snobol_table_t;
 
 /**
  * @brief Create a new runtime table
  * @param name Optional name for debugging (can be NULL)
  * @return Pointer to new table, or NULL on failure
- * 
+ *
  * Ownership: Caller owns the returned table and must call table_release()
  */
 SNOBOL_NODISCARD snobol_table_t *table_create(const char *name);
@@ -52,7 +53,7 @@ SNOBOL_NODISCARD snobol_table_t *table_create(const char *name);
  * @brief Increment table reference count
  * @param table Table to retain
  * @return Same table pointer for convenience
- * 
+ *
  * Use when sharing table ownership with another owner
  */
 SNOBOL_NODISCARD snobol_table_t *table_retain(snobol_table_t *table);
@@ -60,7 +61,7 @@ SNOBOL_NODISCARD snobol_table_t *table_retain(snobol_table_t *table);
 /**
  * @brief Decrement table reference count and free if zero
  * @param table Table to release
- * 
+ *
  * When refcount reaches 0, all entries and the table itself are freed
  */
 void table_release(snobol_table_t *table);
@@ -71,17 +72,18 @@ void table_release(snobol_table_t *table);
  * @param key String key (copied)
  * @param value String value (copied), or NULL to delete
  * @return true on success, false on allocation failure
- * 
+ *
  * Ownership: Table takes ownership of copies of key and value
  */
-SNOBOL_NODISCARD bool table_set(snobol_table_t *table, const char *key, const char *value);
+SNOBOL_NODISCARD bool table_set(snobol_table_t *table, const char *key,
+                                const char *value);
 
 /**
  * @brief Look up a value by key
  * @param table Table to query
  * @param key Key to look up
  * @return Pointer to value string, or NULL if not found
- * 
+ *
  * Ownership: Returned pointer is owned by the table, do not free
  * The pointer remains valid until the entry is modified or deleted
  */
@@ -129,4 +131,3 @@ const char *table_name(const snobol_table_t *table);
  * @return 32-bit hash value
  */
 uint32_t table_hash_string(const char *str);
-

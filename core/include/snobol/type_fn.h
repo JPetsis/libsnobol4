@@ -11,8 +11,8 @@
 
 #pragma once
 
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 /* --------------------------------------------------------------------------
  * Numeric comparison helpers (for internal use in type_fn.c and PHP binding)
@@ -168,4 +168,3 @@ bool snobol_real(const char *str, size_t len);
  * @return     true if string represents any numeric value
  */
 bool snobol_numeric(const char *str, size_t len);
-

@@ -112,6 +112,23 @@ cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DSNOBOL_SANITIZE=ON
 cmake --build build-asan --target test-asan
 ```
 
+### Regenerating Unicode Case-Folding Tables
+
+The BMP case-folding tables in `core/src/unicode_fold_data.c` are auto-generated from
+[Unicode CaseFolding.txt](https://www.unicode.org/Public/UCD/latest/ucd/CaseFolding.txt).
+
+```bash
+# Regenerate tables (requires C compiler; fetches UCD if not cached locally)
+make gen-unicode-fold
+
+# Rebuild after regeneration
+make build
+```
+
+The generator tool is in `dev/gen_unicode_fold.c`. It parses the full-case fold
+(staus C and S) entries from Unicode CaseFolding.txt and emits statically-initialized
+C arrays with sorted pair tables for O(log n) binary search.
+
 ### Code Quality
 
 ```bash
@@ -434,6 +451,68 @@ ctest --test-dir build-mingw --output-on-failure
 `CMakePresets.json` at the project root includes `windows-msvc` and `windows-mingw` presets alongside `debug`, `release`, and `asan` presets for Unix.
 
 Note: `SNOBOL_SANITIZE=ON` is not supported on MSVC — configure with GCC or Clang.
+
+## Community Language Bindings
+
+libsnobol4's **officially maintained** components are:
+- **C engine** (`core/`) — language-agnostic pattern matching library
+- **PHP binding** (`bindings/php/`) — PHP extension and helper classes
+
+Additional language bindings (Python, Rust, Go, Java, etc.) are **community contributions** guided by the
+principles below.
+
+### Scope
+
+Community bindings wrap the same language-agnostic C core and provide idiomatic surface APIs for their
+respective languages. Examples include:
+- A Python binding providing a `snobol.match(pattern, subject)` function
+- A Rust crate exposing a `Pattern::compile()` builder API
+- A Go module with `snobol.MatchString()`
+
+### What We Provide
+
+- A **reference prototype** at `examples/python-binding/` (Python) — not feature-complete, but demonstrates the C API
+- Stabilized C headers under `core/include/snobol/`
+- `snobol_match()` and `snobol_pattern_build_*()` convenience APIs (v0.11.0+) for one-shot usage
+- A pkg-config / CMake target for linker integration
+- PHP distribution via `pie install libsnobol4/snobol` (single command for the entire PHP binding)
+
+### Reference Implementation
+
+A **Python reference prototype** is available at `examples/python-binding/`. This is not
+feature-complete but demonstrates the C API integration pattern — use it as a starting
+point for your own binding.
+
+### Minimal Binding Checklist
+
+| Check | Requirement |
+|-------|-------------|
+| ☐ | **Link to C core** via `pkg-config --cflags --libs libsnobol4` or CMake `find_package(libsnobol4)` |
+| ☐ | **Wrap `snobol_match()`** — the one-shot convenience API for simple use cases |
+| ☐ | **Wrap `snobol_pattern_compile()` / `snobol_pattern_match()`** — the multi-step API for repeated matching |
+| ☐ | **Wrap `snobol_match_result_free()`** — proper memory management for match results |
+| ☐ | **Provide idiomatic surface API** matching your language's conventions (e.g., a `Pattern` class, a `match()` function) |
+| ☐ | **Permissive open-source license** — MIT, Apache 2.0, BSD-2, or similar |
+| ☐ | **Publish to standard distribution channel** — PyPI, crates.io, npm, etc. |
+| ☐ | **Host in your own repository** — community bindings live outside the libsnobol4 monorepo |
+| ☐ | **Open a PR** to add your binding to the project README (listing at maintainers' discretion) |
+
+### Maintainer Expectations
+
+1. **Community bindings live in their own repositories**, not in this monorepo (except the Python reference).
+2. Bindings must use a permissive open-source license (MIT, Apache 2.0, BSD-2, or similar).
+3. Bindings follow their language's standard packaging and distribution channels (PyPI, crates.io, etc.).
+4. The core maintainers will not break the C ABI without notice (see SemVer guarantees in ROADMAP.md).
+5. The project README may list community binding repositories at the maintainers' discretion.
+
+### Getting Started
+
+1. Start from the **Python reference prototype** at `examples/python-binding/`.
+2. Use `snobol_match()` for a one-shot convenience path or the full `snobol_pattern_compile()` / `snobol_pattern_match()`
+   API for advanced usage.
+3. Link via `pkg-config --cflags --libs libsnobol4` or CMake `find_package(libsnobol4)`.
+4. Follow the [Minimal Binding Checklist](#minimal-binding-checklist) above.
+5. Publish to your language's ecosystem and open a PR adding your binding to the project README.
 
 ## Code of Conduct
 

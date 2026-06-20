@@ -3,12 +3,17 @@
 ![core-build](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-core.yml/badge.svg)
 ![php-build](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-php.yml/badge.svg)
 ![sanitizers](https://github.com/JPetsis/libsnobol4/actions/workflows/sanitizers.yml/badge.svg)
+[![docs](https://github.com/JPetsis/libsnobol4/actions/workflows/docs.yml/badge.svg)](https://JPetsis.github.io/libsnobol4/)
 
 A high-performance C library implementing [SNOBOL4](https://en.wikipedia.org/wiki/SNOBOL)-style string pattern
-matching and manipulation.
+matching and manipulation — a **PCRE alternative** for complex string processing.
 
 libsnobol4 provides a powerful, expressive alternative to PCRE (Perl Compatible Regular Expressions) for complex string
-manipulation tasks. The core library is language-agnostic, with bindings available for multiple host languages.
+manipulation tasks. The core library is language-agnostic, with officially maintained bindings for **C** and **PHP**.
+Additional language bindings (Python, Rust, Go, etc.) are community contributions — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for a minimal binding checklist and the Python reference prototype.
+
+> **Official scope:** C engine + PHP binding only. See [CONTRIBUTING.md](CONTRIBUTING.md) for community binding guidance.
 
 ## Features
 
@@ -25,7 +30,7 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **Concatenation & Alternation**: Sequential and alternative pattern composition
   * **Span & Break**: Character class matching
   * **Any & NotAny**: Single character matching
-  * **Unicode Support**: Full UTF-8 multi-byte character support
+   * **Unicode Support**: Full UTF-8 with BMP case folding (U+0000–U+FFFF)
   * **Arbno & Bounded Repetition**: Variable-length pattern repetition
   * **Anchors**: Start/end of string anchors
   * **BREAKX**: Character-set break with O(n) pre-scan optimisation (8 fewer backtracks vs ARB)
@@ -41,8 +46,8 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   every match in `subject` using a template string where capture references and formatting
   expressions are compiled entirely to C VM instructions.  Supported expressions inside `${vN...}`:
   * `${vN}` — raw capture
-  * `${vN.upper()}` — Unicode uppercase (Latin-1 + Latin Extended-A; German ß→SS)
-  * `${vN.lower()}` — Unicode lowercase (Latin-1 + Latin Extended-A)
+  * `${vN.upper()}` — Unicode uppercase (full BMP; German ß→SS)
+  * `${vN.lower()}` — Unicode lowercase (full BMP)
   * `${vN.length()}` — decimal codepoint count
   * `${vN.lpad(W[,'c'])}` — left-pad to width W (fill char defaults to space)
   * `${vN.rpad(W[,'c'])}` — right-pad to width W (fill char defaults to space)
@@ -56,17 +61,21 @@ manipulation tasks. The core library is language-agnostic, with bindings availab
   * **DUPL** – Repeat a string N times
   * **REVERSE** – Reverse by codepoints (multi-byte safe)
   * **SUBSTR** – Codepoint-based substring extraction (1-based)
-  * **REPLACE** – Replace all occurrences (≈ PHP `str_replace` speed)
-  * **REPLACE_CHAR** – Character translation table (like POSIX `tr`)
-  * **LPAD / RPAD** – Pad strings to a Unicode codepoint width
-  * **CHAR / ORD** – Codepoint ↔ UTF-8 character conversions
-  * **UPPER / LOWER** – Full Unicode case conversion (Latin-1 + Latin Extended-A, German sharp-s ß→SS)
-* **Case-Insensitive Pattern Matching** (v0.7.0): `snobol_pattern_compile_ex()` with `SNOBOL_FLAG_CASE_INSENSITIVE` enables case-folded matching at compile time. Covers ASCII, Latin-1, and Latin Extended-A codepoints.
-* **API Version Function** (v0.7.0): `snobol_get_api_version()` returns `(MAJOR << 16) | (MINOR << 8) | PATCH` for binding/library compatibility checks.
-* **Built-in Comparison Predicates** (v0.2.0): Boolean predicates matching SNOBOL4 semantics:
-  * **IDENT / DIFFER** – String identity / difference
-  * **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
-  * **INTEGER / REAL / NUMERIC** – Numeric type predicates
+*   **REPLACE** – Replace all occurrences (≈ PHP `str_replace` speed)
+   *   **REPLACE_CHAR** – Character translation table (like POSIX `tr`)
+   *   **LPAD / RPAD** – Pad strings to a Unicode codepoint width
+   *   **CHAR / ORD** – Codepoint ↔ UTF-8 character conversions
+   *   **UPPER / LOWER** – Full BMP Unicode case conversion (Cyrillic, Greek, Arabic, CJK, etc.; German sharp-s ß→SS)
+*   **Case-Insensitive Pattern Matching** (v0.11.0): `SNOBOL_FLAG_CASE_INSENSITIVE` covers the full Basic Multilingual Plane (BMP, U+0000–U+FFFF).
+*   **Numeric Comparison Functions** (v0.11.0): **EQ**, **NE**, **LT**, **GT**, **LE**, **GE** — alongside existing IDENT/DIFFER/LEXEQ/LEXLT/LEXGT.
+*   **POS / TAB** (v0.11.0): Start-relative positional primitives.
+*   **ABORT / FAIL / SUCCEED** (v0.11.0): Pattern-level control verbs.
+*   **ARRAY Data Type** (v0.11.0): Indexed sparse array with integer keys.
+*   **API Version Function** (v0.7.0): `snobol_get_api_version()` returns `(MAJOR << 16) | (MINOR << 8) | PATCH` for binding/library compatibility checks.
+*   **Built-in Comparison Predicates** (v0.2.0): Boolean predicates matching SNOBOL4 semantics:
+   *   **IDENT / DIFFER** – String identity / difference
+   *   **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
+   *   **INTEGER / REAL / NUMERIC** – Numeric type predicates
 * **Optional Micro-JIT** (v0.10.0): ARM64/ARM32/RISC-V 64/x86-64 JIT compilation for hot patterns via a two-phase
   architecture-neutral IR pipeline — runs on **macOS ARM64/Intel, Linux AArch64/x86-64, Linux ARMv7-A, Linux RISC-V 64, and Windows x86-64**:
   * `SNOBOL_JIT_DUMP_IR=1` — dump the IR to `stderr` before lowering (debug)
@@ -145,32 +154,54 @@ cmake --install build
 
 ### Using the Core Library (C)
 
+#### One-shot convenience API (v0.11.0+)
+
+```c
+#include <stdio.h>
+#include <snobol/snobol.h>
+
+int main(void) {
+    snobol_match_result_t *r = snobol_match(
+        "'abc' ARB 'def'", 15,
+        "xyz abc def xyz",  15,
+        0);
+    if (r && r->success) {
+        printf("Match succeeded\n");
+        for (int i = 0; i < r->capture_count; i++) {
+            if (r->captures[i]) {
+                printf("  capture %d: %s\n", i, r->captures[i]);
+            }
+        }
+        if (r->output) {
+            printf("  output: %s\n", r->output);
+        }
+    }
+    snobol_match_result_free(r);
+    return 0;
+}
+```
+
+The function returns a heap-allocated result.  Always check `r->success` (true = match,
+false = no match) and `r->error` (NULL on success, otherwise an error message string).  Captures
+are 0-indexed; `r->captures[i]` is the value bound to positional capture `i` from the pattern
+(where `i = 0` is the first capture).  Free the result with `snobol_match_result_free()`.
+
+#### Multi-step API (fine-grained control)
+
 ```c
 #include <snobol/snobol.h>
 
 int main(void) {
-    // Create context
     snobol_context_t* ctx = snobol_context_create();
-    
-    // Compile pattern: 'hello'
-    snobol_pattern_t* pattern = snobol_pattern_compile(
-        ctx, "'hello'", 7, NULL
-    );
-    
-    // Match against subject
-    snobol_match_t* match = snobol_pattern_match(
-        pattern, "hello world", 11
-    );
-    
-    if (snobol_match_success(match)) {
+    snobol_pattern_t* pattern = snobol_pattern_compile(ctx, "'hello'", 7, NULL);
+    snobol_match_result_t res;
+    snobol_match(pattern, "hello world", 11, &res);
+    if (res.status == SNOBOL_MATCH_SUCCESS) {
         printf("Match found!\n");
     }
-    
-    // Cleanup
-    snobol_match_free(match);
+    snobol_match_result_free(&res);
     snobol_pattern_free(pattern);
     snobol_context_destroy(ctx);
-    
     return 0;
 }
 ```
@@ -309,14 +340,16 @@ See `bench/` directory for benchmark scripts and `bench/results_builtin.json` fo
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Language Bindings                    │
-│  ┌────────────┐    ┌────────────┐    ┌────────────┐     │
-│  │    PHP     │    │   Python   │    │    Rust    │     │
-│  │  Binding   │    │  Binding   │    │  Binding   │     │
-│  └─────┬──────┘    └─────┬──────┘    └─────┬──────┘     │
-│        │                 │                 │            │
-│        └─────────────────┼─────────────────┘            │
-│                          │                              │
+│  ┌────────────┐    ┌──────────────┐    ┌─────────────┐  │
+│  │    PHP     │    │   Python *   │    │   Rust **   │  │
+│  │  Binding   │    │  (Reference) │    │ (Community) │  │
+│  └─────┬──────┘    └──────┬───────┘    └────────┬────┘  │
+│        │                  │                     │       │
+│        └──────────────────┼─────────────────────┘       │
+│                           │                             │
 │                   C Extension API                       │
+│ * examples/python-binding/ — starter for community      │
+│ ** not yet started — see CONTRIBUTING.md                │
 └──────────────────────────┼──────────────────────────────┘
                            │
 ┌──────────────────────────┼──────────────────────────────┐
@@ -346,28 +379,33 @@ See `bench/` directory for benchmark scripts and `bench/results_builtin.json` fo
 
 ## Documentation
 
+- **[Why SNOBOL4 vs PCRE](docs/why-snobol-vs-pcre.md)** — comparison guide with side-by-side examples
+- **Hosted Doxygen**: [JPetsis.github.io/libsnobol4](https://JPetsis.github.io/libsnobol4/) — auto-deployed on push to main
 - **Core API**: Headers in `core/include/snobol/`
 - **PHP Binding**: [bindings/php/README.md](bindings/php/README.md)
 - **Grammar**: [core/grammar/snobol.ebnf](core/grammar/snobol.ebnf)
 
-## Installation
+## Distribution
 
-```bash
-cmake --install build --prefix /usr/local
-```
+### C Library
 
-After installation, the library can be located by CMake or pkg-config:
+| Channel               | Command                                                          | Notes                       |
+|-----------------------|------------------------------------------------------------------|-----------------------------|
+| **Build from source** | `cmake -B build && cmake --build build && cmake --install build` | Full control, all platforms |
+| **Homebrew (macOS)**  | `brew install JPetsis/homebrew-tap/libsnobol4`                   | Pre-built, ARM64 + x86_64   |
 
-```bash
-# CMake (find_package)
-find_package(libsnobol4 REQUIRED)
-target_link_libraries(your_target PRIVATE libsnobol4::snobol4)
+### PHP Extension
 
-# pkg-config
-pkg-config --cflags --libs libsnobol4
-# If installed to a non-standard prefix:
-PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --cflags --libs libsnobol4
-```
+| Channel               | Command                         | Notes                                                             |
+|-----------------------|---------------------------------|-------------------------------------------------------------------|
+| **PIE** (recommended) | `pie install libsnobol4/snobol` | Single command — downloads pre-built binary or builds from source |
+
+### GitHub Releases
+
+Each release includes pre-built `snobol.so` binaries for 5 platform variants (named per PIE convention):
+- Linux x86_64, Linux aarch64
+- macOS x86_64, macOS arm64
+- Windows x86_64
 
 ## CI / Contributing
 
@@ -387,10 +425,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 libsnobol4 uses independent versioning for core and each binding:
 
-- **Core**: v0.10.0 (Multi-Architecture JIT: IR layer, ARM64, ARM32, RISC-V 64, x86-64 backends)
-- **PHP Binding**: v0.8.0
+| Component              | Current | Next        | Status            | Install                               |
+|------------------------|---------|-------------|-------------------|---------------------------------------|
+| **Core**               | v0.10.0 | **v0.11.0** | ✅ v0.10.0 shipped | `brew install JPetsis/tap/libsnobol4` |
+| **PHP Binding**        | v0.8.0  | v0.11.0     | 🔄 In development | `pie install libsnobol4/snobol`       |
+| **Python (reference)** | —       | —           | Prototype only    | `examples/python-binding/`            |
 
-This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.
+This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees. See [ROADMAP.md](ROADMAP.md) for the full plan toward v1.0.0.
 
 ### Platform Support
 
