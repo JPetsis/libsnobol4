@@ -615,13 +615,28 @@ static bool search_automaton_try(VM *vm,
  *
  * Semantics are identical to repeated anchored vm_exec calls in the caller:
  * the first non-overlapping match at or after start_offset is returned.
+ *
+ * Per-candidate VM reset policy (FIELDS-ONLY):
+ * This function does NOT call memset(VM, 0, sizeof(VM)) per candidate. The
+ * per-candidate reset is done by search_reset_vm() (above) which updates
+ * only the fields that change between candidates:
+ *   vm->s, vm->len, vm->ip, vm->pos, vm->var_count, vm->max_cap_used,
+ *   vm->max_counter_used, vm->choices_top, vm->jit.search_mode
+ * The JIT-owned fields (vm->jit.ip_counts, vm->jit.traces, vm->jit.ctx)
+ * are deliberately preserved across iterations.
+ *
+ * Callers that loop snobol_search_exec() (e.g. snobol_pattern_search_ex,
+ * PHP Pattern::searchSplit) MUST initialise the VM struct once (setting
+ * vm->bc, vm->bc_len, vm->out, JIT fields) and then call this function
+ * repeatedly without re-memset'ing the VM. snobol_pattern_search_ex()
+ * in core/src/api.c is the reference implementation.
  * --------------------------------------------------------------------------- */
 bool snobol_search_exec(VM *vm,
-                         const char *subject, size_t subject_len,
-                         size_t start_offset,
-                         const snobol_search_meta_t *meta,
-                         snobol_search_result_t *out_result,
-                         snobol_search_diag_t *diag) {
+                          const char *subject, size_t subject_len,
+                          size_t start_offset,
+                          const snobol_search_meta_t *meta,
+                          snobol_search_result_t *out_result,
+                          snobol_search_diag_t *diag) {
     if (diag) memset(diag, 0, sizeof(*diag));
     if (out_result) out_result->success = false;
     if (!vm || !subject || !out_result) return false;

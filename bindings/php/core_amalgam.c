@@ -37,4 +37,5 @@
 #include "../../core/src/type_fn.c"
 #include "../../core/src/pattern_build.c"
 #include "../../core/src/search.c"
+#include "../../core/src/api.c"
 

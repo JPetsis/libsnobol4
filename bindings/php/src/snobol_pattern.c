@@ -5,6 +5,7 @@
 #include "snobol/vm.h"
 #include "snobol/lexer.h"
 #include "snobol/parser.h"
+#include "snobol/snobol.h"
 #include "snobol/snobol_internal.h"
 #include "snobol/search.h"
 #include "snobol/table.h"
@@ -44,10 +45,10 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
 extern zend_class_entry *snobol_pattern_ce;
 static zend_object_handlers snobol_pattern_object_handlers;
 
-static void snobol_pattern_free(zend_object *object) {
+static void php_snobol_pattern_dtor(zend_object *object) {
     snobol_pattern_t *intern = php_snobol_fetch(object);
-    SNOBOL_LOG("snobol_pattern_free: intern=%p, bc=%p", (void*)intern, (void*)intern->bc);
-    
+    SNOBOL_LOG("php_snobol_pattern_dtor: intern=%p, bc=%p", (void*)intern, (void*)intern->bc);
+
     if (intern->bc) {
         compiler_free(intern->bc);
         intern->bc = NULL;
@@ -59,9 +60,9 @@ static void snobol_pattern_free(zend_object *object) {
         intern->jit_ctx = NULL;
     }
 #endif
-    
+
     zend_object_std_dtor(object);
-    SNOBOL_LOG("snobol_pattern_free: done");
+    SNOBOL_LOG("php_snobol_pattern_dtor: done");
 }
 
 static zend_object *snobol_pattern_create(zend_class_entry *ce) {
@@ -631,6 +632,19 @@ PHP_METHOD(Snobol_Pattern, setJit) {
 /* -------------------------------------------------------------------------
  * Helper: initialise a VM from a snobol_pattern_t for search operations
  * (shared setup for searchAll / searchSplit / searchReplace)
+ *
+ * The VM struct contains many pointer and length fields (write_log,
+ * choices, tables, dyn_cache, etc.). The caller declares a stack-allocated
+ * VM and passes it here uninitialised, so we MUST memset it to a known
+ * state before filling in the search-loop-specific fields. search_reset_vm
+ * (in core/src/search.c) handles the per-candidate reset, but it only
+ * touches the fields that change between candidates — pointer fields
+ * like write_log, choices, etc. must be zeroed once at first init.
+ *
+ * Optimisation opportunity: callers can avoid this memset by using the
+ * stateful snobol_pattern_search_ex() API, which manages the VM state
+ * internally. That refactor is captured in the jit-search-perf-baseline
+ * change's searchSplit/searchAll/searchReplace tasks.
  * ----------------------------------------------------------------------- */
 static void php_snobol_init_vm_for_search(VM *vm,
                                            snobol_pattern_t *intern,
@@ -648,8 +662,9 @@ static void php_snobol_init_vm_for_search(VM *vm,
         vm->jit.traces    = intern->jit_ctx->traces;
         vm->jit.ctx       = intern->jit_ctx;
     }
-    vm->jit.enabled = intern->jit_enabled;
-    vm->jit.stats   = snobol_jit_get_stats();
+    vm->jit.enabled     = intern->jit_enabled;
+    vm->jit.search_mode = true;
+    vm->jit.stats       = snobol_jit_get_stats();
 #endif
 }
 
@@ -790,46 +805,43 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
     const char *subject_val = ZSTR_VAL(subject);
     size_t subject_len      = ZSTR_LEN(subject);
 
-    snobol_search_meta_t meta;
-    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+    /* JIT-search-perf-baseline: use the stateful search API.
+     * snobol_pattern_search_ex amortises the per-iteration cost of
+     * VM init, JIT context lookup, and search metadata derivation.
+     * The state takes raw bytecode (bc, bc_len) so it works with both
+     * the C API's and the PHP binding's pattern structs. */
+    snobol_pattern_search_state_t *state =
+        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+    if (!state) {
+        zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+        RETURN_FALSE;
+    }
 
     array_init(return_value);
     size_t search_offset  = 0;
     size_t last_match_end = 0;
 
     while (search_offset <= subject_len) {
-        VM vm;
-        php_snobol_init_vm_for_search(&vm, intern, NULL);
+        snobol_match_t *m = snobol_pattern_search_ex(state, subject_val, subject_len,
+                                                      search_offset);
+        if (!m || !snobol_match_success(m)) {
+            break;
+        }
 
-#ifdef SNOBOL_DYNAMIC_PATTERN
-        dynamic_pattern_cache_t dyn_cache;
-        if (dynamic_pattern_cache_init(&dyn_cache, 64)) vm.dyn_cache = &dyn_cache;
-        vm.dyn_pending_source = NULL; vm.dyn_pending_source_len = 0;
-        vm.dyn_pending_bc     = NULL; vm.dyn_pending_bc_len = 0;
-#endif
-
-        snobol_search_result_t match;
-        bool found = snobol_search_exec(&vm, subject_val, subject_len,
-                                         search_offset, &meta, &match, NULL);
-
-#ifdef SNOBOL_DYNAMIC_PATTERN
-        if (vm.dyn_cache) dynamic_pattern_cache_destroy(vm.dyn_cache);
-        if (vm.dyn_pending_source) efree(vm.dyn_pending_source);
-        if (vm.dyn_pending_bc)     efree(vm.dyn_pending_bc);
-#endif
-
-        if (!found) break;
+        size_t match_start = snobol_match_get_position(m);
+        size_t match_len   = snobol_match_get_length(m);
 
         /* Add segment before this match */
         add_next_index_stringl(return_value,
             subject_val + last_match_end,
-            match.match_start - last_match_end);
+            match_start - last_match_end);
 
-        size_t match_len = match.match_end - match.match_start;
         if (match_len == 0) match_len = 1;
-        search_offset  = match.match_start + match_len;
+        search_offset  = match_start + match_len;
         last_match_end = search_offset;
     }
+
+    snobol_pattern_search_state_destroy(state);
 
     /* Add remaining segment after last match */
     add_next_index_stringl(return_value,
@@ -861,8 +873,13 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
     const char *repl_val        = ZSTR_VAL(replacement);
     size_t      repl_len        = ZSTR_LEN(replacement);
 
-    snobol_search_meta_t meta;
-    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+    /* JIT-search-perf-baseline: use the stateful search API. */
+    snobol_pattern_search_state_t *state =
+        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+    if (!state) {
+        zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+        RETURN_FALSE;
+    }
 
     snobol_buf out;
     snobol_buf_init(&out);
@@ -871,37 +888,24 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
     size_t last_match_end = 0;
 
     while (search_offset <= subject_len) {
-        VM vm;
-        php_snobol_init_vm_for_search(&vm, intern, NULL);
+        snobol_match_t *m = snobol_pattern_search_ex(state, subject_val, subject_len,
+                                                      search_offset);
+        if (!m || !snobol_match_success(m)) {
+            break;
+        }
 
-#ifdef SNOBOL_DYNAMIC_PATTERN
-        dynamic_pattern_cache_t dyn_cache;
-        if (dynamic_pattern_cache_init(&dyn_cache, 64)) vm.dyn_cache = &dyn_cache;
-        vm.dyn_pending_source = NULL; vm.dyn_pending_source_len = 0;
-        vm.dyn_pending_bc     = NULL; vm.dyn_pending_bc_len = 0;
-#endif
-
-        snobol_search_result_t match;
-        bool found = snobol_search_exec(&vm, subject_val, subject_len,
-                                         search_offset, &meta, &match, NULL);
-
-#ifdef SNOBOL_DYNAMIC_PATTERN
-        if (vm.dyn_cache) dynamic_pattern_cache_destroy(vm.dyn_cache);
-        if (vm.dyn_pending_source) efree(vm.dyn_pending_source);
-        if (vm.dyn_pending_bc)     efree(vm.dyn_pending_bc);
-#endif
-
-        if (!found) break;
+        size_t match_start = snobol_match_get_position(m);
+        size_t match_end   = match_start + snobol_match_get_length(m);
 
         /* Append prefix */
         snobol_buf_append(&out, subject_val + last_match_end,
-                          match.match_start - last_match_end);
+                          match_start - last_match_end);
         /* Append replacement */
         snobol_buf_append(&out, repl_val, repl_len);
 
-        size_t match_len = match.match_end - match.match_start;
+        size_t match_len = match_end - match_start;
         if (match_len == 0) match_len = 1;
-        search_offset  = match.match_start + match_len;
+        search_offset  = match_start + match_len;
         last_match_end = search_offset;
     }
 
@@ -911,6 +915,7 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
 
     RETVAL_STRINGL(out.data, out.len);
     snobol_buf_free(&out);
+    snobol_pattern_search_state_destroy(state);
 }
 
 static const zend_function_entry snobol_pattern_methods[] = {
@@ -934,7 +939,7 @@ void snobol_pattern_minit(void) {
     
     memcpy(&snobol_pattern_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
     snobol_pattern_object_handlers.offset = XtOffsetOf(snobol_pattern_t, std);
-    snobol_pattern_object_handlers.free_obj = snobol_pattern_free;
+    snobol_pattern_object_handlers.free_obj = php_snobol_pattern_dtor;
 
     INIT_CLASS_ENTRY(ce, "Snobol\\Pattern", snobol_pattern_methods);
     snobol_pattern_ce = zend_register_internal_class(&ce);

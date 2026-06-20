@@ -37,6 +37,7 @@ CORE_FILES=(
     "type_fn.c"
     "pattern_build.c"
     "search.c"
+    "api.c"
 )
 
 # Header for the amalgamation file

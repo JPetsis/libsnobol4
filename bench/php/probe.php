@@ -386,5 +386,47 @@ echo "PHP probe measures the full user-facing path (binding cost included).\n";
 echo "Run bench/c/bench_probe.c to compare against the pure C path.\n";
 echo "\n";
 
+/* Optional baseline regression guard. Reads the committed JSON baseline
+ * and asserts each scenario's ns_per_iter is within the threshold. */
+if (getenv('PROBE_BASELINE') === '1') {
+    $baseline_path = getenv('PROBE_BASELINE_PATH') ?: __DIR__ . '/../../bench/results/search_perf_baseline.json';
+    if (!is_file($baseline_path)) {
+        fwrite(STDERR, "PROBE_BASELINE=1 but no baseline file at $baseline_path\n");
+        exit(2);
+    }
+    $baseline_json = file_get_contents($baseline_path);
+    $baseline = json_decode($baseline_json, true);
+    if (!is_array($baseline) || !isset($baseline['php_probe'])) {
+        fwrite(STDERR, "Baseline file missing php_probe section\n");
+        exit(2);
+    }
+    $threshold_pct = 25.0;
+    echo "=== Baseline regression guard (PROBE_BASELINE=1) ===\n";
+    echo "Baseline file: $baseline_path\n";
+    printf("%-16s %12s %12s %12s\n", "scenario", "baseline", "observed", "delta%");
+    printf("%-16s %12s %12s %12s\n", "-------", "--------", "--------", "------");
+    $regressions = 0;
+    $speedups = 0;
+    foreach ($results as $r) {
+        if (!isset($baseline['php_probe'][$r['name']])) continue;
+        $base = $baseline['php_probe'][$r['name']]['ns_per_iter'] ?? 0;
+        if ($base <= 0) continue;
+        $obs = $r['ns_per_iter'];
+        $delta_pct = ($obs - $base) / $base * 100.0;
+        $label = '';
+        if ($delta_pct > $threshold_pct) { $label = '  REGRESSION'; $regressions++; }
+        elseif ($delta_pct < -10.0)     { $label = '  speedup';    $speedups++; }
+        else                             { $label = '  ok'; }
+        printf("%-16s %12d %12d %+11.1f%%%s\n",
+            $r['name'], $base, $obs, $delta_pct, $label);
+    }
+    echo "\n{$regressions} regressions, {$speedups} speedups, " . count($results) . " scenarios checked\n";
+    if ($regressions > 0) {
+        echo "FAILED: {$regressions} scenarios regressed by more than {$threshold_pct}%\n";
+        exit(1);
+    }
+    echo "OK: no regressions exceeding {$threshold_pct}% threshold\n";
+}
+
 // Emit a machine-readable JSON block on stderr for the coupling test
 file_put_contents('php://stderr', json_encode($results, JSON_PRETTY_PRINT) . "\n");

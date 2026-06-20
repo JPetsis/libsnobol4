@@ -169,6 +169,20 @@ snobol_pattern_t* snobol_pattern_compile(snobol_context_t* ctx, const char* sour
 snobol_pattern_t* snobol_pattern_compile_ex(snobol_context_t* ctx, const char* source, size_t len, uint32_t flags, char** error);
 
 /**
+ * @brief Get the bytecode pointer from a compiled pattern.
+ * @param[in] pattern Compiled pattern.
+ * @return Read-only pointer to the bytecode, or NULL if pattern is NULL.
+ */
+const uint8_t* snobol_pattern_get_bc(const snobol_pattern_t* pattern);
+
+/**
+ * @brief Get the bytecode length from a compiled pattern.
+ * @param[in] pattern Compiled pattern.
+ * @return Byte length, or 0 if pattern is NULL.
+ */
+size_t snobol_pattern_get_bc_len(const snobol_pattern_t* pattern);
+
+/**
  * @brief Free a compiled pattern.
  *
  * @param[in] pattern Pattern to free.  NULL is safe.
@@ -203,6 +217,90 @@ snobol_match_t* snobol_pattern_match(snobol_pattern_t* pattern, const char* subj
  *         determine whether the match succeeded.
  */
 snobol_match_t* snobol_pattern_search(snobol_pattern_t* pattern, const char* subject, size_t len);
+
+/**
+ * @brief Opaque state for snobol_pattern_search_ex().
+ *
+ * Holds a cached JIT context reference, the cached search metadata,
+ * a reusable VM, an output buffer, and a reusable match result.
+ * Created once per pattern, reused across all matches in a search loop
+ * (e.g. PHP Pattern::searchSplit) to avoid per-call allocation churn.
+ *
+ * Pointer ownership: created by snobol_pattern_search_state_create(),
+ * destroyed by snobol_pattern_search_state_destroy(). The state holds
+ * a reference to the pattern but does not own it; the caller must keep
+ * the pattern alive until the state is destroyed.
+ */
+typedef struct snobol_pattern_search_state snobol_pattern_search_state_t;
+
+/**
+ * @brief Create a state object for snobol_pattern_search_ex().
+ *
+ * @param[in] bc     Compiled bytecode buffer. Must outlive the state.
+ * @param[in] bc_len Byte length of @p bc.
+ * @return Newly allocated state, or NULL on allocation failure.
+ *         Free with snobol_pattern_search_state_destroy().
+ */
+snobol_pattern_search_state_t *snobol_pattern_search_state_create(
+    const uint8_t *bc, size_t bc_len);
+
+/**
+ * @brief Destroy a search state object. NULL-safe.
+ *
+ * Releases the cached VM, output buffer, match result, and the
+ * reference to the pattern's JIT context. Does NOT free the pattern
+ * itself.
+ */
+void snobol_pattern_search_state_destroy(
+    snobol_pattern_search_state_t *state);
+
+/**
+ * @brief Stateful search that reuses VM, output buffer, and match result
+ * across calls.
+ *
+ * Functionally equivalent to repeated calls to
+ * snobol_pattern_search() but amortises the per-call allocation cost.
+ * Intended for hot loops (e.g. PHP Pattern::searchSplit, which performs
+ * 1000+ matches per call).
+ *
+ * @param[in,out] state       Search state created by
+ *                            snobol_pattern_search_state_create(). The
+ *                            state's internal match result is
+ *                            overwritten on each call.
+ * @param[in]     subject     Subject string (UTF-8).
+ * @param[in]     subject_len Byte length of @p subject.
+ * @param[in]     start_offset Byte offset to start searching from
+ *                            (0 = beginning).
+ * @return Pointer to the internal match result owned by @p state, valid
+ *         until the next call on the same state or state destruction.
+ *         The caller must NOT free this pointer.
+ */
+snobol_match_t *snobol_pattern_search_ex(
+    snobol_pattern_search_state_t *state,
+    const char *subject, size_t subject_len,
+    size_t start_offset);
+
+/**
+ * @brief Get the absolute offset where the match started within the subject.
+ *
+ * Returns the position of the first byte of the match in the subject
+ * string (not the position within the search window). Returns 0 on
+ * failure or if match is NULL.
+ *
+ * @param[in] match Match result from snobol_pattern_search() or
+ *                  snobol_pattern_search_ex().
+ * @return Byte offset of the match start in the original subject.
+ */
+size_t snobol_match_get_position(const snobol_match_t *match);
+
+/**
+ * @brief Get the length of the match in bytes.
+ *
+ * @param[in] match Match result from snobol_pattern_search() or
+ *                  snobol_pattern_search_ex().
+ * @return Number of bytes in the match. Returns 0 on failure or NULL.
+ */
+size_t snobol_match_get_length(const snobol_match_t *match);
 
 /**
  * @brief Free a match result.

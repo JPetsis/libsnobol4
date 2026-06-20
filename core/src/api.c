@@ -42,6 +42,11 @@ struct snobol_pattern {
     size_t   bc_len;
     bool     case_insensitive; /* stored for future JIT dispatch guard */
     bool     search_mode;
+    /* Cached search metadata derived from bytecode at compile time.
+     * Reused by snobol_pattern_search() and snobol_pattern_search_ex()
+     * to avoid re-walking the bytecode on every call. */
+    snobol_search_meta_t meta;
+    bool                 meta_initialized;
 #ifdef SNOBOL_JIT
     struct SnobolJitContext *jit_ctx;
 #endif
@@ -64,6 +69,14 @@ struct snobol_match {
     char   *var_values[API_MAX_VARS];
     size_t  var_lens[API_MAX_VARS];
     int     var_count;
+
+    /* Match position within the subject. Set by search_ex (and
+     * snobol_match() via the same code path). Always 0 for matches
+     * returned by the legacy non-stateful snobol_pattern_search()
+     * unless the search metadata is supplied; for that code path
+     * the position is 0 and match_len is the full subject length. */
+    size_t  position;
+    size_t  length;
 };
 
 /* ---------------------------------------------------------------------------
@@ -144,6 +157,10 @@ static snobol_pattern_t* do_compile(const char* source, size_t len,
     pat->bc_len          = bc_len;
     pat->case_insensitive = case_insensitive;
     pat->search_mode     = search_mode;
+    /* Derive search metadata once at compile time so snobol_pattern_search()
+     * and snobol_pattern_search_ex() don't re-walk the bytecode per call. */
+    snobol_search_derive_meta(pat->bc, pat->bc_len, &pat->meta);
+    pat->meta_initialized = true;
 #ifdef SNOBOL_JIT
     pat->jit_ctx         = NULL;
 #endif
@@ -166,6 +183,14 @@ snobol_pattern_t* snobol_pattern_compile(snobol_context_t* ctx,
                                           char** error)
 {
     return snobol_pattern_compile_ex(ctx, source, len, 0, error);
+}
+
+const uint8_t* snobol_pattern_get_bc(const snobol_pattern_t* pattern) {
+    return pattern ? pattern->bc : NULL;
+}
+
+size_t snobol_pattern_get_bc_len(const snobol_pattern_t* pattern) {
+    return pattern ? pattern->bc_len : 0;
 }
 
 void snobol_pattern_free(snobol_pattern_t* pattern) {
@@ -279,12 +304,22 @@ snobol_match_t* snobol_pattern_search(snobol_pattern_t* pattern,
     vm.jit.stats       = snobol_jit_get_stats();
 #endif
 
+    /* Use cached search metadata from compile time. Falls back to local
+     * derivation only if the pattern was built without our compile path
+     * (defensive — should not happen in practice). */
     snobol_search_meta_t meta;
-    snobol_search_derive_meta(pattern->bc, pattern->bc_len, &meta);
+    bool use_cached = pattern->meta_initialized;
+    if (use_cached) {
+        meta = pattern->meta;
+    } else {
+        snobol_search_derive_meta(pattern->bc, pattern->bc_len, &meta);
+    }
 
     snobol_search_result_t sr;
     bool ok = snobol_search_exec(&vm, subject, len, 0, &meta, &sr, NULL);
     m->success = ok;
+    m->position = sr.match_start;
+    m->length   = sr.match_end - sr.match_start;
 
     if (ok && out_buf.len > 0) {
         m->output = (char *)snobol_malloc(out_buf.len + 1);
@@ -327,6 +362,170 @@ void snobol_match_free(snobol_match_t* match) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Stateful search API
+ *
+ * For hot loops (PHP Pattern::searchSplit iterates 1000+ times per call),
+ * the per-call allocation cost of snobol_match_t, the output buffer, the
+ * VM struct, the JIT context lookup, and the search metadata derivation
+ * dominates. snobol_pattern_search_ex() amortises all of that.
+ *
+ * The state holds:
+ *   - A reference to the pattern (must outlive the state)
+ *   - A reference to the JIT context (acquired on first search via the
+ *     pattern, not on state creation — same lazy semantics as
+ *     snobol_pattern_search)
+ *   - A reusable VM struct (allocated on first use, fields-only reset
+ *     per call via search_reset_vm())
+ *   - A reusable output buffer (snobol_buf)
+ *   - A reusable snobol_match_t that the caller reads but does not free
+ * --------------------------------------------------------------------------- */
+
+struct snobol_pattern_search_state {
+    const uint8_t   *bc;          /* borrowed, not owned */
+    size_t           bc_len;
+    snobol_buf        out_buf;    /* reused across calls */
+    VM                vm;         /* reused, fields-only reset per call */
+    snobol_match_t    match;      /* overwritten on each call */
+    snobol_search_meta_t meta;    /* derived once at create time */
+    bool              vm_inited;  /* true after first search call sets it up */
+    bool              buf_inited; /* true after first out_buf_init */
+};
+
+snobol_pattern_search_state_t *snobol_pattern_search_state_create(
+    const uint8_t *bc, size_t bc_len)
+{
+    if (!bc || bc_len == 0) return NULL;
+    snobol_pattern_search_state_t *state =
+        (snobol_pattern_search_state_t *)snobol_malloc(sizeof(*state));
+    if (!state) return NULL;
+    memset(state, 0, sizeof(*state));
+    state->bc     = bc;
+    state->bc_len = bc_len;
+    /* Derive search metadata once — reused across all search calls */
+    snobol_search_derive_meta(bc, bc_len, &state->meta);
+    return state;
+}
+
+void snobol_pattern_search_state_destroy(
+    snobol_pattern_search_state_t *state)
+{
+    if (!state) return;
+    if (state->buf_inited) {
+        snobol_buf_free(&state->out_buf);
+    }
+    vm_free_labels(&state->vm);
+    if (state->match.output) {
+        snobol_free(state->match.output);
+        state->match.output = NULL;
+    }
+    for (int i = 0; i < API_MAX_VARS; i++) {
+        if (state->match.var_values[i]) {
+            snobol_free(state->match.var_values[i]);
+            state->match.var_values[i] = NULL;
+        }
+    }
+    snobol_free(state);
+}
+
+snobol_match_t *snobol_pattern_search_ex(
+    snobol_pattern_search_state_t *state,
+    const char *subject, size_t subject_len,
+    size_t start_offset)
+{
+    if (!state || !subject) return NULL;
+
+    /* Lazy init: output buffer on first call, JIT context on first call.
+     * The VM struct is initialised fields-only (no memset) on every
+     * call — search_reset_vm() handles the per-candidate reset. */
+    if (!state->buf_inited) {
+        snobol_buf_init(&state->out_buf);
+        state->buf_inited = true;
+    }
+
+    if (!state->vm_inited) {
+        memset(&state->vm, 0, sizeof(VM));
+        state->vm.bc     = (uint8_t *)state->bc;
+        state->vm.bc_len = state->bc_len;
+        state->vm.out    = &state->out_buf;
+#ifdef SNOBOL_JIT
+        /* Acquire JIT context from the bytecode — the LRU cache will
+         * return the same context if the PHP binding already holds one. */
+        struct SnobolJitContext *jit_ctx =
+            snobol_jit_acquire_context(state->bc, state->bc_len);
+        if (jit_ctx) {
+            state->vm.jit.ip_counts = jit_ctx->ip_counts;
+            state->vm.jit.traces    = jit_ctx->traces;
+            state->vm.jit.ctx       = jit_ctx;
+        }
+        state->vm.jit.enabled     = true;
+        state->vm.jit.search_mode = true;
+        state->vm.jit.stats       = snobol_jit_get_stats();
+#endif
+        state->vm_inited = true;
+    }
+
+    /* Free any output from the previous call */
+    if (state->match.output) {
+        snobol_free(state->match.output);
+        state->match.output = NULL;
+        state->match.output_len = 0;
+    }
+    for (int i = 0; i < API_MAX_VARS; i++) {
+        if (state->match.var_values[i]) {
+            snobol_free(state->match.var_values[i]);
+            state->match.var_values[i] = NULL;
+            state->match.var_lens[i] = 0;
+        }
+    }
+    state->match.success = false;
+    state->match.var_count = 0;
+
+    /* Reset out_buf length (keeps capacity) */
+    state->out_buf.len = 0;
+    if (state->out_buf.cap > 0 && state->out_buf.data) {
+        state->out_buf.data[0] = '\0';
+    }
+
+    /* Use the search metadata derived at state creation time. */
+    snobol_search_result_t sr;
+    bool ok = snobol_search_exec(&state->vm, subject, subject_len,
+                                  start_offset, &state->meta, &sr, NULL);
+    state->match.success = ok;
+    /* sr.match_start is already an absolute position in the subject
+     * (not relative to start_offset). Do NOT add start_offset again. */
+    state->match.position = sr.match_start;
+    state->match.length   = sr.match_end - sr.match_start;
+
+    if (ok && state->out_buf.len > 0) {
+        state->match.output = (char *)snobol_malloc(state->out_buf.len + 1);
+        if (state->match.output) {
+            memcpy(state->match.output, state->out_buf.data, state->out_buf.len);
+            state->match.output[state->out_buf.len] = '\0';
+            state->match.output_len = state->out_buf.len;
+        }
+    }
+
+    int n = (int)state->vm.var_count;
+    if (n > API_MAX_VARS) n = API_MAX_VARS;
+    state->match.var_count = n;
+    for (int i = 0; i < n; i++) {
+        size_t vs = state->vm.var_start[i];
+        size_t ve = state->vm.var_end[i];
+        if (ve > vs && ve <= subject_len) {
+            size_t vlen = ve - vs;
+            state->match.var_values[i] = (char *)snobol_malloc(vlen + 1);
+            if (state->match.var_values[i]) {
+                memcpy(state->match.var_values[i], subject + vs, vlen);
+                state->match.var_values[i][vlen] = '\0';
+                state->match.var_lens[i] = vlen;
+            }
+        }
+    }
+
+    return &state->match;
+}
+
+/* ---------------------------------------------------------------------------
  * Match result access
  * --------------------------------------------------------------------------- */
 
@@ -341,6 +540,16 @@ const char* snobol_match_get_output(snobol_match_t* match, size_t* len) {
     }
     if (len) *len = match->output_len;
     return match->output ? match->output : "";
+}
+
+size_t snobol_match_get_position(const snobol_match_t* match) {
+    if (!match || !match->success) return 0;
+    return match->position;
+}
+
+size_t snobol_match_get_length(const snobol_match_t* match) {
+    if (!match || !match->success) return 0;
+    return match->length;
 }
 
 const char* snobol_match_get_variable(snobol_match_t* match, const char* name, size_t* len) {

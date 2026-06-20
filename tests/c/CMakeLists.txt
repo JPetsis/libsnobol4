@@ -24,6 +24,8 @@ add_executable(snobol4_tests
     test_jit_riscv64.c
     test_jit_x86_64.c
     test_jit_c_api.c
+    test_search_meta_cache.c
+    test_search_ex_api.c
     test_lexer.c
     test_parser.c
     test_ast.c

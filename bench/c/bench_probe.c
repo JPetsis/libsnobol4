@@ -504,6 +504,152 @@ static void print_table(const probe_result_t *results, size_t n) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Baseline regression guard
+ *
+ * Reads bench/results/search_perf_baseline.json and asserts each
+ * scenario's ns_per_iter is within 10% of the baseline. Exits non-zero
+ * on regression.
+ * --------------------------------------------------------------------------- */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Minimal JSON parser for our specific schema — finds a scenario
+ * key in the c_probe object and extracts its ns_per_iter value. We
+ * parse brace-delimited scopes to avoid matching ns_per_iter in
+ * nested objects (e.g. c_api_extensions.comparison_to_before). */
+typedef struct {
+    char name[64];
+    long long ns_per_iter;
+    int  found;
+} baseline_row_t;
+
+static int parse_baseline_row(const char *json, const char *scenario, baseline_row_t *out) {
+    /* The c_probe object is the authoritative source. Find it first. */
+    const char *cprobe = strstr(json, "\"c_probe\"");
+    if (!cprobe) return 0;
+    const char *obj_start = strchr(cprobe, '{');
+    if (!obj_start) return 0;
+    /* Walk forward to find the matching '}' for the c_probe object. */
+    int depth = 1;
+    const char *q = obj_start + 1;
+    while (*q && depth > 0) {
+        if (*q == '{') depth++;
+        else if (*q == '}') depth--;
+        if (depth == 0) break;
+        q++;
+    }
+    if (depth != 0) return 0;
+    /* Now search for "<scenario>": { within c_probe only. */
+    char key[128];
+    snprintf(key, sizeof(key), "\"%s\"", scenario);
+    const char *p = strstr(obj_start, key);
+    if (!p || p > q) return 0;
+    /* Find the scenario's object start. */
+    const char *s_start = strchr(p, '{');
+    if (!s_start || s_start > q) return 0;
+    int sd = 1;
+    const char *s_end = s_start + 1;
+    while (s_end < q && sd > 0) {
+        if (*s_end == '{') sd++;
+        else if (*s_end == '}') sd--;
+        if (sd == 0) break;
+        s_end++;
+    }
+    if (sd != 0) return 0;
+    /* Now find ns_per_iter within the scenario's brace-balanced object. */
+    const char *nsp = strstr(s_start, "\"ns_per_iter\"");
+    if (!nsp || nsp > s_end) return 0;
+    const char *colon = strchr(nsp, ':');
+    if (!colon) return 0;
+    long long v = strtoll(colon + 1, NULL, 10);
+    if (v <= 0) return 0;
+    strncpy(out->name, scenario, sizeof(out->name) - 1);
+    out->name[sizeof(out->name) - 1] = '\0';
+    out->ns_per_iter = v;
+    out->found = 1;
+    return 1;
+}
+
+static int read_file(const char *path, char **out) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    *out = (char *)malloc((size_t)sz + 1);
+    if (!*out) { fclose(f); return 0; }
+    fread(*out, 1, (size_t)sz, f);
+    (*out)[sz] = '\0';
+    fclose(f);
+    return 1;
+}
+
+static int assert_against_baseline(const probe_result_t *results, size_t n) {
+    /* Try a few likely paths */
+    const char *env_path = getenv("PROBE_BASELINE_PATH");
+    const char *paths[5] = {0};
+    int npaths = 0;
+    if (env_path) paths[npaths++] = env_path;
+    paths[npaths++] = "bench/results/search_perf_baseline.json";
+    paths[npaths++] = "../bench/results/search_perf_baseline.json";
+    paths[npaths++] = "../../bench/results/search_perf_baseline.json";
+    paths[npaths] = NULL;
+    char *json = NULL;
+    int found_path = -1;
+    for (int i = 0; paths[i]; i++) {
+        if (read_file(paths[i], &json)) {
+            found_path = i;
+            break;
+        }
+    }
+    if (!json) {
+        fprintf(stderr, "PROBE_BASELINE=1 but no baseline file found\n");
+        return 2;
+    }
+    printf("\n=== Baseline regression guard (PROBE_BASELINE=1) ===\n");
+    printf("Baseline file: %s\n", paths[found_path]);
+    printf("%-16s %12s %12s %12s\n",
+           "scenario", "baseline", "observed", "delta%");
+    printf("%-16s %12s %12s %12s\n",
+           "-------", "--------", "--------", "------");
+
+    int regressions = 0;
+    int speedups = 0;
+    for (size_t i = 0; i < n; i++) {
+        baseline_row_t row;
+        if (!parse_baseline_row(json, results[i].name, &row)) {
+            /* No baseline entry — skip (not a regression) */
+            continue;
+        }
+        long long base = row.ns_per_iter;
+        long long obs  = results[i].ns_per_iter;
+        double delta_pct = (base > 0) ? ((double)(obs - base) / base * 100.0) : 0.0;
+        printf("%-16s %12lld %12lld %+11.1f%%",
+               results[i].name, base, obs, delta_pct);
+        if (delta_pct > 25.0) {
+            printf("  REGRESSION\n");
+            regressions++;
+        } else if (delta_pct < -10.0) {
+            printf("  speedup\n");
+            speedups++;
+        } else {
+            printf("  ok\n");
+        }
+    }
+    free(json);
+    printf("\n%d regressions, %d speedups, %zu scenarios checked\n",
+           regressions, speedups, n);
+    if (regressions > 0) {
+        printf("FAILED: %d scenarios regressed by more than 25%%\n", regressions);
+        return 1;
+    }
+    printf("OK: no regressions exceeding 25%% threshold\n");
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------
  * main
  * --------------------------------------------------------------------------- */
 
@@ -551,6 +697,13 @@ int main(void) {
     }
 
     print_table(results, n);
+
+    /* Optional baseline regression guard. If a baseline file exists
+     * at bench/results/search_perf_baseline.json and PROBE_BASELINE=1,
+     * assert each scenario's ns_per_iter is within 10% of the baseline. */
+    if (getenv("PROBE_BASELINE") && atoi(getenv("PROBE_BASELINE")) == 1) {
+        return assert_against_baseline(results, n);
+    }
 
     return 0;
 }
