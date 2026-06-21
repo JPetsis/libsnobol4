@@ -173,6 +173,7 @@ void snobol_jit_log_open(void) {
   if (!path || !path[0])
     return;
   jit_log_fp = fopen(path, "w");
+  fprintf(stderr, "DBG-OPEN: path=%s fp=%p errno=%d\n", path, (void*)jit_log_fp, jit_log_fp ? 0 : errno);
   if (jit_log_fp) {
 #if defined(_WIN32)
     /* MSVC's setvbuf does not reliably support _IOLBF with a NULL buffer
@@ -201,9 +202,11 @@ void snobol_jit_log(const char *fmt, ...) {
     return;
   va_list ap;
   va_start(ap, fmt);
-  vfprintf(jit_log_fp, fmt, ap);
+  int n1 = vfprintf(jit_log_fp, fmt, ap);
   va_end(ap);
-  fputc('\n', jit_log_fp);
+  int n2 = fputc('\n', jit_log_fp);
+  int n3 = fflush(jit_log_fp);
+  fprintf(stderr, "DBG-LOG: n1=%d n2=%d n3=%d ftell=%ld\n", n1, n2, n3, ftell(jit_log_fp));
 }
 
 /* ---------------------------------------------------------------------------

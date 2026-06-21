@@ -1461,7 +1461,7 @@ static uint8_t *x64_emit_block_ops(jit_region_t *out, const jit_ir_region_t *ir,
       uint8_t *span_not_in = (uint8_t *)out->p;
       x64_jcc_rel8(out, JCC_JAE, 0); /* JNC: CF=0 (not in set) → done */
       x64_add_ri32(out, X64_RDI, 1);
-      x64_jmp_rel32(out, (int32_t)(intptr_t)((uint8_t *)out->p - loop_start));
+      x64_jmp_rel32(out, (int32_t)(intptr_t)(loop_start - (uint8_t *)out->p) - 5);
       intptr_t span_not_in_off = (uint8_t *)out->p - span_not_in;
       span_not_in[1] = (uint8_t)(span_not_in_off - 2);
       intptr_t span_done_off = (uint8_t *)out->p - span_done;
