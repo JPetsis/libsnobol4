@@ -371,6 +371,7 @@ typedef struct {
 typedef struct {
   uint8_t *instr_p;
   size_t ip;
+  int cond;
 } FailPatch;
 
 typedef struct {
@@ -397,21 +398,21 @@ typedef struct {
 
 /* Emit B<c> with 11-bit signed offset (in bytes, range ±2048) */
 static void t2_emit_b_cond(int cond, uint8_t *target) {
-  intptr_t diff = target - t2_wp;
+  intptr_t diff = target - t2_wp - 4;
   uint16_t imm11 = (uint16_t)((diff / 2) & 0x7ffu);
   t2_emit16(T2_B_COND(cond, imm11));
 }
 
 /* Emit B.W (32-bit unconditional branch, range ±16MB) */
 static void t2_emit_b_wide(uint8_t *target) {
-  intptr_t diff = target - t2_wp;
+  intptr_t diff = target - t2_wp - 4;
   uint32_t imm24 = (uint32_t)(diff / 2) & 0xffffffu;
   t2_emit32(T2_B_W(imm24));
 }
 
 /* Emit B (16-bit unconditional branch, range ±2KB) */
 static void t2_emit_b(uint8_t *target) {
-  intptr_t diff = target - t2_wp;
+  intptr_t diff = target - t2_wp - 4;
   uint16_t imm12 = (uint16_t)((diff / 2) & 0x7ffu);
   t2_emit16(T2_B(imm12));
 }
@@ -445,14 +446,14 @@ static uint8_t *t2_emit_patch_cbnz(int rn) {
 
 /* Patch a conditional branch (11-bit offset) */
 static void t2_patch_b_cond(uint8_t *p, uint8_t *target, int cond) {
-  intptr_t diff = target - p;
+  intptr_t diff = target - p - 4;
   uint16_t imm11 = (uint16_t)((diff / 2) & 0x7ffu);
   *(uint16_t *)p = T2_B_COND(cond, imm11);
 }
 
 /* Patch a 16-bit B (12-bit offset) */
 static void t2_patch_b(uint8_t *p, uint8_t *target) {
-  intptr_t diff = target - p;
+  intptr_t diff = target - p - 4;
   uint16_t imm12 = (uint16_t)((diff / 2) & 0x7ffu);
   *(uint16_t *)p = T2_B(imm12);
 }
@@ -460,7 +461,7 @@ static void t2_patch_b(uint8_t *p, uint8_t *target) {
 /* Patch a CBZ/CBNZ (7-bit offset in bytes, range ±126) */
 static void t2_patch_cbz_cbnz(uint8_t *p, uint8_t *target, int rn,
                               bool is_cbnz) {
-  intptr_t diff = target - p;
+  intptr_t diff = target - p - 4;
   uint16_t imm7 = (uint16_t)((diff / 2) & 0x7fu);
   if (is_cbnz)
     *(uint16_t *)p = T2_CBNZ(rn, imm7);
@@ -558,7 +559,7 @@ static void t2_emit_callout_blx(uintptr_t fn) {
     t2_emit16(T2_POP_PC);                                                      \
     t2_emit16(T2_CMP_RN_IMM8(0, 0));                                           \
     (fp_)[(*(fpc_))++] =                                                       \
-        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_)};                 \
+        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};     \
   } while (0)
 
 /* =========================================================================
@@ -1166,7 +1167,7 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       t2_emit32(T2_CMP_W_RN_RM(8, 3));
       /* bhi fail */
       fail_patches[(*fail_patch_count)++] =
-          (FailPatch){t2_emit_patch_b_cond(T2_COND_HI), cur};
+          (FailPatch){t2_emit_patch_b_cond(T2_COND_HI), cur, T2_COND_HI};
       for (uint32_t j = 0; j < lit_len; j++) {
         /* ldrb r5, [r1, r2] */
         t2_emit16(T2_LDRB_RT_RN_RM(5, 1, 2));
@@ -1174,7 +1175,7 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
         t2_emit16(T2_CMP_RN_IMM8(5, lit_data[j]));
         /* bne fail */
         fail_patches[(*fail_patch_count)++] =
-            (FailPatch){t2_emit_patch_b_cond(T2_COND_NE), cur};
+            (FailPatch){t2_emit_patch_b_cond(T2_COND_NE), cur, T2_COND_NE};
         /* add r2, r2, #1 */
         t2_emit16(T2_ADDS_RD_RN_IMM3(2, 2, 1));
       }
@@ -1200,7 +1201,7 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       /* Check pos < len */
       t2_emit32(T2_CMP_W_RN_RM(2, 3));
       fail_patches[(*fail_patch_count)++] =
-          (FailPatch){t2_emit_patch_b_cond(T2_COND_GE), cur};
+          (FailPatch){t2_emit_patch_b_cond(T2_COND_GE), cur, T2_COND_GE};
 
       /* Load character */
       t2_emit16(T2_LDRB_RT_RN_RM(5, 1, 2));
@@ -1208,7 +1209,7 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       /* Check if char > 127 (non-ASCII) */
       t2_emit16(T2_CMP_RN_IMM8(5, 127));
       fail_patches[(*fail_patch_count)++] =
-          (FailPatch){t2_emit_patch_b_cond(T2_COND_HI), cur};
+          (FailPatch){t2_emit_patch_b_cond(T2_COND_HI), cur, T2_COND_HI};
 
       /* Load bitmap word: if bit 6 of char is set, use high map (r7), else low
        * (r6) */
@@ -1242,10 +1243,10 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
 
       if (ins->opcode == JIT_IR_NOTANY) {
         fail_patches[(*fail_patch_count)++] =
-            (FailPatch){t2_emit_patch_b_cond(T2_COND_NE), cur};
+            (FailPatch){t2_emit_patch_b_cond(T2_COND_NE), cur, T2_COND_NE};
       } else {
         fail_patches[(*fail_patch_count)++] =
-            (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), cur};
+            (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), cur, T2_COND_EQ};
       }
 
       uint8_t *success_label = t2_wp;
@@ -1307,7 +1308,7 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       /* cmp r8, len */
       t2_emit32(T2_CMP_W_RN_RM(8, 3));
       fail_patches[(*fail_patch_count)++] =
-          (FailPatch){t2_emit_patch_b_cond(T2_COND_HI), cur};
+          (FailPatch){t2_emit_patch_b_cond(T2_COND_HI), cur, T2_COND_HI};
       /* pos += n */
       t2_emit32(T2_ADD_W_RD_RN_RM(2, 2, 4));
       break;
@@ -1324,7 +1325,7 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
         t2_emit32(T2_CMP_W_RN_RM(2, 3));
       }
       fail_patches[(*fail_patch_count)++] =
-          (FailPatch){t2_emit_patch_b_cond(T2_COND_NE), cur};
+          (FailPatch){t2_emit_patch_b_cond(T2_COND_NE), cur, T2_COND_NE};
       break;
     }
 
@@ -1364,7 +1365,7 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       /* cmp pos, r8 */
       t2_emit32(T2_CMP_W_RN_RM(2, 8));
       fail_patches[(*fail_patch_count)++] =
-          (FailPatch){t2_emit_patch_b_cond(T2_COND_NE), cur};
+          (FailPatch){t2_emit_patch_b_cond(T2_COND_NE), cur, T2_COND_NE};
       break;
     }
 
@@ -1374,13 +1375,13 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       /* Check len >= n */
       t2_emit32(T2_CMP_W_RN_RM(3, 4));
       fail_patches[(*fail_patch_count)++] =
-          (FailPatch){t2_emit_patch_b_cond(T2_COND_LO), cur};
+          (FailPatch){t2_emit_patch_b_cond(T2_COND_LO), cur, T2_COND_LO};
       /* r8 = len - n */
       t2_emit32(T2_SUB_W_RD_RN_RM(8, 3, 4));
       /* Check pos <= r8 */
       t2_emit32(T2_CMP_W_RN_RM(8, 2));
       fail_patches[(*fail_patch_count)++] =
-          (FailPatch){t2_emit_patch_b_cond(T2_COND_LO), cur};
+          (FailPatch){t2_emit_patch_b_cond(T2_COND_LO), cur, T2_COND_LO};
       /* pos = r8 */
       t2_emit32(T2_MOV_W_RD_RM(2, 8));
       break;
@@ -1648,7 +1649,7 @@ static void *arm32_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
     for (size_t f = 0; f < fail_patch_count; f++) {
       uint8_t *fail_stub = t2_wp;
       t2_emit_bailout(out, fail_patches[f].ip);
-      t2_patch_b_cond(fail_patches[f].instr_p, fail_stub, T2_COND_EQ);
+      t2_patch_b_cond(fail_patches[f].instr_p, fail_stub, fail_patches[f].cond);
     }
 
     /* Forward-branch fixup */
@@ -1690,7 +1691,7 @@ static void *arm32_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
       t2_emit_mov_imm32(4, (uint32_t)fail_patches[f].ip);
       t2_emit32(T2_STR_W_RT_RN_IMM12(4, 0, (uint32_t)offsetof(VM, ip)));
       t2_emit16(T2_BX_LR);
-      t2_patch_b_cond(fail_patches[f].instr_p, fail_stub, T2_COND_EQ);
+      t2_patch_b_cond(fail_patches[f].instr_p, fail_stub, fail_patches[f].cond);
     }
   }
 
@@ -1700,7 +1701,7 @@ static void *arm32_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
   out->code_size = actual_size;
   t2_sync_region(out);
   snobol_jit_seal_code(code, actual_size);
-  return (void *)code;
+  return (void *)((uintptr_t)code | 1);
 }
 
 /* =========================================================================
