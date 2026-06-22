@@ -81,7 +81,7 @@ endif()
 # Enable JIT for tests on supported architectures.
 # The core library auto-detects the host arch and registers the matching backend;
 # tests need SNOBOL_JIT=1 to enable JIT code paths in the test harness.
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]|arm|riscv64|AMD64|x86_64|amd64|i686|x86)$")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]+.*|arm|riscv64|AMD64|x86_64|amd64|i686|x86)$")
     target_compile_definitions(snobol4_tests PRIVATE SNOBOL_JIT=1)
 endif()
 
@@ -114,9 +114,13 @@ else ()
             -Wno-unused-but-set-variable
             -Wno-unused-function
             -Wno-sign-conversion
+    )
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+        target_compile_options(snobol4_tests PRIVATE
             -Wno-implicit-int-conversion
             -Wno-shorten-64-to-32
-    )
+        )
+    endif()
 endif()
 
 # Register with CTest

@@ -54,7 +54,7 @@ add_executable(snobol4_probe
 target_link_libraries(snobol4_probe PRIVATE snobol4)
 target_compile_features(snobol4_probe PRIVATE c_std_23)
 # Match the test suite: enable JIT for the probe on architectures that have a backend.
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]|arm|riscv64|AMD64|x86_64|amd64|i686|x86)$")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]+.*|arm|riscv64|AMD64|x86_64|amd64|i686|x86)$")
     target_compile_definitions(snobol4_probe PRIVATE SNOBOL_JIT=1)
 endif()
 if(MSVC)

@@ -37,6 +37,25 @@
 #include "snobol/type_fn.h"
 #include "snobol/vm.h"
 
+/* Debug logging: set SNOBOL_JIT_DEBUG=1 in the environment to enable
+ * runtime logging of JIT compilation and code emission. */
+static int jit_debug_on(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *e = getenv("SNOBOL_JIT_DEBUG");
+    cached = (e && e[0] == '1' && e[1] == '\0') ? 1 : 0;
+  }
+  return cached;
+}
+#define JIT_LOG(fmt, ...)                                                      \
+  do {                                                                         \
+    if (jit_debug_on()) {                                                      \
+      fprintf(stderr, "[JIT-ARM32] %s:%d: " fmt "\n", __FILE__, __LINE__,      \
+              ##__VA_ARGS__);                                                  \
+      fflush(stderr);                                                          \
+    }                                                                          \
+  } while (0)
+
 /* =========================================================================
  * Thumb-2 instruction helpers (16-bit and 32-bit encoding)
  *
@@ -124,88 +143,120 @@ static inline uint32_t T2_B_W(uint32_t imm24) {
   ((uint16_t)(0x1000u | (((rd) & 7u) << 0) | (((rm) & 7u) << 3) |              \
               (((imm5) & 0x1fu) << 6)))
 
-/* --- Data-processing (32-bit WIDE) --- */
-/* ADD.W <Rd>, <Rn>, <Rm> — 32-bit ADD */
+/* --- Data-processing (32-bit WIDE) ---
+ *
+ * ARMv7-A 32-bit Thumb-2 register-form data-processing layout:
+ *   HW1[15:11] = 11101  (T2 32-bit prefix)
+ *   HW1[10:9]  = 01     (op1=01, data-proc shifted register)
+ *   HW1[7:4]   = op2    (operation selector)
+ *   HW1[3:0]   = Rn     (first source operand)
+ *   HW2[15:12] = imm3:0 (top 3 bits of shift amount, padded 0)  — except CMP/TST/MOV/shifts
+ *   HW2[11:8]  = Rd     (destination; 0xF for CMP/TST)
+ *   HW2[7:4]   = imm2 + shift type (zero for plain register)
+ *   HW2[3:0]   = Rm     (second source operand; 0xF for MOV.W)
+ * For shift-by-register (LSL/LSR/ASR/ROR):
+ *   HW2[15:12] = 1111   (forced; "shift" class)
+ *   HW2[7:4]   = imm2 + type (zero for register-form shifts)
+ *   HW2[3:0]   = Rm     (shift amount register)
+ */
+
+/* ADD.W <Rd>, <Rn>, <Rm> — 32-bit ADD (T3) */
 static inline uint32_t T2_ADD_W_RD_RN_RM(int rd, int rn, int rm) {
-  uint16_t hi = 0xeb00u | ((rn & 15u) << 3) | (rm & 15u);
-  uint16_t lo = 0x0000u | (rd & 15u);
+  uint16_t hi = 0xeb00u | (rn & 15u);
+  uint16_t lo = (uint16_t)(((rd & 15u) << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* SUB.W <Rd>, <Rn>, <Rm> — 32-bit SUB */
+/* SUB.W <Rd>, <Rn>, <Rm> — 32-bit SUB (T3) */
 static inline uint32_t T2_SUB_W_RD_RN_RM(int rd, int rn, int rm) {
-  uint16_t hi = 0xeba0u | ((rn & 15u) << 3) | (rm & 15u);
-  uint16_t lo = 0x0000u | (rd & 15u);
+  uint16_t hi = 0xeba0u | (rn & 15u);
+  uint16_t lo = (uint16_t)(((rd & 15u) << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* CMP.W <Rn>, <Rm> — 32-bit CMP */
+/* CMP.W <Rn>, <Rm> — 32-bit CMP; Rd forced to 0xF (no write-back) */
 static inline uint32_t T2_CMP_W_RN_RM(int rn, int rm) {
-  uint16_t hi = 0xebb0u | ((rn & 15u) << 3) | (rm & 15u);
-  uint16_t lo = 0x0000u;
+  uint16_t hi = 0xebb0u | (rn & 15u);
+  uint16_t lo = (uint16_t)((0xfu << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* MOV.W <Rd>, <Rm> — 32-bit MOV */
+/* MOV.W <Rd>, <Rm> — 32-bit MOV (T3); Rn forced to 0xF (no source operand) */
 static inline uint32_t T2_MOV_W_RD_RM(int rd, int rm) {
-  uint16_t hi = 0xea4fu | (rm & 15u);
-  uint16_t lo = 0x0000u | (rd & 15u);
+  uint16_t hi = 0xea4fu;
+  uint16_t lo = (uint16_t)(((rd & 15u) << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* TST.W <Rn>, <Rm> */
+/* TST.W <Rn>, <Rm> — 32-bit TST; Rd forced to 0xF (no write-back) */
 static inline uint32_t T2_TST_W_RN_RM(int rn, int rm) {
-  uint16_t hi = 0xea10u | ((rn & 15u) << 3) | (rm & 15u);
-  uint16_t lo = 0x0000u;
+  uint16_t hi = 0xea10u | (rn & 15u);
+  uint16_t lo = (uint16_t)((0xfu << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* AND.W <Rd>, <Rn>, <Rm> */
+/* AND.W <Rd>, <Rn>, <Rm> — 32-bit AND (T3) */
 static inline uint32_t T2_AND_W_RD_RN_RM(int rd, int rn, int rm) {
-  uint16_t hi = 0xea00u | ((rn & 15u) << 3) | (rm & 15u);
-  uint16_t lo = 0x0000u | (rd & 15u);
+  uint16_t hi = 0xea00u | (rn & 15u);
+  uint16_t lo = (uint16_t)(((rd & 15u) << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* ORR.W <Rd>, <Rn>, <Rm> */
+/* ORR.W <Rd>, <Rn>, <Rm> — 32-bit ORR (T3) */
 static inline uint32_t T2_ORR_W_RD_RN_RM(int rd, int rn, int rm) {
-  uint16_t hi = 0xea40u | ((rn & 15u) << 3) | (rm & 15u);
-  uint16_t lo = 0x0000u | (rd & 15u);
+  uint16_t hi = 0xea40u | (rn & 15u);
+  uint16_t lo = (uint16_t)(((rd & 15u) << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* EOR.W <Rd>, <Rn>, <Rm> */
+/* EOR.W <Rd>, <Rn>, <Rm> — 32-bit EOR (T3) */
 static inline uint32_t T2_EOR_W_RD_RN_RM(int rd, int rn, int rm) {
-  uint16_t hi = 0xea80u | ((rn & 15u) << 3) | (rm & 15u);
-  uint16_t lo = 0x0000u | (rd & 15u);
+  uint16_t hi = 0xea80u | (rn & 15u);
+  uint16_t lo = (uint16_t)(((rd & 15u) << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* LSLS.W <Rd>, <Rn>, <Rm> */
+/* LSL.W <Rd>, <Rn>, <Rm> — 32-bit LSL by register (T1 register-form shift)
+ *   HW2[15:12] = 1111 (forced; shift-by-register class marker)
+ *   HW2[3:0]   = Rm (shift amount register)
+ */
 static inline uint32_t T2_LSL_W_RD_RN_RM(int rd, int rn, int rm) {
-  uint16_t hi = 0xfa00u | ((rn & 15u) << 3) | (rm & 15u);
-  uint16_t lo = 0x0000u | (rd & 15u);
+  uint16_t hi = 0xfa00u | (rn & 15u);
+  uint16_t lo = (uint16_t)(0xf000u | ((rd & 15u) << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* LSRS.W <Rd>, <Rn>, <Rm> */
+/* LSR.W <Rd>, <Rn>, <Rm> — 32-bit LSR by register */
 static inline uint32_t T2_LSR_W_RD_RN_RM(int rd, int rn, int rm) {
-  uint16_t hi = 0xfa20u | ((rn & 15u) << 3) | (rm & 15u);
-  uint16_t lo = 0x0000u | (rd & 15u);
+  uint16_t hi = 0xfa20u | (rn & 15u);
+  uint16_t lo = (uint16_t)(0xf000u | ((rd & 15u) << 8) | (rm & 15u));
   return ((uint32_t)hi << 16) | lo;
 }
 
-/* MOVT <Rd>, #<imm16> — move to top half */
-static inline uint32_t T2_MOVT(int rd, uint32_t imm16) {
-  uint16_t hi = 0xf2c0u | ((imm16 >> 12) & 0xfu) | (((rd & 15u)) << 0);
-  uint16_t lo = 0x0000u | ((imm16 & 0xfffu) << 0);
-  return ((uint32_t)hi << 16) | lo;
-}
-
-/* MOVW <Rd>, #<imm16> — move to bottom half */
+/* MOVW / MOVT 32-bit Thumb-2 imm16 encoding (T3 for MOVW, T1 for MOVT):
+ *   HW1[10]    = imm16[11]       ("i" bit)
+ *   HW1[3:0]   = imm16[15:12]    (imm4)
+ *   HW2[14:12] = imm16[10:8]     (imm3)
+ *   HW2[11:8]  = Rd              (4 bits, must be 0..14 per AAPCS)
+ *   HW2[7:0]   = imm16[7:0]      (imm8)
+ */
 static inline uint32_t T2_MOVW(int rd, uint32_t imm16) {
-  uint16_t hi = 0xf240u | ((imm16 >> 12) & 0xfu) | ((rd & 15u) << 0);
-  uint16_t lo = 0x0000u | ((imm16 & 0xfffu) << 0);
+  uint16_t hi = 0xf240u
+              | (uint16_t)(((imm16 >> 11) & 1u) << 10)
+              | (uint16_t)((imm16 >> 12) & 0xfu);
+  uint16_t lo = (uint16_t)(((imm16 >> 8) & 0x7u) << 12)
+              | (uint16_t)((rd & 15u) << 8)
+              | (uint16_t)(imm16 & 0xffu);
+  return ((uint32_t)hi << 16) | lo;
+}
+
+static inline uint32_t T2_MOVT(int rd, uint32_t imm16) {
+  uint16_t hi = 0xf2c0u
+              | (uint16_t)(((imm16 >> 11) & 1u) << 10)
+              | (uint16_t)((imm16 >> 12) & 0xfu);
+  uint16_t lo = (uint16_t)(((imm16 >> 8) & 0x7u) << 12)
+              | (uint16_t)((rd & 15u) << 8)
+              | (uint16_t)(imm16 & 0xffu);
   return ((uint32_t)hi << 16) | lo;
 }
 
@@ -292,13 +343,36 @@ static inline uint16_t T2_POP(uint16_t reglist) {
 #define T2_PUSH_LR 0xb500u
 #define T2_POP_PC 0xbd00u
 
-/* PUSH {r4-r11,lr} */
-#define T2_PUSH_R4R11_LR 0xb570u
-/* POP {r4-r11,pc} */
-#define T2_POP_R4R11_PC 0xbd70u
+/* PUSH.W {r3-r11,lr} — 32-bit Thumb-2 STMDB SP!,{r3-r11,lr}
+ *   10 registers = 40 bytes, keeps SP 8-byte aligned at public interface.
+ *   Mask = bits 3-11,14 = 0x4FF8.
+ *   Including r3 keeps AAPCS32's 8-byte SP alignment when the JIT later
+ *   issues a BLX to a C helper (which needs an aligned SP). The JIT
+ *   doesn't actually use the saved r3 — it overwrites r3 with VM.len
+ *   immediately after the prologue. We just push it as a free pad word.
+ *   hi=0xe92d, lo=0x4ff8 */
+#define T2_PUSH_R4R11_LR ((uint32_t)0xe92d4ff8u)
+/* POP.W {r3-r11,pc} — 32-bit Thumb-2 LDMIA SP!,{r3-r11,pc}
+ *   Mask = bits 3-11,15 = 0x8FF8.
+ *   hi=0xe8bd, lo=0x8ff8 */
+#define T2_POP_R4R11_PC ((uint32_t)0xe8bd8ff8u)
+
+/* PUSH.W {r0,r1,r2,lr} — 32-bit Thumb-2 STMDB SP!,{r0,r1,r2,lr}
+ *   Saves live JIT registers around a call-out: VM(r0), subject(r1),
+ *   pos(r2), and JIT-return-addr(lr).
+ *   Mask = bits 0,1,2,14 = 0x4007. 4 regs = 16 bytes, 8-aligned from prologue. */
+#define T2_PUSH_R0R1R2LR ((uint32_t)0xe92d4007u)
+/* POP.W {r0,r1,r2,lr} — 32-bit Thumb-2 LDMIA SP!,{r0,r1,r2,lr}
+ *   Same mask, pops into r0,r1,r2,lr. */
+#define T2_POP_R0R1R2LR  ((uint32_t)0xe8bd4007u)
 
 /* --- Misc --- */
 #define T2_NOP 0xbf00u
+/* ADD SP, SP, #imm — 16-bit T2, imm7 = imm/4 (max 508 bytes). */
+#define T2_ADD_SP_IMM7(imm7) ((uint16_t)(0xb000u | ((imm7) & 0x7fu)))
+/* SUB SP, SP, #imm — 16-bit T2 (bit 7 = 1 selects SUB). */
+#define T2_SUB_SP_IMM7(imm7) ((uint16_t)(0xb080u | ((imm7) & 0x7fu)))
+/* STRB.W <Rt>, [<Rn>, #<imm12>] — uses T2_STRB_W_RT_RN_IMM12 above. */
 #define T2_IT_AL 0xbf08u  /* IF-THEN always (3 instructions) */
 #define T2_IT_EQ 0xbf08u  /* IT eq */
 #define T2_ITT_AL 0xbf0cu /* IF-THEN always (2 instructions) */
@@ -319,7 +393,15 @@ static void t2_emit16(uint16_t ins) {
 }
 
 static void t2_emit32(uint32_t ins) {
-  *(uint32_t *)t2_wp = ins;
+  /* Thumb-2 32-bit instruction: first halfword (hi) at lower address.
+   * The encoding helpers return (hi << 16) | lo.  A plain *(uint32_t*)
+   * store would put lo at the lower address on little-endian ARM, so we
+   * emit the two halfwords explicitly in the correct order. */
+  uint16_t hi = (uint16_t)((ins >> 16) & 0xFFFFu);
+  uint16_t lo = (uint16_t)(ins & 0xFFFFu);
+  JIT_LOG("t2_emit32 0x%08x  (hi=0x%04x lo=0x%04x)", ins, hi, lo);
+  *(uint16_t *)t2_wp = hi;   /* first halfword at lower address */
+  *(uint16_t *)(t2_wp + 2) = lo; /* second halfword at higher address */
   t2_wp += 4;
 }
 
@@ -506,61 +588,145 @@ static void t2_emit_str_to_vm(int rt, size_t offset) {
 }
 
 /* =========================================================================
- * Call-out macros (AAPCS32 calling convention)
+ * Call-out helpers (AAPCS32 calling convention)
  *
- * All call-outs save lr on the stack, set up args in r0-r3, BLX to the
- * helper function pointer, then restore lr.
+ * Helpers expect:  r0 = VM,  r1-r3 = helper-specific args.
+ * AAPCS32 caller-saved (clobbered by BLX):  r0-r3, r12, lr
+ * AAPCS32 callee-saved (preserved by helper): r4-r11
  *
- * AAPCS32 caller-saved: r0-r3, r12, lr
- * AAPCS32 callee-saved: r4-r11
+ * JIT uses r0=VM, r1=subject, r2=pos, r3=len as live values across
+ * call-outs.  The macro is layered so each case can insert arg-setup
+ * instructions between PUSH and BLX.
+ *
+ *   CALLOUT_PROLOGUE: saves pos to VM, then PUSH.W {r0,r1,r2,lr}
+ *   case sets r1/r2/r3 (some helper-specific subset) using MOVW
+ *   CALLOUT_CALL(fn): MOVW/MOVT r12 = fn_addr; BLX r12
+ *                     — r0 = return value, lr = continuation, JIT live regs on stack
+ *   CALLOUT_SAVE_RET (bool only): MOV r12, r0 — saves return value to scratch
+ *   CALLOUT_EPILOGUE: POP.W {r0,r1,r2,lr}; LDR r3,VM.len
  * ========================================================================= */
-
-#define T2_CALLOUT_SAVE T2_PUSH_LR
-#define T2_CALLOUT_RESTORE T2_POP_PC
-
-/*
- * EMIT_VOID_CALLOUT(js, fn_ptr):
- *   PUSH {lr}
- *   MOV r12, #lo(fn_ptr)
- *   MOVT r12, #hi(fn_ptr)
- *   BLX r12
- *   POP {pc}
- *
- * For the void case we emit direct BL since the helper address is
- * compile-time known. BL has ±16MB range; helpers are in the same
- * binary so this is safe.
- */
-static void t2_emit_callout(void) { t2_emit16(T2_PUSH_LR); }
-
-static void t2_emit_callout_blx(uintptr_t fn) {
-  /* Load function address into r12 (IP) */
-  t2_emit_mov_imm32(12, (uint32_t)(uintptr_t)fn);
-  /* BLX r12 */
-  t2_emit16(T2_BLX(12));
-  /* POP {pc} (restores lr and returns) */
-  t2_emit16(T2_POP_PC);
-}
-
-#define EMIT_VOID_CALLOUT(fn_ptr_)                                             \
-  do {                                                                         \
-    t2_emit_callout();                                                         \
-    t2_emit_callout_blx((uintptr_t)(fn_ptr_));                                 \
-  } while (0)
-
-/* For bool-returning call-outs that can cause FAIL (pattern failure).
- * After the call-out, we check r0 (return value). If zero, jump to fail stub.
- * The fail stub is patched later. */
-#define EMIT_BOOL_CALLOUT(fn_ptr_, fp_, fpc_, cur_)                            \
-  do {                                                                         \
+#define CALLOUT_PROLOGUE                                                       \
+  do {                                                                        \
     t2_emit_str_to_vm(2, offsetof(VM, pos));                                   \
-    t2_emit16(T2_PUSH_LR);                                                     \
-    t2_emit_mov_imm32(12, (uint32_t)(uintptr_t)(fn_ptr_));                     \
-    t2_emit16(T2_BLX(12));                                                     \
-    t2_emit16(T2_POP_PC);                                                      \
-    t2_emit16(T2_CMP_RN_IMM8(0, 0));                                           \
-    (fp_)[(*(fpc_))++] =                                                       \
-        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};     \
+    t2_emit32(T2_PUSH_R0R1R2LR);                                              \
   } while (0)
+
+#define CALLOUT_CALL(fn_ptr_)                                                  \
+  do {                                                                        \
+    t2_emit_mov_imm32(12, (uint32_t)(uintptr_t)(fn_ptr_));                     \
+    t2_emit16(T2_BLX(12));                                                    \
+  } while (0)
+
+/* MOV r12, r0 — save bool return value into the IP scratch reg.
+ * r12 is caller-saved but it survives the next POP because it's not in the
+ * POP {r0,r1,r2,lr} list. */
+#define CALLOUT_SAVE_RET t2_emit16((uint16_t)T2_MOV_RD_RS(12, 0))
+
+#define CALLOUT_EPILOGUE                                                       \
+  do {                                                                        \
+    t2_emit32(T2_POP_R0R1R2LR);                                               \
+    t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));       \
+  } while (0)
+
+/* Convenience macros for the common arities.
+ *
+ * The "argN" expressions are emitted as MOVW/MOVT immediate loads into
+ * r1-r3 before the BLX.  Callee-saved helpers (r4-r11) are preserved
+ * by the C helper and remain intact across the call-out. */
+#define EMIT_VOID_CALLOUT0(fn_ptr_)                                            \
+  do {                                                                        \
+    CALLOUT_PROLOGUE;                                                         \
+    CALLOUT_CALL(fn_ptr_);                                                    \
+    CALLOUT_EPILOGUE;                                                         \
+  } while (0)
+
+#define EMIT_VOID_CALLOUT1(fn_ptr_, arg1)                                      \
+  do {                                                                        \
+    CALLOUT_PROLOGUE;                                                         \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
+    CALLOUT_CALL(fn_ptr_);                                                    \
+    CALLOUT_EPILOGUE;                                                         \
+  } while (0)
+
+#define EMIT_VOID_CALLOUT2(fn_ptr_, arg1, arg2)                                \
+  do {                                                                        \
+    CALLOUT_PROLOGUE;                                                         \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
+    t2_emit_mov_imm32(2, (uint32_t)(arg2));                                   \
+    CALLOUT_CALL(fn_ptr_);                                                    \
+    CALLOUT_EPILOGUE;                                                         \
+  } while (0)
+
+/* Bool call-outs.  For the bool-test-after-call we must:
+ *   1. After BLX returns, save r0 (return value) into r3 (caller-saved,
+ *      NOT in the PUSH {r0,r1,r2,lr} list, so survives POP).
+ *   2. POP {r0,r1,r2,lr} to restore VM, subject, pos, JIT-return-addr.
+ *   3. CMP r3, #0 — uses the 16-bit CMP encoding (only available for
+ *      r0-r7).  r12 cannot be used with T2_CMP_RN_IMM8 because that
+ *      macro masks the register number with 0x7; we would silently
+ *      cmp r4 instead of r12.  Using r3 avoids that footgun and r3 is
+ *      reloaded on the success path.
+ *   4. Branch EQ (r3 == 0 → false) to the fail stub.
+ *   5. LDR r3, VM.len — only on the success path; the fail stub
+ *      does NOT exec this (vm_push_choice etc. doesn't need r3). */
+#define EMIT_BOOL_CALLOUT0(fn_ptr_, fp_, fpc_, cur_)                           \
+  do {                                                                        \
+    CALLOUT_PROLOGUE;                                                         \
+    CALLOUT_CALL(fn_ptr_);                                                    \
+    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));  /* MOV r3, r0 — save ret */      \
+    t2_emit32(T2_POP_R0R1R2LR);                                                \
+    t2_emit16(T2_CMP_RN_IMM8(3, 0));                                           \
+    (fp_)[(*(fpc_))++] =                                                      \
+        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};    \
+    t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));        \
+  } while (0)
+
+#define EMIT_BOOL_CALLOUT1(fn_ptr_, arg1, fp_, fpc_, cur_)                     \
+  do {                                                                        \
+    CALLOUT_PROLOGUE;                                                         \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
+    CALLOUT_CALL(fn_ptr_);                                                    \
+    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));                                  \
+    t2_emit32(T2_POP_R0R1R2LR);                                                \
+    t2_emit16(T2_CMP_RN_IMM8(3, 0));                                           \
+    (fp_)[(*(fpc_))++] =                                                      \
+        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};    \
+    t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));        \
+  } while (0)
+
+#define EMIT_BOOL_CALLOUT2(fn_ptr_, arg1, arg2, fp_, fpc_, cur_)              \
+  do {                                                                        \
+    CALLOUT_PROLOGUE;                                                         \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
+    t2_emit_mov_imm32(2, (uint32_t)(arg2));                                   \
+    CALLOUT_CALL(fn_ptr_);                                                    \
+    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));                                  \
+    t2_emit32(T2_POP_R0R1R2LR);                                                \
+    t2_emit16(T2_CMP_RN_IMM8(3, 0));                                           \
+    (fp_)[(*(fpc_))++] =                                                      \
+        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};    \
+    t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));        \
+  } while (0)
+
+#define EMIT_BOOL_CALLOUT3(fn_ptr_, arg1, arg2, arg3, fp_, fpc_, cur_)         \
+  do {                                                                        \
+    CALLOUT_PROLOGUE;                                                         \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
+    t2_emit_mov_imm32(2, (uint32_t)(arg2));                                   \
+    t2_emit_mov_imm32(3, (uint32_t)(arg3));                                   \
+    CALLOUT_CALL(fn_ptr_);                                                    \
+    /* r3 had arg3 for the BLX; now reuse r3 to hold the bool return value. */ \
+    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));  /* MOV r3, r0 */                \
+    t2_emit32(T2_POP_R0R1R2LR);                                                \
+    t2_emit16(T2_CMP_RN_IMM8(3, 0));                                           \
+    (fp_)[(*(fpc_))++] =                                                      \
+        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};    \
+    t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));        \
+  } while (0)
+
+/* Legacy names kept for any code still using the old API. */
+#define EMIT_VOID_CALLOUT(fn_ptr_)  EMIT_VOID_CALLOUT0(fn_ptr_)
+#define EMIT_BOOL_CALLOUT(fn_ptr_, fp_, fpc_, cur_)  EMIT_BOOL_CALLOUT0(fn_ptr_, fp_, fpc_, cur_)
 
 /* =========================================================================
  * JIT call-out helper functions (identical to ARM64 backend)
@@ -1398,24 +1564,23 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
     case JIT_IR_EMIT_LITERAL: {
       uint32_t elt_off = ins->u.emit_lit.offset;
       uint32_t elt_len = ins->u.emit_lit.len;
-      /* Save pos */
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_VOID_CALLOUT(snobol_jit_helper_emit_literal);
+      /* emit_literal(VM, offset, len) — args in r1/r2 */
+      EMIT_VOID_CALLOUT2(snobol_jit_helper_emit_literal, elt_off, elt_len);
       break;
     }
 
     case JIT_IR_EMIT_CAPTURE: {
       uint8_t ecap_reg = ins->u.emit_cap.reg;
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_VOID_CALLOUT(snobol_jit_helper_emit_capture);
+      /* emit_capture(VM, reg) — arg in r1 */
+      EMIT_VOID_CALLOUT1(snobol_jit_helper_emit_capture, ecap_reg);
       break;
     }
 
     case JIT_IR_EMIT_EXPR: {
       uint8_t eex_r = ins->u.emit_expr.reg;
       uint8_t eex_t = ins->u.emit_expr.expr_type;
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_VOID_CALLOUT(snobol_jit_helper_emit_expr);
+      /* emit_expr(VM, reg, expr_type) — args in r1/r2 */
+      EMIT_VOID_CALLOUT2(snobol_jit_helper_emit_expr, eex_r, eex_t);
       break;
     }
 
@@ -1424,14 +1589,31 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       uint8_t efmt_t = ins->u.emit_fmt.fmt_type;
       uint16_t efmt_w = ins->u.emit_fmt.width;
       uint8_t efmt_f = ins->u.emit_fmt.fill_char;
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_VOID_CALLOUT(snobol_jit_helper_emit_format);
+      /* emit_format takes 5 args (VM, reg, fmt_type, width, fill_char).
+       * AAPCS32 places arg5 at [sp, #0].  We SUB sp by 8 to keep SP
+       * 8-byte aligned for the BLX (4 bytes for the actual arg, 4 bytes
+       * of alignment pad). */
+      CALLOUT_PROLOGUE;
+      t2_emit_mov_imm32(1, (uint32_t)efmt_r);
+      t2_emit_mov_imm32(2, (uint32_t)efmt_t);
+      t2_emit_mov_imm32(3, (uint32_t)efmt_w);
+      t2_emit_mov_imm32(4, (uint32_t)efmt_f);
+      t2_emit16(T2_SUB_SP_IMM7(2));  /* SUB sp, sp, #8 — keep 8-aligned */
+      t2_emit32(T2_STRB_W_RT_RN_IMM12(4, 13, 0));  /* STRB.W r4, [sp, #0] */
+      CALLOUT_CALL(snobol_jit_helper_emit_format);
+      t2_emit16(T2_ADD_SP_IMM7(2));  /* ADD sp, sp, #8 — reclaim slot */
+      CALLOUT_EPILOGUE;
       break;
     }
 
     case JIT_IR_EMIT_TABLE: {
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_VOID_CALLOUT(snobol_jit_helper_emit_table_ip);
+      /* emit_table_ip(VM, op_ip) — op_ip is the bc IP of the EMIT_TABLE byte,
+       * taken from the IR instruction's `bc_ip` field (per jit_ir.h docs).
+       * AAPCS32 passes uint64_t as a register pair: r1=low32, r2=high32. */
+      uint64_t etab_ip = (uint64_t)cur;
+      EMIT_VOID_CALLOUT2(snobol_jit_helper_emit_table_ip,
+                         (uint32_t)(etab_ip & 0xffffffffu),
+                         (uint32_t)(etab_ip >> 32));
       break;
     }
 
@@ -1440,9 +1622,10 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       uint16_t tg_tid = ins->u.tget.table_id;
       uint8_t tg_kreg = ins->u.tget.key_reg;
       uint8_t tg_dreg = ins->u.tget.dest_reg;
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_BOOL_CALLOUT(snobol_jit_helper_table_get, fail_patches,
-                        fail_patch_count, cur);
+      /* table_get(VM, table_id, key_reg, dest_reg) — args r1/r2/r3 */
+      EMIT_BOOL_CALLOUT3(snobol_jit_helper_table_get, tg_tid, tg_kreg, tg_dreg,
+                         fail_patches, fail_patch_count, cur);
+      /* Helper advances VM.pos on success: reload for subsequent JIT ops. */
       t2_emit32(T2_LDR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
 #else
       (void)ins;
@@ -1455,8 +1638,13 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       uint16_t ts_tid = ins->u.tset.table_id;
       uint8_t ts_kreg = ins->u.tset.key_reg;
       uint8_t ts_vreg = ins->u.tset.val_reg;
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_VOID_CALLOUT(snobol_jit_helper_table_set);
+      /* table_set(VM, table_id, key_reg, val_reg) — void, args r1/r2/r3 */
+      CALLOUT_PROLOGUE;
+      t2_emit_mov_imm32(1, (uint32_t)ts_tid);
+      t2_emit_mov_imm32(2, (uint32_t)ts_kreg);
+      t2_emit_mov_imm32(3, (uint32_t)ts_vreg);
+      CALLOUT_CALL(snobol_jit_helper_table_set);
+      CALLOUT_EPILOGUE;
       t2_emit32(T2_LDR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
 #else
       (void)ins;
@@ -1467,9 +1655,10 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
     case JIT_IR_BAL: {
       uint32_t bal_open = ins->u.bal.open_cp;
       uint32_t bal_close = ins->u.bal.close_cp;
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_BOOL_CALLOUT(snobol_jit_helper_bal, fail_patches, fail_patch_count,
-                        cur);
+      /* bal(VM, open_cp, close_cp) — args r1/r2 */
+      EMIT_BOOL_CALLOUT2(snobol_jit_helper_bal, bal_open, bal_close,
+                         fail_patches, fail_patch_count, cur);
+      /* BAL advances VM.pos on success: reload for subsequent JIT ops. */
       t2_emit32(T2_LDR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
       break;
     }
@@ -1477,18 +1666,18 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
     case JIT_IR_EVAL: {
       uint16_t ev_fn = ins->u.eval.fn_id;
       uint8_t ev_reg = ins->u.eval.reg;
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_BOOL_CALLOUT(snobol_jit_helper_eval, fail_patches, fail_patch_count,
-                        cur);
+      /* eval(VM, fn_id, reg) — args r1/r2 */
+      EMIT_BOOL_CALLOUT2(snobol_jit_helper_eval, ev_fn, ev_reg,
+                         fail_patches, fail_patch_count, cur);
       t2_emit32(T2_LDR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
       break;
     }
 
     case JIT_IR_DYNAMIC: {
 #ifdef SNOBOL_DYNAMIC_PATTERN
-      t2_emit32(T2_STR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
-      EMIT_BOOL_CALLOUT(snobol_jit_helper_dynamic, fail_patches,
-                        fail_patch_count, cur);
+      /* dynamic(VM) — single arg (r0 = VM), bool return */
+      EMIT_BOOL_CALLOUT0(snobol_jit_helper_dynamic, fail_patches,
+                         fail_patch_count, cur);
       t2_emit32(T2_LDR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
 #endif
       break;
@@ -1524,8 +1713,8 @@ static void t2_emit_bailout(jit_region_t *out, size_t bail_ip) {
   /* Store bail_ip to VM ip */
   t2_emit_mov_imm32(4, (uint32_t)bail_ip);
   t2_emit32(T2_STR_W_RT_RN_IMM12(4, 0, (uint32_t)offsetof(VM, ip)));
-  /* POP {pc} (restore lr and return) */
-  t2_emit16(T2_POP_PC);
+  /* POP.W {r4-r11,pc} (restore callee-saved registers and return) */
+  t2_emit32(T2_POP_R4R11_PC);
   t2_sync_region(out);
 }
 
@@ -1548,16 +1737,22 @@ static void *arm32_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
 
   bool use_cfg = (n_blocks >= 2 || (n_blocks == 1 && cfg.has_backward));
 
+  JIT_LOG("lower: %zu IR instrs, %d block(s), use_cfg=%d, has_bwd=%d",
+          ir->count, n_blocks, (int)use_cfg, (int)cfg.has_backward);
+
   /* Allocate code buffer */
   size_t code_size = use_cfg ? 32768u : 16384u;
   uint32_t *code = (uint32_t *)snobol_jit_alloc_code(code_size);
-  if (!code)
+  if (!code) {
+    JIT_LOG("alloc_code(%zu) failed", code_size);
     return nullptr;
+  }
 
   out->p = code;
   out->code_start = code;
   out->code_size = code_size;
   t2_wp = (uint8_t *)code;
+  JIT_LOG("code buffer at %p, size=%zu", (void *)code, code_size);
 
   FailPatch fail_patches[1024];
   size_t fail_patch_count = 0;
@@ -1567,8 +1762,8 @@ static void *arm32_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
     StubPatch stub_patches[256];
     int stub_patch_count = 0;
 
-    /* Prologue: PUSH {r4-r11,lr} to save callee-saved regs */
-    t2_emit16(T2_PUSH_R4R11_LR);
+    /* Prologue: PUSH.W {r4-r11,lr} to save callee-saved regs */
+    t2_emit32(T2_PUSH_R4R11_LR);
 
     /* Load subject pointer (vm->s) into r1 */
     t2_emit32(T2_LDR_W_RT_RN_IMM12(1, 0, (uint32_t)offsetof(VM, s)));
@@ -1601,15 +1796,18 @@ static void *arm32_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
           t2_emit_bailout(out, blk->term_ip);
           break;
         }
-        /* Push choice: save state */
-        t2_emit16(T2_PUSH_LR);
-        /* Call vm_push_choice(VM*, succ_b) */
+        /* Save JIT live registers (r0=VM, r1=subj, r2=pos, r3=len, lr)
+         * and VM.pos across the choice-stack push call-out. */
+        CALLOUT_PROLOGUE;
+        /* Set up arg: r1 = succ_b for vm_push_choice(VM*, succ_b). */
         t2_emit_mov_imm32(4, (uint32_t)blk->succ_b);
         t2_emit16(T2_MOV_RD_RS(1, 4));
-        t2_emit_callout_blx((uintptr_t)vm_push_choice);
-        t2_emit16(T2_POP_PC);
-        /* Reload r3 = vm->len after call-out */
-        t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));
+        /* Call vm_push_choice (void helper). */
+        CALLOUT_CALL(vm_push_choice);
+        /* Restore JIT live registers (r0/r1/r2/lr) and reload r3=len
+         * (CALLOUT_EPILOGUE already reloads r3 from VM.len). */
+        CALLOUT_EPILOGUE;
+        /* Stub branch to successor block A (patched later). */
         stub_patches[stub_patch_count++] = (StubPatch){t2_wp, blk->succ_a};
         t2_emit_b(t2_wp + 4); /* placeholder */
         break;
@@ -1701,6 +1899,8 @@ static void *arm32_lower(const jit_ir_region_t *ir, VM *vm, jit_region_t *out) {
   out->code_size = actual_size;
   t2_sync_region(out);
   snobol_jit_seal_code(code, actual_size);
+  JIT_LOG("sealed %zu bytes at %p, entry=%p", actual_size, (void *)code,
+          (void *)((uintptr_t)code | 1));
   return (void *)((uintptr_t)code | 1);
 }
 
