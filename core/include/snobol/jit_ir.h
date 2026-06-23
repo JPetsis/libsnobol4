@@ -8,13 +8,15 @@
  * passes] → [Backend lowerer] → machine code
  *
  * Design decisions:
- *  - Linear, flat instruction array (not SSA) — sufficient for the RISC-like
- * targets.
+ *  - Linear, flat instruction array with SSA properties (each virtual register
+ *    is defined exactly once).
+ *  - Phi nodes (JIT_IR_PHI) are used at CFG join points where a value may
+ *    arrive from multiple predecessors.
  *  - Virtual registers encoded as uint8_t indices (max 256 per region).
  *  - All operands are pre-decoded by the lifter; the backend must NOT re-parse
- * raw bytecode.
+ *    raw bytecode.
  *  - Memory: IR arrays are heap-allocated and freed immediately after the
- * backend lowers them.
+ *    backend lowers them.
  */
 #pragma once
 
@@ -79,6 +81,10 @@ typedef enum {
   /* internal: copy for copy-propagation analysis */
   JIT_IR_COPY,
 
+  /* SSA phi node (µ-op): dst_reg = phi(src_reg[0], src_reg[1], …).
+   * Inserted at CFG join points during SSA construction. */
+  JIT_IR_PHI,
+
   JIT_IR_OPCODE_COUNT
 } jit_ir_opcode_t;
 
@@ -91,8 +97,11 @@ typedef enum {
   0x02u /**< Instruction performs a C helper call-out */
 #define JIT_IR_FLAG_PURE                                                       \
   0x04u /**< Instruction is pure; removable if dst unused */
-#define JIT_IR_FLAG_DEAD 0x08u   /**< Marked dead by DCE pass */
-#define JIT_IR_FLAG_PSEUDO 0x10u /**< Pseudo-op: no code emitted */
+#define JIT_IR_FLAG_DEAD 0x08u           /**< Marked dead by DCE pass */
+#define JIT_IR_FLAG_PSEUDO 0x10u         /**< Pseudo-op: no code emitted */
+#define JIT_IR_FLAG_LOOP_INVARIANT 0x20u /**< Marked loop-invariant by LICM */
+#define JIT_IR_FLAG_CONSTANT_FOLDED                                            \
+  0x40u /**< Replaced by constant-folding pass */
 
 /* Virtual-register sentinel: instruction has no output */
 #define JIT_IR_VREG_NONE 0u
@@ -234,8 +243,55 @@ typedef struct {
 
     /* JIT_IR_COPY: copy propagation — dst_reg = src_reg[0] */
     /* (uses src_reg[0] in the outer struct) */
+
+    /* JIT_IR_PHI: dst_reg = phi(operand[0], operand[1], …) */
+    struct {
+      uint8_t operand_count; /**< Number of phi operands */
+      size_t operand_first;  /**< First index into region->phi_operands[] */
+    } phi;
   } u;
 } jit_ir_instr_t;
+
+/* -------------------------------------------------------------------------
+ * SSA / CFG data structures
+ * ------------------------------------------------------------------------- */
+
+/** One phi operand: incoming value vreg from predecessor block. */
+typedef struct {
+  uint8_t vreg;     /**< Incoming value virtual register */
+  uint16_t pred_id; /**< Predecessor basic-block index */
+} jit_ir_phi_operand_t;
+
+/** Forward declaration for use in basic block. */
+typedef struct _jit_ir_basic_block jit_ir_basic_block_t;
+
+/**
+ * Basic-block descriptor for the CFG.
+ *
+ * Each block spans a contiguous range of IR instructions [start_idx, end_idx]
+ * (inclusive).  Branches are always the last instruction of a block; labels
+ * are always the first instruction of a block.
+ */
+struct _jit_ir_basic_block {
+  size_t start_idx; /**< First instruction index (inclusive) */
+  size_t end_idx;   /**< Last instruction index (inclusive) */
+  uint16_t id;      /**< Block index (position in region->blocks[]) */
+
+  /* CFG adjacency — stored as dynamic arrays owned by the region.  The raw
+   * arrays live in the region's *_pool and each block records offset+count. */
+  uint16_t pred_count; /**< Number of predecessors */
+  uint16_t pred_first; /**< First index in region->pred_pool[] */
+  uint16_t succ_count; /**< Number of successors */
+  uint16_t succ_first; /**< First index in region->succ_pool[] */
+
+  /* Loop-nest depth for LICM (0 = outside any loop).  Filled by
+   * jit_ir_find_loops(). */
+  uint16_t loop_depth;
+
+  /* Dominator-tree fields (filled by jit_ir_compute_dominators). */
+  uint16_t idom;      /**< Immediate dominator block id (itself = root) */
+  uint16_t dom_depth; /**< Depth in dominator tree (root = 0) */
+};
 
 /* -------------------------------------------------------------------------
  * IR region — owns the instruction array for one compiled region
@@ -248,6 +304,30 @@ typedef struct {
       vreg_next; /**< Next virtual register to allocate (1-based; 0 = NONE) */
   uint16_t use_count[256]; /**< Reference count per virtual register */
   bool non_compilable;     /**< True if vreg limit exceeded (>256) */
+
+  /* -----------------------------------------------------------------------
+   * Basic-block CFG — built by jit_ir_build_cfg()
+   * ----------------------------------------------------------------------- */
+  jit_ir_basic_block_t *blocks; /**< Heap-allocated block array */
+  uint16_t block_count;         /**< Number of valid blocks */
+  uint16_t block_capacity;      /**< Allocated block slots */
+
+  /* Adjacency pool: flat uint16_t arrays where each block's preds/succs are
+   * stored as contiguous slices indexed by pred_first/succ_first + count. */
+  uint16_t *pred_pool;       /**< Heap-allocated predecessor pool */
+  size_t pred_pool_count;    /**< Valid entries in pred_pool */
+  size_t pred_pool_capacity; /**< Allocated pred_pool slots */
+
+  uint16_t *succ_pool;       /**< Heap-allocated successor pool */
+  size_t succ_pool_count;    /**< Valid entries in succ_pool */
+  size_t succ_pool_capacity; /**< Allocated succ_pool slots */
+
+  /* -----------------------------------------------------------------------
+   * Phi operands pool — flat array indexed by phi instructions
+   * ----------------------------------------------------------------------- */
+  jit_ir_phi_operand_t *phi_operands; /**< Heap-allocated phi operand array */
+  size_t phi_operands_count;          /**< Valid entries */
+  size_t phi_operands_capacity;       /**< Allocated slots */
 } jit_ir_region_t;
 
 /* -------------------------------------------------------------------------
@@ -277,9 +357,141 @@ uint8_t jit_ir_alloc_vreg(jit_ir_region_t *r);
 /** Increment the use-count of virtual register @p reg. */
 void jit_ir_inc_use(jit_ir_region_t *r, uint8_t reg);
 
+/**
+ * Append a phi instruction with the given operands.
+ *
+ * The phi opcode and @p dst_reg are recorded in a new instruction entry;
+ * the operand list (vreg + predecessor block id for each incoming edge) is
+ * copied into the region's phi_operands pool.
+ *
+ * @return The instruction index of the appended phi, or (size_t)-1 on failure.
+ */
+size_t jit_ir_append_phi(jit_ir_region_t *r, size_t bc_ip, uint8_t dst_reg,
+                         const jit_ir_phi_operand_t *operands,
+                         uint8_t operand_count);
+
+/* -------------------------------------------------------------------------
+ * CFG construction & analysis
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Reconstruct the control-flow graph from the linear instruction array.
+ *
+ * Scans for JIT_IR_LABEL (block starts), JIT_IR_JMP / JIT_IR_GOTO /
+ * JIT_IR_GOTO_F / JIT_IR_SPLIT (block ends) and builds the basic block
+ * descriptor array plus predecessor/successor adjacency pools.
+ *
+ * Must be called before any CFG-dependent pass.
+ */
+void jit_ir_build_cfg(jit_ir_region_t *r);
+
+/**
+ * Compute immediate dominators for all blocks using a simple data-flow
+ * algorithm (Lengauer-Tarjan is unnecessary at this scale).
+ *
+ * Requires jit_ir_build_cfg() to have been called first.
+ */
+void jit_ir_compute_dominators(jit_ir_region_t *r);
+
+/**
+ * Identify natural loops via back-edge detection and annotate each block's
+ * loop_depth field.  A block inside k nested loops gets loop_depth = k.
+ *
+ * Requires jit_ir_compute_dominators() to have been called first.
+ */
+void jit_ir_find_loops(jit_ir_region_t *r);
+
 /* -------------------------------------------------------------------------
  * Optimiser passes
  * ------------------------------------------------------------------------- */
+
+/**
+ * Dead-code elimination (DCE) pass.
+ *
+ * Marks instructions as JIT_IR_FLAG_DEAD when:
+ *  - The instruction's output virtual register (dst_reg) has use_count == 0.
+ *  - AND the instruction does NOT have JIT_IR_FLAG_SIDE_EFFECT.
+ *
+ * Dead instructions are compacted out of the array in place.
+ */
+void jit_ir_dce(jit_ir_region_t *r);
+
+/**
+ * Copy-propagation pass.
+ *
+ * For each JIT_IR_COPY instruction (dst_reg = src_reg[0]):
+ *  - Replace all downstream uses of dst_reg with src_reg[0].
+ *  - Remove the COPY instruction (it becomes dead and DCE cleans it).
+ */
+void jit_ir_copy_propagation(jit_ir_region_t *r);
+
+/**
+ * Global Value Numbering (GVN) pass.
+ *
+ * Assigns a value number to each instruction based on a hash of (opcode,
+ * src_reg[0], src_reg[1], union data).  When two instructions have the same
+ * value number, they compute the same result; the redundant one is replaced
+ * with JIT_IR_COPY targeting the earlier definition's dst_reg.
+ *
+ * Requires jit_ir_build_cfg() + jit_ir_compute_dominators() to have been
+ * called first (dominator information is used to determine which definition
+ * dominates a given use).
+ */
+void jit_ir_gvn(jit_ir_region_t *r);
+
+/**
+ * Constant-folding pass.
+ *
+ * For each instruction whose opcode is non-side-effecting and whose source
+ * operands all reference JIT_IR_LIT constants propagated through copies,
+ * evaluate the instruction at compile time and replace it with a JIT_IR_COPY
+ * to the result.  Currently handles:
+ *  - JIT_IR_LEN (constant n → data pointer + length pre-decoded)
+ *  - JIT_IR_RPOS / JIT_IR_RTAB / JIT_IR_POS / JIT_IR_TAB with constant
+ *    offset from a preceding LIT-producing instruction
+ *
+ * This pass is intentionally conservative — only fold when correctness is
+ * provable.
+ */
+void jit_ir_constant_fold(jit_ir_region_t *r);
+
+/**
+ * Loop-Invariant Code Motion (LICM) pass.
+ *
+ * Requires jit_ir_find_loops() to have been called first.  For each loop
+ * (blocks with loop_depth > 0), identifies instructions that:
+ *  1. Are pure (no side effects, no call-out)
+ *  2. Have all source operands defined outside the loop (or loop-invariant
+ *     transitively)
+ *
+ * Such instructions are hoisted to the loop preheader (the block immediately
+ * dominating the loop header).
+ */
+void jit_ir_licm(jit_ir_region_t *r);
+
+/* -------------------------------------------------------------------------
+ * Register-allocator interface
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Linear-scan register-allocation result.
+ *
+ * After calling jit_ir_alloc_registers(), each virtual register is assigned a
+ * physical register slot.  The mapping is stored in @p phys_reg[vreg].
+ */
+typedef struct {
+  int phys_reg[256];    /**< phys_reg[vreg] = physical register index, or -1 if
+                             the vreg is unused/spilled */
+  uint16_t spill_count; /**< Number of vregs spilled to stack */
+} jit_ir_regalloc_t;
+
+/**
+ * Run linear-scan register allocation on the region.
+ *
+ * @return A heap-allocated jit_ir_regalloc_t; caller frees with free().
+ *         Returns NULL on allocation failure.
+ */
+jit_ir_regalloc_t *jit_ir_alloc_registers(jit_ir_region_t *r);
 
 /**
  * Dead-code elimination (DCE) pass.

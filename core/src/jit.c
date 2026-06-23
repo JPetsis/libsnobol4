@@ -188,7 +188,8 @@ void snobol_jit_log_open(void) {
   if (!path || !path[0])
     return;
   jit_log_fp = fopen(path, "w");
-  fprintf(stderr, "DBG-OPEN: path=%s fp=%p errno=%d\n", path, (void*)jit_log_fp, jit_log_fp ? 0 : errno);
+  fprintf(stderr, "DBG-OPEN: path=%s fp=%p errno=%d\n", path,
+          (void *)jit_log_fp, jit_log_fp ? 0 : errno);
   if (jit_log_fp) {
 #if defined(_WIN32)
     /* MSVC's setvbuf does not reliably support _IOLBF with a NULL buffer
@@ -221,7 +222,8 @@ void snobol_jit_log(const char *fmt, ...) {
   va_end(ap);
   int n2 = fputc('\n', jit_log_fp);
   int n3 = fflush(jit_log_fp);
-  fprintf(stderr, "DBG-LOG: n1=%d n2=%d n3=%d ftell=%ld\n", n1, n2, n3, ftell(jit_log_fp));
+  fprintf(stderr, "DBG-LOG: n1=%d n2=%d n3=%d ftell=%ld\n", n1, n2, n3,
+          ftell(jit_log_fp));
 }
 
 /* ---------------------------------------------------------------------------
@@ -846,9 +848,17 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip,
       return nullptr;
     }
 
-    /* Optimiser passes */
+    /* Optimiser passes — classic */
     jit_ir_copy_propagation(ir);
     jit_ir_dce(ir);
+
+    /* SSA-based optimiser passes */
+    jit_ir_build_cfg(ir);
+    jit_ir_compute_dominators(ir);
+    jit_ir_find_loops(ir);
+    jit_ir_gvn(ir);
+    jit_ir_constant_fold(ir);
+    jit_ir_licm(ir);
 
     /* Debug dump */
     {

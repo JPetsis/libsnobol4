@@ -150,8 +150,8 @@ static inline uint32_t T2_B_W(uint32_t imm24) {
  *   HW1[10:9]  = 01     (op1=01, data-proc shifted register)
  *   HW1[7:4]   = op2    (operation selector)
  *   HW1[3:0]   = Rn     (first source operand)
- *   HW2[15:12] = imm3:0 (top 3 bits of shift amount, padded 0)  — except CMP/TST/MOV/shifts
- *   HW2[11:8]  = Rd     (destination; 0xF for CMP/TST)
+ *   HW2[15:12] = imm3:0 (top 3 bits of shift amount, padded 0)  — except
+ * CMP/TST/MOV/shifts HW2[11:8]  = Rd     (destination; 0xF for CMP/TST)
  *   HW2[7:4]   = imm2 + shift type (zero for plain register)
  *   HW2[3:0]   = Rm     (second source operand; 0xF for MOV.W)
  * For shift-by-register (LSL/LSR/ASR/ROR):
@@ -241,22 +241,18 @@ static inline uint32_t T2_LSR_W_RD_RN_RM(int rd, int rn, int rm) {
  *   HW2[7:0]   = imm16[7:0]      (imm8)
  */
 static inline uint32_t T2_MOVW(int rd, uint32_t imm16) {
-  uint16_t hi = 0xf240u
-              | (uint16_t)(((imm16 >> 11) & 1u) << 10)
-              | (uint16_t)((imm16 >> 12) & 0xfu);
-  uint16_t lo = (uint16_t)(((imm16 >> 8) & 0x7u) << 12)
-              | (uint16_t)((rd & 15u) << 8)
-              | (uint16_t)(imm16 & 0xffu);
+  uint16_t hi = 0xf240u | (uint16_t)(((imm16 >> 11) & 1u) << 10) |
+                (uint16_t)((imm16 >> 12) & 0xfu);
+  uint16_t lo = (uint16_t)(((imm16 >> 8) & 0x7u) << 12) |
+                (uint16_t)((rd & 15u) << 8) | (uint16_t)(imm16 & 0xffu);
   return ((uint32_t)hi << 16) | lo;
 }
 
 static inline uint32_t T2_MOVT(int rd, uint32_t imm16) {
-  uint16_t hi = 0xf2c0u
-              | (uint16_t)(((imm16 >> 11) & 1u) << 10)
-              | (uint16_t)((imm16 >> 12) & 0xfu);
-  uint16_t lo = (uint16_t)(((imm16 >> 8) & 0x7u) << 12)
-              | (uint16_t)((rd & 15u) << 8)
-              | (uint16_t)(imm16 & 0xffu);
+  uint16_t hi = 0xf2c0u | (uint16_t)(((imm16 >> 11) & 1u) << 10) |
+                (uint16_t)((imm16 >> 12) & 0xfu);
+  uint16_t lo = (uint16_t)(((imm16 >> 8) & 0x7u) << 12) |
+                (uint16_t)((rd & 15u) << 8) | (uint16_t)(imm16 & 0xffu);
   return ((uint32_t)hi << 16) | lo;
 }
 
@@ -360,11 +356,12 @@ static inline uint16_t T2_POP(uint16_t reglist) {
 /* PUSH.W {r0,r1,r2,lr} — 32-bit Thumb-2 STMDB SP!,{r0,r1,r2,lr}
  *   Saves live JIT registers around a call-out: VM(r0), subject(r1),
  *   pos(r2), and JIT-return-addr(lr).
- *   Mask = bits 0,1,2,14 = 0x4007. 4 regs = 16 bytes, 8-aligned from prologue. */
+ *   Mask = bits 0,1,2,14 = 0x4007. 4 regs = 16 bytes, 8-aligned from prologue.
+ */
 #define T2_PUSH_R0R1R2LR ((uint32_t)0xe92d4007u)
 /* POP.W {r0,r1,r2,lr} — 32-bit Thumb-2 LDMIA SP!,{r0,r1,r2,lr}
  *   Same mask, pops into r0,r1,r2,lr. */
-#define T2_POP_R0R1R2LR  ((uint32_t)0xe8bd4007u)
+#define T2_POP_R0R1R2LR ((uint32_t)0xe8bd4007u)
 
 /* --- Misc --- */
 #define T2_NOP 0xbf00u
@@ -400,7 +397,7 @@ static void t2_emit32(uint32_t ins) {
   uint16_t hi = (uint16_t)((ins >> 16) & 0xFFFFu);
   uint16_t lo = (uint16_t)(ins & 0xFFFFu);
   JIT_LOG("t2_emit32 0x%08x  (hi=0x%04x lo=0x%04x)", ins, hi, lo);
-  *(uint16_t *)t2_wp = hi;   /* first halfword at lower address */
+  *(uint16_t *)t2_wp = hi;       /* first halfword at lower address */
   *(uint16_t *)(t2_wp + 2) = lo; /* second halfword at higher address */
   t2_wp += 4;
 }
@@ -601,20 +598,20 @@ static void t2_emit_str_to_vm(int rt, size_t offset) {
  *   CALLOUT_PROLOGUE: saves pos to VM, then PUSH.W {r0,r1,r2,lr}
  *   case sets r1/r2/r3 (some helper-specific subset) using MOVW
  *   CALLOUT_CALL(fn): MOVW/MOVT r12 = fn_addr; BLX r12
- *                     — r0 = return value, lr = continuation, JIT live regs on stack
- *   CALLOUT_SAVE_RET (bool only): MOV r12, r0 — saves return value to scratch
- *   CALLOUT_EPILOGUE: POP.W {r0,r1,r2,lr}; LDR r3,VM.len
+ *                     — r0 = return value, lr = continuation, JIT live regs on
+ * stack CALLOUT_SAVE_RET (bool only): MOV r12, r0 — saves return value to
+ * scratch CALLOUT_EPILOGUE: POP.W {r0,r1,r2,lr}; LDR r3,VM.len
  * ========================================================================= */
 #define CALLOUT_PROLOGUE                                                       \
-  do {                                                                        \
+  do {                                                                         \
     t2_emit_str_to_vm(2, offsetof(VM, pos));                                   \
-    t2_emit32(T2_PUSH_R0R1R2LR);                                              \
+    t2_emit32(T2_PUSH_R0R1R2LR);                                               \
   } while (0)
 
 #define CALLOUT_CALL(fn_ptr_)                                                  \
-  do {                                                                        \
+  do {                                                                         \
     t2_emit_mov_imm32(12, (uint32_t)(uintptr_t)(fn_ptr_));                     \
-    t2_emit16(T2_BLX(12));                                                    \
+    t2_emit16(T2_BLX(12));                                                     \
   } while (0)
 
 /* MOV r12, r0 — save bool return value into the IP scratch reg.
@@ -623,9 +620,9 @@ static void t2_emit_str_to_vm(int rt, size_t offset) {
 #define CALLOUT_SAVE_RET t2_emit16((uint16_t)T2_MOV_RD_RS(12, 0))
 
 #define CALLOUT_EPILOGUE                                                       \
-  do {                                                                        \
-    t2_emit32(T2_POP_R0R1R2LR);                                               \
-    t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));       \
+  do {                                                                         \
+    t2_emit32(T2_POP_R0R1R2LR);                                                \
+    t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));        \
   } while (0)
 
 /* Convenience macros for the common arities.
@@ -634,27 +631,27 @@ static void t2_emit_str_to_vm(int rt, size_t offset) {
  * r1-r3 before the BLX.  Callee-saved helpers (r4-r11) are preserved
  * by the C helper and remain intact across the call-out. */
 #define EMIT_VOID_CALLOUT0(fn_ptr_)                                            \
-  do {                                                                        \
-    CALLOUT_PROLOGUE;                                                         \
-    CALLOUT_CALL(fn_ptr_);                                                    \
-    CALLOUT_EPILOGUE;                                                         \
+  do {                                                                         \
+    CALLOUT_PROLOGUE;                                                          \
+    CALLOUT_CALL(fn_ptr_);                                                     \
+    CALLOUT_EPILOGUE;                                                          \
   } while (0)
 
 #define EMIT_VOID_CALLOUT1(fn_ptr_, arg1)                                      \
-  do {                                                                        \
-    CALLOUT_PROLOGUE;                                                         \
-    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
-    CALLOUT_CALL(fn_ptr_);                                                    \
-    CALLOUT_EPILOGUE;                                                         \
+  do {                                                                         \
+    CALLOUT_PROLOGUE;                                                          \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                    \
+    CALLOUT_CALL(fn_ptr_);                                                     \
+    CALLOUT_EPILOGUE;                                                          \
   } while (0)
 
 #define EMIT_VOID_CALLOUT2(fn_ptr_, arg1, arg2)                                \
-  do {                                                                        \
-    CALLOUT_PROLOGUE;                                                         \
-    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
-    t2_emit_mov_imm32(2, (uint32_t)(arg2));                                   \
-    CALLOUT_CALL(fn_ptr_);                                                    \
-    CALLOUT_EPILOGUE;                                                         \
+  do {                                                                         \
+    CALLOUT_PROLOGUE;                                                          \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                    \
+    t2_emit_mov_imm32(2, (uint32_t)(arg2));                                    \
+    CALLOUT_CALL(fn_ptr_);                                                     \
+    CALLOUT_EPILOGUE;                                                          \
   } while (0)
 
 /* Bool call-outs.  For the bool-test-after-call we must:
@@ -670,63 +667,64 @@ static void t2_emit_str_to_vm(int rt, size_t offset) {
  *   5. LDR r3, VM.len — only on the success path; the fail stub
  *      does NOT exec this (vm_push_choice etc. doesn't need r3). */
 #define EMIT_BOOL_CALLOUT0(fn_ptr_, fp_, fpc_, cur_)                           \
-  do {                                                                        \
-    CALLOUT_PROLOGUE;                                                         \
-    CALLOUT_CALL(fn_ptr_);                                                    \
-    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));  /* MOV r3, r0 — save ret */      \
+  do {                                                                         \
+    CALLOUT_PROLOGUE;                                                          \
+    CALLOUT_CALL(fn_ptr_);                                                     \
+    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0)); /* MOV r3, r0 — save ret */       \
     t2_emit32(T2_POP_R0R1R2LR);                                                \
     t2_emit16(T2_CMP_RN_IMM8(3, 0));                                           \
-    (fp_)[(*(fpc_))++] =                                                      \
-        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};    \
+    (fp_)[(*(fpc_))++] =                                                       \
+        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};     \
     t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));        \
   } while (0)
 
 #define EMIT_BOOL_CALLOUT1(fn_ptr_, arg1, fp_, fpc_, cur_)                     \
-  do {                                                                        \
-    CALLOUT_PROLOGUE;                                                         \
-    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
-    CALLOUT_CALL(fn_ptr_);                                                    \
-    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));                                  \
+  do {                                                                         \
+    CALLOUT_PROLOGUE;                                                          \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                    \
+    CALLOUT_CALL(fn_ptr_);                                                     \
+    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));                                   \
     t2_emit32(T2_POP_R0R1R2LR);                                                \
     t2_emit16(T2_CMP_RN_IMM8(3, 0));                                           \
-    (fp_)[(*(fpc_))++] =                                                      \
-        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};    \
+    (fp_)[(*(fpc_))++] =                                                       \
+        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};     \
     t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));        \
   } while (0)
 
-#define EMIT_BOOL_CALLOUT2(fn_ptr_, arg1, arg2, fp_, fpc_, cur_)              \
-  do {                                                                        \
-    CALLOUT_PROLOGUE;                                                         \
-    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
-    t2_emit_mov_imm32(2, (uint32_t)(arg2));                                   \
-    CALLOUT_CALL(fn_ptr_);                                                    \
-    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));                                  \
+#define EMIT_BOOL_CALLOUT2(fn_ptr_, arg1, arg2, fp_, fpc_, cur_)               \
+  do {                                                                         \
+    CALLOUT_PROLOGUE;                                                          \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                    \
+    t2_emit_mov_imm32(2, (uint32_t)(arg2));                                    \
+    CALLOUT_CALL(fn_ptr_);                                                     \
+    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));                                   \
     t2_emit32(T2_POP_R0R1R2LR);                                                \
     t2_emit16(T2_CMP_RN_IMM8(3, 0));                                           \
-    (fp_)[(*(fpc_))++] =                                                      \
-        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};    \
+    (fp_)[(*(fpc_))++] =                                                       \
+        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};     \
     t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));        \
   } while (0)
 
 #define EMIT_BOOL_CALLOUT3(fn_ptr_, arg1, arg2, arg3, fp_, fpc_, cur_)         \
-  do {                                                                        \
-    CALLOUT_PROLOGUE;                                                         \
-    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                   \
-    t2_emit_mov_imm32(2, (uint32_t)(arg2));                                   \
-    t2_emit_mov_imm32(3, (uint32_t)(arg3));                                   \
-    CALLOUT_CALL(fn_ptr_);                                                    \
+  do {                                                                         \
+    CALLOUT_PROLOGUE;                                                          \
+    t2_emit_mov_imm32(1, (uint32_t)(arg1));                                    \
+    t2_emit_mov_imm32(2, (uint32_t)(arg2));                                    \
+    t2_emit_mov_imm32(3, (uint32_t)(arg3));                                    \
+    CALLOUT_CALL(fn_ptr_);                                                     \
     /* r3 had arg3 for the BLX; now reuse r3 to hold the bool return value. */ \
-    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0));  /* MOV r3, r0 */                \
+    t2_emit16((uint16_t)T2_MOV_RD_RS(3, 0)); /* MOV r3, r0 */                  \
     t2_emit32(T2_POP_R0R1R2LR);                                                \
     t2_emit16(T2_CMP_RN_IMM8(3, 0));                                           \
-    (fp_)[(*(fpc_))++] =                                                      \
-        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};    \
+    (fp_)[(*(fpc_))++] =                                                       \
+        (FailPatch){t2_emit_patch_b_cond(T2_COND_EQ), (cur_), T2_COND_EQ};     \
     t2_emit32(T2_LDR_W_RT_RN_IMM12(3, 0, (uint32_t)offsetof(VM, len)));        \
   } while (0)
 
 /* Legacy names kept for any code still using the old API. */
-#define EMIT_VOID_CALLOUT(fn_ptr_)  EMIT_VOID_CALLOUT0(fn_ptr_)
-#define EMIT_BOOL_CALLOUT(fn_ptr_, fp_, fpc_, cur_)  EMIT_BOOL_CALLOUT0(fn_ptr_, fp_, fpc_, cur_)
+#define EMIT_VOID_CALLOUT(fn_ptr_) EMIT_VOID_CALLOUT0(fn_ptr_)
+#define EMIT_BOOL_CALLOUT(fn_ptr_, fp_, fpc_, cur_)                            \
+  EMIT_BOOL_CALLOUT0(fn_ptr_, fp_, fpc_, cur_)
 
 /* =========================================================================
  * JIT call-out helper functions (identical to ARM64 backend)
@@ -1598,10 +1596,10 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       t2_emit_mov_imm32(2, (uint32_t)efmt_t);
       t2_emit_mov_imm32(3, (uint32_t)efmt_w);
       t2_emit_mov_imm32(4, (uint32_t)efmt_f);
-      t2_emit16(T2_SUB_SP_IMM7(2));  /* SUB sp, sp, #8 — keep 8-aligned */
-      t2_emit32(T2_STRB_W_RT_RN_IMM12(4, 13, 0));  /* STRB.W r4, [sp, #0] */
+      t2_emit16(T2_SUB_SP_IMM7(2)); /* SUB sp, sp, #8 — keep 8-aligned */
+      t2_emit32(T2_STRB_W_RT_RN_IMM12(4, 13, 0)); /* STRB.W r4, [sp, #0] */
       CALLOUT_CALL(snobol_jit_helper_emit_format);
-      t2_emit16(T2_ADD_SP_IMM7(2));  /* ADD sp, sp, #8 — reclaim slot */
+      t2_emit16(T2_ADD_SP_IMM7(2)); /* ADD sp, sp, #8 — reclaim slot */
       CALLOUT_EPILOGUE;
       break;
     }
@@ -1667,8 +1665,8 @@ static bool emit_block_ops_ir(jit_region_t *js, const jit_ir_region_t *ir,
       uint16_t ev_fn = ins->u.eval.fn_id;
       uint8_t ev_reg = ins->u.eval.reg;
       /* eval(VM, fn_id, reg) — args r1/r2 */
-      EMIT_BOOL_CALLOUT2(snobol_jit_helper_eval, ev_fn, ev_reg,
-                         fail_patches, fail_patch_count, cur);
+      EMIT_BOOL_CALLOUT2(snobol_jit_helper_eval, ev_fn, ev_reg, fail_patches,
+                         fail_patch_count, cur);
       t2_emit32(T2_LDR_W_RT_RN_IMM12(2, 0, (uint32_t)offsetof(VM, pos)));
       break;
     }
