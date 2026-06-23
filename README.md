@@ -407,13 +407,31 @@ Each release includes pre-built `snobol.so` binaries for 5 platform variants (na
 - macOS x86_64, macOS arm64
 - Windows x86_64
 
+## Thread Safety
+
+The libsnobol4 core library is **partially thread-safe**. Key guarantees:
+
+| Component | Thread-Safe | Notes |
+|-----------|-------------|-------|
+| Pattern compilation (`snobol_pattern_compile*`) | ✅ Fully reentrant | Per-call stack state, no shared globals |
+| Pattern matching (`vm_run`, `snobol_search_exec`) | ✅ Fully reentrant | VM state is stack-allocated per call |
+| Public API (`snobol_context_create`, `snobol_pattern_match`, `snobol_match`, etc.) | ✅ Reentrant | No hidden global mutation |
+| JIT LRU cache (`snobol_jit_acquire_context`, `release`) | ✅ Mutex-guarded | Single `pthread_mutex_t` protects the cache array, LRU clock, stats, and config |
+| JIT stats (`snobol_jit_get_stats`, `snobol_jit_reset_stats`) | ⚠️ Reader/writer | `get_stats` returns a direct pointer; external serialisation required if reading concurrently with mutations |
+| Character-class compilation (`compiler.c` global list) | ❌ Not thread-safe | Each `snobol_pattern_compile*` uses a file-scope static linked list; do not compile patterns concurrently from multiple threads |
+
+**Best practice:** Create and use patterns from a single thread, or serialise calls to `snobol_pattern_compile*` with an external mutex. Matching and searching can then be called from any thread without additional locking.
+
+The JIT cache mutex is initialised statically and requires no explicit setup. In PHP, the Zend Engine serialises extension calls per request, so the PHP binding is inherently single-threaded per request.
+
 ## CI / Contributing
 
 The default pull-request CI gate (`.github/workflows/ci-core.yml`) runs on `ubuntu-latest`, `macos-latest`, and `windows-latest`.
+**ASan + UBSan** is now included as a standard CI job (no longer optional).
 
-**Optional workflows** (triggered via GitHub Actions "Run workflow" or nightly schedule):
-- **Sanitizers** (`.github/workflows/sanitizers.yml`): ASan + UBSan build on Ubuntu — not part of the PR gate.
-- **Benchmarks** (`.github/workflows/benchmarks.yml`): full benchmark suite with artifact upload — not part of the PR gate.
+Additional workflows:
+- **Benchmarks** (`.github/workflows/benchmarks.yml`): full benchmark suite with artifact upload.
+- **Valgrind** (`.github/workflows/valgrind.yml`): memory leak detection on Linux.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
