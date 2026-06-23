@@ -19,3 +19,7 @@ uint32_t snobol_get_api_version(void) {
          ((uint32_t)SNOBOL_VERSION_MINOR << 8) |
          ((uint32_t)SNOBOL_VERSION_PATCH);
 }
+
+uint32_t snobol_get_abi_version(void) {
+  return SNOBOL_ABI_VERSION;
+}

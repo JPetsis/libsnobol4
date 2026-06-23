@@ -55,7 +55,7 @@ if (!function_exists('snobol_get_api_version')) {
      *
      * Encoding: (MAJOR << 16) | (MINOR << 8) | PATCH
      *
-     * For v0.7.0 this returns 0x00000700 (1792).
+     * For v0.11.0 this returns 0x00000B00 (2816).
      * Extract components:
      *   $major = ($v >> 16) & 0xFF;
      *   $minor = ($v >>  8) & 0xFF;
@@ -64,6 +64,23 @@ if (!function_exists('snobol_get_api_version')) {
      * @return int Packed version integer
      */
     function snobol_get_api_version(): int
+    {
+        // Native implementation in C extension
+        return 0;
+    }
+}
+
+if (!function_exists('snobol_get_abi_version')) {
+    /**
+     * Return the libsnobol4 ABI version as an integer.
+     *
+     * The ABI version is a monotonically-increasing integer that is bumped
+     * whenever the public ABI changes in a breaking way.  The initial value
+     * is 1.
+     *
+     * @return int ABI version
+     */
+    function snobol_get_abi_version(): int
     {
         // Native implementation in C extension
         return 0;

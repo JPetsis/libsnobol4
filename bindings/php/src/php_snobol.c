@@ -527,6 +527,16 @@ PHP_FUNCTION(snobol_get_api_version) {
     RETURN_LONG((zend_long)snobol_get_api_version());
 }
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_abi_version, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+PHP_FUNCTION(snobol_get_abi_version) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        return;
+    }
+    RETURN_LONG((zend_long)snobol_get_abi_version());
+}
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_choice_stats, 0, 0, IS_ARRAY, 0)
 ZEND_END_ARG_INFO()
 
@@ -582,6 +592,7 @@ static const zend_function_entry snobol_functions[] = {
     PHP_FE(snobol_text_real,         ai_text_str1_bool)
     PHP_FE(snobol_text_numeric,      ai_text_str1_bool)
     PHP_FE(snobol_get_api_version,   ai_snobol_get_api_version)
+    PHP_FE(snobol_get_abi_version,   ai_snobol_get_abi_version)
     PHP_FE(snobol_get_choice_stats,  ai_snobol_get_choice_stats)
     PHP_FE_END
 };

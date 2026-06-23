@@ -409,7 +409,7 @@ $minor = ($v >> 8) & 0xFF;   // 7
 $patch = $v & 0xFF;          // 0
 ```
 
-For v0.8.0 this returns `0x00000800` (2048 in decimal).
+For v0.11.0 this returns `0x00000B00` (2816 in decimal).
 
 ## Running Tests
 

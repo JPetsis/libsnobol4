@@ -8,22 +8,47 @@
  * pattern matching. This header provides the main API entry point,
  * re-exporting common types and functions for convenient single-include usage.
  *
- * @version 0.1.0
+ * @version 0.11.0
  */
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* Version macros */
+/* -----------------------------------------------------------------------
+ * Version macros
+ * ----------------------------------------------------------------------- */
 /** @brief Library major version number. */
 #define SNOBOL_VERSION_MAJOR 0
 /** @brief Library minor version number. */
-#define SNOBOL_VERSION_MINOR 8
+#define SNOBOL_VERSION_MINOR 11
 /** @brief Library patch version number. */
 #define SNOBOL_VERSION_PATCH 0
-/** @brief Library version as a string literal, e.g. @c "0.8.0". */
-#define SNOBOL_VERSION_STRING "0.8.0"
+/** @brief Library version as a string literal, e.g. @c "0.11.0". */
+#define SNOBOL_VERSION_STRING "0.11.0"
+
+/** @brief ABI version number (monotonically increasing).
+ *
+ *  Incremented on any breaking ABI change.  The initial value is 1.
+ *  Bindings can check this at load time to detect incompatibility. */
+#define SNOBOL_ABI_VERSION 1
+
+/* -----------------------------------------------------------------------
+ * Deprecation macros
+ *
+ * Use SNOBOL_DEPRECATED to mark public API functions that are deprecated
+ * but kept for one minor version cycle before removal.  Deprecated
+ * functions produce a compiler warning.
+ *
+ *   SNOBOL_DEPRECATED void snobol_old_func(void);
+ * ----------------------------------------------------------------------- */
+#if defined(__GNUC__) || defined(__clang__)
+#define SNOBOL_DEPRECATED __attribute__((deprecated))
+#elif defined(_MSC_VER)
+#define SNOBOL_DEPRECATED __declspec(deprecated)
+#else
+#define SNOBOL_DEPRECATED
+#endif
 
 /**
  * Get library version at runtime (three separate integers)
@@ -42,9 +67,22 @@ void snobol_version(int *major, int *minor, int *patch);
  * compile-time SNOBOL_VERSION_MAJOR to detect incompatible library upgrades.
  *
  * @return Encoded API version uint32_t.
- *         For v0.7.0 this returns 0x00000700u.
+ *         For v0.11.0 this returns 0x00000B00u.
  */
 uint32_t snobol_get_api_version(void);
+
+/**
+ * Get the ABI version of the library.
+ *
+ * Returns a monotonically-increasing integer that is bumped whenever a
+ * breaking change is made to the public ABI.  Bindings and dynamic
+ * loaders can call this at initialisation to verify compatibility.
+ *
+ * The initial v0.11.0 value is 1.
+ *
+ * @return ABI version integer.
+ */
+uint32_t snobol_get_abi_version(void);
 
 /* Include common headers */
 #include "snobol/array.h"

@@ -94,7 +94,7 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
 
 | Binding                       | Status   | Version  |
 |-------------------------------|----------|----------|
-| [PHP](bindings/php/README.md) | ✅ Stable | v0.7.0   |
+| [PHP](bindings/php/README.md) | ✅ Stable | v0.11.0  |
 
 ### JIT Backends
 
@@ -428,7 +428,7 @@ libsnobol4 uses independent versioning for core and each binding:
 | Component              | Current | Next        | Status            | Install                               |
 |------------------------|---------|-------------|-------------------|---------------------------------------|
 | **Core**               | v0.10.0 | **v0.11.0** | ✅ v0.10.0 shipped | `brew install JPetsis/tap/libsnobol4` |
-| **PHP Binding**        | v0.8.0  | v0.11.0     | 🔄 In development | `pie install libsnobol4/snobol`       |
+| **PHP Binding**        | v0.11.0  | v0.11.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
 | **Python (reference)** | —       | —           | Prototype only    | `examples/python-binding/`            |
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees. See [ROADMAP.md](ROADMAP.md) for the full plan toward v1.0.0.

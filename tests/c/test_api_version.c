@@ -1,8 +1,8 @@
 /**
- * test_api_version.c – Tests for snobol_get_api_version()
+ * test_api_version.c – Tests for snobol_get_api_version() and
+ * snobol_get_abi_version()
  *
- * Assert snobol_get_api_version() == (0 << 16) | (8 << 8) | 0
- * for the current v0.8.0 library.
+ * Assert version macros match encoded values at runtime.
  */
 
 #include <stdbool.h>
@@ -18,9 +18,9 @@ void test_api_version_suite(void) {
 
   uint32_t ver = snobol_get_api_version();
 
-  /* For v0.8.0: (0 << 16) | (8 << 8) | 0 == 0x00000800 */
-  test_assert(ver == 0x00000800u,
-              "snobol_get_api_version() == 0x00000800u (v0.8.0)");
+  /* For v0.11.0: (0 << 16) | (11 << 8) | 0 == 0x00000B00 */
+  test_assert(ver == 0x00000B00u,
+              "snobol_get_api_version() == 0x00000B00u (v0.11.0)");
 
   /* Major version extraction */
   uint32_t major = ver >> 16;
@@ -43,4 +43,10 @@ void test_api_version_suite(void) {
   test_assert((int)major == vi_major && (int)minor == vi_minor &&
                   (int)patch == vi_patch,
               "snobol_get_api_version() consistent with snobol_version()");
+
+  /* ABI version */
+  uint32_t abi = snobol_get_abi_version();
+  test_assert(abi == 1, "snobol_get_abi_version() == 1 (initial)");
+  test_assert(abi == SNOBOL_ABI_VERSION,
+              "snobol_get_abi_version() == SNOBOL_ABI_VERSION macro");
 }
