@@ -225,14 +225,29 @@ git commit -m "feat: add bounded repetition support
 - Test public API methods
 - Include regression tests for bugs
 
+## API Stability Policy
+
+Starting with **v0.11.0**, libsnobol4 makes the following stability guarantees:
+
+- **Public C API** — Functions declared in `core/include/snobol/snobol.h` with `snobol_` prefix follow [SemVer](https://semver.org/).
+  - A **major** bump means breaking changes to the public API or ABI.
+  - A **minor** bump adds functionality in a backward-compatible manner.
+  - A **patch** bump contains only bug fixes.
+- **ABI version** — `snobol_get_abi_version()` returns a monotonically-increasing integer. Load-time checks MUST compare this value at runtime (not at compile time) to detect incompatible dynamic libraries. A change in `SNOBOL_ABI_VERSION` always accompanies a major version bump.
+- **Deprecation** — Public functions marked `SNOBOL_DEPRECATED` in the header remain available for one minor-version cycle before removal. Compiler warnings guide migration.
+- **Internal headers** — Everything inside `core/include/snobol/` not in `snobol.h` or the public API section is subject to change without notice.
+- **PHP binding** — Follows the major/minor/patch scheme independently. The PHP extension version `PHP_SNOBOL_VERSION` tracks the binding, not the core.
+
+> ⚠️ Pre-v1.0.0: While the project is still below v1.0.0, minor bumps may include breaking changes to internal interfaces. The declared public API (`snobol.h`) is kept stable within a minor version, but the ABI version is the authoritative compatibility signal.
+
 ## Release Process
 
 ### Versioning
 
 libsnobol4 uses independent versioning for core and bindings:
 
-- **Core**: `v<major>.<minor>.<patch>` (e.g., `v0.1.0`)
-- **PHP Binding**: `v<major>.<minor>.<patch>` (e.g., `v0.1.0`)
+- **Core**: `v<major>.<minor>.<patch>` (e.g., `v0.11.0`)
+- **PHP Binding**: `v<major>.<minor>.<patch>` (e.g., `v0.11.0`)
 
 ### Creating a Release
 
@@ -240,8 +255,8 @@ libsnobol4 uses independent versioning for core and bindings:
 2. Update CHANGELOG.md
 3. Create git tags:
    ```bash
-   git tag core/v0.1.0
-   git tag php/v0.1.0
+   git tag core/v0.11.0
+   git tag php/v0.11.0
    git push origin --tags
    ```
 4. Create GitHub release with changelog

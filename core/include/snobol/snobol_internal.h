@@ -40,6 +40,23 @@
 #define snobol_calloc ecalloc
 #endif
 
+/**
+ * snobol_check_alloc(ptr) — NULL-check a heap allocation.
+ *
+ * In STANDALONE builds this returns false and the pointer is null.
+ * In PHP builds the allocator never returns NULL, so this is a no-op
+ * that always returns true.
+ *
+ * Usage:
+ *   char *buf = snobol_malloc(n);
+ *   if (!snobol_check_alloc(buf)) return ERROR_NOMEM;
+ */
+#ifdef STANDALONE_BUILD
+#define snobol_check_alloc(ptr) ((ptr) != NULL)
+#else
+#define snobol_check_alloc(ptr) ((void)(ptr), true)
+#endif
+
 /* Debug logging */
 /* #define SNOBOL_TRACE 1 */
 #ifdef SNOBOL_TRACE

@@ -268,3 +268,62 @@ jobs:
           push: false
           file: ci/Dockerfile.jit-qemu-riscv64
 
+  asan:
+    name: AddressSanitizer + UBSan (PR gate)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential clang
+
+      - name: Configure CMake with ASan
+        run: |
+          cmake -B build \
+            -DBUILD_TESTS=ON \
+            -DBUILD_PHP=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang \
+            -DSNOBOL_SANITIZE=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests under ASan
+        id: asan_run
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cd build
+          ctest --output-on-failure 2>&1 | tee ../asan-report.txt
+
+      - name: Upload ASan log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asan-report
+          path: asan-report.txt
+          retention-days: 30
+
+      - name: Summarise ASan results
+        if: always()
+        run: |
+          echo "## AddressSanitizer + UBSan Gate" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Sanitizers:** ASan (detect_leaks=1) + UBSan" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.asan_run.outcome }}" = "success" ]; then
+            echo "✅ **No sanitizer errors detected.**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Sanitizer errors detected — see uploaded `asan-report.txt`.**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "ERROR:|WARNING:|SUMMARY:|runtime error:" asan-report.txt | head -30 >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
