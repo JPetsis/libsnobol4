@@ -860,16 +860,37 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip,
     jit_ir_constant_fold(ir);
     jit_ir_licm(ir);
 
+    /* Register allocation (linear-scan). The backends use a fixed physical
+     * register convention for VM.s/pos/len today, so we compute the allocation
+     * as a hint/foundation for future calls.  The result is logged when
+     * SNOBOL_JIT_DUMP_IR=1 is set and freed immediately. */
+    jit_ir_regalloc_t *ra = jit_ir_alloc_registers(ir);
+
     /* Debug dump */
     {
       const char *dump_env = getenv("SNOBOL_JIT_DUMP_IR");
-      if (dump_env && dump_env[0] == '1' && dump_env[1] == '\0')
+      if (dump_env && dump_env[0] == '1' && dump_env[1] == '\0') {
         jit_ir_dump(ir, stderr);
+        if (ra) {
+          fprintf(stderr, "[snobol JIT-IR] regalloc  spills=%u\n",
+                  (unsigned)ra->spill_count);
+          for (uint16_t v = 1; v < ir->vreg_next; v++) {
+            if (ra->phys_reg[v] >= 0)
+              fprintf(stderr, "  v%u -> phys %d\n", (unsigned)v,
+                      ra->phys_reg[v]);
+          }
+        }
+      }
       if (jit_log_fp) {
         snobol_jit_log("--- IR for start_ip=%zu ---", start_ip);
         jit_ir_dump(ir, jit_log_fp);
+        if (ra)
+          snobol_jit_log("regalloc spills=%u", (unsigned)ra->spill_count);
       }
     }
+
+    if (ra)
+      snobol_free(ra);
 
     /* Lower IR → machine code via backend */
     jit_region_t code_region = {nullptr, nullptr, 0, 0};

@@ -9,6 +9,16 @@
  *
  * Backends are registered at compile time via CMake option SNOBOL_JIT_BACKEND
  * (default: "arm64").  Only one backend is active per binary.
+ *
+ * Register allocation:
+ *  The JIT pipeline calls jit_ir_alloc_regions() in jit.c after the optimiser
+ *  passes to compute a linear-scan physical-register assignment.  The result
+ *  is logged when SNOBOL_JIT_DUMP_IR=1 is set.  Current backends use a fixed
+ *  physical-register convention (e.g. x1=VM.s on ARM64) and do not consult the
+ *  allocator for code emission.  Backends that wish to use dynamic register
+ *  assignment may call jit_ir_alloc_registers() directly on the IR region
+ *  passed to lower(); the assignment table (phys_reg[vreg]) is available for
+ *  the lifetime of the call.
  */
 #pragma once
 

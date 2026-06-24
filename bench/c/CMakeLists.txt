@@ -27,6 +27,7 @@ add_executable(snobol4_bench
     bench_tokenization.c
     bench_substitution.c
     bench_complex_http.c
+    bench_delimiter.c
     bench_runner.c
 )
 

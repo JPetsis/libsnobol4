@@ -9,6 +9,7 @@ BENCH_SUITE(alternation);
 BENCH_SUITE(tokenization);
 BENCH_SUITE(substitution);
 BENCH_SUITE(complex_http);
+BENCH_SUITE(delimiter);
 
 static bench_results_t results[16];
 static int result_count = 0;
@@ -42,6 +43,7 @@ int main(void) {
     run_one(bench_tokenization_suite);
     run_one(bench_substitution_suite);
     run_one(bench_complex_http_suite);
+    run_one(bench_delimiter_suite);
 
     /* Header */
     printf("%-30s %16s %16s %10s %16s %10s\n",
