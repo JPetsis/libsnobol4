@@ -356,7 +356,7 @@ static void test_ir_phi_append(void) {
   jit_ir_region_t *r = jit_ir_region_new();
   test_assert(r != NULL, "region allocated");
   jit_ir_phi_operand_t ops[2] = {{.vreg = 1, .pred_id = 0},
-                                  {.vreg = 2, .pred_id = 1}};
+                                 {.vreg = 2, .pred_id = 1}};
   size_t idx = jit_ir_append_phi(r, 0, 3, ops, 2);
   test_assert(idx != (size_t)-1, "phi append returned valid index");
   test_assert(r->count == 1, "one instruction after phi append");

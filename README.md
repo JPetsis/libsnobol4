@@ -71,6 +71,9 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
 *   **POS / TAB** (v0.11.0): Start-relative positional primitives.
 *   **ABORT / FAIL / SUCCEED** (v0.11.0): Pattern-level control verbs.
 *   **ARRAY Data Type** (v0.11.0): Indexed sparse array with integer keys.
+*   **ABI Stability Policy** (v0.11.0): `snobol_get_abi_version()` returns the monotonically-increasing ABI version (initial value `1`). Load-time compatibility checks MUST compare this at runtime. Deprecated functions are marked with `SNOBOL_DEPRECATED` and remain available for one minor-version cycle.
+*   **Thread Safety** (v0.11.0): The JIT LRU cache and global statistics are guarded by a `pthread_mutex_t`; VMs and pattern compilation are fully reentrant. See "Thread Safety" section below for per-component guarantees.
+*   **SSA-based JIT IR Optimisations** (v0.11.0): The JIT pipeline now runs Global Value Numbering (GVN), constant folding, Loop-Invariant Code Motion (LICM), a dominance-tree computation, and a linear-scan register allocator on the architecture-neutral IR. Phi-node infrastructure is in place for future SSA-form lifting.
 *   **API Version Function** (v0.7.0): `snobol_get_api_version()` returns `(MAJOR << 16) | (MINOR << 8) | PATCH` for binding/library compatibility checks.
 *   **Built-in Comparison Predicates** (v0.2.0): Boolean predicates matching SNOBOL4 semantics:
    *   **IDENT / DIFFER** – String identity / difference
@@ -80,7 +83,7 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
   architecture-neutral IR pipeline — runs on **macOS ARM64/Intel, Linux AArch64/x86-64, Linux ARMv7-A, Linux RISC-V 64, and Windows x86-64**:
   * `SNOBOL_JIT_DUMP_IR=1` — dump the IR to `stderr` before lowering (debug)
   * `SNOBOL_JIT_BACKEND=arm64|arm32|riscv64|x86_64` (CMake option) — selects the code-generation backend (default: `arm64`)
-  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → ARM64/Thumb-2/RV64I/x86-64 machine code
+  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → CFG build → dominator tree → loop detection → GVN → constant fold → LICM → linear-scan regalloc → ARM64/Thumb-2/RV64I/x86-64 machine code
   * **ARM32 backend** targets ARMv7-A with Thumb-2 instruction set; uses W^X page permissions on Linux
   * **RISC-V 64 backend** targets RV64I base ISA; optional RV64C compressed support via `SNOBOL_JIT_RV64C=ON`
   * **x86-64 backend** supports both System V AMD64 ABI (Linux/macOS) and Microsoft x64 ABI (Windows) via
@@ -411,14 +414,14 @@ Each release includes pre-built `snobol.so` binaries for 5 platform variants (na
 
 The libsnobol4 core library is **partially thread-safe**. Key guarantees:
 
-| Component | Thread-Safe | Notes |
-|-----------|-------------|-------|
-| Pattern compilation (`snobol_pattern_compile*`) | ✅ Fully reentrant | Per-call stack state, no shared globals |
-| Pattern matching (`vm_run`, `snobol_search_exec`) | ✅ Fully reentrant | VM state is stack-allocated per call |
-| Public API (`snobol_context_create`, `snobol_pattern_match`, `snobol_match`, etc.) | ✅ Reentrant | No hidden global mutation |
-| JIT LRU cache (`snobol_jit_acquire_context`, `release`) | ✅ Mutex-guarded | Single `pthread_mutex_t` protects the cache array, LRU clock, stats, and config |
-| JIT stats (`snobol_jit_get_stats`, `snobol_jit_reset_stats`) | ⚠️ Reader/writer | `get_stats` returns a direct pointer; external serialisation required if reading concurrently with mutations |
-| Character-class compilation (`compiler.c` global list) | ❌ Not thread-safe | Each `snobol_pattern_compile*` uses a file-scope static linked list; do not compile patterns concurrently from multiple threads |
+| Component                                                                          | Thread-Safe       | Notes                                                                                                                           |
+|------------------------------------------------------------------------------------|-------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| Pattern compilation (`snobol_pattern_compile*`)                                    | ✅ Fully reentrant | Per-call stack state, no shared globals                                                                                         |
+| Pattern matching (`vm_run`, `snobol_search_exec`)                                  | ✅ Fully reentrant | VM state is stack-allocated per call                                                                                            |
+| Public API (`snobol_context_create`, `snobol_pattern_match`, `snobol_match`, etc.) | ✅ Reentrant       | No hidden global mutation                                                                                                       |
+| JIT LRU cache (`snobol_jit_acquire_context`, `release`)                            | ✅ Mutex-guarded   | Single `pthread_mutex_t` protects the cache array, LRU clock, stats, and config                                                 |
+| JIT stats (`snobol_jit_get_stats`, `snobol_jit_reset_stats`)                       | ⚠️ Reader/writer  | `get_stats` returns a direct pointer; external serialisation required if reading concurrently with mutations                    |
+| Character-class compilation (`compiler.c` global list)                             | ❌ Not thread-safe | Each `snobol_pattern_compile*` uses a file-scope static linked list; do not compile patterns concurrently from multiple threads |
 
 **Best practice:** Create and use patterns from a single thread, or serialise calls to `snobol_pattern_compile*` with an external mutex. Matching and searching can then be called from any thread without additional locking.
 
@@ -443,11 +446,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 libsnobol4 uses independent versioning for core and each binding:
 
-| Component              | Current | Next        | Status            | Install                               |
-|------------------------|---------|-------------|-------------------|---------------------------------------|
-| **Core**               | v0.10.0 | **v0.11.0** | ✅ v0.10.0 shipped | `brew install JPetsis/tap/libsnobol4` |
-| **PHP Binding**        | v0.11.0  | v0.11.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
-| **Python (reference)** | —       | —           | Prototype only    | `examples/python-binding/`            |
+| Component              | Current | Next        | Status               | Install                               |
+|------------------------|---------|-------------|----------------------|---------------------------------------|
+| **Core**               | v0.10.0 | **v0.11.0** | ✅ v0.10.0 shipped    | `brew install JPetsis/tap/libsnobol4` |
+| **PHP Binding**        | v0.11.0 | v0.11.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
+| **Python (reference)** | —       | —           | Prototype only       | `examples/python-binding/`            |
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees. See [ROADMAP.md](ROADMAP.md) for the full plan toward v1.0.0.
 

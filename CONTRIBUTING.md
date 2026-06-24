@@ -240,6 +240,29 @@ Starting with **v0.11.0**, libsnobol4 makes the following stability guarantees:
 
 > ⚠️ Pre-v1.0.0: While the project is still below v1.0.0, minor bumps may include breaking changes to internal interfaces. The declared public API (`snobol.h`) is kept stable within a minor version, but the ABI version is the authoritative compatibility signal.
 
+### Public API audit (v0.11.0)
+
+The v0.11.0 public surface (declared in `core/include/snobol/snobol.h`) was audited before the v0.11.0 tag:
+
+- Context/pattern/match lifecycle: `snobol_context_create`, `snobol_context_destroy`, `snobol_pattern_compile`, `snobol_pattern_compile_ex`, `snobol_pattern_free`, `snobol_match_free` — stable.
+- Pattern execution: `snobol_pattern_match`, `snobol_pattern_search`, `snobol_pattern_search_state_create`, `snobol_pattern_search_state_destroy`, `snobol_pattern_search_ex` — stable; no reshape before v1.0.
+- Match accessors: `snobol_match_success`, `snobol_match_get_output`, `snobol_match_get_variable`, `snobol_match_get_position`, `snobol_match_get_length` — stable.
+- One-shot API: `snobol_match`, `snobol_match_result_free` — stable.
+- Builder API: `snobol_pattern_build_*` family — stable shape; returns `NULL` on allocation failure (without setting an error channel — the caller should check the return value).
+- Flag constants: `SNOBOL_FLAG_CASE_INSENSITIVE`, `SNOBOL_FLAG_SEARCH_MODE` — values stable (any new flags must use previously free bits).
+- Version macros: `SNOBOL_VERSION_MAJOR/MINOR/PATCH/STRING`, `SNOBOL_ABI_VERSION` — stable shape.
+
+No functions were deprecated or marked for removal in v0.11.0. The next minor bump (v0.12) MAY deprecate a function (with `SNOBOL_DEPRECATED`) — that deprecation will appear in `CHANGELOG.md` for that release.
+
+## Error Handling Convention
+
+The C core libsnobol4 makes the following stability guarantees around allocation failures:
+
+- **Allocation failures are recoverable.** Every public API function in `core/src/api.c` checks the result of every `snobol_malloc` / `snobol_calloc` and returns a sentinel (`NULL` for handle-returning functions, `0` for size-returning functions, or a `snobol_match_result_t{.success=false, .error="..."}` for `snobol_match()`) on failure. There is no `abort()` / `exit()` path triggered by OOM conditions out-of-the-box.
+- **Cleanup is partial-state-safe.** When an allocation fails mid-construction, any earlier allocations in the same call are `snobol_free`d before the failure return. New code MUST follow this pattern — never return `NULL` from a partially-constructed object.
+- **`snobol_check_alloc` helper.** A defensive macro `snobol_check_alloc(ptr)` is declared in `snobol/snobol_internal.h`. In standalone builds it is `((ptr) != NULL)`; in PHP builds it is a no-op (the Zend allocator does not return `NULL`). Use it for symmetry across build types when wrapping allocation sites.
+- **Allocation failure tests.** The custom test runner (`tests/c/test_runner.c`) does not inject OOM. ASan/UBSan CI sanity-checks the standalone failure paths. Future work: add an OOM injection test framework (see roadmap, v0.12+).
+
 ## Release Process
 
 ### Versioning
@@ -500,17 +523,17 @@ point for your own binding.
 
 ### Minimal Binding Checklist
 
-| Check | Requirement |
-|-------|-------------|
-| ☐ | **Link to C core** via `pkg-config --cflags --libs libsnobol4` or CMake `find_package(libsnobol4)` |
-| ☐ | **Wrap `snobol_match()`** — the one-shot convenience API for simple use cases |
-| ☐ | **Wrap `snobol_pattern_compile()` / `snobol_pattern_match()`** — the multi-step API for repeated matching |
-| ☐ | **Wrap `snobol_match_result_free()`** — proper memory management for match results |
-| ☐ | **Provide idiomatic surface API** matching your language's conventions (e.g., a `Pattern` class, a `match()` function) |
-| ☐ | **Permissive open-source license** — MIT, Apache 2.0, BSD-2, or similar |
-| ☐ | **Publish to standard distribution channel** — PyPI, crates.io, npm, etc. |
-| ☐ | **Host in your own repository** — community bindings live outside the libsnobol4 monorepo |
-| ☐ | **Open a PR** to add your binding to the project README (listing at maintainers' discretion) |
+| Check | Requirement                                                                                                            |
+|-------|------------------------------------------------------------------------------------------------------------------------|
+| ☐     | **Link to C core** via `pkg-config --cflags --libs libsnobol4` or CMake `find_package(libsnobol4)`                     |
+| ☐     | **Wrap `snobol_match()`** — the one-shot convenience API for simple use cases                                          |
+| ☐     | **Wrap `snobol_pattern_compile()` / `snobol_pattern_match()`** — the multi-step API for repeated matching              |
+| ☐     | **Wrap `snobol_match_result_free()`** — proper memory management for match results                                     |
+| ☐     | **Provide idiomatic surface API** matching your language's conventions (e.g., a `Pattern` class, a `match()` function) |
+| ☐     | **Permissive open-source license** — MIT, Apache 2.0, BSD-2, or similar                                                |
+| ☐     | **Publish to standard distribution channel** — PyPI, crates.io, npm, etc.                                              |
+| ☐     | **Host in your own repository** — community bindings live outside the libsnobol4 monorepo                              |
+| ☐     | **Open a PR** to add your binding to the project README (listing at maintainers' discretion)                           |
 
 ### Maintainer Expectations
 
