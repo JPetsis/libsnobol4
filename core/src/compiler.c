@@ -160,11 +160,11 @@ static int add_or_get_charclass(const char *s, size_t len) {
         } else if (end_cp > 0x7F) {
           for (uint32_t c = cp; c <= end_cp; c++) {
             uint32_t up[2];
-            int len;
-            snobol_to_upper_cp(c, up, &len);
+            int ulen;
+            snobol_to_upper_cp(c, up, &ulen);
             if (up[0] != c) {
               add_range(ne, up[0], up[0]);
-              if (len > 1)
+              if (ulen > 1)
                 add_range(ne, up[1], up[1]);
             }
             uint32_t lo = snobol_to_lower_cp(c);
@@ -186,11 +186,11 @@ static int add_or_get_charclass(const char *s, size_t len) {
         add_range(ne, cp - 32, cp - 32);
       } else if (cp > 0x7F) {
         uint32_t up[2];
-        int len;
-        snobol_to_upper_cp(cp, up, &len);
+        int ulen;
+        snobol_to_upper_cp(cp, up, &ulen);
         if (up[0] != cp) {
           add_range(ne, up[0], up[0]);
-          if (len > 1)
+          if (ulen > 1)
             add_range(ne, up[1], up[1]);
         }
         uint32_t lo = snobol_to_lower_cp(cp);

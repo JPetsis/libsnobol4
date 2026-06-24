@@ -9,20 +9,17 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
+#include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef SNOBOL_JIT_PLATFORM_MACOS
-#include <pthread.h>
-#endif
-#include <assert.h>
-#include <pthread.h>
 
 /* Static assertion: PAGE_EXECUTE_READWRITE must never be used (DEP compliance).
  * This placeholder assertion passes universally — the real enforcement is in
@@ -37,6 +34,23 @@ _Static_assert(MEM_COMMIT && MEM_RESERVE && PAGE_READWRITE && PAGE_EXECUTE_READ,
 #include "snobol/string_fn.h"
 #include "snobol/table.h"
 #include "snobol/type_fn.h"
+
+/* ---------------------------------------------------------------------------
+ * Portable mutex abstraction (SRWLOCK on Windows, pthreads elsewhere)
+ * ---------------------------------------------------------------------------
+ */
+
+#ifdef SNOBOL_JIT_PLATFORM_WINDOWS
+typedef SRWLOCK jit_mutex_t;
+#define JIT_MUTEX_INIT SRWLOCK_INIT
+#define jit_mutex_lock(m) AcquireSRWLockExclusive(m)
+#define jit_mutex_unlock(m) ReleaseSRWLockExclusive(m)
+#else
+typedef pthread_mutex_t jit_mutex_t;
+#define JIT_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+#define jit_mutex_lock(m) pthread_mutex_lock(m)
+#define jit_mutex_unlock(m) pthread_mutex_unlock(m)
+#endif
 
 /* ---------------------------------------------------------------------------
  * JIT OPCODE COVERAGE MATRIX
@@ -97,7 +111,7 @@ static SnobolJitStats global_jit_stats = {0};
 /* Protects jit_cache, jit_cache_count, lru_clock, global_jit_stats,
  * global_jit_cfg, and the log file pointer from concurrent access by
  * multiple threads (separate VM instances). */
-static pthread_mutex_t jit_global_mutex = PTHREAD_MUTEX_INITIALIZER;
+static jit_mutex_t jit_global_mutex = JIT_MUTEX_INIT;
 
 /* ---------------------------------------------------------------------------
  * Configuration
@@ -118,10 +132,10 @@ static SnobolJitConfig global_jit_cfg = {
 };
 
 void snobol_jit_set_config(const SnobolJitConfig *cfg) {
-  pthread_mutex_lock(&jit_global_mutex);
+  jit_mutex_lock(&jit_global_mutex);
   if (cfg)
     global_jit_cfg = *cfg;
-  pthread_mutex_unlock(&jit_global_mutex);
+  jit_mutex_unlock(&jit_global_mutex);
 }
 
 /* ---------------------------------------------------------------------------
@@ -142,14 +156,14 @@ const char *jit_backend_name(void) {
 }
 
 const SnobolJitConfig *snobol_jit_get_config(void) {
-  pthread_mutex_lock(&jit_global_mutex);
+  jit_mutex_lock(&jit_global_mutex);
   const SnobolJitConfig *ret = &global_jit_cfg;
-  pthread_mutex_unlock(&jit_global_mutex);
+  jit_mutex_unlock(&jit_global_mutex);
   return ret;
 }
 
 void snobol_jit_load_config_from_env(void) {
-  pthread_mutex_lock(&jit_global_mutex);
+  jit_mutex_lock(&jit_global_mutex);
   const char *v;
   if ((v = getenv("SNOBOL_JIT_HOTNESS")))
     global_jit_cfg.hotness_threshold = (uint64_t)strtoull(v, nullptr, 10);
@@ -168,7 +182,7 @@ void snobol_jit_load_config_from_env(void) {
         (uint64_t)strtoull(v, nullptr, 10);
   if ((v = getenv("SNOBOL_JIT_SEARCH_OPS")))
     global_jit_cfg.search_min_useful_ops = (uint32_t)strtoul(v, nullptr, 10);
-  pthread_mutex_unlock(&jit_global_mutex);
+  jit_mutex_unlock(&jit_global_mutex);
 }
 
 /* ---------------------------------------------------------------------------
@@ -306,7 +320,7 @@ static int jit_cache_evict(void) {
 }
 
 SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len) {
-  pthread_mutex_lock(&jit_global_mutex);
+  jit_mutex_lock(&jit_global_mutex);
   uint64_t hash = djb2_hash(bc, bc_len);
 
   /* Search cache */
@@ -316,13 +330,13 @@ SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len) {
       c->ref_count++;
       c->lru_counter = ++lru_clock;
       global_jit_stats.cache_hits_total++;
-      pthread_mutex_unlock(&jit_global_mutex);
+      jit_mutex_unlock(&jit_global_mutex);
       return c;
     }
   }
 
   /* Create new context (outside the lock — alloc might be slow) */
-  pthread_mutex_unlock(&jit_global_mutex);
+  jit_mutex_unlock(&jit_global_mutex);
 
   SnobolJitContext *ctx = snobol_calloc(1, sizeof(SnobolJitContext));
   if (!ctx)
@@ -347,7 +361,7 @@ SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len) {
   }
 
   /* Insert into cache (re-lock) */
-  pthread_mutex_lock(&jit_global_mutex);
+  jit_mutex_lock(&jit_global_mutex);
   ctx->lru_counter = ++lru_clock;
   int cap = (int)global_jit_cfg.cache_max_entries;
   if (cap > JIT_CACHE_MAX_HARD)
@@ -361,7 +375,7 @@ SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len) {
       jit_cache[jit_cache_count++] = ctx;
     }
   }
-  pthread_mutex_unlock(&jit_global_mutex);
+  jit_mutex_unlock(&jit_global_mutex);
 
   return ctx;
 }
@@ -369,10 +383,10 @@ SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len) {
 void snobol_jit_release_context(SnobolJitContext *ctx) {
   if (!ctx)
     return;
-  pthread_mutex_lock(&jit_global_mutex);
+  jit_mutex_lock(&jit_global_mutex);
   if (ctx->ref_count > 0)
     ctx->ref_count--;
-  pthread_mutex_unlock(&jit_global_mutex);
+  jit_mutex_unlock(&jit_global_mutex);
 }
 
 /* ---------------------------------------------------------------------------
@@ -388,7 +402,7 @@ SnobolJitStats *snobol_jit_get_stats(void) {
 }
 
 void snobol_jit_reset_stats(void) {
-  pthread_mutex_lock(&jit_global_mutex);
+  jit_mutex_lock(&jit_global_mutex);
   memset(&global_jit_stats, 0, sizeof(global_jit_stats));
   /* Clear profiling counters so tests start with a cold JIT */
   for (int i = 0; i < jit_cache_count; i++) {
@@ -409,7 +423,7 @@ void snobol_jit_reset_stats(void) {
     c->search_ctx_entries = 0;
     c->search_ctx_exits = 0;
   }
-  pthread_mutex_unlock(&jit_global_mutex);
+  jit_mutex_unlock(&jit_global_mutex);
 }
 
 /* ---------------------------------------------------------------------------
@@ -420,9 +434,9 @@ void snobol_jit_reset_stats(void) {
 static bool jit_initialised = false;
 
 void snobol_jit_init(void) {
-  pthread_mutex_lock(&jit_global_mutex);
+  jit_mutex_lock(&jit_global_mutex);
   if (jit_initialised) {
-    pthread_mutex_unlock(&jit_global_mutex);
+    jit_mutex_unlock(&jit_global_mutex);
     return;
   }
   jit_initialised = true;
@@ -430,7 +444,7 @@ void snobol_jit_init(void) {
   memset(jit_cache, 0, sizeof(jit_cache));
   jit_cache_count = 0;
   lru_clock = 0;
-  pthread_mutex_unlock(&jit_global_mutex);
+  jit_mutex_unlock(&jit_global_mutex);
   snobol_jit_load_config_from_env();
   snobol_jit_log_open();
   snobol_jit_log("init backend=%s hotness=%llu min_useful=%u",
@@ -450,7 +464,7 @@ void snobol_jit_init(void) {
 }
 
 void snobol_jit_shutdown(void) {
-  pthread_mutex_lock(&jit_global_mutex);
+  jit_mutex_lock(&jit_global_mutex);
   jit_initialised = false;
   snobol_jit_log("shutdown cache_count=%d", jit_cache_count);
   for (int i = 0; i < jit_cache_count; i++) {
@@ -461,7 +475,7 @@ void snobol_jit_shutdown(void) {
     }
   }
   jit_cache_count = 0;
-  pthread_mutex_unlock(&jit_global_mutex);
+  jit_mutex_unlock(&jit_global_mutex);
   snobol_jit_log_close();
 }
 
@@ -908,9 +922,9 @@ jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip,
     /* Count CFG blocks compiled in this region */
     if (code_region.n_blocks == 0)
       code_region.n_blocks = 1;
-    pthread_mutex_lock(&jit_global_mutex);
+    jit_mutex_lock(&jit_global_mutex);
     global_jit_stats.jit_blocks_compiled_total += code_region.n_blocks;
-    pthread_mutex_unlock(&jit_global_mutex);
+    jit_mutex_unlock(&jit_global_mutex);
 
     if (out_code_size)
       *out_code_size = code_region.code_size;
