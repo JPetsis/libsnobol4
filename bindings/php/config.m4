@@ -49,6 +49,17 @@ if test "$PHP_SNOBOL" != "no"; then
   dnl Add include paths (absolute paths are fine for -I compiler flags)
   PHP_ADD_INCLUDE([$CORE_DIR/include])
   PHP_ADD_INCLUDE([$abs_srcdir/src])
+  dnl SLJIT headers — try several paths depending on build context
+  if test -d "$abs_srcdir/deps/sljit"; then
+    dnl Staged build (DDEV copies deps/ into build dir)
+    PHP_ADD_INCLUDE([$abs_srcdir/deps/sljit])
+  elif test -d "$abs_srcdir/../../deps/sljit"; then
+    dnl Native phpize from bindings/php/
+    PHP_ADD_INCLUDE([$abs_srcdir/../../deps/sljit])
+  elif test -d "$CORE_DIR/../deps/sljit"; then
+    dnl Fallback relative to core dir
+    PHP_ADD_INCLUDE([$CORE_DIR/../deps/sljit])
+  fi
 
   dnl Enable JIT on ARM64 (requires mmap/mprotect with PROT_EXEC)
   dnl The micro-JIT emits ARM64 machine code; it is not supported on other arches.
@@ -65,9 +76,10 @@ if test "$PHP_SNOBOL" != "no"; then
   SNOBOL_JIT_FLAG=""
   case "$SNOBOL_HOST_CPU" in
     aarch64|arm64)
-      AC_DEFINE(SNOBOL_JIT, 1, [Enable micro-JIT support (ARM64 only)])
-      AC_MSG_NOTICE([micro-JIT enabled ($SNOBOL_HOST_CPU)])
-      SNOBOL_JIT_FLAG="-DSNOBOL_JIT=1"
+      AC_DEFINE(SNOBOL_JIT, 1, [Enable SLJIT JIT backend (method JIT)])
+      AC_DEFINE(SNOBOL_JIT_BACKEND_SLJIT, 1, [Enable SLJIT JIT backend])
+      AC_MSG_NOTICE([SLJIT JIT enabled ($SNOBOL_HOST_CPU)])
+      SNOBOL_JIT_FLAG="-DSNOBOL_JIT=1 -DSNOBOL_JIT_BACKEND_SLJIT=1"
       ;;
     *)
       AC_MSG_NOTICE([micro-JIT disabled (ARM64 only; detected=$SNOBOL_HOST_CPU)])

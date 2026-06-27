@@ -28,9 +28,7 @@ typedef struct snobol_array snobol_array_t;
 #ifdef SNOBOL_JIT
 /* Forward declare JIT types to avoid circular dependency */
 typedef struct SnobolJitStats SnobolJitStats;
-typedef struct SnobolJitContext SnobolJitContext;
 typedef struct SnobolJitConfig SnobolJitConfig;
-/* jit_trace_fn will be defined in jit.h */
 #endif
 
 /** @brief Maximum number of capture registers per VM execution. */
@@ -427,14 +425,8 @@ typedef struct {
 
 #ifdef SNOBOL_JIT
   struct {
-    uint64_t *ip_counts;
-    uint64_t *op_counts;
-    void **traces;
     bool enabled;
-    bool search_mode; /**< true when VM is executing inside a search loop */
     struct SnobolJitStats *stats;
-    struct SnobolJitContext
-        *ctx; /**< owning context; used for per-pattern profitability state */
   } jit;
 #endif
 

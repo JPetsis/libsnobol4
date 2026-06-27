@@ -15,6 +15,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 CORE_SRC="$PROJECT_ROOT/core/src"
+DEPS_SLJIT="$PROJECT_ROOT/deps/sljit"
 AMALGAM_FILE="$PROJECT_ROOT/bindings/php/core_amalgam.c"
 
 # Core source files in dependency order
@@ -29,8 +30,8 @@ CORE_FILES=(
     "array.c"
     "dynamic_pattern.c"
     "jit_ir.c"
+    "jit_backend_sljit.c"
     "jit.c"
-    "jit_backend_arm64.c"
     "version.c"
     "unicode_fold.c"
     "string_fn.c"
@@ -38,6 +39,11 @@ CORE_FILES=(
     "pattern_build.c"
     "search.c"
     "api.c"
+)
+
+# Dependency source files (outside core/src/)
+DEPS_FILES=(
+    "sljitLir.c"
 )
 
 # Header for the amalgamation file
@@ -81,11 +87,21 @@ generate_amalgam() {
         fi
     done
     
+    # Add includes for each dependency file
+    for file in "${DEPS_FILES[@]}"; do
+        if [ -f "$DEPS_SLJIT/$file" ]; then
+            echo "#include \"../../deps/sljit/$file\"" >> "$AMALGAM_FILE"
+        else
+            echo "❌ Warning: Dependency source file not found: $file" >&2
+        fi
+    done
+    
     # Add final newline
     echo "" >> "$AMALGAM_FILE"
     
+    total=$(( ${#CORE_FILES[@]} + ${#DEPS_FILES[@]} ))
     echo "✅ Generated $AMALGAM_FILE"
-    echo "   Included ${#CORE_FILES[@]} core source files"
+    echo "   Included $total source files (${#CORE_FILES[@]} core + ${#DEPS_FILES[@]} deps)"
 }
 
 verify_amalgam() {
@@ -95,8 +111,11 @@ verify_amalgam() {
     local missing_files=()
     local extra_includes=()
     
+    # Merge all expected files
+    local expected_files=("${CORE_FILES[@]}" "${DEPS_FILES[@]}")
+    
     # Check that all required files are included
-    for file in "${CORE_FILES[@]}"; do
+    for file in "${expected_files[@]}"; do
         if ! grep -q "#include.*$file" "$AMALGAM_FILE"; then
             missing_files+=("$file")
             errors=$((errors + 1))
@@ -106,11 +125,16 @@ verify_amalgam() {
     # Check for any includes that shouldn't be there
     while IFS= read -r line; do
         # Extract filename from #include line
+        local included_file=""
         if [[ "$line" =~ ^#include.*\"../../core/src/([^\"]+)\" ]]; then
             included_file="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^#include.*\"../../deps/sljit/([^\"]+)\" ]]; then
+            included_file="${BASH_REMATCH[1]}"
+        fi
+        if [ -n "$included_file" ]; then
             # Check if this file is in our expected list
             local found=0
-            for expected in "${CORE_FILES[@]}"; do
+            for expected in "${expected_files[@]}"; do
                 if [ "$included_file" = "$expected" ]; then
                     found=1
                     break

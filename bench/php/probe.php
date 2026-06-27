@@ -350,34 +350,25 @@ foreach ($scenarios as $s) {
         'iters'          => $timing['iters'],
         'total_ns'       => $timing['total_ns'],
         'ns_per_iter'    => $timing['iters'] > 0 ? (int)($timing['total_ns'] / $timing['iters']) : 0,
-        'jit_entries'    => (int)($delta['jit_entries_total'] ?? 0),
-        'jit_bailouts'   => (int)($delta['jit_bailouts_total'] ?? 0),
-        'jit_choice_push'=> (int)($delta['jit_choice_push_total'] ?? 0),
-        'jit_choice_pop' => (int)($delta['jit_choice_pop_total'] ?? 0),
-        'jit_exec_ns'    => (int)($delta['jit_exec_time_ns_total'] ?? 0),
-        'jit_interp_ns'  => (int)($delta['jit_interp_time_ns_total'] ?? 0),
+        'jit_method_attempts'  => (int)($delta['jit_method_attempts_total'] ?? 0),
+        'jit_method_successes' => (int)($delta['jit_method_successes_total'] ?? 0),
+        'jit_method_fallbacks' => (int)($delta['jit_method_fallbacks_total'] ?? 0),
     ];
 }
 
-printf("%-16s %10s %10s %10s %10s %10s %10s %10s %12s %12s\n",
-    "scenario", "ns/iter", "iters", "jit_ent", "jit_bail",
-    "choice_p", "choice_pop", "", "exec_ns", "interp_ns");
-printf("%-16s %10s %10s %10s %10s %10s %10s %10s %12s %12s\n",
-    "-------", "-------", "-----", "-------", "-------",
-    "---------", "---------", "", "-------", "--------");
+printf("%-16s %10s %10s %12s %12s %12s\n",
+    "scenario", "ns/iter", "iters", "jit_attempts", "jit_ok", "jit_fb");
+printf("%-16s %10s %10s %12s %12s %12s\n",
+    "-------", "-------", "-----", "-----------", "------", "------");
 
 foreach ($results as $r) {
-    printf("%-16s %10d %10d %10d %10d %10d %10d %10s %12d %12d\n",
+    printf("%-16s %10d %10d %12d %12d %12d\n",
         $r['name'],
         $r['ns_per_iter'],
         $r['iters'],
-        $r['jit_entries'],
-        $r['jit_bailouts'],
-        $r['jit_choice_push'],
-        $r['jit_choice_pop'],
-        "",
-        $r['jit_exec_ns'],
-        $r['jit_interp_ns']);
+        $r['jit_method_attempts'],
+        $r['jit_method_successes'],
+        $r['jit_method_fallbacks']);
 }
 
 echo "\n";

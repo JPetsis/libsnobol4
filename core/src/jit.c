@@ -119,16 +119,9 @@ static jit_mutex_t jit_global_mutex = JIT_MUTEX_INIT;
  */
 
 static SnobolJitConfig global_jit_cfg = {
-    .hotness_threshold = 50,
-    .max_exit_rate_pct = 80,
-    .compile_budget_ns = 500000ULL, /* 0.5 ms */
-    .cache_max_entries = 128,
-    .min_useful_ops = 2,
-    .skip_backtrack_heavy = true,
-    /* Search-mode defaults: lower thresholds so hot search
-     * patterns become JIT-eligible without requiring anchored-match volumes. */
-    .search_hotness_threshold = 20,
-    .search_min_useful_ops = 1,
+    .method_enabled = true,
+    .max_compiled_patterns = 1024,
+    .scratch_size = 256,
 };
 
 void snobol_jit_set_config(const SnobolJitConfig *cfg) {
@@ -165,23 +158,13 @@ const SnobolJitConfig *snobol_jit_get_config(void) {
 void snobol_jit_load_config_from_env(void) {
   jit_mutex_lock(&jit_global_mutex);
   const char *v;
-  if ((v = getenv("SNOBOL_JIT_HOTNESS")))
-    global_jit_cfg.hotness_threshold = (uint64_t)strtoull(v, nullptr, 10);
-  if ((v = getenv("SNOBOL_JIT_MAX_EXIT_PCT")))
-    global_jit_cfg.max_exit_rate_pct = (uint32_t)strtoul(v, nullptr, 10);
-  if ((v = getenv("SNOBOL_JIT_BUDGET_NS")))
-    global_jit_cfg.compile_budget_ns = (uint64_t)strtoull(v, nullptr, 10);
-  if ((v = getenv("SNOBOL_JIT_CACHE_MAX")))
-    global_jit_cfg.cache_max_entries = (uint32_t)strtoul(v, nullptr, 10);
-  if ((v = getenv("SNOBOL_JIT_MIN_OPS")))
-    global_jit_cfg.min_useful_ops = (uint32_t)strtoul(v, nullptr, 10);
-  if ((v = getenv("SNOBOL_JIT_SKIP_BT")))
-    global_jit_cfg.skip_backtrack_heavy = (strtol(v, nullptr, 10) != 0);
-  if ((v = getenv("SNOBOL_JIT_SEARCH_HOT")))
-    global_jit_cfg.search_hotness_threshold =
-        (uint64_t)strtoull(v, nullptr, 10);
-  if ((v = getenv("SNOBOL_JIT_SEARCH_OPS")))
-    global_jit_cfg.search_min_useful_ops = (uint32_t)strtoul(v, nullptr, 10);
+  if ((v = getenv("SNOBOL_JIT_METHOD_ENABLED")))
+    global_jit_cfg.method_enabled = (strtol(v, nullptr, 10) != 0);
+  if ((v = getenv("SNOBOL_JIT_MAX_PATTERNS")))
+    global_jit_cfg.max_compiled_patterns =
+        (uint32_t)strtoul(v, nullptr, 10);
+  if ((v = getenv("SNOBOL_JIT_SCRATCH_SIZE")))
+    global_jit_cfg.scratch_size = (uint32_t)strtoul(v, nullptr, 10);
   jit_mutex_unlock(&jit_global_mutex);
 }
 
@@ -241,27 +224,24 @@ void snobol_jit_log(const char *fmt, ...) {
 }
 
 /* ---------------------------------------------------------------------------
- * LRU compiled-artifact cache
+ * Method JIT cache (whole-pattern compilation)
  *
- * Ownership rules:
- *  - The cache array owns each SnobolJitContext*.
- *  - Patterns increment ref_count via snobol_jit_acquire_context().
- *  - Eviction is only allowed when ref_count == 0.
- *  - Compiled code (traces[i]) is owned by the context and freed with
- *    snobol_jit_free_code(traces[i], trace_sizes[i]) when the context
- *    is destroyed.  Eviction never frees code that is still referenced.
- *
- * Thread safety:
- *  All cache operations are guarded by jit_global_mutex.  Multiple
- *  threads may call snobol_jit_acquire_context() / release concurrently.
+ * Flat array keyed by djb2(bytecode hash). FIFO eviction.
+ * Thread safety: all operations guarded by jit_global_mutex.
  * ---------------------------------------------------------------------------
  */
+#define METHOD_CACHE_SIZE 256
 
-#define JIT_CACHE_MAX_HARD 512 /* absolute upper bound regardless of config */
+typedef struct {
+  uint64_t hash;     /**< djb2(bytecode) */
+  size_t bc_len;     /**< Full bytecode length (for collision detection) */
+  jit_trace_fn fn;   /**< Compiled function or NULL */
+  size_t code_size;  /**< Native code size (for free) */
+  bool occupied;     /**< Slot in use */
+} method_cache_entry_t;
 
-static SnobolJitContext *jit_cache[JIT_CACHE_MAX_HARD];
-static int jit_cache_count = 0;
-static uint64_t lru_clock = 0; /* monotonically increasing access counter */
+static method_cache_entry_t method_cache[METHOD_CACHE_SIZE];
+static int method_cache_count = 0;
 
 static uint64_t djb2_hash(const uint8_t *data, size_t len) {
   uint64_t h = 5381;
@@ -270,159 +250,18 @@ static uint64_t djb2_hash(const uint8_t *data, size_t len) {
   return h;
 }
 
-/* Destroy a context (frees compiled code + allocations).
- * Must only be called when ref_count == 0 and the context is removed from
- * cache. */
-static void jit_context_destroy(SnobolJitContext *ctx) {
-  if (!ctx)
-    return;
-  if (ctx->traces && ctx->trace_sizes) {
-    for (size_t i = 0; i < ctx->bc_len; i++) {
-      if (ctx->traces[i] && ctx->trace_sizes[i]) {
-        snobol_jit_free_code(ctx->traces[i], ctx->trace_sizes[i]);
-        ctx->traces[i] = nullptr;
-      }
-    }
-  }
-  if (ctx->ip_counts)
-    snobol_free(ctx->ip_counts);
-  if (ctx->traces)
-    snobol_free(ctx->traces);
-  if (ctx->trace_sizes)
-    snobol_free(ctx->trace_sizes);
-  snobol_free(ctx);
-}
-
-/* Evict the least-recently-used entry with ref_count == 0.
- * Returns the evicted slot index, or -1 if no evictable entry exists. */
-static int jit_cache_evict(void) {
-  int victim = -1;
-  uint64_t min_lru = UINT64_MAX;
-  int max = (int)global_jit_cfg.cache_max_entries;
-  if (max > JIT_CACHE_MAX_HARD)
-    max = JIT_CACHE_MAX_HARD;
-
-  for (int i = 0; i < jit_cache_count; i++) {
-    SnobolJitContext *c = jit_cache[i];
-    if (c && c->ref_count == 0 && c->lru_counter < min_lru) {
-      min_lru = c->lru_counter;
-      victim = i;
-    }
-  }
-  if (victim < 0)
-    return -1;
-
-  jit_context_destroy(jit_cache[victim]);
-  /* Compact array */
-  jit_cache[victim] = jit_cache[--jit_cache_count];
-  jit_cache[jit_cache_count] = nullptr;
-  return victim;
-}
-
-SnobolJitContext *snobol_jit_acquire_context(const uint8_t *bc, size_t bc_len) {
-  jit_mutex_lock(&jit_global_mutex);
-  uint64_t hash = djb2_hash(bc, bc_len);
-
-  /* Search cache */
-  for (int i = 0; i < jit_cache_count; i++) {
-    SnobolJitContext *c = jit_cache[i];
-    if (c && c->hash == hash && c->bc_len == bc_len) {
-      c->ref_count++;
-      c->lru_counter = ++lru_clock;
-      global_jit_stats.cache_hits_total++;
-      jit_mutex_unlock(&jit_global_mutex);
-      return c;
-    }
-  }
-
-  /* Create new context (outside the lock — alloc might be slow) */
-  jit_mutex_unlock(&jit_global_mutex);
-
-  SnobolJitContext *ctx = snobol_calloc(1, sizeof(SnobolJitContext));
-  if (!ctx)
-    return nullptr;
-  ctx->bc_len = bc_len;
-  ctx->hash = hash;
-  ctx->ref_count = 1;
-  ctx->lru_counter = 0; /* set below when inserted under lock */
-  ctx->ip_counts = snobol_calloc(bc_len, sizeof(uint64_t));
-  ctx->traces = snobol_calloc(bc_len, sizeof(void *));
-  ctx->trace_sizes = snobol_calloc(bc_len, sizeof(size_t));
-
-  if (!ctx->ip_counts || !ctx->traces || !ctx->trace_sizes) {
-    if (ctx->ip_counts)
-      snobol_free(ctx->ip_counts);
-    if (ctx->traces)
-      snobol_free(ctx->traces);
-    if (ctx->trace_sizes)
-      snobol_free(ctx->trace_sizes);
-    snobol_free(ctx);
-    return nullptr;
-  }
-
-  /* Insert into cache (re-lock) */
-  jit_mutex_lock(&jit_global_mutex);
-  ctx->lru_counter = ++lru_clock;
-  int cap = (int)global_jit_cfg.cache_max_entries;
-  if (cap > JIT_CACHE_MAX_HARD)
-    cap = JIT_CACHE_MAX_HARD;
-
-  if (jit_cache_count < cap) {
-    jit_cache[jit_cache_count++] = ctx;
-  } else {
-    int slot = jit_cache_evict();
-    if (slot >= 0) {
-      jit_cache[jit_cache_count++] = ctx;
-    }
-  }
-  jit_mutex_unlock(&jit_global_mutex);
-
-  return ctx;
-}
-
-void snobol_jit_release_context(SnobolJitContext *ctx) {
-  if (!ctx)
-    return;
-  jit_mutex_lock(&jit_global_mutex);
-  if (ctx->ref_count > 0)
-    ctx->ref_count--;
-  jit_mutex_unlock(&jit_global_mutex);
-}
-
 /* ---------------------------------------------------------------------------
  * Stats API
  * ---------------------------------------------------------------------------
  */
 
 SnobolJitStats *snobol_jit_get_stats(void) {
-  /* NOTE: returns a pointer to a global struct; callers should serialise
-   * external access if they read/modify stats concurrently with other
-   * API calls. */
   return &global_jit_stats;
 }
 
 void snobol_jit_reset_stats(void) {
   jit_mutex_lock(&jit_global_mutex);
   memset(&global_jit_stats, 0, sizeof(global_jit_stats));
-  /* Clear profiling counters so tests start with a cold JIT */
-  for (int i = 0; i < jit_cache_count; i++) {
-    SnobolJitContext *c = jit_cache[i];
-    if (!c)
-      continue;
-    if (c->ip_counts)
-      memset(c->ip_counts, 0, c->bc_len * sizeof(uint64_t));
-    if (c->traces)
-      memset(c->traces, 0, c->bc_len * sizeof(void *));
-    if (c->trace_sizes)
-      memset(c->trace_sizes, 0, c->bc_len * sizeof(size_t));
-    c->stop_compiling = false;
-    c->ctx_entries = 0;
-    c->ctx_exits = 0;
-    c->compile_time_ns = 0;
-    c->search_stop_compiling = false;
-    c->search_ctx_entries = 0;
-    c->search_ctx_exits = 0;
-  }
   jit_mutex_unlock(&jit_global_mutex);
 }
 
@@ -441,40 +280,30 @@ void snobol_jit_init(void) {
   }
   jit_initialised = true;
   memset(&global_jit_stats, 0, sizeof(global_jit_stats));
-  memset(jit_cache, 0, sizeof(jit_cache));
-  jit_cache_count = 0;
-  lru_clock = 0;
+  memset(method_cache, 0, sizeof(method_cache));
+  method_cache_count = 0;
   jit_mutex_unlock(&jit_global_mutex);
   snobol_jit_load_config_from_env();
   snobol_jit_log_open();
-  snobol_jit_log("init backend=%s hotness=%llu min_useful=%u",
-                 jit_backend_name(),
-                 (unsigned long long)global_jit_cfg.hotness_threshold,
-                 (unsigned)global_jit_cfg.min_useful_ops);
-  /* Register the compile-time selected backend */
-#if defined(__aarch64__) || defined(__arm64__)
-  snobol_jit_arm64_register();
-#elif defined(__arm__) || defined(__thumb__) || defined(__ARM_ARCH_7A__)
-  snobol_jit_arm32_register();
-#elif defined(__riscv) && __riscv_xlen == 64
-  snobol_jit_riscv64_register();
-#elif defined(__x86_64__) || defined(_M_X64)
-  snobol_jit_x86_64_register();
-#endif
+  snobol_jit_log("init backend=%s method_enabled=%d",
+                  jit_backend_name(),
+                  (int)global_jit_cfg.method_enabled);
+  snobol_jit_sljit_register();
 }
 
 void snobol_jit_shutdown(void) {
   jit_mutex_lock(&jit_global_mutex);
   jit_initialised = false;
-  snobol_jit_log("shutdown cache_count=%d", jit_cache_count);
-  for (int i = 0; i < jit_cache_count; i++) {
-    if (jit_cache[i]) {
-      jit_cache[i]->ref_count = 0;
-      jit_context_destroy(jit_cache[i]);
-      jit_cache[i] = nullptr;
+  snobol_jit_log("shutdown method_cache_count=%d", method_cache_count);
+  for (int i = 0; i < method_cache_count; i++) {
+    if (method_cache[i].occupied && method_cache[i].fn) {
+      snobol_jit_free_code((void *)method_cache[i].fn,
+                           method_cache[i].code_size);
+      method_cache[i].occupied = false;
+      method_cache[i].fn = nullptr;
     }
   }
-  jit_cache_count = 0;
+  method_cache_count = 0;
   jit_mutex_unlock(&jit_global_mutex);
   snobol_jit_log_close();
 }
@@ -563,375 +392,189 @@ void snobol_jit_free_code(void *code, size_t size) {
 #endif
 }
 
+/* Tracing JIT (per-IP hot-trace compilation) has been retired.
+ * SLJIT is now the only JIT backend, and method JIT (whole-pattern
+ * compilation) is the only JIT mode. */
+
 /* ---------------------------------------------------------------------------
- * Profitability gate
+ * Method JIT — whole-pattern compilation cache
  *
- * Scans bytecode from ip to estimate how many useful (non-trivial) ops
- * exist before the first SPLIT, REPEAT_INIT, REPEAT_STEP, ACCEPT, or FAIL.
+ * The method JIT compiles a trace starting at bytecode offset 0 (the whole
+ * pattern entry point) and caches the result keyed by bytecode hash.
+ * The compiled function has the same `jit_trace_fn` signature as a
+ * tracing-JIT trace: `void fn(VM *vm)`.
  *
- * Returns false (skip JIT) if:
- *   1. The region has fewer than cfg->min_useful_ops useful ops.
- *   2. cfg->skip_backtrack_heavy is true and a SPLIT/REPEAT appears within
- *      the first few ops (pattern dominated by backtracking with short prefix).
+ * The cache is a flat array with hash-keyed lookup, independent from the
+ * per-IP tracing-JIT LRU cache (which stores SnobolJitContext entries).
  * ---------------------------------------------------------------------------
  */
 
-bool snobol_jit_should_compile(const VM *vm, size_t ip,
-                               const SnobolJitConfig *cfg, bool search_mode) {
-  if (!cfg)
-    return true;
-
-  /* Choose thresholds based on execution mode:
-   * Search-mode uses lower thresholds so one-op hot search patterns can
-   * become JIT-eligible without requiring anchored-match traffic volumes. */
-  uint32_t min_ops =
-      search_mode ? cfg->search_min_useful_ops : cfg->min_useful_ops;
-
-  size_t scan = ip;
-  uint32_t useful = 0;
-  bool has_backtrack = false;
-
-  for (int i = 0; i < 64 && scan < vm->bc_len; i++) {
-    uint8_t op = vm->bc[scan++];
-    switch (op) {
-    case OP_SPLIT:
-    case OP_REPEAT_INIT:
-    case OP_REPEAT_STEP:
-      has_backtrack = true;
-      /* In search mode, allow constrained forward SPLIT to be
-       * counted as a useful op: teleport the scan to the taken
-       * branch so the profitability check evaluates what will
-       * actually run in compiled code. */
-      if (op == OP_SPLIT && search_mode && scan + 8 <= vm->bc_len) {
-        size_t split_start = scan - 1; /* position of OP_SPLIT byte */
-        uint32_t pa = ((uint32_t)vm->bc[scan] << 24) |
-                      ((uint32_t)vm->bc[scan + 1] << 16) |
-                      ((uint32_t)vm->bc[scan + 2] << 8) |
-                      (uint32_t)vm->bc[scan + 3];
-        uint32_t pb = ((uint32_t)vm->bc[scan + 4] << 24) |
-                      ((uint32_t)vm->bc[scan + 5] << 16) |
-                      ((uint32_t)vm->bc[scan + 6] << 8) |
-                      (uint32_t)vm->bc[scan + 7];
-        if ((size_t)pa > split_start && (size_t)pb > split_start &&
-            (size_t)pa < vm->bc_len && (size_t)pb < vm->bc_len) {
-          scan = (size_t)pa; /* teleport: evaluate taken branch */
-          useful++;          /* SPLIT counts as one useful op   */
-          break;             /* continue for-loop from pa       */
-        }
-      }
-      goto done;
-    case OP_NOP:
-      break; /* no operands, no useful work */
-    case OP_ACCEPT:
-    case OP_FAIL:
-      goto done;
-    case OP_JMP:
-      /* Follow forward JMP: skip 4 bytes of target */
-      if (scan + 4 <= vm->bc_len) {
-        uint32_t tgt = ((uint32_t)vm->bc[scan] << 24) |
-                       ((uint32_t)vm->bc[scan + 1] << 16) |
-                       ((uint32_t)vm->bc[scan + 2] << 8) |
-                       (uint32_t)vm->bc[scan + 3];
-        scan += 4;
-        if (tgt > scan && tgt < vm->bc_len) {
-          scan = tgt;
-          continue;
-        }
-      }
-      goto done;
-    case OP_LIT: {
-      if (scan + 8 > vm->bc_len)
-        goto done;
-      uint32_t len = ((uint32_t)vm->bc[scan + 4] << 24) |
-                     ((uint32_t)vm->bc[scan + 5] << 16) |
-                     ((uint32_t)vm->bc[scan + 6] << 8) |
-                     (uint32_t)vm->bc[scan + 7];
-      scan += 8 + len;
-      useful++;
-      break;
-    }
-    case OP_ANY:
-    case OP_NOTANY:
-    case OP_SPAN:
-    case OP_BREAK:
-    case OP_BREAKX: /* BREAKX included in search-aware compiler scan */
-      scan += 2;
-      useful++;
-      break;
-    case OP_LEN:
-      scan += 4;
-      useful++;
-      break;
-    case OP_ANCHOR:
-    case OP_CAP_START:
-    case OP_CAP_END:
-      scan += 1;
-      break;
-    case OP_ASSIGN:
-      scan += 3;
-      break;
-    /* --- NEW opcodes for full coverage --- */
-    case OP_REM:
-      useful++;
-      break;
-    case OP_RPOS:
-      scan += 4;
-      useful++;
-      break;
-    case OP_RTAB:
-      scan += 4;
-      useful++;
-      break;
-    case OP_POS:
-      scan += 4;
-      useful++;
-      break;
-    case OP_TAB:
-      scan += 4;
-      useful++;
-      break;
-    case OP_ABORT:
-      useful++;
-      break;
-    case OP_SUCCEED:
-      useful++;
-      break;
-    case OP_FENCE:
-      break;
-    case OP_LABEL:
-      scan += 2;
-      break;
-    case OP_GOTO: {
-      /* treat like JMP: follow forward if we can, then stop */
-      if (scan + 2 > vm->bc_len)
-        goto done;
-      scan += 2;
-      goto done;
-    }
-    case OP_GOTO_F:
-      scan += 2;
-      break;
-    case OP_EMIT_LITERAL: {
-      if (scan + 8 > vm->bc_len)
-        goto done;
-      uint32_t elt_off =
-          ((uint32_t)vm->bc[scan] << 24) | ((uint32_t)vm->bc[scan + 1] << 16) |
-          ((uint32_t)vm->bc[scan + 2] << 8) | (uint32_t)vm->bc[scan + 3];
-      uint32_t elt_len = ((uint32_t)vm->bc[scan + 4] << 24) |
-                         ((uint32_t)vm->bc[scan + 5] << 16) |
-                         ((uint32_t)vm->bc[scan + 6] << 8) |
-                         (uint32_t)vm->bc[scan + 7];
-      scan += 8;
-      /* If inline data follows, skip it */
-      size_t expected_ip = ip + (scan - (ip - 1 /* rewind for op byte*/));
-      (void)expected_ip;
-      if ((size_t)elt_off == (size_t)(vm->bc + scan - vm->bc))
-        scan += (size_t)elt_len;
-      useful++;
-      break;
-    }
-    case OP_EMIT_CAPTURE:
-      scan += 1;
-      useful++;
-      break;
-    case OP_EMIT_EXPR:
-      scan += 2;
-      useful++;
-      break;
-    case OP_EMIT_FORMAT: {
-      if (scan + 2 > vm->bc_len)
-        goto done;
-      uint8_t sc_fmt = vm->bc[scan + 1];
-      scan += 2;
-      if (sc_fmt == SNBL_FMT_LPAD || sc_fmt == SNBL_FMT_RPAD)
-        scan += 3;
-      useful++;
-      break;
-    }
-    case OP_EMIT_TABLE: {
-      if (scan + 4 > vm->bc_len)
-        goto done;
-      uint8_t sc_ktype = vm->bc[scan + 2];
-      uint8_t sc_nlen = vm->bc[scan + 3];
-      scan += 4 + sc_nlen;
-      if (sc_ktype == 0) {
-        if (scan + 2 > vm->bc_len)
-          goto done;
-        uint16_t kl = ((uint16_t)vm->bc[scan] << 8) | vm->bc[scan + 1];
-        scan += 2 + kl;
-      } else if (sc_ktype == 1) {
-        scan += 1;
-      }
-      useful++;
-      break;
-    }
-    case OP_TABLE_GET:
-    case OP_TABLE_SET:
-    case OP_ARRAY_GET:
-    case OP_ARRAY_SET: {
-      if (scan + 4 > vm->bc_len)
-        goto done;
-      uint8_t nlen = vm->bc[scan + 4];
-      scan += 5 + nlen;
-      useful++;
-      break;
-    }
-    case OP_BAL:
-      scan += 8;
-      useful++;
-      break;
-    case OP_EVAL:
-      scan += 3;
-      useful++;
-      break;
-    case OP_DYNAMIC:
-      useful++;
-      break;
-    case OP_DYNAMIC_DEF: {
-      if (scan + 4 > vm->bc_len)
-        goto done;
-      uint32_t src_len =
-          ((uint32_t)vm->bc[scan] << 24) | ((uint32_t)vm->bc[scan + 1] << 16) |
-          ((uint32_t)vm->bc[scan + 2] << 8) | (uint32_t)vm->bc[scan + 3];
-      scan += 4 + src_len;
-      if (scan + 4 > vm->bc_len)
-        goto done;
-      uint32_t dyn_bcl =
-          ((uint32_t)vm->bc[scan] << 24) | ((uint32_t)vm->bc[scan + 1] << 16) |
-          ((uint32_t)vm->bc[scan + 2] << 8) | (uint32_t)vm->bc[scan + 3];
-      scan += 4 + dyn_bcl;
-      break;
-    }
-    default:
-      goto done;
+static int method_cache_find(uint64_t hash, size_t bc_len) {
+  for (int i = 0; i < method_cache_count; i++) {
+    if (method_cache[i].occupied &&
+        method_cache[i].hash == hash &&
+        method_cache[i].bc_len == bc_len) {
+      return i;
     }
   }
-done:
-  /* Skip JIT if too few useful ops using mode-appropriate threshold */
-  if (useful < min_ops)
-    return false;
+  return -1;
+}
 
-  /* Skip JIT for patterns where backtracking appears immediately after a
-   * short prefix — in search mode we only trigger this for anchored-heavy
-   * patterns (search workloads naturally have early-exit structure). */
-  if (has_backtrack && cfg->skip_backtrack_heavy && !search_mode && useful < 5)
-    return false;
+static int method_cache_evict(void) {
+  /* Simple FIFO eviction: remove the first (oldest) entry */
+  if (method_cache_count <= 0)
+    return -1;
+  int victim = 0;
+  if (method_cache[victim].occupied && method_cache[victim].fn) {
+    snobol_jit_free_code((void *)method_cache[victim].fn,
+                         method_cache[victim].code_size);
+    method_cache[victim].occupied = false;
+    method_cache[victim].fn = nullptr;
+    if (snobol_jit_get_stats())
+      snobol_jit_get_stats()->method_evictions_total++;
+  }
+  /* Compact: shift all entries left */
+  for (int i = victim; i < method_cache_count - 1; i++)
+    method_cache[i] = method_cache[i + 1];
+  method_cache_count--;
+  method_cache[method_cache_count].occupied = false;
+  method_cache[method_cache_count].fn = nullptr;
+  return 0; /* success */
+}
 
-  return true;
+static int method_cache_insert(uint64_t hash, size_t bc_len,
+                               jit_trace_fn fn, size_t code_size) {
+  if (method_cache_count >= METHOD_CACHE_SIZE) {
+    if (method_cache_evict() < 0)
+      return -1;
+  }
+  int idx = method_cache_count++;
+  method_cache[idx].hash = hash;
+  method_cache[idx].bc_len = bc_len;
+  method_cache[idx].fn = fn;
+  method_cache[idx].code_size = code_size;
+  method_cache[idx].occupied = true;
+  return idx;
 }
 
 /* ---------------------------------------------------------------------------
- * NOTE: ARM64 instruction helpers, helper functions, CFG builder, and
- * legacy direct-emission code have been moved to jit_backend_arm64.c.
- * The backend is registered via snobol_jit_arm64_register() in
- * snobol_jit_init().
+ * Method JIT compile / query / free
  * ---------------------------------------------------------------------------
  */
 
-/* (Legacy ARM64 direct-emission code removed — see jit_backend_arm64.c) */
-
-jit_trace_fn snobol_jit_compile(VM *vm, size_t start_ip,
-                                size_t *out_code_size) {
+jit_trace_fn snobol_jit_method_compile(const uint8_t *bc,
+                                        size_t bc_len,
+                                        size_t *out_code_size) {
   if (out_code_size)
     *out_code_size = 0;
-
-#if !defined(__aarch64__) && !defined(__arm64__) && !defined(__arm__) &&       \
-    !defined(__thumb__) && !defined(__ARM_ARCH_7A__) &&                        \
-    !(defined(__riscv) && __riscv_xlen == 64) && !defined(__x86_64__) &&       \
-    !defined(_M_X64)
-  (void)vm;
-  (void)start_ip;
-  return nullptr;
-#endif
-
-  /* ---- IR pipeline ----
-   *
-   * 1. Lift VM bytecode to architecture-neutral IR.
-   * 2. Run optimiser passes (DCE, copy-propagation).
-   * 3. Dump IR to stderr if SNOBOL_JIT_DUMP_IR=1.
-   * 4. Lower IR to machine code via the registered backend.
-   *
-   * If no backend is registered (shouldn't happen after snobol_jit_init()),
-   * fall through to the legacy ARM64 direct-emission path below.
-   */
-  if (active_backend) {
-    jit_ir_region_t *ir = jit_ir_lift_region(vm, start_ip);
-    if (!ir || ir->non_compilable || ir->count == 0) {
-      if (ir)
-        jit_ir_region_free(ir);
-      return nullptr;
-    }
-
-    /* Optimiser passes — classic */
-    jit_ir_copy_propagation(ir);
-    jit_ir_dce(ir);
-
-    /* SSA-based optimiser passes */
-    jit_ir_build_cfg(ir);
-    jit_ir_compute_dominators(ir);
-    jit_ir_find_loops(ir);
-    jit_ir_gvn(ir);
-    jit_ir_constant_fold(ir);
-    jit_ir_licm(ir);
-
-    /* Register allocation (linear-scan). The backends use a fixed physical
-     * register convention for VM.s/pos/len today, so we compute the allocation
-     * as a hint/foundation for future calls.  The result is logged when
-     * SNOBOL_JIT_DUMP_IR=1 is set and freed immediately. */
-    jit_ir_regalloc_t *ra = jit_ir_alloc_registers(ir);
-
-    /* Debug dump */
-    {
-      const char *dump_env = getenv("SNOBOL_JIT_DUMP_IR");
-      if (dump_env && dump_env[0] == '1' && dump_env[1] == '\0') {
-        jit_ir_dump(ir, stderr);
-        if (ra) {
-          fprintf(stderr, "[snobol JIT-IR] regalloc  spills=%u\n",
-                  (unsigned)ra->spill_count);
-          for (uint16_t v = 1; v < ir->vreg_next; v++) {
-            if (ra->phys_reg[v] >= 0)
-              fprintf(stderr, "  v%u -> phys %d\n", (unsigned)v,
-                      ra->phys_reg[v]);
-          }
-        }
-      }
-      if (jit_log_fp) {
-        snobol_jit_log("--- IR for start_ip=%zu ---", start_ip);
-        jit_ir_dump(ir, jit_log_fp);
-        if (ra)
-          snobol_jit_log("regalloc spills=%u", (unsigned)ra->spill_count);
-      }
-    }
-
-    if (ra)
-      snobol_free(ra);
-
-    /* Lower IR → machine code via backend */
-    jit_region_t code_region = {nullptr, nullptr, 0, 0};
-    snobol_jit_log("compile start_ip=%zu ir_count=%zu", start_ip, ir->count);
-    void *code_ptr = active_backend->lower(ir, vm, &code_region);
-    jit_ir_region_free(ir);
-
-    if (!code_ptr) {
-      snobol_jit_log("compile result=FAIL start_ip=%zu", start_ip);
-      return nullptr;
-    }
-    snobol_jit_log("compile result=OK start_ip=%zu code_size=%zu", start_ip,
-                   code_region.code_size);
-
-    /* Count CFG blocks compiled in this region */
-    if (code_region.n_blocks == 0)
-      code_region.n_blocks = 1;
-    jit_mutex_lock(&jit_global_mutex);
-    global_jit_stats.jit_blocks_compiled_total += code_region.n_blocks;
-    jit_mutex_unlock(&jit_global_mutex);
-
-    if (out_code_size)
-      *out_code_size = code_region.code_size;
-    return (jit_trace_fn)code_ptr;
+  if (!bc || bc_len == 0) {
+    return nullptr;
+  }
+  if (!active_backend) {
+    return nullptr;
   }
 
-  return nullptr;
+  /* Fast path: already cached */
+  uint64_t hash = djb2_hash(bc, bc_len);
+  jit_mutex_lock(&jit_global_mutex);
+  int cached = method_cache_find(hash, bc_len);
+  if (cached >= 0 && method_cache[cached].fn) {
+    jit_trace_fn fn = method_cache[cached].fn;
+    size_t csz = method_cache[cached].code_size;
+    jit_mutex_unlock(&jit_global_mutex);
+    if (out_code_size)
+      *out_code_size = csz;
+    return fn;
+  }
+  jit_mutex_unlock(&jit_global_mutex);
+
+  /* Synthesise a minimal VM so the existing IR lift/lower can run without
+   * a live caller.  The fields touched by the SLJIT backend (bc, bc_len)
+   * are populated; everything else is zeroed. */
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  vm.bc = bc;
+  vm.bc_len = bc_len;
+
+  jit_ir_region_t *ir = jit_ir_lift_region(&vm, 0);
+  if (!ir || ir->non_compilable || ir->count == 0) {
+    if (ir)
+      jit_ir_region_free(ir);
+    if (snobol_jit_get_stats())
+      snobol_jit_get_stats()->method_fallbacks_total++;
+    return nullptr;
+  }
+
+  /* Same optimiser stack as snobol_jit_compile() */
+  jit_ir_copy_propagation(ir);
+  jit_ir_dce(ir);
+  jit_ir_build_cfg(ir);
+  jit_ir_compute_dominators(ir);
+  jit_ir_find_loops(ir);
+  jit_ir_gvn(ir);
+  jit_ir_constant_fold(ir);
+  jit_ir_licm(ir);
+
+  if (snobol_jit_get_stats())
+    snobol_jit_get_stats()->method_attempts_total++;
+
+  jit_region_t code_region = {nullptr, nullptr, 0, 0};
+  void *code_ptr = active_backend->lower(ir, &vm, &code_region);
+  jit_ir_region_free(ir);
+
+  if (!code_ptr) {
+    if (snobol_jit_get_stats())
+      snobol_jit_get_stats()->method_fallbacks_total++;
+    return nullptr;
+  }
+
+  if (snobol_jit_get_stats())
+    snobol_jit_get_stats()->method_successes_total++;
+
+  /* Store in cache */
+  jit_mutex_lock(&jit_global_mutex);
+  method_cache_insert(hash, bc_len, (jit_trace_fn)code_ptr, code_region.code_size);
+  jit_mutex_unlock(&jit_global_mutex);
+
+  if (out_code_size)
+    *out_code_size = code_region.code_size;
+  return (jit_trace_fn)code_ptr;
+}
+
+jit_trace_fn snobol_jit_method_query(const uint8_t *bc, size_t bc_len) {
+  if (!bc || bc_len == 0)
+    return nullptr;
+
+  uint64_t hash = djb2_hash(bc, bc_len);
+  jit_mutex_lock(&jit_global_mutex);
+  int idx = method_cache_find(hash, bc_len);
+  jit_trace_fn fn = (idx >= 0) ? method_cache[idx].fn : nullptr;
+  jit_mutex_unlock(&jit_global_mutex);
+  return fn;
+}
+
+void snobol_jit_method_free(jit_trace_fn fn) {
+  if (!fn)
+    return;
+
+  jit_mutex_lock(&jit_global_mutex);
+  for (int i = 0; i < method_cache_count; i++) {
+    if (method_cache[i].occupied && method_cache[i].fn == fn) {
+      snobol_jit_free_code((void *)fn, method_cache[i].code_size);
+      method_cache[i].occupied = false;
+      method_cache[i].fn = nullptr;
+      /* Compact */
+      for (int j = i; j < method_cache_count - 1; j++)
+        method_cache[j] = method_cache[j + 1];
+      method_cache_count--;
+      method_cache[method_cache_count].occupied = false;
+      method_cache[method_cache_count].fn = nullptr;
+      if (snobol_jit_get_stats())
+        snobol_jit_get_stats()->method_evictions_total++;
+      break;
+    }
+  }
+  jit_mutex_unlock(&jit_global_mutex);
 }
 
 #endif /* SNOBOL_JIT */

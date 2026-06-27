@@ -60,8 +60,11 @@
 /* Enable dynamic patterns and tables */
 #undef SNOBOL_DYNAMIC_PATTERN
 
-/* Enable micro-JIT support (ARM64 only) */
+/* Enable SLJIT JIT backend (method JIT) */
 #undef SNOBOL_JIT
+
+/* Enable SLJIT JIT backend */
+#undef SNOBOL_JIT_BACKEND_SLJIT
 
 /* Define to 1 if all of the C89 standard headers exist (not just the ones
    required in a freestanding environment). This macro is provided for

@@ -1,24 +1,13 @@
 /**
  * @file jit_backend.h
- * @brief JIT backend vtable API for the SNOBOL4 micro-JIT.
+ * @brief JIT backend vtable API for the SNOBOL4 JIT.
  *
- * A backend implements three operations:
- *  - lower():       Translate IR instructions to machine code.
- *  - flush_icache():Ensure instruction-cache coherence after code emission.
+ * A backend implements:
+ *  - lower:         Translate IR instructions to machine code.
+ *  - flush_icache:  Ensure instruction-cache coherence after code emission.
  *  - name:          Static string identifying the backend.
  *
- * Backends are registered at compile time via CMake option SNOBOL_JIT_BACKEND
- * (default: "arm64").  Only one backend is active per binary.
- *
- * Register allocation:
- *  The JIT pipeline calls jit_ir_alloc_regions() in jit.c after the optimiser
- *  passes to compute a linear-scan physical-register assignment.  The result
- *  is logged when SNOBOL_JIT_DUMP_IR=1 is set.  Current backends use a fixed
- *  physical-register convention (e.g. x1=VM.s on ARM64) and do not consult the
- *  allocator for code emission.  Backends that wish to use dynamic register
- *  assignment may call jit_ir_alloc_registers() directly on the IR region
- *  passed to lower(); the assignment table (phys_reg[vreg]) is available for
- *  the lifetime of the call.
+ * SLJIT is the only JIT backend (arch-specific backends retired).
  */
 #pragma once
 
@@ -32,7 +21,6 @@
 
 /* -------------------------------------------------------------------------
  * Code emission buffer (the output region written by the backend)
- * Previously named JITState inside jit.c.
  * -------------------------------------------------------------------------
  */
 typedef struct {
@@ -47,8 +35,6 @@ typedef struct {
  * -------------------------------------------------------------------------
  */
 typedef struct jit_backend {
-  /** Identifying name of the backend, e.g. "arm64".  Must match the CMake
-   *  SNOBOL_JIT_BACKEND string.  Static storage. */
   const char *name;
 
   /**
@@ -66,7 +52,6 @@ typedef struct jit_backend {
 
   /**
    * Flush the instruction cache for the given code range.
-   * Called by the backend after writing machine code to a RWX page.
    */
   void (*flush_icache)(void *code, size_t size);
 } jit_backend_t;
@@ -87,21 +72,11 @@ const jit_backend_t *jit_backend_get(void);
 const char *jit_backend_name(void);
 
 /* -------------------------------------------------------------------------
- * Backend init declarations (definitions in jit_backend_arm64.c,
- * jit_backend_arm32.c)
+ * Backend init declarations
  * -------------------------------------------------------------------------
  */
-#if defined(__aarch64__) || defined(__arm64__)
-void snobol_jit_arm64_register(void);
-#endif
-#if defined(__arm__) || defined(__thumb__) || defined(__ARM_ARCH_7A__)
-void snobol_jit_arm32_register(void);
-#endif
-#if defined(__riscv) && __riscv_xlen == 64
-void snobol_jit_riscv64_register(void);
-#endif
-#if defined(__x86_64__) || defined(_M_X64)
-void snobol_jit_x86_64_register(void);
+#ifdef SNOBOL_JIT_BACKEND_SLJIT
+void snobol_jit_sljit_register(void);
 #endif
 
 #endif /* SNOBOL_JIT */

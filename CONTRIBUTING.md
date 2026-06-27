@@ -290,151 +290,68 @@ libsnobol4 uses independent versioning for core and bindings:
 - **Issues**: Open an issue on GitHub
 - **Discussions**: Use GitHub Discussions for questions
 
-## Windows Development
+## SLJIT JIT Backend
 
-The project supports MSVC (Visual Studio 2022+) and MinGW-w64 toolchains on Windows. The JIT is supported on Windows x86-64 via the `x86_64` backend (Microsoft x64 ABI), using `VirtualAlloc`/`VirtualProtect` for W^X code-page management (DEP-compliant — never uses `PAGE_EXECUTE_READWRITE`). Build with:
-
-```bash
-cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=x86_64
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
-
-## Linux / macOS x86-64 JIT
-
-The micro-JIT runs on x86-64 Linux and macOS (Intel) via the `x86_64` backend using the
-System V AMD64 ABI. Build with:
+The JIT compiler uses **SLJIT** as the single backend covering all supported
+architectures (x86-64, AArch64, ARMv7, RISC-V 64). SLJIT is the default and
+only supported `SNOBOL_JIT_BACKEND`; no architecture-specific CMake option is
+needed.
 
 ```bash
-cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=x86_64
+cmake -B build -DBUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-On Linux, code pages use `mmap(PROT_READ|PROT_WRITE)` → `mprotect(PROT_READ|PROT_EXEC)` (W^X model);
-on macOS Intel, `mmap` with `MAP_JIT` is used. The x86 instruction cache is coherent on both platforms,
-so no explicit icache flush is needed (except `FlushInstructionCache` on Windows).
+### JIT Configuration
 
-## Windows x86-64 JIT
+The JIT has two tiers:
 
-The micro-JIT runs on Windows x86-64 (MSVC or MinGW-w64) via the `x86_64` backend using the
-Microsoft x64 ABI. Build with:
+- **Per-IP hot-trace JIT** (always on when `SNOBOL_JIT=1`): compiles frequently
+  executed bytecode regions into native code at runtime. Hotness and budget
+  thresholds can be tuned via `SnobolJitConfig`.
+- **Method JIT** (on by default via `SnobolJitConfig.method_enabled`):
+  compiles entire patterns ahead of execution. The compiled function is
+  cached and reused across calls. Toggle via:
 
-```bash
-cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=x86_64
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
-
-**DEP compliance**: Code pages are allocated with `VirtualAlloc(MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)`,
-then switched to `PAGE_EXECUTE_READ` via `VirtualProtect` after emission. `PAGE_EXECUTE_READWRITE` is
-never used. The `/NXCOMPAT` linker flag (enabled by default since VS 2010) ensures hardware DEP is active.
-
-## Linux AArch64 JIT
-
-The micro-JIT runs on Linux AArch64 (bare-metal or QEMU). The build uses the same
-`-DSNOBOL_JIT_BACKEND=arm64` CMake option as macOS:
-
-```bash
-# Native AArch64 build
-cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=arm64
-cmake --build build
-ctest --test-dir build --output-on-failure
-
-# QEMU AArch64 (from x86-64 host)
-docker run --rm --platform linux/arm64 \
-  -v $(pwd):/workspace -w /workspace \
-  arm64v8/ubuntu:24.04 \
-  bash -c "apt-get update && apt-get install -y cmake build-essential \
-    && cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=arm64 \
-    && cmake --build build \
-    && ctest --test-dir build --output-on-failure"
+```c
+SnobolJitConfig config = snobol_jit_get_config();
+config.method_enabled = 1;   // enable (default)
+config.max_compiled_patterns = 128;
+snobol_jit_set_config(&config);
 ```
 
 ### W^X Policy
 
-On Linux the JIT uses a **write-then-execute** (W^X) model:
-1. Pages are allocated with `PROT_READ | PROT_WRITE` (writable, not executable).
-2. After code emission, `mprotect` transitions them to `PROT_READ | PROT_EXEC`.
+The JIT uses a **write-then-execute** (W^X) model on all platforms:
+
+1. Pages are allocated writable, not executable.
+2. After code emission, pages are switched to executable, not writable.
 3. Pages are never simultaneously writable and executable.
 
-This is the default behaviour on Linux AArch64. If you encounter `SIGSEGV` during
-JIT compilation, check that `mprotect` is permitted in your environment
-(e.g., some hardened kernels or seccomp profiles may block `PROT_EXEC`).
+On Linux this uses `mmap(PROT_READ|PROT_WRITE)` → `mprotect(PROT_READ|PROT_EXEC)`;
+on macOS `mmap` with `MAP_JIT`; on Windows `VirtualAlloc` → `VirtualProtect`.
 
-## Linux ARM32 (ARMv7-A Thumb-2) JIT
+### QEMU Multi-Architecture Testing
 
-The micro-JIT runs on Linux ARMv7-A via the `arm32` backend (Thumb-2 instruction set). Build with:
-
-```bash
-# Native ARMv7 build
-cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=arm32
-cmake --build build
-ctest --test-dir build --output-on-failure
-
-# QEMU ARMv7 (from x86-64 host)
-docker run --rm --platform linux/arm/v7 \
-  -v $(pwd):/workspace -w /workspace \
-  arm32v7/ubuntu:24.04 \
-  bash -c "apt-get update && apt-get install -y cmake build-essential \
-    && cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=arm32 \
-    && cmake --build build \
-    && ctest --test-dir build --output-on-failure"
-```
-
-**W^X model**: `mmap(PROT_READ|PROT_WRITE)` → `mprotect(PROT_READ|PROT_EXEC)`. The ARMv7
-page table does not distinguish between read-only and read-execute at the page level, so
-W^X is enforced at the API level only (PROT_WRITE is cleared after emission).
-
-## Linux RISC-V 64 JIT
-
-The micro-JIT runs on Linux RISC-V 64 via the `riscv64` backend (RV64I base ISA, optional
-RV64C compressed support). Build with:
-
-```bash
-# Native RISC-V 64 build
-cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=riscv64
-cmake --build build
-ctest --test-dir build --output-on-failure
-
-# With RV64C compressed instructions
-cmake -B build -DBUILD_TESTS=ON -DSNOBOL_JIT_BACKEND=riscv64 -DSNOBOL_JIT_RV64C=ON
-cmake --build build
-
-# QEMU RISC-V 64 (from x86-64 host)
-docker run --rm --platform linux/riscv64 \
-  -v $(pwd):/workspace -w /workspace \
-  riscv64/ubuntu:24.04 \
-  bash -c "apt-get update && apt-get install -y cmake build-essential \
-    && cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=riscv64 \
-    && cmake --build build \
-    && ctest --test-dir build --output-on-failure"
-```
-
-## QEMU Multi-Architecture Setup
-
-The CI matrix uses QEMU user-mode emulation via `docker/setup-qemu-action` to validate
-JIT correctness on non-native architectures. To reproduce locally:
+The CI matrix uses QEMU user-mode emulation via `docker/setup-qemu-action`
+to validate correctness on non-native architectures. To reproduce locally:
 
 ```bash
 # Enable QEMU binfmt support (one-time)
 docker run --privileged --rm tonistiigi/binfmt --install all
 
-# Build per-platform Docker images
-docker build -t jit-qemu-aarch64 -f ci/Dockerfile.jit-qemu .
-docker build -t jit-qemu-armv7 -f ci/Dockerfile.jit-qemu-armv7 .
-docker build -t jit-qemu-riscv64 -f ci/Dockerfile.jit-qemu-riscv64 .
+# Build multi-platform Docker image (single Dockerfile for all archs)
+docker build -t jit-qemu -f ci/Dockerfile.jit-qemu .
 
 # Run with platform emulation
-docker run --rm --platform linux/arm64 jit-qemu-aarch64
-docker run --rm --platform linux/arm/v7 jit-qemu-armv7
-docker run --rm --platform linux/riscv64 jit-qemu-riscv64
+docker run --rm --platform linux/arm64 jit-qemu
+docker run --rm --platform linux/arm/v7 jit-qemu
+docker run --rm --platform linux/riscv64 jit-qemu
 ```
 
-Available QEMU CI jobs in `.github/workflows/ci-core.yml`:
-- `jit-qemu-aarch64`: Linux AArch64 via `qemu-aarch64`
-- `jit-qemu-armv7`: Linux ARMv7-A via `qemu-arm`
-- `jit-qemu-riscv64`: Linux RISC-V 64 via `qemu-riscv64`
+CI jobs in `.github/workflows/ci-core.yml`:
+- `jit-qemu-smoke`: consolidated job with `matrix.platform: [ linux/arm64, linux/arm/v7, linux/riscv64 ]`
 
 ## `SNOBOL_JIT_DUMP_IR` Debugging Workflow
 

@@ -1422,11 +1422,15 @@ jit_ir_region_t *jit_ir_lift_region(const VM *vm, size_t start_ip) {
       break;
     }
     if (op == OP_REPEAT_INIT) {
-      LIFT_SE(r, JIT_IR_REPEAT_INIT, cur);
+      /* The SLJIT method-JIT backend has no handler for JIT_IR_REPEAT_INIT
+       * (currently a no-op stub). Mark non-compilable. */
+      r->non_compilable = true;
       break;
     }
     if (op == OP_REPEAT_STEP) {
-      LIFT_SE(r, JIT_IR_REPEAT_STEP, cur);
+      /* The SLJIT method-JIT backend has no handler for JIT_IR_REPEAT_STEP
+       * (currently a no-op stub). Mark non-compilable. */
+      r->non_compilable = true;
       break;
     }
 
@@ -1452,24 +1456,13 @@ jit_ir_region_t *jit_ir_lift_region(const VM *vm, size_t start_ip) {
     }
 
     if (op == OP_SPLIT) {
-      if (oip + 8 > bc_len)
-        break;
-      size_t ta = (size_t)ir_read_u32(bc + oip);
-      size_t tb = (size_t)ir_read_u32(bc + oip + 4);
-      if (!jit_ir_append(r, JIT_IR_SPLIT, JIT_IR_FLAG_SIDE_EFFECT, cur,
-                         JIT_IR_VREG_NONE, 0, 0))
-        break;
-      r->instrs[r->count - 1].u.split.target_a = ta;
-      r->instrs[r->count - 1].u.split.target_b = tb;
-      /* Teleport to arm-a for forward branches (mirrors pass-1 in
-       * snobol_jit_compile). The ARM64 backend handles arm-b via
-       * CFG/choice-push. */
-      if (ta > scan && ta < bc_len && tb > scan && tb < bc_len) {
-        scan = ta; /* inline arm-a */
-      } else {
-        break; /* backward target or out-of-range: hand off to interpreter */
-      }
-      continue;
+      /* The SLJIT method-JIT backend does not implement the choice-point
+       * (arm-b) backtracking path: JIT_IR_SPLIT only jumps to target_a,
+       * so patterns with alternation would produce incorrect results
+       * (side-effecting opcodes in arm-a would run twice — once in JIT,
+       * once in the VM fallback). Mark non-compilable. */
+      r->non_compilable = true;
+      break;
     }
 
     if (op == OP_GOTO) {
@@ -1514,29 +1507,19 @@ jit_ir_region_t *jit_ir_lift_region(const VM *vm, size_t start_ip) {
       continue;
     }
 
-    if (op == OP_ANY || op == OP_NOTANY || op == OP_SPAN || op == OP_BREAK ||
-        op == OP_BREAKX) {
+    if (op == OP_SPAN || op == OP_BREAK || op == OP_BREAKX) {
+      /* The SLJIT method-JIT backend has no charclass scan implementation
+       * for JIT_IR_SPAN/JIT_IR_BREAK/JIT_IR_BREAKX (currently stubs that
+       * either no-op or only check bounds). Mark non-compilable. */
+      r->non_compilable = true;
+      break;
+    }
+
+    if (op == OP_ANY || op == OP_NOTANY) {
       if (oip + 2 > bc_len)
         break;
       uint16_t set_id = ir_read_u16(bc + oip);
-      jit_ir_opcode_t irop;
-      switch (op) {
-      case OP_ANY:
-        irop = JIT_IR_ANY;
-        break;
-      case OP_NOTANY:
-        irop = JIT_IR_NOTANY;
-        break;
-      case OP_SPAN:
-        irop = JIT_IR_SPAN;
-        break;
-      case OP_BREAK:
-        irop = JIT_IR_BREAK;
-        break;
-      default:
-        irop = JIT_IR_BREAKX;
-        break;
-      }
+      jit_ir_opcode_t irop = (op == OP_ANY) ? JIT_IR_ANY : JIT_IR_NOTANY;
       if (!jit_ir_append(r, irop, JIT_IR_FLAG_SIDE_EFFECT, cur,
                          JIT_IR_VREG_NONE, 0, 0))
         break;
@@ -1583,17 +1566,10 @@ jit_ir_region_t *jit_ir_lift_region(const VM *vm, size_t start_ip) {
     }
 
     if (op == OP_ASSIGN) {
-      if (oip + 3 > bc_len)
-        break;
-      uint16_t var = ir_read_u16(bc + oip);
-      uint8_t reg = bc[oip + 2];
-      if (!jit_ir_append(r, JIT_IR_ASSIGN, JIT_IR_FLAG_SIDE_EFFECT, cur,
-                         JIT_IR_VREG_NONE, 0, 0))
-        break;
-      r->instrs[r->count - 1].u.assign.var = var;
-      r->instrs[r->count - 1].u.assign.reg = reg;
-      scan = oip + 3;
-      continue;
+      /* The SLJIT method-JIT backend has no handler for JIT_IR_ASSIGN
+       * (currently a no-op stub). Mark non-compilable. */
+      r->non_compilable = true;
+      break;
     }
 
     if (op == OP_REM) {
@@ -1750,109 +1726,38 @@ jit_ir_region_t *jit_ir_lift_region(const VM *vm, size_t start_ip) {
     }
 
     if (op == OP_EMIT_EXPR) {
-      if (oip + 2 > bc_len)
-        break;
-      uint8_t reg = bc[oip];
-      uint8_t expr_type = bc[oip + 1];
-      if (!jit_ir_append(r, JIT_IR_EMIT_EXPR,
-                         JIT_IR_FLAG_SIDE_EFFECT | JIT_IR_FLAG_CALLOUT, cur,
-                         JIT_IR_VREG_NONE, 0, 0))
-        break;
-      r->instrs[r->count - 1].u.emit_expr.reg = reg;
-      r->instrs[r->count - 1].u.emit_expr.expr_type = expr_type;
-      scan = oip + 2;
-      continue;
+      /* The SLJIT method-JIT backend has no handler for JIT_IR_EMIT_EXPR
+       * (currently a no-op stub). Mark non-compilable. */
+      r->non_compilable = true;
+      break;
     }
 
     if (op == OP_EMIT_FORMAT) {
-      if (oip + 2 > bc_len)
-        break;
-      uint8_t reg = bc[oip];
-      uint8_t fmt_type = bc[oip + 1];
-      uint16_t width = 0;
-      uint8_t fill = 0;
-      size_t next = oip + 2;
-      if (fmt_type == SNBL_FMT_LPAD || fmt_type == SNBL_FMT_RPAD) {
-        if (next + 3 > bc_len)
-          break;
-        width = ir_read_u16(bc + next);
-        fill = bc[next + 2];
-        next += 3;
-      }
-      if (!jit_ir_append(r, JIT_IR_EMIT_FORMAT,
-                         JIT_IR_FLAG_SIDE_EFFECT | JIT_IR_FLAG_CALLOUT, cur,
-                         JIT_IR_VREG_NONE, 0, 0))
-        break;
-      r->instrs[r->count - 1].u.emit_fmt.reg = reg;
-      r->instrs[r->count - 1].u.emit_fmt.fmt_type = fmt_type;
-      r->instrs[r->count - 1].u.emit_fmt.width = width;
-      r->instrs[r->count - 1].u.emit_fmt.fill_char = fill;
-      scan = next;
-      continue;
+      /* The SLJIT method-JIT backend has no handler for JIT_IR_EMIT_FORMAT
+       * (currently a no-op stub). Mark non-compilable. */
+      r->non_compilable = true;
+      break;
     }
 
     if (op == OP_EMIT_TABLE) {
-      if (oip + 4 > bc_len)
-        break;
-      uint8_t ktype = bc[oip + 2];
-      uint8_t nlen = bc[oip + 3];
-      size_t after = oip + 4 + nlen;
-      if (after > bc_len)
-        break;
-      size_t next;
-      if (ktype == 0) {
-        if (after + 2 > bc_len)
-          break;
-        uint16_t kl = ir_read_u16(bc + after);
-        next = after + 2 + kl;
-      } else if (ktype == 1) {
-        next = after + 1;
-      } else {
-        break;
-      }
-      /* bc_ip carries the instruction offset needed by the runtime helper */
-      if (!jit_ir_append(r, JIT_IR_EMIT_TABLE,
-                         JIT_IR_FLAG_SIDE_EFFECT | JIT_IR_FLAG_CALLOUT, cur,
-                         JIT_IR_VREG_NONE, 0, 0))
-        break;
-      scan = next;
-      continue;
+      /* The SLJIT method-JIT backend has no handler for JIT_IR_EMIT_TABLE
+       * (currently a no-op stub). Mark non-compilable. */
+      r->non_compilable = true;
+      break;
     }
 
     if (op == OP_TABLE_GET) {
-      if (oip + 5 > bc_len)
-        break;
-      uint16_t tid = ir_read_u16(bc + oip);
-      uint8_t kreg = bc[oip + 2];
-      uint8_t dreg = bc[oip + 3];
-      uint8_t nlen = bc[oip + 4];
-      if (!jit_ir_append(r, JIT_IR_TABLE_GET,
-                         JIT_IR_FLAG_SIDE_EFFECT | JIT_IR_FLAG_CALLOUT, cur,
-                         JIT_IR_VREG_NONE, 0, 0))
-        break;
-      r->instrs[r->count - 1].u.tget.table_id = tid;
-      r->instrs[r->count - 1].u.tget.key_reg = kreg;
-      r->instrs[r->count - 1].u.tget.dest_reg = dreg;
-      scan = oip + 5 + nlen;
-      continue;
+      /* The SLJIT method-JIT backend has no handler for JIT_IR_TABLE_GET
+       * (currently a no-op stub). Mark non-compilable. */
+      r->non_compilable = true;
+      break;
     }
 
     if (op == OP_TABLE_SET) {
-      if (oip + 5 > bc_len)
-        break;
-      uint16_t tid = ir_read_u16(bc + oip);
-      uint8_t kreg = bc[oip + 2];
-      uint8_t vreg = bc[oip + 3];
-      uint8_t nlen = bc[oip + 4];
-      if (!jit_ir_append(r, JIT_IR_TABLE_SET,
-                         JIT_IR_FLAG_SIDE_EFFECT | JIT_IR_FLAG_CALLOUT, cur,
-                         JIT_IR_VREG_NONE, 0, 0))
-        break;
-      r->instrs[r->count - 1].u.tset.table_id = tid;
-      r->instrs[r->count - 1].u.tset.key_reg = kreg;
-      r->instrs[r->count - 1].u.tset.val_reg = vreg;
-      scan = oip + 5 + nlen;
-      continue;
+      /* The SLJIT method-JIT backend has no handler for JIT_IR_TABLE_SET
+       * (currently a no-op stub). Mark non-compilable. */
+      r->non_compilable = true;
+      break;
     }
 
     if (op == OP_BAL) {
@@ -1886,11 +1791,10 @@ jit_ir_region_t *jit_ir_lift_region(const VM *vm, size_t start_ip) {
     }
 
     if (op == OP_DYNAMIC) {
-      jit_ir_append(r, JIT_IR_DYNAMIC,
-                    JIT_IR_FLAG_SIDE_EFFECT | JIT_IR_FLAG_CALLOUT, cur,
-                    JIT_IR_VREG_NONE, 0, 0);
-      scan = oip;
-      continue;
+      /* The SLJIT method-JIT backend has no handler for JIT_IR_DYNAMIC
+       * (currently a no-op stub). Mark non-compilable. */
+      r->non_compilable = true;
+      break;
     }
 
     /* Unknown opcode: stop scanning */

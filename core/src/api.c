@@ -49,9 +49,6 @@ struct snobol_pattern {
    * to avoid re-walking the bytecode on every call. */
   snobol_search_meta_t meta;
   bool meta_initialized;
-#ifdef SNOBOL_JIT
-  struct SnobolJitContext *jit_ctx;
-#endif
 };
 
 /* Maximum named variables returned from a match */
@@ -174,9 +171,6 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
    * and snobol_pattern_search_ex() don't re-walk the bytecode per call. */
   snobol_search_derive_meta(pat->bc, pat->bc_len, &pat->meta);
   pat->meta_initialized = true;
-#ifdef SNOBOL_JIT
-  pat->jit_ctx = NULL;
-#endif
   return pat;
 }
 
@@ -207,12 +201,6 @@ size_t snobol_pattern_get_bc_len(const snobol_pattern_t *pattern) {
 void snobol_pattern_free(snobol_pattern_t *pattern) {
   if (!pattern)
     return;
-#ifdef SNOBOL_JIT
-  if (pattern->jit_ctx) {
-    snobol_jit_release_context(pattern->jit_ctx);
-    pattern->jit_ctx = NULL;
-  }
-#endif
   compiler_free(pattern->bc);
   snobol_free(pattern);
 }
@@ -305,20 +293,6 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
   vm.s = subject;
   vm.len = len;
   vm.out = &out_buf;
-
-#ifdef SNOBOL_JIT
-  if (!pattern->jit_ctx) {
-    pattern->jit_ctx = snobol_jit_acquire_context(pattern->bc, pattern->bc_len);
-  }
-  if (pattern->jit_ctx) {
-    vm.jit.ip_counts = pattern->jit_ctx->ip_counts;
-    vm.jit.traces = pattern->jit_ctx->traces;
-    vm.jit.ctx = pattern->jit_ctx;
-  }
-  vm.jit.enabled = true;
-  vm.jit.search_mode = true;
-  vm.jit.stats = snobol_jit_get_stats();
-#endif
 
   /* Use cached search metadata from compile time. Falls back to local
    * derivation only if the pattern was built without our compile path
@@ -467,17 +441,7 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
     state->vm.bc_len = state->bc_len;
     state->vm.out = &state->out_buf;
 #ifdef SNOBOL_JIT
-    /* Acquire JIT context from the bytecode — the LRU cache will
-     * return the same context if the PHP binding already holds one. */
-    struct SnobolJitContext *jit_ctx =
-        snobol_jit_acquire_context(state->bc, state->bc_len);
-    if (jit_ctx) {
-      state->vm.jit.ip_counts = jit_ctx->ip_counts;
-      state->vm.jit.traces = jit_ctx->traces;
-      state->vm.jit.ctx = jit_ctx;
-    }
     state->vm.jit.enabled = true;
-    state->vm.jit.search_mode = true;
     state->vm.jit.stats = snobol_jit_get_stats();
 #endif
     state->vm_inited = true;

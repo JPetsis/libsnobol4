@@ -421,11 +421,6 @@ size_t vm_choice_record_average_size(VM *vm) {
   if (vm->choice_push_count > 0) {
     return vm->choice_allocated / vm->choice_push_count;
   }
-#ifdef SNOBOL_JIT
-  if (vm->jit.stats && vm->jit.stats->choice_push_total > 0) {
-    return vm->jit.stats->choice_bytes_total / vm->jit.stats->choice_push_total;
-  }
-#endif
   return 0;
 }
 
@@ -486,12 +481,6 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
     if (vm->choice_live_depth > vm->choice_peak_depth)
       vm->choice_peak_depth = vm->choice_live_depth;
     vm_write_log_clear(vm);
-#ifdef SNOBOL_JIT
-    if (vm->jit.stats) {
-      vm->jit.stats->choice_push_total++;
-      vm->jit.stats->choice_bytes_total += record_size;
-    }
-#endif
   } else {
     size_t record_size = sizeof(struct choice);
     if (vm->choices_top + record_size >= vm->choices_cap) {
@@ -530,12 +519,6 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
       vm->choice_peak_memory = vm->choices_top;
     if (vm->choice_live_depth > vm->choice_peak_depth)
       vm->choice_peak_depth = vm->choice_live_depth;
-#ifdef SNOBOL_JIT
-    if (vm->jit.stats) {
-      vm->jit.stats->choice_push_total++;
-      vm->jit.stats->choice_bytes_total += record_size;
-    }
-#endif
   }
 }
 
@@ -544,10 +527,6 @@ bool vm_pop_choice(VM *vm) {
     return false;
 #ifdef SNOBOL_PROFILE
   vm->profile.pop_count++;
-#endif
-#ifdef SNOBOL_JIT
-  if (vm->jit.stats)
-    vm->jit.stats->choice_pop_total++;
 #endif
   if (vm->use_compact_choice) {
     uint32_t last_size;
@@ -677,143 +656,9 @@ bool vm_run(VM *vm) {
       continue;
     }
 #ifdef SNOBOL_JIT
-    {
-      size_t current_ip = vm->ip;
-      const SnobolJitConfig *jit_cfg = snobol_jit_get_config();
-
-      if (vm->jit.ctx && vm->jit.ctx->stop_compiling &&
-          (!vm->jit.traces || vm->jit.traces[current_ip] == nullptr)) {
-        /* Profitability gate permanently disabled JIT for this pattern and
-         * there is no trace at the current IP.  Fall straight through to
-         * the interpreter without paying profiling overhead each dispatch. */
-      } else if (vm->jit.enabled && vm->jit.traces &&
-                 vm->jit.traces[current_ip]) {
-        /* ---- Execute compiled trace ---- */
-        if (vm->jit.stats) {
-          vm->jit.stats->entries_total++;
-          if (vm->jit.search_mode)
-            vm->jit.stats->search_entries_total++;
-        }
-        if (vm->jit.ctx)
-          vm->jit.ctx->ctx_entries++;
-
-        uint64_t t_exec = (vm->jit.stats) ? snobol_jit_now_ns() : 0;
-        jit_trace_fn fn = (jit_trace_fn)vm->jit.traces[current_ip];
-        snobol_jit_log("jit_trace enter ip=%zu pos=%zu", current_ip, vm->pos);
-        fn(vm);
-        snobol_jit_log("jit_trace exit ip=%zu pos=%zu", vm->ip, vm->pos);
-        if (vm->jit.stats) {
-          uint64_t exec_ns = snobol_jit_now_ns() - t_exec;
-          vm->jit.stats->exec_time_ns_total += exec_ns;
-          vm->jit.stats->time_ns_total += exec_ns; /* legacy */
-          vm->jit.stats->exits_total++;
-          if (vm->ip == current_ip) {
-            vm->jit.stats->bailouts_total++;
-            vm->jit.stats->bailout_match_fail_total++;
-            /* Attribute quick first-op mismatches in search mode
-             * to expected candidate rejection so they are distinguishable
-             * from unsupported control flow or safety fallbacks. */
-            if (vm->jit.search_mode) {
-              vm->jit.stats->bailout_search_candidate_total++;
-              /* search_candidate_rejects is the canonical per-exit
-               * counter for expected candidate rejections only.
-               * It SHALL NOT be incremented for unsupported-op or
-               * left-region bailouts (those land in bailout_partial). */
-              vm->jit.stats->search_candidate_rejects++;
-            }
-          } else {
-            vm->jit.stats->bailout_partial_total++;
-          }
-        }
-
-        /* Per-pattern early-exit rule */
-        if (vm->jit.ctx) {
-          vm->jit.ctx->ctx_exits++;
-          /* Separately track search-mode exits for attribution */
-          if (vm->jit.search_mode)
-            vm->jit.ctx->search_ctx_exits++;
-          if (!vm->jit.ctx->stop_compiling && vm->jit.ctx->ctx_entries > 100 &&
-              jit_cfg->max_exit_rate_pct < 100) {
-            uint64_t entries = vm->jit.ctx->ctx_entries;
-            uint64_t exits = vm->jit.ctx->ctx_exits;
-            if (exits * 100 / entries > (uint64_t)jit_cfg->max_exit_rate_pct) {
-              vm->jit.ctx->stop_compiling = true;
-              if (vm->jit.stats)
-                vm->jit.stats->skipped_exit_rate_total++;
-            }
-          }
-        }
-
-        if (vm->ip != current_ip)
-          continue;
-        /* Fell through (bailout): let interpreter handle current ip */
-
-      } else if (vm->jit.ip_counts && current_ip < vm->bc_len) {
-        uint64_t count = ++vm->jit.ip_counts[current_ip];
-
-        /* in search mode, use a lower hotness threshold so
-         * single-op hot search patterns become JIT-eligible sooner. */
-        uint64_t hot_threshold = vm->jit.search_mode
-                                     ? jit_cfg->search_hotness_threshold
-                                     : jit_cfg->hotness_threshold;
-
-        bool should_try = (count == hot_threshold) && vm->jit.traces &&
-                          vm->jit.traces[current_ip] == nullptr &&
-                          !(vm->jit.ctx && vm->jit.ctx->stop_compiling);
-
-        if (should_try) {
-          /* Profitability gate: use search_mode flag */
-          if (!snobol_jit_should_compile(vm, current_ip, jit_cfg,
-                                         vm->jit.search_mode)) {
-            if (vm->jit.ctx)
-              vm->jit.ctx->stop_compiling = true;
-            /* attribute cold skip to search-mode counter when appropriate */
-            if (vm->jit.stats) {
-              if (vm->jit.search_mode)
-                vm->jit.stats->skipped_search_cold_total++;
-              else
-                vm->jit.stats->skipped_cold_total++;
-            }
-          } else {
-            /* Compile budget check */
-            uint64_t budget_used =
-                vm->jit.ctx ? vm->jit.ctx->compile_time_ns : 0;
-            if (budget_used >= jit_cfg->compile_budget_ns) {
-              if (vm->jit.ctx)
-                vm->jit.ctx->stop_compiling = true;
-              if (vm->jit.stats)
-                vm->jit.stats->skipped_budget_total++;
-            } else {
-              if (vm->jit.stats)
-                vm->jit.stats->compilations_total++;
-              uint64_t t_compile = (vm->jit.stats) ? snobol_jit_now_ns() : 0;
-              size_t code_sz = 0;
-              void *trace =
-                  (void *)snobol_jit_compile(vm, current_ip, &code_sz);
-              if (t_compile && vm->jit.stats) {
-                uint64_t compile_ns = snobol_jit_now_ns() - t_compile;
-                vm->jit.stats->compile_time_ns_total += compile_ns;
-                if (vm->jit.ctx)
-                  vm->jit.ctx->compile_time_ns += compile_ns;
-              }
-              if (trace) {
-                vm->jit.traces[current_ip] = trace;
-                if (vm->jit.ctx && vm->jit.ctx->trace_sizes)
-                  vm->jit.ctx->trace_sizes[current_ip] = code_sz;
-              } else {
-                if (vm->jit.stats)
-                  vm->jit.stats->bailouts_total++;
-              }
-            }
-          }
-        }
-      }
-    } /* end SNOBOL_JIT block */
-#endif
-    /* Track interpreter dispatch time when JIT is enabled */
-#ifdef SNOBOL_JIT
-    uint64_t t_interp =
-        (vm->jit.enabled && vm->jit.stats) ? snobol_jit_now_ns() : 0;
+    /* Tracing JIT has been retired.  The method JIT (whole-pattern
+     * compilation) replaces it and is invoked from search.c, not from
+     * within the VM dispatch.  The VM always runs as interpreter. */
 #endif
     uint8_t op = vm->bc[vm->ip++];
 #ifdef SNOBOL_JIT
@@ -1914,16 +1759,6 @@ bool vm_run(VM *vm) {
       /* Execute dynamic pattern bytecode through the VM */
       const uint8_t *saved_bc = vm->bc;
       size_t saved_bc_len = vm->bc_len;
-#ifdef SNOBOL_JIT
-      void *saved_jit_ctx = vm->jit.ctx;
-      void **saved_jit_traces = vm->jit.traces;
-      uint64_t *saved_jit_ip_counts = vm->jit.ip_counts;
-
-      SnobolJitContext *inner_ctx = (SnobolJitContext *)pattern->jit_ctx;
-      vm->jit.ctx = inner_ctx;
-      vm->jit.traces = inner_ctx ? inner_ctx->traces : nullptr;
-      vm->jit.ip_counts = inner_ctx ? inner_ctx->ip_counts : nullptr;
-#endif
       vm->bc = pattern->bc;
       vm->bc_len = pattern->bc_len;
       vm->ip = 0;
@@ -1937,11 +1772,6 @@ bool vm_run(VM *vm) {
       vm->bc = saved_bc;
       vm->bc_len = saved_bc_len;
       vm->ip = saved_ip;
-#ifdef SNOBOL_JIT
-      vm->jit.ctx = saved_jit_ctx;
-      vm->jit.traces = saved_jit_traces;
-      vm->jit.ip_counts = saved_jit_ip_counts;
-#endif
       /* Restore choice stack and write-log that vm_run() freed */
       vm->choices = saved_choices;
       vm->choices_cap = saved_choices_cap;
@@ -2248,13 +2078,7 @@ bool vm_run(VM *vm) {
         goto fail_ret;
       break;
     }
-    /* Accumulate interpreter dispatch time for this loop iteration */
-#ifdef SNOBOL_JIT
-    if (t_interp && vm->jit.stats) {
-      uint64_t interp_ns = snobol_jit_now_ns() - t_interp;
-      vm->jit.stats->interp_time_ns_total += interp_ns;
-    }
-#endif
+    /* Interpreter dispatch time tracking retired with tracing JIT */
   }
   if (!vm->keep_choices) {
     if (vm->choices) {

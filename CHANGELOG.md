@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### SLJIT Method JIT & Tracing-JIT Retirement — 2026-06-27
+
+### Added
+
+- **SLJIT single backend** (`deps/sljit/`): SLJIT replaces all 4 architecture-
+  specific backends (ARM64, ARM32, RISC-V, x86-64). A single `jit_backend_sljit.c`
+  covers all platforms via SLJIT's native code generation.
+- **Method JIT** (`core/src/jit.c`, `core/src/search.c`): whole-pattern compilation
+  via `snobol_jit_method_compile`/`snobol_jit_method_query`. Compiled functions are
+  cached by bytecode identity and reused across calls. Tier 0 check in
+  `snobol_search_exec` calls the compiled function if available.
+- **Method JIT stats**: `method_attempts_total`, `method_successes_total`,
+  `method_fallbacks_total`, `method_evictions_total` exposed via
+  `snobol_get_jit_stats()`.
+
+### Changed
+
+- **JIT config** simplified: `snobol_jit_config_t` contains only
+  `method_enabled`, `max_compiled_patterns`, `scratch_size`.
+- **CI matrix consolidated**: 4 per-arch jobs replaced with 4 OS-native SLJIT
+  jobs + 1 multi-arch QEMU job (`jit-qemu-smoke`).
+- **QEMU Dockerfiles consolidated**: `ci/Dockerfile.jit-qemu-armv7` and
+  `ci/Dockerfile.jit-qemu-riscv64` merged into `ci/Dockerfile.jit-qemu`.
+
+### Removed
+
+- **Tracing JIT** fully retired: `SnobolJitContext`, `pattern->jit_ctx`,
+  per-IP trace compilation, LRU cache, profitability gate, `SNOBOL_JIT_METHOD`
+  compile-time flag, choice-stack counters (`choice_push_total`,
+  `choice_bytes_total`, `choice_pop_total`).
+- **4 per-architecture backends**: `jit_backend_arm64.c`, `jit_backend_arm32.c`,
+  `jit_backend_riscv64.c`, `jit_backend_x86_64.c` deleted.
+- **9 tracing-JIT test files** removed from build.
+- **Tracing-JIT PHP binding code**: all `jit_ctx`/`ip_counts`/`traces`/`ctx`/
+  `search_mode` references removed from `snobol_pattern.c` and `php_snobol.h`.
+
+### Fixed
+
+- **test_jit_observability.c**: updated to use `method_attempts_total` /
+  `method_successes_total` instead of removed tracing counters.
+- **test_search_meta_cache.c**, **test_search_ex_api.c**: removed
+  `entries_total` references.
+
 ### searchSplit Bulk-Result Buffer — 2026-06-20
 
 ### Added

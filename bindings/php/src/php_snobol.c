@@ -71,6 +71,7 @@ void snobol_pattern_helper_php_minit(void);
 PHP_MINFO_FUNCTION(snobol);
 #ifdef SNOBOL_JIT
 #include "snobol/jit.h"
+#include "snobol/jit_backend.h"
 #endif
 
 PHP_MINFO_FUNCTION(snobol) {
@@ -141,34 +142,11 @@ PHP_FUNCTION(snobol_get_jit_stats) {
 
     SnobolJitStats *stats = snobol_jit_get_stats();
     array_init(return_value);
-    /* Core counters */
-    add_assoc_long(return_value, "jit_compilations_total",       (zend_long)stats->compilations_total);
-    add_assoc_long(return_value, "jit_cache_hits_total",         (zend_long)stats->cache_hits_total);
-    add_assoc_long(return_value, "jit_entries_total",            (zend_long)stats->entries_total);
-    add_assoc_long(return_value, "jit_exits_total",              (zend_long)stats->exits_total);
-    add_assoc_long(return_value, "jit_bailouts_total",           (zend_long)stats->bailouts_total);
-    add_assoc_long(return_value, "jit_time_ns_total",            (zend_long)stats->time_ns_total);
-    /* Backtracking counters */
-    add_assoc_long(return_value, "choice_push_total",            (zend_long)stats->choice_push_total);
-    add_assoc_long(return_value, "choice_pop_total",             (zend_long)stats->choice_pop_total);
-    add_assoc_long(return_value, "choice_bytes_total",           (zend_long)stats->choice_bytes_total);
-    /* Timing */
-    add_assoc_long(return_value, "jit_compile_time_ns_total",    (zend_long)stats->compile_time_ns_total);
-    add_assoc_long(return_value, "jit_exec_time_ns_total",       (zend_long)stats->exec_time_ns_total);
-    add_assoc_long(return_value, "jit_interp_time_ns_total",     (zend_long)stats->interp_time_ns_total);
-    /* Profitability / skip reasons */
-    add_assoc_long(return_value, "jit_skipped_cold_total",       (zend_long)stats->skipped_cold_total);
-    add_assoc_long(return_value, "jit_skipped_exit_rate_total",  (zend_long)stats->skipped_exit_rate_total);
-    add_assoc_long(return_value, "jit_skipped_budget_total",     (zend_long)stats->skipped_budget_total);
-    /* Bailout reasons */
-    add_assoc_long(return_value, "jit_bailout_match_fail_total", (zend_long)stats->bailout_match_fail_total);
-    add_assoc_long(return_value, "jit_bailout_partial_total",    (zend_long)stats->bailout_partial_total);
-    /* Search-mode specific counters */
-    add_assoc_long(return_value, "jit_search_entries_total",              (zend_long)stats->search_entries_total);
-    add_assoc_long(return_value, "jit_search_candidate_rejects",          (zend_long)stats->search_candidate_rejects);
-    add_assoc_long(return_value, "jit_skipped_search_cold_total",         (zend_long)stats->skipped_search_cold_total);
-    add_assoc_long(return_value, "jit_bailout_search_candidate_total",    (zend_long)stats->bailout_search_candidate_total);
-    add_assoc_long(return_value, "jit_blocks_compiled_total",            (zend_long)stats->jit_blocks_compiled_total);
+    /* Method JIT (whole-pattern compilation via SLJIT) — sole remaining JIT stats */
+    add_assoc_long(return_value, "jit_method_attempts_total",  (zend_long)stats->method_attempts_total);
+    add_assoc_long(return_value, "jit_method_successes_total", (zend_long)stats->method_successes_total);
+    add_assoc_long(return_value, "jit_method_fallbacks_total", (zend_long)stats->method_fallbacks_total);
+    add_assoc_long(return_value, "jit_method_evictions_total", (zend_long)stats->method_evictions_total);
 }
 
 PHP_FUNCTION(snobol_reset_jit_stats) {
@@ -194,11 +172,14 @@ PHP_FUNCTION(snobol_set_jit_config) {
     SnobolJitConfig cfg = *snobol_jit_get_config();
     zval *val;
 
-    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "hotness_threshold", sizeof("hotness_threshold")-1)) != NULL) {
-        cfg.hotness_threshold = (uint64_t)zval_get_long(val);
+    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "method_enabled", sizeof("method_enabled")-1)) != NULL) {
+        cfg.method_enabled = (bool)zval_is_true(val);
     }
-    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "min_useful_ops", sizeof("min_useful_ops")-1)) != NULL) {
-        cfg.min_useful_ops = (uint32_t)zval_get_long(val);
+    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "max_compiled_patterns", sizeof("max_compiled_patterns")-1)) != NULL) {
+        cfg.max_compiled_patterns = (uint32_t)zval_get_long(val);
+    }
+    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "scratch_size", sizeof("scratch_size")-1)) != NULL) {
+        cfg.scratch_size = (uint32_t)zval_get_long(val);
     }
 
     snobol_jit_set_config(&cfg);

@@ -395,12 +395,8 @@ static inline void search_reset_vm(VM *vm, const char *subject,
   vm->max_counter_used = 0;
   /* Reset choice stack */
   vm->choices_top = 0;
-#ifdef SNOBOL_JIT
-  /* Mark VM as executing in a search loop so JIT uses
-   * search-mode profitability thresholds and attributes bailouts correctly. */
-  vm->jit.search_mode = true;
-#endif
 }
+
 
 /* ---------------------------------------------------------------------------
  * Tier 2: BREAK/BREAKX accelerated search
@@ -667,13 +663,11 @@ static bool search_automaton_try(VM *vm, const char *subject,
  * per-candidate reset is done by search_reset_vm() (above) which updates
  * only the fields that change between candidates:
  *   vm->s, vm->len, vm->ip, vm->pos, vm->var_count, vm->max_cap_used,
- *   vm->max_counter_used, vm->choices_top, vm->jit.search_mode
- * The JIT-owned fields (vm->jit.ip_counts, vm->jit.traces, vm->jit.ctx)
- * are deliberately preserved across iterations.
+ *   vm->max_counter_used, vm->choices_top
  *
  * Callers that loop snobol_search_exec() (e.g. snobol_pattern_search_ex,
  * PHP Pattern::searchSplit) MUST initialise the VM struct once (setting
- * vm->bc, vm->bc_len, vm->out, JIT fields) and then call this function
+ * vm->bc, vm->bc_len, vm->out) and then call this function
  * repeatedly without re-memset'ing the VM. snobol_pattern_search_ex()
  * in core/src/api.c is the reference implementation.
  * ---------------------------------------------------------------------------
@@ -697,6 +691,53 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
     snobol_search_derive_meta(vm->bc, vm->bc_len, &local_meta);
     meta = &local_meta;
   }
+
+#ifdef SNOBOL_JIT
+  /* ---- Tier 0: Method JIT (whole-pattern native call) ----
+   *
+   * If the method JIT is enabled, compile the entire pattern into a
+   * single native function and cache it.  On subsequent calls use
+   * the cached function directly.
+   *
+   * The compiled function is a standard jit_trace_fn (void fn(VM *vm)).
+   * We synthesise a minimal VM with the subject, bytecode, and position
+   * populated, then call it.  If vm->ip advances past all bytecodes,
+   * the match succeeded.
+   *
+   * On failure, fall through to the existing tiered search path.
+   */
+   const SnobolJitConfig *jit_cfg = snobol_jit_get_config();
+   if (jit_cfg && jit_cfg->method_enabled) {
+     /* Try cache first, then compile */
+     jit_trace_fn mfn = snobol_jit_method_query(vm->bc, vm->bc_len);
+     if (!mfn)
+       mfn = snobol_jit_method_compile(vm->bc, vm->bc_len, NULL);
+     if (mfn) {
+       /* Synthesise a minimal VM for the compiled trace */
+       VM local_vm;
+       memset(&local_vm, 0, sizeof(local_vm));
+       local_vm.bc = vm->bc;
+       local_vm.bc_len = vm->bc_len;
+       local_vm.s = subject;
+       local_vm.len = subject_len;
+       local_vm.ip = 0;
+       local_vm.pos = start_offset;
+
+       mfn(&local_vm);
+
+       /* If ip reached the end, match succeeded */
+       if (local_vm.ip == local_vm.bc_len) {
+         if (out_result) {
+           out_result->success = true;
+           out_result->match_start = start_offset;
+           out_result->match_end = local_vm.pos;
+         }
+         return true;
+       }
+       /* Match failed — fall through to existing tiers. */
+     }
+   }
+#endif /* SNOBOL_JIT */
 
   /* ---- Tier 1a: BREAK / BREAKX with ASCII bitmap ---- */
   if (meta->is_break_family && meta->ascii_class_only) {

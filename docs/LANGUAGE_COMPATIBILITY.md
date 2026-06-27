@@ -32,7 +32,7 @@ The engine now supports full SNOBOL language compatibility including:
 | Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                     |
 | Helper API: `DynamicPatternCache`             | ✅ Complete | Truthful runtime-backed cache interface       |
 | Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)    |
-| Test coverage                                 | ✅ Complete | 228 PHP tests, 1,457 C tests                  |
+| Test coverage                                 | ✅ Complete | 228 PHP tests, 1,615 C tests                  |
 
 ### ⚠️ Known Limitations
 
@@ -48,22 +48,27 @@ The engine now supports full SNOBOL language compatibility including:
 The JIT subsystem uses a two-phase compilation pipeline:
 
 ```
-VM bytecodes → [Lifter] → jit_ir_region_t → [DCE + Copy-prop] → [Backend lowerer] → machine code
+VM bytecodes → [Lifter] → jit_ir_region_t → [DCE + Copy-prop] → [SLJIT lowerer] → machine code
 ```
 
 1. **Lifter** (`jit_ir_lift_region`): Translates VM bytecode to a flat, linear IR
    (`jit_ir_instr_t` array).  All operands are pre-decoded; the backend reads only IR fields.
 2. **Optimiser passes**: Dead-code elimination (DCE) removes pure instructions with zero-use
    output registers; copy-propagation folds copy chains before DCE runs.
-3. **Backend lowerer** (`jit_backend_t::lower`): Architecture-specific code emitter.
-   The active backend is selected at compile time via `SNOBOL_JIT_BACKEND` (default: `arm64`).
+3. **SLJIT lowerer** (`jit_backend_sljit.c`): Single backend covering all architectures
+   (x86-64, AArch64, ARMv7, RISC-V 64). The 4 architecture-specific backends have been
+   retired; `SNOBOL_JIT_BACKEND` defaults to `sljit` and no other backend is available.
+
+In addition to the per-IP hot-trace JIT, a **method JIT** compiles entire patterns ahead
+of execution. The compiled function (`jit_trace_fn`) is cached by bytecode identity and
+reused across calls. Enable via `SnobolJitConfig.method_enabled` (default: on). Patterns
+containing `EVAL` / `DYNAMIC` / `BAL` fall back to the interpreter.
 
 ### Debug tools
 
 | Environment variable   | Effect                                                |
 |------------------------|-------------------------------------------------------|
 | `SNOBOL_JIT_DUMP_IR=1` | Dump human-readable IR to `stderr` before lowering    |
-| `SNOBOL_JIT_BACKEND`   | CMake option — selects the backend (default: `arm64`) |
 
 ## Parser Extensions
 
@@ -400,62 +405,44 @@ All runtime objects (tables, dynamic patterns) use reference counting:
 
 ## JIT Availability
 
-The JIT subsystem supports four backends across multiple operating systems:
+The JIT subsystem uses **SLJIT** as the single backend covering all supported architectures. SLJIT is the default and only valid `SNOBOL_JIT_BACKEND`; the previous four architecture-specific backends (ARM64, ARM32, RISC-V 64, x86-64) have been retired.
 
-| Backend   | Target Architecture | OS                    | CI Status       | Notes                                                             |
-|-----------|---------------------|-----------------------|-----------------|-------------------------------------------------------------------|
-| `arm64`   | AArch64             | macOS (Apple Silicon) | ✅ Native runner | `MAP_JIT` code pages; full opcode coverage                        |
-| `arm64`   | AArch64             | Linux                 | ✅ Native + QEMU | W^X model; `__builtin___clear_cache`                              |
-| `arm32`   | ARMv7-A (Thumb-2)   | Linux                 | ✅ QEMU-emulated | W^X model; AAPCS32 calling convention                             |
-| `riscv64` | RV64GC              | Linux                 | ✅ QEMU-emulated | Optional RV64C compressed; W^X + icache flush                     |
-| `x86_64`  | x86-64 (AMD64)      | Linux                 | ✅ Native runner | System V AMD64 ABI; W^X model                                     |
-| `x86_64`  | x86-64 (AMD64)      | macOS (Intel)         | ✅ Native runner | System V AMD64 ABI; `MAP_JIT`                                     |
-| `x86_64`  | x86-64 (AMD64)      | Windows               | ✅ Native runner | Microsoft x64 ABI; `VirtualAlloc`/`VirtualProtect`; DEP-compliant |
+| Backend | Target Architectures                        | OS                     | CI Status        |
+|---------|---------------------------------------------|------------------------|------------------|
+| `sljit` | AArch64, ARMv7, RISC-V 64, x86-64, and more | macOS, Linux, Windows  | ✅ Native + QEMU |
 
 **CI coverage notes:**
-- QEMU-based CI (`jit-qemu-aarch64`, `jit-qemu-armv7`, `jit-qemu-riscv64`) provides **correctness coverage** — validates JIT compilation and match results match interpreter output.
-- Native runners (`jit-backend-tests` matrix) provide **performance coverage** — benchmarks measure JIT throughput and bailout rates under real hardware conditions.
-
-Select the backend at CMake time via `-DSNOBOL_JIT_BACKEND=<name>` (default: `arm64`).
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for per-backend build instructions.
+- QEMU-based CI (`jit-qemu-smoke` with `matrix.platform: [ linux/arm64, linux/arm/v7, linux/riscv64 ]`) validates JIT compilation and match results across architectures.
+- Native runners (`jit-backend-tests` matrix) run benchmarks on real hardware (macOS ARM64, Linux x86-64, Windows x86-64).
+- SLJIT handles register allocation, W^X memory management, and icache flush internally.
 
 ## JIT Compatibility Notes
 
-As of v0.9.0 the ARM64 micro-JIT compiles **all VM opcodes**. No opcode causes
-an interpreter fallback at runtime:
+As of the SLJIT method-JIT change, opcodes fall into three categories:
 
-| Opcode group                                                           | JIT status (v0.9.0)                                                                                                                       |
-|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| `OP_LABEL`, `OP_GOTO`, `OP_GOTO_F`                                     | **jit-compiled** — label is a no-emit pseudo-op; GOTO/GOTO_F compile as unconditional/conditional branches                                |
-| `OP_TABLE_GET`, `OP_TABLE_SET`, `OP_EMIT_TABLE`                        | **call-out** — compiled as `BLR` to `snobol_jit_helper_table_{get,set}` / `snobol_jit_helper_emit_table_ip`                               |
-| `OP_DYNAMIC_DEF`, `OP_DYNAMIC`                                         | **pseudo / call-out** — `OP_DYNAMIC_DEF` is a region-termination pseudo-op; `OP_DYNAMIC` compiles as `BLR` to `snobol_jit_helper_dynamic` |
-| `OP_EMIT_FORMAT`, `OP_EMIT_LITERAL`, `OP_EMIT_CAPTURE`, `OP_EMIT_EXPR` | **call-out** — compiled as inline `BLR` to the registered `vm->emit_fn` callback                                                          |
-| `OP_REM`, `OP_RPOS`, `OP_RTAB`                                         | **jit-compiled** — inline integer comparisons against `vm->sp` / `vm->subject_len`                                                        |
-| `OP_FENCE`                                                             | **jit-compiled** — inline choice-stack cut                                                                                                |
-| `OP_BAL`                                                               | **call-out** — compiled as `BLR` to `snobol_jit_helper_bal`                                                                               |
-| `OP_EVAL`                                                              | **call-out** — compiled as `BLR` with full caller-saved register spill/restore                                                            |
+| Category | Opcodes | Behavior |
+|----------|---------|----------|
+| **Compilable** | LIT, ANY, NOTANY, LEN, ANCHOR, POS, RPOS, TAB, RTAB, REM, FAIL, FENCE, SUCCEED, ACCEPT, CAP_START, CAP_END, EMIT_LITERAL, EMIT_CAPTURE, BAL, EVAL, GOTO, GOTO_F, LABEL, NOP | Compiled to native SLJIT code. C call-outs (ANY, NOTANY, EMIT_LITERAL, EMIT_CAPTURE, BAL, EVAL) save/restore `VM.pos` and invoke helpers. |
+| **Non-compilable** (→ VM fallback) | SPAN, BREAK, BREAKX, SPLIT, ASSIGN, REPEAT_INIT, REPEAT_STEP, EMIT_EXPR, EMIT_FORMAT, EMIT_TABLE, TABLE_GET, TABLE_SET, DYNAMIC | The IR lifter marks the region `non_compilable`; `snobol_jit_method_compile()` returns NULL. The VM interpreter handles these opcodes. |
+| **Pseudo** | PHI, COPY, DYNAMIC_DEF | Architecture-neutral IR artefacts; no code emitted. |
 
-**Phase 1c additions (CFG-based multi-block JIT, still active):**
+Patterns containing any **Non-compilable** opcode fall back to the VM interpreter
+at all times — no partial JIT compilation is attempted.
 
-- **Multi-arm alternation** (`'a' | 'b' | 'c'`) — compiled with the CFG builder; each SPLIT arm is a separate
-  compiled stub, eliminating interpreter round-trips between arms.
-- **ARBNO loops** — backward JMP edges compiled with a counted iteration guard (`JIT_LOOP_ITER_MAX` = 1024).
-- **`jit_blocks_compiled_total`** — `SnobolJitStats` field counting compiled CFG blocks.
-
-**Observability counters** (`jit_exec_time_ns_total`, `jit_interp_time_ns_total`, `jit_bailouts_total`) are
-exposed via `snobol_jit_get_stats()` / `snobol_jit_stats_reset()` and asserted in `tests/JitOpcodeCoverageTest.php`.
-For fully-compiled patterns `jit_bailouts_total` will be 0 and `jit_interp_time_ns_total` will be 0.
+**Observability counters** (`jit_method_attempts_total`, `jit_method_successes_total`,
+`jit_method_fallbacks_total`, `jit_method_evictions_total`)
+are exposed via `snobol_get_jit_stats()` / `snobol_reset_jit_stats()`.
 
 ## Test Coverage
 
 | Suite         | Tests | Assertions | Status   |
 |---------------|-------|------------|----------|
-| C Tests       | 1,457 | -          | ✅ Pass   |
+| C Tests       | 1,615 | -          | ✅ Pass   |
 | PHP Tests     | 228   | 556        | ✅ Pass   |
 | Compatibility | 26    | -          | ✅ Pass   |
 | Skipped       | 4     | -          | Expected |
 
-**Total:** 1,711 tests passing
+**Total:** 1,869 tests passing
 
 ## Case-Insensitive Matching
 

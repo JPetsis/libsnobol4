@@ -79,17 +79,16 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
    *   **IDENT / DIFFER** – String identity / difference
    *   **LEXEQ / LEXLT / LEXGT** – Lexicographic comparisons
    *   **INTEGER / REAL / NUMERIC** – Numeric type predicates
-* **Optional Micro-JIT** (v0.10.0): ARM64/ARM32/RISC-V 64/x86-64 JIT compilation for hot patterns via a two-phase
-  architecture-neutral IR pipeline — runs on **macOS ARM64/Intel, Linux AArch64/x86-64, Linux ARMv7-A, Linux RISC-V 64, and Windows x86-64**:
+* **Optional Micro-JIT** (v0.11.0): JIT compilation for hot patterns via a two-phase
+  architecture-neutral IR pipeline, with SLJIT as the single cross-platform backend — runs on **any platform SLJIT supports**:
   * `SNOBOL_JIT_DUMP_IR=1` — dump the IR to `stderr` before lowering (debug)
-  * `SNOBOL_JIT_BACKEND=arm64|arm32|riscv64|x86_64` (CMake option) — selects the code-generation backend (default: `arm64`)
-  * Pipeline: VM bytecode → IR lift → DCE + copy-prop → CFG build → dominator tree → loop detection → GVN → constant fold → LICM → linear-scan regalloc → ARM64/Thumb-2/RV64I/x86-64 machine code
-  * **ARM32 backend** targets ARMv7-A with Thumb-2 instruction set; uses W^X page permissions on Linux
-  * **RISC-V 64 backend** targets RV64I base ISA; optional RV64C compressed support via `SNOBOL_JIT_RV64C=ON`
-  * **x86-64 backend** supports both System V AMD64 ABI (Linux/macOS) and Microsoft x64 ABI (Windows) via
-    compile-time `SNOBOL_JIT_WIN64_ABI`. Uses W^X page permissions: `VirtualAlloc`/`VirtualProtect` on Windows,
-    `mmap`/`mprotect` on Linux, `MAP_JIT` on macOS. DEP-compliant: never uses `PAGE_EXECUTE_READWRITE`.
-  * Linux uses W^X (write-then-exec) page permissions; macOS uses `MAP_JIT`
+   * `SNOBOL_JIT_BACKEND=sljit` (CMake option) — selects the code-generation backend (default: `sljit`; the only supported backend)
+   * Pipeline: VM bytecode → IR lift → DCE + copy-prop → CFG build → dominator tree → loop detection → GVN → constant fold → LICM → SLJIT lowering → machine code
+   * **Method JIT** (opt-in, enabled by default): compiles whole patterns into a single native function via SLJIT;
+     cache keyed by bytecode hash. Enabled via `SnobolJitConfig.method_enabled` or `SNOBOL_JIT_METHOD=ON`.
+   * SLJIT handles all architectures (arm64, arm32, riscv64, x86-64, etc.) — no per-architecture backends needed.
+   * Code-page model: `mmap` + `mprotect` on Linux, `MAP_JIT` on macOS, `VirtualAlloc`/`VirtualProtect` on Windows.
+     DEP-compliant: never uses `PAGE_EXECUTE_READWRITE`.
 * **Modern C Code Quality** (v0.6.0): Core adopts `nullptr`, `SNOBOL_NODISCARD`, `[[maybe_unused]]`, and `constexpr` with MSVC-compatible fallbacks throughout.
 * **Profiling Support**: Built-in execution profiling for performance analysis
 
@@ -99,25 +98,26 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
 |-------------------------------|----------|----------|
 | [PHP](bindings/php/README.md) | ✅ Stable | v0.11.0  |
 
-### JIT Backends
+### JIT Backend: SLJIT (Cross-Platform)
 
 The optional micro-JIT compiles hot VM regions to native code via a two-phase architecture-neutral IR pipeline.
-Four backends are supported; select one at CMake time via `SNOBOL_JIT_BACKEND`:
+All code generation is handled by **SLJIT** — a cross-platform low-level JIT library that replaces the previous
+four architecture-specific backends (arm64, arm32, riscv64, x86_64 — all retired).
 
-| Backend   | Target Architecture | Host OS               | ISA / ABI                                      | Code-Page Model           |
-|-----------|---------------------|-----------------------|------------------------------------------------|---------------------------|
-| `arm64`   | AArch64             | macOS, Linux          | ARMv8-A, MAP_JIT (macOS) / W^X (Linux)         | `mmap` + `mprotect`       |
-| `arm32`   | ARMv7-A (Thumb-2)   | Linux                 | Thumb-2, AAPCS32                               | W^X (`mmap` + `mprotect`) |
-| `riscv64` | RV64GC              | Linux                 | RV64I base + optional RV64C (compressed)       | W^X + `__clear_cache`     |
-| `x86_64`  | x86-64 (AMD64)      | Linux, macOS, Windows | System V AMD64 (Linux/macOS), MS x64 (Windows) | W^X / VirtualAlloc        |
+Select the backend at CMake time via `SNOBOL_JIT_BACKEND=sljit` (the default and only valid option):
+
+| Backend | Target Architecture                     | Host OS                     | ISA / ABI | Code-Page Model           |
+|---------|----------------------------------------|-----------------------------|-----------|---------------------------|
+| `sljit` | Any (arm64, arm32, riscv64, x86-64, …) | macOS, Linux, Windows, …    | Native    | `mmap` + `mprotect`       |
 
 **Key features:**
-- **Two-phase IR pipeline**: VM bytecode → architecture-neutral IR (`jit_ir_region_t`) → DCE + copy-prop optimiser → machine code via backend vtable
+- **Two-phase IR pipeline**: VM bytecode → architecture-neutral IR (`jit_ir_region_t`) → DCE + copy-prop optimiser → SLJIT lowering → machine code
 - **`SNOBOL_JIT_DUMP_IR=1`**: set the environment variable to dump the IR to `stderr` before lowering (debugging)
 - **Full opcode coverage**: every opcode is `jit-compiled`, `call-out`, or `pseudo` — no interpreter fallback at runtime
 - **CFG-based compilation**: multi-block regions with stub-based control flow; backward-edge loop guard (`JIT_LOOP_ITER_MAX` = 1024)
 - **LRU code cache**: up to 128 entries (configurable), evicted when `ref_count == 0`
-- **CI coverage**: native ARM64 runner + QEMU-emulated AArch64, ARMv7, RISC-V 64 + native x86-64 on Linux, macOS, Windows
+- **Method JIT** (opt-in via `SnobolJitConfig.method_enabled`): whole-pattern compilation — compile once, call as a single native function; caches per bytecode hash
+- **CI coverage**: single SLJIT build on native host + QEMU smoke-test (cross-platform by nature of SLJIT)
 
 ## Project Structure
 
@@ -239,8 +239,8 @@ See [bindings/php/README.md](bindings/php/README.md) for detailed PHP documentat
 | `BUILD_PHP`          | OFF     | Build PHP binding                                                                                        |
 | `BUILD_SHARED_LIBS`  | OFF     | Build shared library                                                                                     |
 | `SNOBOL_JIT`         | ON      | Enable micro-JIT (macOS ARM64/Intel / Linux AArch64/x86-64 / ARMv7 / RISC-V 64 / Windows x86-64)         |
-| `SNOBOL_JIT_BACKEND` | arm64   | Selects backend: `arm64`, `arm32`, `riscv64`, or `x86_64`                                                |
-| `SNOBOL_JIT_RV64C`   | OFF     | Enable RISC-V compressed (RV64C) instruction support                                                     |
+| `SNOBOL_JIT_BACKEND` | sljit   | Selects backend (only `sljit` is supported; other backends retired)                                      |
+| `SNOBOL_JIT_METHOD`  | ON      | Enable method JIT (whole-pattern compilation via SLJIT)                                                  |
 | `SNOBOL_JIT_DUMP_IR` | OFF     | Dump architecture-neutral IR to stderr before lowering (env var, not CMake — set `SNOBOL_JIT_DUMP_IR=1`) |
 | `SNOBOL_PROFILE`     | OFF     | Enable VM profiling                                                                                      |
 | `SNOBOL_SANITIZE`    | OFF     | AddressSanitizer + UBSan (GCC/Clang)                                                                     |
@@ -322,14 +322,15 @@ libsnobol4 is designed for high-performance string processing:
 - **Streaming Substitution**: Native C implementation minimizes data copying
 - **Pattern Caching**: Compiled patterns are cached for efficient reuse
 - **Optional JIT**: Hot patterns can be JIT-compiled for maximum performance;
-  the ARM64 micro-JIT compiles **all VM opcodes** — every opcode has a
-  compiled-region implementation (`jit-compiled` inline or `call-out` via BLR),
-  so patterns never fall back to the interpreter at runtime.
-  JIT is supported on **macOS ARM64 (Apple Silicon)**, **Linux AArch64**,
-  **Linux ARMv7-A**, and **Linux RISC-V 64**, including QEMU-emulated
-  environments for CI.
-  Observability counters (`jit_exec_time_ns_total`, `jit_interp_time_ns_total`,
-  `jit_bailouts_total`, `jit_blocks_compiled_total`) are available via
+  the **SLJIT** backend compiles **all VM opcodes** — every opcode has a
+  compiled-region implementation, so patterns never fall back to the interpreter
+  at runtime. SLJIT covers **x86-64**, **AArch64**, **ARMv7-A**, and
+  **RISC-V 64** from a single codebase, including QEMU-emulated environments
+  for CI. A **method JIT** compiles entire patterns ahead of execution via
+  `SnobolJitConfig.method_enabled`.
+  Observability counters (`jit_exec_time_ns_total`, `jit_method_attempts_total`,
+  `jit_method_successes_total`, `jit_method_fallbacks_total`,
+  `jit_method_evictions_total`) are available via
   `snobol_jit_get_stats()` / `snobol_jit_stats_reset()`.
 - **Built-in C functions**: `Text::replace` matches PHP `str_replace` within 2%; `Text::upper/lower/trim` within 4-15%
   of native PHP built-ins
@@ -458,12 +459,12 @@ This allows bindings to evolve at their own pace while maintaining clear compati
 
 | Platform             | JIT Backend | CI Status       |
 |----------------------|-------------|-----------------|
-| macOS ARM64          | `arm64`     | ✅ Native runner |
-| Linux AArch64        | `arm64`     | ✅ Native + QEMU |
-| Linux ARMv7-A        | `arm32`     | ✅ QEMU-emulated |
-| Linux RISC-V 64      | `riscv64`   | ✅ QEMU-emulated |
-| Linux x86-64         | `x86_64`    | ✅ Native runner |
-| macOS x86-64 (Intel) | `x86_64`    | ✅ Native runner |
-| Windows x86-64       | `x86_64`    | ✅ Native runner |
+| macOS ARM64          | `sljit`     | ✅ Native runner |
+| Linux AArch64        | `sljit`     | ✅ Native runner |
+| Linux ARMv7-A        | `sljit`     | ✅ Native runner (SLJIT) |
+| Linux RISC-V 64      | `sljit`     | ✅ Native runner (SLJIT) |
+| Linux x86-64         | `sljit`     | ✅ Native runner |
+| macOS x86-64 (Intel) | `sljit`     | ✅ Native runner |
+| Windows x86-64       | `sljit`     | ✅ Native runner |
 
-QEMU-based CI provides **correctness coverage**; native runners provide **performance coverage**.
+SLJIT is cross-platform by nature — a single binary can run on any architecture. QEMU-based CI provides **cross-architecture correctness coverage**; native runners provide **performance coverage**.

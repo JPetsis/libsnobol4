@@ -39,7 +39,6 @@ typedef struct snobol_pattern {
     uint8_t *bc;
     size_t bc_len;
 #ifdef SNOBOL_JIT
-    struct SnobolJitContext *jit_ctx;
     bool jit_enabled;
 #endif
     zend_object std;

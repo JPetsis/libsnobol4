@@ -14,16 +14,9 @@ add_executable(snobol4_tests
     test_stress_backtracking.c
     test_catastrophic.c
     test_jit_observability.c
-    test_jit_cache.c
-    test_jit_branches.c
-    test_jit_profitability.c
-    test_jit_cfg.c
-    test_jit_opcode_coverage.c
     test_jit_ir.c
-    test_jit_arm32.c
-    test_jit_riscv64.c
-    test_jit_x86_64.c
     test_jit_c_api.c
+    test_jit_method.c
     test_search_meta_cache.c
     test_search_ex_api.c
     test_lexer.c
@@ -44,7 +37,6 @@ add_executable(snobol4_tests
     test_comparison_numeric.c
     test_builtin_dispatch.c
     test_search_runtime.c
-    test_search_jit.c
     test_fusion.c
     test_compact_choice.c
     # New: Unicode fold, case-insensitive patterns, API version

@@ -17,7 +17,7 @@ use PHPUnit\Framework\TestCase;
  * This test runs both probes and asserts:
  *
  *   1. Both probes produce non-zero iterations for every scenario.
- *   2. Search-mode scenarios in the PHP probe show jit_entries > 0
+ *   2. Search-mode scenarios in the PHP probe show jit_method_attempts > 0
  *      (proves the PHP binding exercises the same JIT machinery).
  *   3. The PHP cost for the tokenize scenario is at most 500x the C
  *      cost. This is a loose guard: today's ratio is around 100-300x
@@ -128,8 +128,8 @@ class JitCPhpCouplingTest extends TestCase
             }
         }
         $this->assertNotNull($tokenize, 'PHP probe missing tokenize_php scenario');
-        $this->assertGreaterThan(0, $tokenize['jit_entries'],
-            'PHP searchSplit should fire the JIT — got 0 entries. '
+        $this->assertGreaterThan(0, $tokenize['jit_method_attempts'],
+            'PHP searchSplit should fire the JIT — got 0 attempts. '
             . 'Did the binding fail to enable search-mode JIT?');
     }
 
@@ -178,7 +178,7 @@ class JitCPhpCouplingTest extends TestCase
     public function testJitImprovesBothPaths(): void
     {
         // When SNOBOL_JIT=1 (the default in ddev), the search-mode
-        // scenarios should show jit_entries > 0 in BOTH the C probe
+        // scenarios should show method-JIT attempts > 0 in BOTH the C probe
         // and the PHP probe. This proves the binding is not silently
         // disabling JIT for search-mode work.
         $php = $this->runPhpProbe();
@@ -192,9 +192,9 @@ class JitCPhpCouplingTest extends TestCase
             return;
         }
 
-        $this->assertGreaterThan(0, $c_search['jit_entries'],
+        $this->assertGreaterThan(0, $c_search['jit_method_attempts'],
             'C probe tokenize did not fire JIT — check SNOBOL_JIT=1');
-        $this->assertGreaterThan(0, $php_search['jit_entries'],
+        $this->assertGreaterThan(0, $php_search['jit_method_attempts'],
             'PHP probe tokenize_php did not fire JIT — '
             . 'the binding may have disabled search-mode JIT');
     }
@@ -256,8 +256,7 @@ class JitCPhpCouplingTest extends TestCase
 
     /**
      * Parse the C probe's table output. The C probe prints a table
-     * with columns: scenario, ns/iter, iters, jit_ent, jit_bail,
-     * s_entries, choice_p, choice_pop, exec_ns, interp_ns.
+     * with columns: scenario, ns/iter, iters, jit_attempts, jit_ok, jit_fb.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -277,22 +276,17 @@ class JitCPhpCouplingTest extends TestCase
             if (preg_match('/^Legend:/', $line)) break;
             if (trim($line) === '') continue;
 
-            // Format: name ns/iter iters jit_ent jit_bail s_entries
-            //         choice_p choice_pop exec_ns interp_ns
+            // Format: name ns/iter iters jit_attempts jit_ok jit_fb
             $cols = preg_split('/\s+/', trim($line));
-            if (count($cols) < 10) continue;
+            if (count($cols) < 6) continue;
             $rows[] = [
-                'name'           => $cols[0],
-                'ns_per_iter'    => (int)$cols[1],
-                'iters'          => (int)$cols[2],
-                'jit_entries'    => (int)$cols[3],
-                'jit_bailouts'   => (int)$cols[4],
-                'jit_search_entries' => (int)$cols[5],
-                'jit_choice_push'=> (int)$cols[6],
-                'jit_choice_pop' => (int)$cols[7],
-                'total_ns'       => (int)$cols[1] * (int)$cols[2],
-                'jit_exec_ns'    => (int)$cols[8],
-                'jit_interp_ns'  => (int)$cols[9],
+                'name'              => $cols[0],
+                'ns_per_iter'       => (int)$cols[1],
+                'iters'             => (int)$cols[2],
+                'jit_method_attempts'  => (int)$cols[3],
+                'jit_method_successes' => (int)$cols[4],
+                'jit_method_fallbacks' => (int)$cols[5],
+                'total_ns'          => (int)$cols[1] * (int)$cols[2],
             ];
         }
         return $rows;

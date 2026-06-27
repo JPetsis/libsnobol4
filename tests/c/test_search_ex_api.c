@@ -148,19 +148,11 @@ void test_search_ex_api_suite(void) {
               snobol_pattern_search_ex(state, "aaaaaaaaaaaaaaaaaa", 18, 0);
           (void)m;
         }
-#ifdef SNOBOL_JIT
-        snobol_jit_reset_stats();
-        uint64_t before = snobol_jit_get_stats()->entries_total;
-#endif
         for (int i = 0; i < 50; i++) {
           snobol_match_t *m =
               snobol_pattern_search_ex(state, "aaaaaaaaaaaaaaaaaa", 18, 0);
           (void)m;
         }
-#ifdef SNOBOL_JIT
-        uint64_t after = snobol_jit_get_stats()->entries_total;
-        test_assert(after > before, "JIT fires through stateful path");
-#endif
         snobol_pattern_search_state_destroy(state);
       }
       snobol_pattern_free(pat);

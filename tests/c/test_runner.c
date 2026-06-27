@@ -265,16 +265,9 @@ void test_control_flow_suite(void);
 void test_backtracking_suite(void);
 void test_catastrophic_suite(void);
 void test_jit_observability_suite(void);
-void test_jit_cache_suite(void);
-void test_jit_branches_suite(void);
-void test_jit_profitability_suite(void);
-void test_jit_cfg_suite(void);
-void test_jit_opcode_coverage_suite(void);
 void test_jit_ir_suite(void);
-void test_jit_arm32_suite(void);
-void test_jit_riscv64_suite(void);
-void test_jit_x86_64_suite(void);
 void test_jit_c_api_suite(void);
+void test_jit_method_suite(void);
 void test_search_meta_cache_suite(void);
 void test_search_ex_api_suite(void);
 void test_lexer_suite(void);
@@ -300,7 +293,6 @@ void test_comparison_suite(void);
 void test_comparison_numeric_suite(void);
 void test_builtin_dispatch_suite(void);
 void test_search_runtime_suite(void);
-void test_search_jit_suite(void);
 void test_fusion_suite(void);
 void test_compact_choice_suite(void);
 /* Unicode / API new suites */
@@ -338,16 +330,9 @@ int main(void) {
 
   /* JIT */
   RUN_SUITE("JIT: Observability", test_jit_observability_suite);
-  RUN_SUITE("JIT: Cache", test_jit_cache_suite);
-  RUN_SUITE("JIT: Branches", test_jit_branches_suite);
-  RUN_SUITE("JIT: Profitability", test_jit_profitability_suite);
-  RUN_SUITE("JIT: CFG Multi-Block", test_jit_cfg_suite);
-  RUN_SUITE("JIT: Full Opcode Coverage", test_jit_opcode_coverage_suite);
   RUN_SUITE("JIT: Neutral IR", test_jit_ir_suite);
-  RUN_SUITE("JIT: ARM32 Backend", test_jit_arm32_suite);
-  RUN_SUITE("JIT: RISCV64 Backend", test_jit_riscv64_suite);
-  RUN_SUITE("JIT: x86_64 Backend", test_jit_x86_64_suite);
   RUN_SUITE("JIT: C API Integration", test_jit_c_api_suite);
+  RUN_SUITE("JIT: Method", test_jit_method_suite);
   RUN_SUITE("Search: cached metadata", test_search_meta_cache_suite);
   RUN_SUITE("Search: stateful _ex API", test_search_ex_api_suite);
 
@@ -378,7 +363,6 @@ int main(void) {
 
   /* Search runtime */
   RUN_SUITE("Search Runtime", test_search_runtime_suite);
-  RUN_SUITE("Search JIT", test_search_jit_suite);
   RUN_SUITE("Fusion: SPLIT/ANY", test_fusion_suite);
   RUN_SUITE("Compact Choice Stack", test_compact_choice_suite);
   /* Unicode / API */

@@ -85,34 +85,16 @@ jobs:
           retention-days: 7
 
   jit-backend-tests:
-    name: JIT Backend Tests (${{ matrix.os }}, ${{ matrix.backend }})
+    name: JIT Tests (${{ matrix.os }}, SLJIT)
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # ARM64: macOS Apple Silicon + Linux AArch64
-          - os: macos-latest
-            backend: arm64
-          - os: ubuntu-24.04-arm
-            backend: arm64
-          # x86-64: Linux + Windows + macOS Intel
-          - os: ubuntu-latest
-            backend: x86_64
-          - os: windows-latest
-            backend: x86_64
-          - os: macos-26-intel
-            backend: x86_64
+        os: [ ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm ]
 
     env:
-      # Capture every JIT/VM event to a file so a CI hang can be diagnosed
-      # post-mortem by inspecting the last few hundred lines of the log.
-      # CTest runs in build/, so the log is created in build/ alongside the
-      # test binary; the upload step globs both the working dir and build/.
-      SNOBOL_JIT_LOG_FILE: snobol-jit-${{ matrix.os }}-${{ matrix.backend }}.log
-      # Per-suite watchdog.  Aborts the test binary if a suite runs longer
-      # than this; default 60 s.
+      SNOBOL_JIT_LOG_FILE: snobol-jit-${{ matrix.os }}-sljit.log
       SNOBOL_TEST_TIMEOUT_SECS: "60"
 
     steps:
@@ -127,12 +109,12 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: choco install procdump --no-progress --ignore-checksums
 
-      - name: Configure CMake (with JIT backend)
+      - name: Configure CMake (SLJIT backend)
         run: >
           cmake -B build
           -DBUILD_TESTS=ON
           -DBUILD_PHP=OFF
-          -DSNOBOL_JIT_BACKEND=${{ matrix.backend }}
+          -DSNOBOL_JIT_BACKEND=sljit
 
       - name: Build
         run: cmake --build build --config Release
@@ -147,7 +129,7 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure -L roundtrip
 
-      - name: Run full JIT test suite
+      - name: Run full test suite
         if: matrix.os != 'windows-latest'
         working-directory: build
         run: ctest --output-on-failure
@@ -162,7 +144,7 @@ jobs:
         working-directory: build
         run: ctest --output-on-failure -L roundtrip -C Release --verbose
 
-      - name: Run full JIT test suite (Windows)
+      - name: Run full test suite (Windows)
         if: matrix.os == 'windows-latest'
         working-directory: build
         run: ctest --output-on-failure -C Release --verbose
@@ -196,7 +178,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: jit-log-${{ matrix.os }}-${{ matrix.backend }}
+          name: jit-log-${{ matrix.os }}-sljit
           compression-level: 0
           path: |
             build/${{ env.SNOBOL_JIT_LOG_FILE }}
@@ -208,9 +190,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  jit-qemu-aarch64:
-    name: JIT QEMU AArch64 (Linux)
+  jit-qemu-smoke:
+    name: JIT QEMU Cross-Arch Smoke Test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ linux/arm64, linux/arm/v7, linux/riscv64 ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -218,55 +204,15 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
-          platforms: arm64
+          platforms: ${{ matrix.platform }}
 
-      - name: Build and test in QEMU AArch64 container
+      - name: Build and test in QEMU container
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/arm64
+          platforms: ${{ matrix.platform }}
           push: false
           file: ci/Dockerfile.jit-qemu
-
-  jit-qemu-armv7:
-    name: JIT QEMU ARMv7 (Linux)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm
-
-      - name: Build and test in QEMU ARMv7 container
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/arm/v7
-          push: false
-          file: ci/Dockerfile.jit-qemu-armv7
-
-  jit-qemu-riscv64:
-    name: JIT QEMU RISC-V 64 (Linux)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: riscv64
-
-      - name: Build and test in QEMU RISC-V 64 container
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/riscv64
-          push: false
-          file: ci/Dockerfile.jit-qemu-riscv64
 
   asan:
     name: AddressSanitizer + UBSan (PR gate)

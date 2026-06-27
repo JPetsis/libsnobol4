@@ -5,7 +5,7 @@ monorepo structure.
 
 ---
 
-## v0.9.0 → v0.10.0 (Multi-Architecture JIT)
+## v0.11.0 → v0.12.0 (SLJIT Method JIT)
 
 ### No breaking changes
 
@@ -14,21 +14,67 @@ All existing consumers require no code changes.
 
 ### Behaviour changes consumers should be aware of
 
-- **New `SNOBOL_JIT_BACKEND` CMake option** (default: `arm64`).  Selects the
-  code-generation backend at compile time.  Valid values: `arm64`, `arm32`,
-  `riscv64`, `x86_64`.  Unknown values produce a CMake `FATAL_ERROR`.
-- **`SNOBOL_JIT_DUMP_IR=1` environment variable**: set to dump the
-  architecture-neutral IR to `stderr` before backend lowering.  Useful for
-  debugging JIT compilation across all backends.
-- **New backends**: ARM32 (Thumb-2, ARMv7-A), RISC-V 64 (RV64GC), and
-  x86-64 (System V AMD64 + Microsoft x64 ABI) in addition to the existing ARM64.
-- **Windows x86-64 JIT**: enabled on Windows when `SNOBOL_JIT_BACKEND=x86_64`;
-  uses `VirtualAlloc`/`VirtualProtect` with DEP compliance.
-- **QEMU CI jobs**: `jit-qemu-armv7` and `jit-qemu-riscv64` validate JIT
-  correctness on ARM32 and RISC-V 64 in emulated environments.
-- **IR pipeline**: all backends share a common architecture-neutral IR lifter,
-  DCE, and copy-propagation optimiser.  The pre-IR ARM64 code in `jit.c` has
-  been removed — the IR pipeline is the only compilation path.
+- **SLJIT is the only JIT backend** (`-DSNOBOL_JIT_BACKEND=sljit`, default).  The four
+  architecture-specific backends (ARM64, ARM32, RISC-V 64, x86-64) have been retired.
+  All existing CMake build configurations using `arm64`, `arm32`, `riscv64`, or `x86_64`
+  will produce a CMake `FATAL_ERROR`.  Remove the `-DSNOBOL_JIT_BACKEND` flag or set it
+  to `sljit` explicitly.
+- **Method JIT replaces per-trace JIT** (always-on under `SNOBOL_JIT`).  The method JIT
+  compiles entire patterns into a single native function via SLJIT on the first match,
+  then caches the compiled function.  Previously, the tracing JIT compiled hot bytecode
+  regions per-IP after multiple executions.
+- **`SnobolJitContext` removed** — the JIT context struct, `snobol_jit_acquire_context()`,
+  and `snobol_jit_release_context()` no longer exist.  The method cache replaces the
+  per-IP trace cache.
+- **JIT stats renamed**: `jit_entries_total` → method-JIT stats (`jit_method_attempts_total`,
+  `jit_method_successes_total`, `jit_method_fallbacks_total`, `jit_method_evictions_total`).
+  Old `jit_bailouts_total`, `jit_exec_time_ns_total`, `jit_interp_time_ns_total` and
+  other tracing-JIT counters have been removed.  Update any monitoring code to use the
+  new stat names.
+- **`SnobolJitConfig` simplified** to three fields: `method_enabled`, `max_compiled_patterns`,
+  `scratch_size`.  Old fields (`hotness_threshold`, `max_exit_rate_pct`, `compile_budget_ns`,
+  `cache_max_entries`, `min_useful_ops`, `skip_backtrack_heavy`, `search_hotness_threshold`,
+  `search_min_useful_ops`) have been removed.
+- **Compiler fusion passes no longer apply** to the method JIT path. The method JIT
+  compiles the raw bytecode as emitted by the compiler. Post-compilation optimization
+  (DCE, copy propagation, GVN, LICM) runs on the architecture-neutral IR in the JIT
+  pipeline itself.
+- **`SNOBOL_JIT_METHOD` environment variable** is no longer used; method JIT is always-on
+  under `SNOBOL_JIT=1`.  Toggle it via `SnobolJitConfig.method_enabled` at runtime.
+- **Uncompilable patterns**: patterns containing `SPAN`, `BREAK`, `BREAKX`, `SPLIT`,
+  `ASSIGN`, `REPEAT_*`, `EMIT_EXPR/FORMAT/TABLE`, `TABLE_GET/SET`, or `DYNAMIC` now
+  fall back to the VM interpreter at all times (the IR lifter marks them non-compilable).
+  Previously, the tracing JIT compiled them as call-outs with potential bailouts.
+
+### Migration Steps
+
+1. **Update CMake configuration**: remove `-DSNOBOL_JIT_BACKEND=arm64` (or other arch)
+   or set it to `-DSNOBOL_JIT_BACKEND=sljit`.  SLJIT is the default, so omitting the
+   flag entirely also works.
+
+2. **Update JIT monitoring code**: replace references to old stat names with the new
+   method-JIT names:
+   ```diff
+   - $stats['jit_entries_total']
+   + $stats['jit_method_attempts_total']
+   ```
+
+3. **Remove calls to removed APIs**:
+   ```diff
+   - snobol_jit_acquire_context()
+   - snobol_jit_release_context()
+   - config->hotness_threshold = 100;  // removed
+   + config->method_enabled = true;     // new API
+   ```
+
+4. **Test fallback patterns**: patterns with `SPAN`, `BREAK`, `SPLIT`, or `ASSIGN` now
+   always use the VM interpreter. If your application relies on these being JIT-compiled
+   for performance, file an issue — these opcodes are candidates for future SLJIT backend
+   implementation.
+
+---
+
+## v0.9.0 → v0.10.0 (Multi-Architecture JIT)
 
 ---
 

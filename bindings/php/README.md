@@ -485,8 +485,9 @@ ddev logs
 
 1. **Use compiled patterns**: Patterns are cached by default. Use `['cache' => false]` to disable.
 2. **Prefer Builder API**: The Builder API produces optimized AST structures.
-3. **Use JIT for hot patterns**: Call `$pattern->setJit(true)` for frequently-used patterns.
-4. **Minimize captures**: Only capture what you need; captures have overhead.
+3. **Use JIT for hot patterns**: JIT is enabled by default (`Pattern::setJit(true)`). The first match with a given pattern triggers SLJIT whole-pattern compilation; subsequent matches reuse the cached native function. Simple patterns (literals, anchors, captures, emits) benefit most — patterns with SPAN/BREAK/SPLIT/ASSIGN fall back to the VM interpreter transparently.
+4. **Monitor JIT behavior**: Use `snobol_get_jit_stats()` to check compilation counts: `jit_method_attempts_total`, `jit_method_successes_total`, `jit_method_fallbacks_total`.
+5. **Minimize captures**: Only capture what you need; captures have overhead.
 
 ## License
 

@@ -6,3 +6,23 @@
 /.ddev/traefik/certs/
 /.ddev/config.artif_hook.yml
 /.phpunit.result.cache
+
+# phpize-generated artifacts
+/Makefile
+/Makefile.fragments
+/Makefile.objects
+/autom4te.cache/
+/config.h
+/config.log
+/config.nice
+/config.status
+/configure
+/configure.ac
+/libtool
+/run-tests.php
+/modules/
+/.libs/
+/.deps/
+*.lo
+*.la
+*.o
