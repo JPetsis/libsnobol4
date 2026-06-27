@@ -5,13 +5,19 @@ cmake_minimum_required(VERSION 3.16)
 
 project(libsnobol4_core VERSION 0.11.0 LANGUAGES C)
 
+# JIT backend selection — must be set before _using_sljit check so
+# fresh CI checkouts get the correct default before line 9 runs.
+# SLJIT is the default and only supported backend (arch-specific ones retired).
+set(SNOBOL_JIT_BACKEND "sljit" CACHE STRING "JIT backend (sljit only; arch-specific backends retired)")
+set_property(CACHE SNOBOL_JIT_BACKEND PROPERTY STRINGS "sljit")
+
 # Detect SLJIT backend early so we can conditionally include sources
 set(_using_sljit FALSE)
 if(SNOBOL_JIT_BACKEND STREQUAL "sljit")
     set(_using_sljit TRUE)
 endif()
 
-# Core source files — exclude custom backends when using SLJIT
+# Core source files — all sources (no arch-specific backends)
 set(_core_sources
     src/lexer.c
     src/parser.c
@@ -155,32 +161,17 @@ if(_jit_arch_ok)
 endif()
 unset(_jit_arch_ok)
 
-# JIT backend selection (compile-time; only one backend per binary).
-# Valid values: "arm64" (default, requires ARM64 host)
-#               "arm32" (requires ARMv7-A Thumb-2 host)
-#               "riscv64" (requires RV64GC host)
-#               "x86_64" (requires x86-64 host)
-#               "sljit"  (uses SLJIT — cross-platform, replaces all custom backends)
-set(SNOBOL_JIT_BACKEND "sljit" CACHE STRING "JIT backend to compile in (sljit only; arch-specific backends retired)")
-
-set_property(CACHE SNOBOL_JIT_BACKEND PROPERTY STRINGS "sljit")
-set(_valid_jit_backends "arm64;arm32;riscv64;x86_64;sljit")
-if(NOT SNOBOL_JIT_BACKEND IN_LIST _valid_jit_backends)
+# JIT backend selection (compile-time; SLJIT only, arch-specific backends retired)
+if(NOT SNOBOL_JIT_BACKEND STREQUAL "sljit")
     message(FATAL_ERROR
         "SNOBOL_JIT_BACKEND='${SNOBOL_JIT_BACKEND}' is not a recognised backend.\n"
-        "Valid backends: ${_valid_jit_backends}"
+        "The only supported backend is 'sljit'; arch-specific backends have been retired."
     )
 endif()
 target_compile_definitions(snobol4 PRIVATE
     SNOBOL_JIT_BACKEND="${SNOBOL_JIT_BACKEND}"
+    SNOBOL_JIT_BACKEND_SLJIT=1
 )
-
-# SLJIT-specific: disable the arch-detection-based JIT auto-enable since
-# SLJIT handles cross-compilation. The existing SNOBOL_JIT=1 will be set
-# by the arch detection block above; for sljit backend we keep it.
-if(_using_sljit)
-    target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_BACKEND_SLJIT=1)
-endif()
 
 # Optional: enable method JIT (whole-pattern compilation via SLJIT).
 # Enabled by default when the SLJIT backend is used; the method JIT
