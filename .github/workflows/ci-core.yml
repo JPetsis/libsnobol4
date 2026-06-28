@@ -266,7 +266,7 @@ jobs:
           if [ "${{ steps.asan_run.outcome }}" = "success" ]; then
             echo "✅ **No sanitizer errors detected.**" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Sanitizer errors detected — see uploaded `asan-report.txt`.**" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Sanitizer errors detected — see uploaded \`asan-report.txt\`.**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             grep -E "ERROR:|WARNING:|SUMMARY:|runtime error:" asan-report.txt | head -30 >> $GITHUB_STEP_SUMMARY || true

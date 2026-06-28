@@ -8,6 +8,9 @@
 #include <time.h>
 
 #include "../../core/include/snobol/snobol_internal.h"
+#ifdef SNOBOL_JIT
+#include "../../core/include/snobol/jit.h"
+#endif
 
 #ifdef _WIN32
 #include <io.h>
@@ -432,6 +435,10 @@ int main(void) {
            test_ctx.passed + test_ctx.failed);
 
   print_rule('=');
+
+#ifdef SNOBOL_JIT
+  snobol_jit_shutdown();
+#endif
   return test_ctx.failed > 0 ? 1 : 0;
 }
 
