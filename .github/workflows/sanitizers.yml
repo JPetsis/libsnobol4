@@ -47,7 +47,8 @@ jobs:
             -DBUILD_PHP=OFF \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_COMPILER=clang \
-            -DSNOBOL_SANITIZE=ON
+            -DSNOBOL_SANITIZE=ON \
+            -DSNOBOL_JIT_BACKEND=sljit
 
       - name: Build
         run: cmake --build build
@@ -112,7 +113,8 @@ jobs:
             -DBUILD_PHP=OFF \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer -g"
+            -DCMAKE_C_FLAGS="-fsanitize=undefined -fno-omit-frame-pointer -g" \
+            -DSNOBOL_JIT_BACKEND=sljit
 
       - name: Build
         run: cmake --build build

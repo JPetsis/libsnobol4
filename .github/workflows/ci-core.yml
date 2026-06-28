@@ -43,7 +43,7 @@ jobs:
         run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
       - name: Configure CMake
-        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF
+        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=sljit
 
       - name: Build
         run: cmake --build build --config Release
@@ -233,7 +233,8 @@ jobs:
             -DBUILD_PHP=OFF \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_COMPILER=clang \
-            -DSNOBOL_SANITIZE=ON
+            -DSNOBOL_SANITIZE=ON \
+            -DSNOBOL_JIT_BACKEND=sljit
 
       - name: Build
         run: cmake --build build
