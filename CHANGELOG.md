@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### SLJIT Method JIT & Tracing-JIT Retirement — 2026-06-27
+### SLJIT Method JIT & Tracing-JIT Retirement — 2026-06-27 [0.11.0]
 
 ### Added
 
@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **test_search_meta_cache.c**, **test_search_ex_api.c**: removed
   `entries_total` references.
 
-### searchSplit Bulk-Result Buffer — 2026-06-20
+### searchSplit Bulk-Result Buffer — 2026-06-20 [0.11.0]
 
 ### Added
 
@@ -87,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the bulk path is reserved for very large subjects (and for future tuning
   when the search region becomes cheaper, e.g. via SSA IR in Phase 11).
 
-### JIT Search Performance Baseline — 2026-06-20
+### JIT Search Performance Baseline — 2026-06-20 [0.11.0]
 
 ### Added
 
@@ -126,7 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   relative to the captured baseline, catching the case where a JIT
   optimization helps the C path but the PHP binding is forgotten.
 
-### Diagnostic Probe — 2026-06-20
+### Diagnostic Probe — 2026-06-20 [0.11.0]
 
 ### Added
 
@@ -157,7 +157,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **AGENTS.md** updated with the "JIT changes must cover both C and PHP
   binding" rule and the diagnostic-probe workflow.
 
-### Activate C JIT — 2026-06-20
+### Activate C JIT — 2026-06-20 [0.11.0]
 
 ### Added
 
@@ -182,7 +182,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   suites now compare interpreter mode (current) against search/JIT mode,
   side by side with PCRE2.
 
-### Binding Performance & Range Syntax — 2026-06-20
+### Binding Performance & Range Syntax — 2026-06-20 [0.11.0]
 
 ### Added
 
@@ -220,7 +220,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`docs/why-snobol-vs-pcre.md`** and `docs/examples/*.php` updated
   to use range syntax in illustrative examples.
 
-### Testing & Docs Meta — 2026-06-19
+### Testing & Docs Meta — 2026-06-19 [0.11.0]
 
 ### Added
 
@@ -248,7 +248,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`README.md`** and **`CONTRIBUTING.md`** updated for the v0.11.0 /
   v1.0.0 plan and the official scope statement.
 
-### AST Clone & Clean Build — 2026-06-19
+### AST Clone & Clean Build — 2026-06-19 [0.11.0]
 
 ### Added
 
@@ -272,7 +272,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`docs/why-snobol-vs-pcre.md` examples** updated to use `Snobol\Builder` API instead
   of unsupported pattern string syntax (`BREAK`, `POS`, `RPOS`).
 
-### Core Primitives & Builtins — 2026-06-15
+### Core Primitives & Builtins — 2026-06-15 [0.11.0]
 
 ### Added
 
@@ -304,7 +304,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PHP tests**: `tests/php/PrimitivesTest.php` (90 tests), `tests/php/ComparisonsTest.php` (183 tests).
 - **`snobol_str_to_double()`** helper exposed in `core/include/snobol/type_fn.h` for reuse.
 
-### Array Data Type — 2026-06-16
+### Array Data Type — 2026-06-16 [0.11.0]
 
 ### Added
 
@@ -329,7 +329,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PHP tests**: `tests/compat/ArrayTest.php` (176 assertions) covering all `Snobol\Array_`
   operations including edge cases (empty array, single element, many elements, deletion).
 
-### Full BMP Unicode — 2026-06-16
+### Full BMP Unicode — 2026-06-16 [0.11.0]
 
 ### Added
 
@@ -358,7 +358,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PHP tests**: `tests/php/UnicodeTest.php` (37 tests) covering BMP UPPER/LOWER with
   Greek, Cyrillic, CJK, and mixed-script strings.
 
-### Convenience API for PHP binding — 2026-06-18
+### Convenience API for PHP binding — 2026-06-18 [0.11.0]
 
 ### Added
 
