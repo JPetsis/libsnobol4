@@ -288,6 +288,7 @@ static void *sljit_lower_method(const jit_ir_region_t *ir, VM *vm,
   /* ---- Create compiler ----------------------------------------------------- */
   struct sljit_compiler *c = sljit_create_compiler(NULL);
   if (!c) {
+    snobol_free(is_target);
     snobol_free(bc_map);
     snobol_free(pending);
     snobol_free(labels);
@@ -300,9 +301,10 @@ static void *sljit_lower_method(const jit_ir_region_t *ir, VM *vm,
    *   Scratch: R0 = position, R1 = length/end, R2–R5 = temporaries
    *   Saved:   S0 = vm*, S1 = subject base
    * ----------------------------------------------------------------------- */
-  if (sljit_emit_enter(c, 0, SLJIT_ARGS0V(),
+  if (sljit_emit_enter(c, 0, SLJIT_ARGS1V(P_R),
                        6, 2, 16) != SLJIT_SUCCESS) {
     sljit_free_compiler(c);
+    snobol_free(is_target);
     snobol_free(bc_map);
     snobol_free(pending);
     snobol_free(labels);
@@ -774,6 +776,7 @@ static void *sljit_lower_method(const jit_ir_region_t *ir, VM *vm,
   sljit_free_compiler(c);
 
   if (!code_ptr) {
+    snobol_free(is_target);
     snobol_free(bc_map);
     snobol_free(pending);
     snobol_free(labels);
@@ -787,6 +790,7 @@ static void *sljit_lower_method(const jit_ir_region_t *ir, VM *vm,
     out->n_blocks = ir->block_count > 0 ? (size_t)ir->block_count : 1;
   }
 
+  snobol_free(is_target);
   snobol_free(bc_map);
   snobol_free(pending);
   snobol_free(labels);

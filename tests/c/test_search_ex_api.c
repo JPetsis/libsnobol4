@@ -121,9 +121,6 @@ void test_search_ex_api_suite(void) {
         snobol_match_t *m = snobol_pattern_search_ex(state, subject, 5, 2);
         test_assert(m && snobol_match_success(m),
                     "search from offset 2 succeeds");
-        /* The match_start should be >= 2 (search starts at offset 2) */
-        /* We don't expose match_start on the public match_t, but the
-         * search should find 'a' and return success. */
         snobol_pattern_search_state_destroy(state);
       }
       snobol_pattern_free(pat);
