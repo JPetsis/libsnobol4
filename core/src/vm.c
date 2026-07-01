@@ -5,9 +5,6 @@
 #include "snobol/string_fn.h"
 #include "snobol/table.h"
 #include "snobol/type_fn.h"
-#ifdef SNOBOL_JIT
-#include "snobol/jit.h"
-#endif
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -641,10 +638,6 @@ bool vm_run(VM *vm) {
       vm_write_log_clear(vm);
     }
   }
-#ifdef SNOBOL_JIT
-  snobol_jit_log("vm_run enter ip=%zu pos=%zu len=%zu bc_len=%zu jit=%d",
-                 vm->ip, vm->pos, vm->len, vm->bc_len, vm->jit.enabled);
-#endif
 
   while (1) {
 #ifdef SNOBOL_PROFILE
@@ -655,23 +648,11 @@ bool vm_run(VM *vm) {
         goto fail_ret;
       continue;
     }
-#ifdef SNOBOL_JIT
-    /* Tracing JIT has been retired.  The method JIT (whole-pattern
-     * compilation) replaces it and is invoked from search.c, not from
-     * within the VM dispatch.  The VM always runs as interpreter. */
-#endif
     uint8_t op = vm->bc[vm->ip++];
-#ifdef SNOBOL_JIT
-    snobol_jit_log("dispatch ip=%zu op=0x%02X pos=%zu choices_top=%zu",
-                   (size_t)(vm->ip - 1), op, vm->pos, vm->choices_top);
-#endif
     switch (op) {
     case OP_NOP:
       break; /* fusion filler — skip one byte */
     case OP_ACCEPT:
-#ifdef SNOBOL_JIT
-      snobol_jit_log("vm_run exit reason=ACCEPT pos=%zu", vm->pos);
-#endif
       if (!vm->keep_choices) {
         if (vm->choices) {
           snobol_free(vm->choices);
@@ -684,9 +665,6 @@ bool vm_run(VM *vm) {
       return true;
     case OP_FAIL: {
       bool had = vm_pop_choice(vm);
-#ifdef SNOBOL_JIT
-      snobol_jit_log("OP_FAIL pop=%d new_ip=%zu", (int)had, vm->ip);
-#endif
       if (!had)
         goto fail_ret;
       break;
@@ -699,9 +677,6 @@ bool vm_run(VM *vm) {
     case OP_SPLIT: {
       uint32_t a = read_u32(vm->bc, vm->bc_len, &vm->ip);
       uint32_t b = read_u32(vm->bc, vm->bc_len, &vm->ip);
-#ifdef SNOBOL_JIT
-      snobol_jit_log("OP_SPLIT a=%u b=%u pos=%zu", a, b, vm->pos);
-#endif
       vm_push_choice(vm, (size_t)b, vm->pos);
       vm->ip = (size_t)a;
       break;
@@ -2091,9 +2066,6 @@ bool vm_run(VM *vm) {
   }
   return false;
 fail_ret:
-#ifdef SNOBOL_JIT
-  snobol_jit_log("vm_run exit reason=FAIL");
-#endif
   if (!vm->keep_choices) {
     if (vm->choices) {
       snobol_free(vm->choices);

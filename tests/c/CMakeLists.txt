@@ -13,10 +13,6 @@ add_executable(snobol4_tests
     test_backtracking.c
     test_stress_backtracking.c
     test_catastrophic.c
-    test_jit_observability.c
-    test_jit_ir.c
-    test_jit_c_api.c
-    test_jit_method.c
     test_search_meta_cache.c
     test_search_ex_api.c
     test_lexer.c
@@ -70,14 +66,6 @@ if(SNOBOL_SANITIZE)
     )
 endif()
 
-# Enable JIT for tests on supported architectures.
-# The core library auto-detects the host arch and registers the matching backend;
-# tests need SNOBOL_JIT=1 to enable JIT code paths in the test harness.
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|armv[0-9]+.*|arm|riscv64|AMD64|x86_64|amd64|i686|x86)$")
-    target_compile_definitions(snobol4_tests PRIVATE SNOBOL_JIT=1)
-endif()
-
-# Warning flags for test sources - mirror core library settings
 if(MSVC)
     target_compile_options(snobol4_tests PRIVATE
         /W4
@@ -93,10 +81,6 @@ if(MSVC)
         # compat #define nullptr NULL to work on MSVC 2022+.
         /std:c17
     )
-    # Diagnostic: disable /GS globally for the test binary
-    if(SNOBOL_JIT_NO_GS)
-        target_compile_options(snobol4_tests PRIVATE /GS-)
-    endif()
     # Suppress MSVC safe-CRT deprecation warnings in test sources
     target_compile_definitions(snobol4_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 else ()
@@ -119,26 +103,5 @@ endif()
 add_test(
     NAME snobol4_c_tests
     COMMAND snobol4_tests
-)
-
-# Named JIT IR unit-test target (task 6.1): same binary, subset label
-add_test(
-    NAME test_jit_ir
-    COMMAND snobol4_tests
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-)
-set_tests_properties(test_jit_ir PROPERTIES LABELS "jit-ir")
-
-# IR roundtrip target (task 6.2): full pattern corpus run with JIT enabled
-# Verifies that every pattern in the test suite produces the same result
-# under the IR pipeline as it did under the interpreter.
-add_test(
-    NAME test_ir_roundtrip
-    COMMAND snobol4_tests
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-)
-set_tests_properties(test_ir_roundtrip PROPERTIES
-    LABELS "jit-ir;roundtrip"
-    ENVIRONMENT "SNOBOL_JIT=1"
 )
 

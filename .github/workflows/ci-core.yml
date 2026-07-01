@@ -31,7 +31,6 @@ jobs:
         os: [ ubuntu-latest, macos-latest, windows-latest ]
 
     env:
-      SNOBOL_JIT_LOG_FILE: snobol-jit-core-${{ matrix.os }}.log
       SNOBOL_TEST_TIMEOUT_SECS: "60"
 
     steps:
@@ -43,7 +42,7 @@ jobs:
         run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
 
       - name: Configure CMake
-        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF -DSNOBOL_JIT_BACKEND=sljit
+        run: cmake -B build -DBUILD_TESTS=ON -DBUILD_PHP=OFF
 
       - name: Build
         run: cmake --build build --config Release
@@ -70,150 +69,6 @@ jobs:
             "snobol4_tests.exe not found" | Out-File test-direct-output.txt
           }
 
-      - name: Upload JIT log (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: jit-log-core-${{ matrix.os }}
-          path: |
-            build/${{ env.SNOBOL_JIT_LOG_FILE }}
-            build/watchdog.log
-            build/test-direct-output.txt
-            build/Testing/Temporary/LastTest.log
-            build/Testing/Temporary/LastTestsFailed.log
-          if-no-files-found: ignore
-          retention-days: 7
-
-  jit-backend-tests:
-    name: JIT Tests (${{ matrix.os }}, SLJIT)
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest, ubuntu-24.04-arm ]
-
-    env:
-      SNOBOL_JIT_LOG_FILE: snobol-jit-${{ matrix.os }}-sljit.log
-      SNOBOL_TEST_TIMEOUT_SECS: "60"
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install CMake (Windows)
-        if: matrix.os == 'windows-latest'
-        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
-
-      - name: Install procdump (Windows)
-        if: matrix.os == 'windows-latest'
-        run: choco install procdump --no-progress --ignore-checksums
-
-      - name: Configure CMake (SLJIT backend)
-        run: >
-          cmake -B build
-          -DBUILD_TESTS=ON
-          -DBUILD_PHP=OFF
-          -DSNOBOL_JIT_BACKEND=sljit
-
-      - name: Build
-        run: cmake --build build --config Release
-
-      - name: Run JIT IR unit tests
-        if: matrix.os != 'windows-latest'
-        working-directory: build
-        run: ctest --output-on-failure -L jit-ir
-
-      - name: Run IR roundtrip tests
-        if: matrix.os != 'windows-latest'
-        working-directory: build
-        run: ctest --output-on-failure -L roundtrip
-
-      - name: Run full test suite
-        if: matrix.os != 'windows-latest'
-        working-directory: build
-        run: ctest --output-on-failure
-
-      - name: Run JIT IR unit tests (Windows)
-        if: matrix.os == 'windows-latest'
-        working-directory: build
-        run: ctest --output-on-failure -L jit-ir -C Release --verbose
-
-      - name: Run IR roundtrip tests (Windows)
-        if: matrix.os == 'windows-latest'
-        working-directory: build
-        run: ctest --output-on-failure -L roundtrip -C Release --verbose
-
-      - name: Run full test suite (Windows)
-        if: matrix.os == 'windows-latest'
-        working-directory: build
-        run: ctest --output-on-failure -C Release --verbose
-
-      - name: Run snobol4_tests under procdump (Windows, crash-dump capture)
-        if: matrix.os == 'windows-latest'
-        working-directory: build
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $bin = Get-ChildItem -Recurse -Filter snobol4_tests.exe | Select-Object -First 1
-          if (-not $bin) { Write-Host "snobol4_tests.exe not found"; exit 1 }
-          $dmpDir = Join-Path $pwd "crashdumps"
-          New-Item -ItemType Directory -Force -Path $dmpDir
-          procdump -ma -e 1 -f C0000409 -accepteula `
-            -x $dmpDir $bin.FullName 2>&1
-
-      - name: Capture test binary output (Windows, always)
-        if: always() && matrix.os == 'windows-latest'
-        working-directory: build
-        shell: pwsh
-        run: |
-          $bin = Get-ChildItem -Recurse -Filter snobol4_tests.exe | Select-Object -First 1
-          if ($bin) {
-            & $bin.FullName 2>&1 | Tee-Object -FilePath test-direct-output.txt
-          } else {
-            "snobol4_tests.exe not found" | Out-File test-direct-output.txt
-          }
-
-      - name: Upload JIT log (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: jit-log-${{ matrix.os }}-sljit
-          compression-level: 0
-          path: |
-            build/${{ env.SNOBOL_JIT_LOG_FILE }}
-            build/watchdog.log
-            build/test-direct-output.txt
-            build/crashdumps/
-            build/Testing/Temporary/LastTest.log
-            build/Testing/Temporary/LastTestsFailed.log
-          if-no-files-found: ignore
-          retention-days: 7
-
-  jit-qemu-smoke:
-    name: JIT QEMU Cross-Arch Smoke Test
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [ linux/arm64, linux/arm/v7, linux/riscv64 ]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: ${{ matrix.platform }}
-
-      - name: Build and test in QEMU container
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: ${{ matrix.platform }}
-          push: false
-          file: ci/Dockerfile.jit-qemu
-
   asan:
     name: AddressSanitizer + UBSan (PR gate)
     runs-on: ubuntu-latest
@@ -233,8 +88,7 @@ jobs:
             -DBUILD_PHP=OFF \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_COMPILER=clang \
-            -DSNOBOL_SANITIZE=ON \
-            -DSNOBOL_JIT_BACKEND=sljit
+            -DSNOBOL_SANITIZE=ON
 
       - name: Build
         run: cmake --build build

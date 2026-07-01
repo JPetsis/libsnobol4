@@ -25,12 +25,6 @@ typedef struct snobol_array snobol_array_t;
 #include "snobol/dynamic_pattern.h"
 #endif
 
-#ifdef SNOBOL_JIT
-/* Forward declare JIT types to avoid circular dependency */
-typedef struct SnobolJitStats SnobolJitStats;
-typedef struct SnobolJitConfig SnobolJitConfig;
-#endif
-
 /** @brief Maximum number of capture registers per VM execution. */
 #define MAX_CAPS 64
 /** @brief Maximum number of named variable registers per VM execution. */
@@ -421,13 +415,6 @@ typedef struct {
   uint8_t *
       dyn_pending_bc; /* Pending dynamic pattern bytecode from OP_DYNAMIC_DEF */
   size_t dyn_pending_bc_len; /* Length of pending bytecode */
-#endif
-
-#ifdef SNOBOL_JIT
-  struct {
-    bool enabled;
-    struct SnobolJitStats *stats;
-  } jit;
 #endif
 
 #ifdef SNOBOL_PROFILE

@@ -20,10 +20,8 @@ extern void test_assert(bool condition, const char *message);
 /* Internal access — we want to verify the pattern struct's meta field.
  * The struct definition is in core/src/api.c. We can only see the
  * public API from here, so we test behavior, not internals. The test
- * ensures:
- *   1. snobol_pattern_search() returns correct results (regression)
- *   2. The JIT still fires on hot patterns (proves metadata is wired
- *      through to the search runtime) */
+ * ensures that snobol_pattern_search() returns correct results
+ * (regression) using the compile-time cached search metadata. */
 void test_search_meta_cache_suite(void) {
   test_suite("Search: cached metadata on pattern");
 
@@ -31,9 +29,9 @@ void test_search_meta_cache_suite(void) {
   {
     snobol_context_t *ctx = snobol_context_create();
     char *err = NULL;
-    snobol_pattern_t *pat = snobol_pattern_compile_ex(
-        ctx, "'pqr'", 5, SNOBOL_FLAG_SEARCH_MODE, &err);
-    test_assert(pat != NULL, "compile with SEARCH_MODE flag succeeds");
+    snobol_pattern_t *pat =
+        snobol_pattern_compile_ex(ctx, "'pqr'", 5, 0, &err);
+    test_assert(pat != NULL, "compile succeeds");
     if (pat) {
       snobol_match_t *m =
           snobol_pattern_search(pat, "abcdefghijklmnopqrstuvwxyz", 26);

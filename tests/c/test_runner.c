@@ -8,9 +8,6 @@
 #include <time.h>
 
 #include "../../core/include/snobol/snobol_internal.h"
-#ifdef SNOBOL_JIT
-#include "../../core/include/snobol/jit.h"
-#endif
 
 #ifdef _WIN32
 #include <io.h>
@@ -267,10 +264,6 @@ void test_template_ops_suite(void);
 void test_control_flow_suite(void);
 void test_backtracking_suite(void);
 void test_catastrophic_suite(void);
-void test_jit_observability_suite(void);
-void test_jit_ir_suite(void);
-void test_jit_c_api_suite(void);
-void test_jit_method_suite(void);
 void test_search_meta_cache_suite(void);
 void test_search_ex_api_suite(void);
 void test_lexer_suite(void);
@@ -331,11 +324,6 @@ int main(void) {
   RUN_SUITE("Backtracking", test_backtracking_suite);
   RUN_SUITE("Catastrophic Backtracking", test_catastrophic_suite);
 
-  /* JIT */
-  RUN_SUITE("JIT: Observability", test_jit_observability_suite);
-  RUN_SUITE("JIT: Neutral IR", test_jit_ir_suite);
-  RUN_SUITE("JIT: C API Integration", test_jit_c_api_suite);
-  RUN_SUITE("JIT: Method", test_jit_method_suite);
   RUN_SUITE("Search: cached metadata", test_search_meta_cache_suite);
   RUN_SUITE("Search: stateful _ex API", test_search_ex_api_suite);
 
@@ -436,9 +424,6 @@ int main(void) {
 
   print_rule('=');
 
-#ifdef SNOBOL_JIT
-  snobol_jit_shutdown();
-#endif
   return test_ctx.failed > 0 ? 1 : 0;
 }
 

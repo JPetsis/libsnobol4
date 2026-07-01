@@ -5,19 +5,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(libsnobol4_core VERSION 0.11.0 LANGUAGES C)
 
-# JIT backend selection — must be set before _using_sljit check so
-# fresh CI checkouts get the correct default before line 9 runs.
-# SLJIT is the default and only supported backend (arch-specific ones retired).
-set(SNOBOL_JIT_BACKEND "sljit" CACHE STRING "JIT backend (sljit only; arch-specific backends retired)")
-set_property(CACHE SNOBOL_JIT_BACKEND PROPERTY STRINGS "sljit")
-
-# Detect SLJIT backend early so we can conditionally include sources
-set(_using_sljit FALSE)
-if(SNOBOL_JIT_BACKEND STREQUAL "sljit")
-    set(_using_sljit TRUE)
-endif()
-
-# Core source files — all sources (no arch-specific backends)
+# Core source files
 set(_core_sources
     src/lexer.c
     src/parser.c
@@ -27,8 +15,6 @@ set(_core_sources
     src/table.c
     src/array.c
     src/dynamic_pattern.c
-    src/jit.c
-    src/jit_ir.c
     src/version.c
     src/string_fn.c
     src/type_fn.c
@@ -36,13 +22,6 @@ set(_core_sources
     src/search.c
     src/unicode_fold.c
     src/api.c
-)
-
-# SLJIT is the only JIT backend. The 4 arch-specific backends
-# (arm64/arm32/riscv64/x86_64) have been retired.
-list(APPEND _core_sources
-    src/jit_backend_sljit.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../deps/sljit/sljitLir.c
 )
 
 add_library(snobol4 STATIC ${_core_sources})
@@ -58,13 +37,6 @@ target_include_directories(snobol4
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
-
-# SLJIT include path (needed for sljitLir.c to #include sljitNative*.c)
-if(_using_sljit)
-    target_include_directories(snobol4 PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../deps/sljit
-    )
-endif()
 
 # Warning flags - compiler-specific
 if(MSVC)
@@ -97,14 +69,6 @@ else()
     )
 endif()
 
-# Diagnostic option: disable MSVC /GS buffer security check entirely.
-# Use this to determine whether a STATUS_STACK_BUFFER_OVERRUN crash originates
-# from the /GS cookie check or from another source.
-option(SNOBOL_JIT_NO_GS "Disable /GS buffer security check on MSVC (diagnostic)" OFF)
-if(MSVC AND SNOBOL_JIT_NO_GS)
-    target_compile_options(snobol4 PRIVATE /GS-)
-endif()
-
 # Optional: Enable VM profiling
 option(SNOBOL_PROFILE "Enable VM profiling" OFF)
 if(SNOBOL_PROFILE)
@@ -120,72 +84,6 @@ if(SNOBOL_SANITIZE)
     target_link_options(snobol4 PUBLIC
         -fsanitize=address,undefined
     )
-endif()
-
-# Enable micro-JIT on supported architectures.  Backend source files have their
-# own arch guards so the compiler only sees code for the active target.
-# On Windows JIT is opt-in and requires SNOBOL_JIT=ON (only x86_64 supported).
-set(_jit_arch_ok FALSE)
-# ARM64
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-    set(_jit_arch_ok TRUE)
-endif()
-# ARM32 (armv7l, armv6l, arm, etc. — but not arm64)
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64")
-    set(_jit_arch_ok TRUE)
-endif()
-# RISC-V 64-bit
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64|riscv64.*")
-    set(_jit_arch_ok TRUE)
-endif()
-# x86-64 (AMD64)
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64|amd64|i686|x86")
-    set(_jit_arch_ok TRUE)
-endif()
-# SLJIT: cross-platform, works on any architecture
-if(_using_sljit)
-    set(_jit_arch_ok TRUE)
-endif()
-if(_jit_arch_ok)
-    target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT=1)
-
-    # Platform detection for JIT code paths
-    if(WIN32)
-        target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_PLATFORM_WINDOWS=1)
-        target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_WIN64_ABI=1)
-    elseif(APPLE)
-        target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_PLATFORM_MACOS=1)
-    else()
-        target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_PLATFORM_LINUX=1)
-    endif()
-endif()
-unset(_jit_arch_ok)
-
-# JIT backend selection (compile-time; SLJIT only, arch-specific backends retired)
-if(NOT SNOBOL_JIT_BACKEND STREQUAL "sljit")
-    message(FATAL_ERROR
-        "SNOBOL_JIT_BACKEND='${SNOBOL_JIT_BACKEND}' is not a recognised backend.\n"
-        "The only supported backend is 'sljit'; arch-specific backends have been retired."
-    )
-endif()
-target_compile_definitions(snobol4 PRIVATE
-    SNOBOL_JIT_BACKEND="${SNOBOL_JIT_BACKEND}"
-    SNOBOL_JIT_BACKEND_SLJIT=1
-)
-
-# Optional: enable method JIT (whole-pattern compilation via SLJIT).
-# Enabled by default when the SLJIT backend is used; the method JIT
-# compiles a single trace starting at ip=0 and caches it for reuse.
-# Disable with -DSNOBOL_JIT_METHOD=OFF to use only the tracing JIT.
-option(SNOBOL_JIT_METHOD "Enable method JIT (whole-pattern compilation)" ON)
-if(SNOBOL_JIT_METHOD)
-    target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_METHOD=1)
-endif()
-
-# Optional: enable RV64C compressed instructions (RISC-V 64-bit only)
-option(SNOBOL_JIT_RV64C "Enable RV64C compressed instructions on RISC-V 64-bit" OFF)
-if(SNOBOL_JIT_RV64C AND CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64")
-    target_compile_definitions(snobol4 PRIVATE SNOBOL_JIT_RV64C=1)
 endif()
 
 # Installation rules

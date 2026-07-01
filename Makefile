@@ -8,7 +8,7 @@
 #   make help     - Show all targets
 
 .PHONY: all build test clean distclean install uninstall help \
-        build-debug build-release build-jit build-asan \
+        build-debug build-release build-asan \
         test-verbose test-valgrind test-valgrind-report test-asan bench bench-c docs format lint warnings \
         gen-unicode-fold
 
@@ -43,7 +43,6 @@ build:
 		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 		-DBUILD_TESTS=ON \
 		-DBUILD_PHP=OFF \
-		-DSNOBOL_JIT=ON \
 		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
 		$(CMAKE_EXTRA_FLAGS)
 	@echo "==> Building libsnobol4..."
@@ -57,9 +56,6 @@ build-debug:
 
 build-release:
 	@$(MAKE) build BUILD_TYPE=Release
-
-build-jit:
-	@$(MAKE) build BUILD_TYPE=Release CMAKE_EXTRA_FLAGS="-DSNOBOL_JIT=ON -DSNOBOL_PROFILE=ON"
 
 build-asan:
 	@echo "==> Configuring build with AddressSanitizer + UBSan..."
@@ -192,7 +188,6 @@ bench-c:
 		-DBUILD_TESTS=ON \
 		-DBUILD_PHP=OFF \
 		-DBUILD_BENCH_C=ON \
-		-DSNOBOL_JIT=ON \
 		$(CMAKE_EXTRA_FLAGS)
 	$(CMAKE_BUILD) --target snobol4_bench
 	@echo ""
@@ -290,7 +285,6 @@ build-php:
 		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 		-DBUILD_TESTS=ON \
 		-DBUILD_PHP=ON \
-		-DSNOBOL_JIT=ON \
 		$(CMAKE_EXTRA_FLAGS)
 	$(CMAKE_BUILD)
 	@echo "==> PHP binding build complete!"
@@ -305,7 +299,6 @@ help:
 	@echo "  build          - Build with default configuration (Release)"
 	@echo "  build-debug    - Build with Debug configuration"
 	@echo "  build-release  - Build with Release configuration"
-	@echo "  build-jit      - Build with JIT and profiling enabled"
 	@echo "  build-asan     - Build with AddressSanitizer+UBSan (SNOBOL_SANITIZE=ON)"
 	@echo "  build-php      - Build with PHP binding (requires PHP dev headers)"
 	@echo "  gen-unicode-fold - Regenerate BMP case-folding tables from UCD"

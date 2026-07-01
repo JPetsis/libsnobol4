@@ -42,8 +42,7 @@ jobs:
             -DBUILD_TESTS=ON \
             -DBUILD_PHP=OFF \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DSNOBOL_SANITIZE=OFF \
-            -DSNOBOL_JIT_BACKEND=sljit
+            -DSNOBOL_SANITIZE=OFF
 
       - name: Build
         run: cmake --build build

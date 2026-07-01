@@ -89,7 +89,6 @@ uint32_t snobol_get_abi_version(void);
 #include "snobol/ast.h"
 #include "snobol/compiler.h"
 #include "snobol/dynamic_pattern.h"
-#include "snobol/jit.h"
 #include "snobol/lexer.h"
 #include "snobol/parser.h"
 #include "snobol/search.h"
@@ -161,20 +160,9 @@ void snobol_context_destroy(snobol_context_t *ctx);
  * Latin-1 Supplement (U+0041–U+005A / U+0061–U+007A; U+00C0–U+00FF pairs).
  * Captured text preserves the original subject case.
  *
- * JIT is disabled when this flag is set; patterns fall back to the interpreter.
  * Pass to snobol_pattern_compile_ex() via the flags bitmask.
  */
 #define SNOBOL_FLAG_CASE_INSENSITIVE 0x0001u
-
-/**
- * Enable search-mode compilation. The compiled pattern is optimised for
- * substring search (un-anchored) rather than full-string anchored match.
- * For search-mode you typically call snobol_pattern_search() instead of
- * snobol_pattern_match().
- *
- * Pass to snobol_pattern_compile_ex() via the flags bitmask.
- */
-#define SNOBOL_FLAG_SEARCH_MODE 0x0002u
 
 /* Pattern compilation */
 /**
@@ -248,13 +236,14 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
 /**
  * @brief Execute a compiled pattern in search (un-anchored) mode.
  *
- * Uses the JIT search path to find the first occurrence of the pattern
- * anywhere in the subject string (like SNOBOL4's @c ? or @c POS(0) match).
- * Falls back to the interpreter VM when JIT is unavailable.
+ * Uses the search tier dispatch (memchr/memmem/bitmap fast paths) before
+ * falling back to the interpreter VM when no tier matches. Finds the
+ * first occurrence of the pattern anywhere in the subject string (like
+ * SNOBOL4's @c ? or @c POS(0) match).
  *
  * @param[in] pattern Compiled pattern to execute.
  * @param[in] subject Subject string (UTF-8).
- * @param[in] len     Byte length of @p subject.
+ * @param[in] len Byte length of @p subject.
  * @return New match result that the caller must free with snobol_match_free().
  *         Always returns a valid pointer; call snobol_match_success() to
  *         determine whether the match succeeded.
@@ -265,10 +254,10 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
 /**
  * @brief Opaque state for snobol_pattern_search_ex().
  *
- * Holds a cached JIT context reference, the cached search metadata,
- * a reusable VM, an output buffer, and a reusable match result.
- * Created once per pattern, reused across all matches in a search loop
- * (e.g. PHP Pattern::searchSplit) to avoid per-call allocation churn.
+ * Holds the cached search metadata, a reusable VM, an output buffer,
+ * and a reusable match result.  Created once per pattern, reused across
+ * all matches in a search loop (e.g. PHP Pattern::searchSplit) to
+ * avoid per-call allocation churn.
  *
  * Pointer ownership: created by snobol_pattern_search_state_create(),
  * destroyed by snobol_pattern_search_state_destroy(). The state holds
@@ -292,7 +281,7 @@ snobol_pattern_search_state_create(const uint8_t *bc, size_t bc_len);
  * @brief Destroy a search state object. NULL-safe.
  *
  * Releases the cached VM, output buffer, match result, and the
- * reference to the pattern's JIT context. Does NOT free the pattern
+ * reference to the pattern's bytecode. Does NOT free the pattern
  * itself.
  */
 void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state);

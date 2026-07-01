@@ -20,9 +20,6 @@
 #include "snobol/snobol.h"
 #include "snobol/snobol_internal.h"
 #include "snobol/vm.h"
-#ifdef SNOBOL_JIT
-#include "snobol/jit.h"
-#endif
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -42,8 +39,7 @@ struct snobol_context {
 struct snobol_pattern {
   uint8_t *bc;
   size_t bc_len;
-  bool case_insensitive; /* stored for future JIT dispatch guard */
-  bool search_mode;
+  bool case_insensitive;
   /* Cached search metadata derived from bytecode at compile time.
    * Reused by snobol_pattern_search() and snobol_pattern_search_ex()
    * to avoid re-walking the bytecode on every call. */
@@ -88,9 +84,6 @@ snobol_context_t *snobol_context_create(void) {
       (snobol_context_t *)snobol_malloc(sizeof(snobol_context_t));
   if (ctx)
     ctx->_reserved = 0;
-#ifdef SNOBOL_JIT
-  snobol_jit_init();
-#endif
   return ctx;
 }
 
@@ -108,8 +101,7 @@ void snobol_context_destroy(snobol_context_t *ctx) {
  * Core compilation helper: lex → parse → compile → allocate pattern.
  */
 static snobol_pattern_t *do_compile(const char *source, size_t len,
-                                    bool case_insensitive, bool search_mode,
-                                    char **error) {
+                                     bool case_insensitive, char **error) {
   if (error)
     *error = NULL;
 
@@ -166,7 +158,6 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
   pat->bc = bc;
   pat->bc_len = bc_len;
   pat->case_insensitive = case_insensitive;
-  pat->search_mode = search_mode;
   /* Derive search metadata once at compile time so snobol_pattern_search()
    * and snobol_pattern_search_ex() don't re-walk the bytecode per call. */
   snobol_search_derive_meta(pat->bc, pat->bc_len, &pat->meta);
@@ -175,13 +166,12 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
 }
 
 snobol_pattern_t *snobol_pattern_compile_ex(snobol_context_t *ctx,
-                                            const char *source, size_t len,
-                                            uint32_t flags, char **error) {
+                                             const char *source, size_t len,
+                                             uint32_t flags, char **error) {
   (void)ctx; /* context owns the pattern conceptually; no registry yet */
   bool case_insensitive = (flags & SNOBOL_FLAG_CASE_INSENSITIVE) != 0;
-  bool search_mode = (flags & SNOBOL_FLAG_SEARCH_MODE) != 0;
   /* Unknown flag bits are intentionally ignored (forward-compatible). */
-  return do_compile(source, len, case_insensitive, search_mode, error);
+  return do_compile(source, len, case_insensitive, error);
 }
 
 snobol_pattern_t *snobol_pattern_compile(snobol_context_t *ctx,
@@ -232,10 +222,6 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
   vm.s = subject;
   vm.len = len;
   vm.out = &out_buf;
-
-  /* TODO(jit-case-fold): when case_insensitive is set, JIT is disabled;
-   * the interpreter handles case-folded char class matching directly via
-   * the charclass case_insensitive flag stored in the bytecode. */
 
   bool ok = vm_run(&vm);
   m->success = ok;
@@ -358,14 +344,11 @@ void snobol_match_free(snobol_match_t *match) {
  *
  * For hot loops (PHP Pattern::searchSplit iterates 1000+ times per call),
  * the per-call allocation cost of snobol_match_t, the output buffer, the
- * VM struct, the JIT context lookup, and the search metadata derivation
- * dominates. snobol_pattern_search_ex() amortises all of that.
+ * VM struct, and the search metadata derivation dominates.
+ * snobol_pattern_search_ex() amortises all of that.
  *
  * The state holds:
  *   - A reference to the pattern (must outlive the state)
- *   - A reference to the JIT context (acquired on first search via the
- *     pattern, not on state creation — same lazy semantics as
- *     snobol_pattern_search)
  *   - A reusable VM struct (allocated on first use, fields-only reset
  *     per call via search_reset_vm())
  *   - A reusable output buffer (snobol_buf)
@@ -440,10 +423,6 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
     state->vm.bc = (uint8_t *)state->bc;
     state->vm.bc_len = state->bc_len;
     state->vm.out = &state->out_buf;
-#ifdef SNOBOL_JIT
-    state->vm.jit.enabled = true;
-    state->vm.jit.stats = snobol_jit_get_stats();
-#endif
     state->vm_inited = true;
   }
 
@@ -585,12 +564,11 @@ snobol_match_result_t *snobol_match(const char *pattern, size_t pat_len,
 
   /* Compile pattern */
   bool case_insensitive = (flags & SNOBOL_FLAG_CASE_INSENSITIVE) != 0;
-  bool search_mode = (flags & SNOBOL_FLAG_SEARCH_MODE) != 0;
   snobol_context_t *ctx =
       NULL; /* not needed for compile, but required by API */
   char *compile_error = NULL;
   snobol_pattern_t *pat = do_compile(pattern, pat_len, case_insensitive,
-                                     search_mode, &compile_error);
+                                     &compile_error);
 
   if (!pat) {
     if (compile_error) {

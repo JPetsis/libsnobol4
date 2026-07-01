@@ -7,7 +7,6 @@ option(BUILD_TESTS "Build C test suite" ON)
 option(BUILD_PHP "Build PHP binding" OFF)
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(SNOBOL_PROFILE "Enable VM profiling" OFF)
-option(SNOBOL_JIT "Enable micro-JIT" ON)
 option(SNOBOL_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(SNOBOL_FUZZ "Build libFuzzer fuzz harnesses (requires Clang)" OFF)
 
