@@ -114,7 +114,7 @@ void bench_delimiter_suite(bench_results_t *out) {
         char *err = NULL;
         snobol_pattern_t *pat =
             snobol_pattern_compile_ex(ctx, "SPAN(',')", 9,
-                                       SNOBOL_FLAG_SEARCH_MODE, &err);
+                                       0, &err);
         if (!pat) {
             fprintf(stderr, "compile SPAN (search) failed: %s\n",
                     err ? err : "??");

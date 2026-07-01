@@ -18,21 +18,12 @@
 #include <string.h>
 #include <inttypes.h>
 
-#ifdef SNOBOL_JIT
-#include <snobol/jit.h>
-#endif
-
 /* Per-scenario result */
 typedef struct {
     const char *name;       /* scenario id */
     int64_t iters;          /* iterations executed */
     int64_t total_ns;       /* wall time for the loop */
     int64_t ns_per_iter;    /* total_ns / iters */
-
-    /* JIT stat deltas (across the loop). All zero if JIT disabled. */
-    uint64_t jit_method_attempts;
-    uint64_t jit_method_successes;
-    uint64_t jit_method_fallbacks;
 } probe_result_t;
 
 /* Comma subject (matches bench_alternation.c) */
@@ -204,39 +195,6 @@ static snobol_pattern_t *compile_or_die(snobol_context_t *ctx,
     return pat;
 }
 
-/* Snapshot JIT stats. Returns zeros if JIT is not compiled in. */
-static void snapshot_jit(uint64_t *attempts, uint64_t *successes,
-                         uint64_t *fallbacks) {
-#ifdef SNOBOL_JIT
-    SnobolJitStats *s = snobol_jit_get_stats();
-    if (s) {
-        *attempts  = s->method_attempts_total;
-        *successes = s->method_successes_total;
-        *fallbacks = s->method_fallbacks_total;
-    } else
-#endif
-    {
-        *attempts = *successes = *fallbacks = 0;
-    }
-}
-
-/* Capture per-scenario JIT deltas. */
-static void capture_deltas(probe_result_t *r,
-                           uint64_t a0, uint64_t s0, uint64_t f0) {
-    uint64_t a1, s1, f1;
-    snapshot_jit(&a1, &s1, &f1);
-    r->jit_method_attempts  = a1 - a0;
-    r->jit_method_successes = s1 - s0;
-    r->jit_method_fallbacks = f1 - f0;
-}
-
-/* Reset JIT stats. No-op if JIT is not compiled in. */
-static void reset_jit_stats(void) {
-#ifdef SNOBOL_JIT
-    snobol_jit_reset_stats();
-#endif
-}
-
 /* ---------------------------------------------------------------------------
  * Scenario runners
  *
@@ -248,9 +206,6 @@ static void run_literal_fail(int64_t iters, probe_result_t *r) {
     snobol_pattern_t *pat = compile_or_die(ctx, "'pqr'", 5);
     size_t slen = strlen(SUBJECT_NO_PQR);
 
-    uint64_t a0, s0, f0;
-    snapshot_jit(&a0, &s0, &f0);
-
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
         snobol_match_t *m = snobol_pattern_match(pat, SUBJECT_NO_PQR, slen);
@@ -261,7 +216,6 @@ static void run_literal_fail(int64_t iters, probe_result_t *r) {
     r->iters = iters;
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
-    capture_deltas(r, a0, s0, f0);
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -271,9 +225,6 @@ static void run_literal_ok(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "'pqr'", 5);
     size_t slen = strlen(SUBJECT_WITH_PQR);
-
-    uint64_t a0, s0, f0;
-    snapshot_jit(&a0, &s0, &f0);
 
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
@@ -285,7 +236,6 @@ static void run_literal_ok(int64_t iters, probe_result_t *r) {
     r->iters = iters;
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
-    capture_deltas(r, a0, s0, f0);
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -295,9 +245,6 @@ static void run_span_comma(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "SPAN(',')", 9);
     size_t slen = strlen(SUBJECT_CSV);
-
-    uint64_t a0, s0, f0;
-    snapshot_jit(&a0, &s0, &f0);
 
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
@@ -309,7 +256,6 @@ static void run_span_comma(int64_t iters, probe_result_t *r) {
     r->iters = iters;
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
-    capture_deltas(r, a0, s0, f0);
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -319,9 +265,6 @@ static void run_span_search(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "SPAN(',')", 9);
     size_t slen = strlen(SUBJECT_CSV);
-
-    uint64_t a0, s0, f0;
-    snapshot_jit(&a0, &s0, &f0);
 
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
@@ -333,7 +276,6 @@ static void run_span_search(int64_t iters, probe_result_t *r) {
     r->iters = iters;
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
-    capture_deltas(r, a0, s0, f0);
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -345,9 +287,6 @@ static void run_alternation(int64_t iters, probe_result_t *r) {
     snobol_pattern_t *pat = compile_or_die(ctx, "'a' | 'b' | 'c'", 15);
     size_t slen = strlen(SUBJECT_MIXED);
 
-    uint64_t a0, s0, f0;
-    snapshot_jit(&a0, &s0, &f0);
-
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
         snobol_match_t *m = snobol_pattern_match(pat, SUBJECT_MIXED, slen);
@@ -358,7 +297,6 @@ static void run_alternation(int64_t iters, probe_result_t *r) {
     r->iters = iters;
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
-    capture_deltas(r, a0, s0, f0);
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -368,9 +306,6 @@ static void run_alt_search(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "'a' | 'b' | 'c'", 15);
     size_t slen = strlen(SUBJECT_MIXED);
-
-    uint64_t a0, s0, f0;
-    snapshot_jit(&a0, &s0, &f0);
 
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
@@ -382,7 +317,6 @@ static void run_alt_search(int64_t iters, probe_result_t *r) {
     r->iters = iters;
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
-    capture_deltas(r, a0, s0, f0);
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -395,9 +329,6 @@ static void run_tokenize(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "' '", 3);
     size_t slen = strlen(SUBJECT_WHITESPACE);
-
-    uint64_t a0, s0, f0;
-    snapshot_jit(&a0, &s0, &f0);
 
     int64_t total_search_calls = 0;
     int64_t start = bench_ns();
@@ -421,7 +352,6 @@ static void run_tokenize(int64_t iters, probe_result_t *r) {
     r->iters = total_search_calls;  /* report actual search calls, not outer iters */
     r->total_ns = end - start;
     r->ns_per_iter = (total_search_calls > 0) ? (r->total_ns / total_search_calls) : 0;
-    capture_deltas(r, a0, s0, f0);
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -433,41 +363,28 @@ static void run_tokenize(int64_t iters, probe_result_t *r) {
 
 static void print_header(void) {
     printf("\n");
-    printf("libsnobol4 diagnostic probe — per-scenario timing + JIT stat deltas\n");
-    printf("==================================================================\n");
-#ifdef SNOBOL_JIT
-    printf("JIT: ENABLED (public stats available via snobol_jit_get_stats)\n");
-#else
-    printf("JIT: DISABLED (rebuild with -DSNOBOL_JIT=ON to enable)\n");
-#endif
+    printf("libsnobol4 diagnostic probe — per-scenario timing\n");
+    printf("=================================================\n");
     printf("\n");
 }
 
 static void print_table(const probe_result_t *results, size_t n) {
-    /* Columns: scenario, ns/iter, iters, jit_attempts, jit_ok, jit_fb */
-    printf("%-16s %10s %8s %12s %12s %12s\n",
-           "scenario", "ns/iter", "iters", "jit_attempts", "jit_ok", "jit_fb");
-    printf("%-16s %10s %8s %12s %12s %12s\n",
-           "-------", "-------", "-----", "-----------", "------", "------");
+    printf("%-16s %10s %8s\n",
+           "scenario", "ns/iter", "iters");
+    printf("%-16s %10s %8s\n",
+           "-------", "-------", "-----");
 
     for (size_t i = 0; i < n; i++) {
         const probe_result_t *r = &results[i];
-        printf("%-16s %10" PRId64 " %8" PRId64 " %12" PRIu64 " %12" PRIu64
-               " %12" PRIu64 "\n",
+        printf("%-16s %10" PRId64 " %8" PRId64 "\n",
                r->name,
                r->ns_per_iter,
-               r->iters,
-               r->jit_method_attempts,
-               r->jit_method_successes,
-               r->jit_method_fallbacks);
+               r->iters);
     }
     printf("\n");
     printf("Legend:\n");
-    printf("  ns/iter       : wall time per match attempt (lower = faster)\n");
-    printf("  iters         : match attempts executed in the scenario\n");
-    printf("  jit_attempts  : method-JIT compile attempts (delta)\n");
-    printf("  jit_ok        : method-JIT successful compilations (delta)\n");
-    printf("  jit_fb        : method-JIT fallbacks to interpreter (delta)\n");
+    printf("  ns/iter  : wall time per match attempt (lower = faster)\n");
+    printf("  iters    : match attempts executed in the scenario\n");
     printf("\n");
 }
 
@@ -642,7 +559,7 @@ int main(void) {
     probe_result_t results[7];
     memset(results, 0, sizeof(results));
 
-    /* Run each scenario with a fresh JIT-stats baseline so deltas are clean. */
+    /* Run each scenario */
     struct {
         const char *name;
         void (*run)(int64_t, probe_result_t *);
@@ -659,7 +576,6 @@ int main(void) {
     size_t n = sizeof(scenarios) / sizeof(scenarios[0]);
 
     for (size_t i = 0; i < n; i++) {
-        reset_jit_stats();
         results[i].name = scenarios[i].name;
         scenarios[i].run(scenarios[i].iter_count, &results[i]);
     }

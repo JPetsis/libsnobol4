@@ -639,6 +639,55 @@ bool vm_run(VM *vm) {
     }
   }
 
+#ifndef _MSC_VER
+  static void *opcode_table[] = {
+      [OP_ACCEPT] = &&op_accept,
+      [OP_FAIL] = &&op_fail,
+      [OP_JMP] = &&op_jmp,
+      [OP_SPLIT] = &&op_split,
+      [OP_LIT] = &&op_lit,
+      [OP_ANY] = &&op_any,
+      [OP_NOTANY] = &&op_notany,
+      [OP_SPAN] = &&op_span,
+      [OP_BREAK] = &&op_break,
+      [OP_CAP_START] = &&op_cap_start,
+      [OP_CAP_END] = &&op_cap_end,
+      [OP_ASSIGN] = &&op_assign,
+      [OP_LEN] = &&op_len,
+      [OP_EVAL] = &&op_eval,
+      [OP_ANCHOR] = &&op_anchor,
+      [OP_REPEAT_INIT] = &&op_repeat_init,
+      [OP_REPEAT_STEP] = &&op_repeat_step,
+      [OP_EMIT_LITERAL] = &&op_emit_literal,
+      [OP_EMIT_CAPTURE] = &&op_emit_capture,
+      [OP_EMIT_EXPR] = &&op_emit_expr,
+      [OP_EMIT_TABLE] = &&op_emit_table,
+      [OP_EMIT_FORMAT] = &&op_emit_format,
+      [OP_LABEL] = &&op_label,
+      [OP_GOTO] = &&op_goto,
+      [OP_GOTO_F] = &&op_goto_f,
+#ifdef SNOBOL_DYNAMIC_PATTERN
+      [OP_TABLE_GET] = &&op_table_get,
+      [OP_TABLE_SET] = &&op_table_set,
+      [OP_ARRAY_GET] = &&op_array_get,
+      [OP_ARRAY_SET] = &&op_array_set,
+      [OP_DYNAMIC] = &&op_dynamic,
+      [OP_DYNAMIC_DEF] = &&op_dynamic_def,
+#endif
+      [OP_BREAKX] = &&op_breakx,
+      [OP_BAL] = &&op_bal,
+      [OP_FENCE] = &&op_fence,
+      [OP_REM] = &&op_rem,
+      [OP_RPOS] = &&op_rpos,
+      [OP_RTAB] = &&op_rtab,
+      [OP_POS] = &&op_pos,
+      [OP_TAB] = &&op_tab,
+      [OP_ABORT] = &&op_abort,
+      [OP_SUCCEED] = &&op_succeed,
+      [OP_NOP] = &&op_nop,
+  };
+#endif
+
   while (1) {
 #ifdef SNOBOL_PROFILE
     vm->profile.dispatch_count++;
@@ -649,10 +698,29 @@ bool vm_run(VM *vm) {
       continue;
     }
     uint8_t op = vm->bc[vm->ip++];
+#ifndef _MSC_VER
+    goto *opcode_table[op];
+#else
     switch (op) {
+#endif
+#ifndef _MSC_VER
+op_nop:
+#endif
+#ifdef _MSC_VER
     case OP_NOP:
-      break; /* fusion filler — skip one byte */
+#endif
+      /* fusion filler — skip one byte */
+#ifdef _MSC_VER
+      break;
+#else
+      continue;
+#endif
+#ifndef _MSC_VER
+op_accept:
+#endif
+#ifdef _MSC_VER
     case OP_ACCEPT:
+#endif
       if (!vm->keep_choices) {
         if (vm->choices) {
           snobol_free(vm->choices);
@@ -663,25 +731,61 @@ bool vm_run(VM *vm) {
         }
       }
       return true;
-    case OP_FAIL: {
+#ifndef _MSC_VER
+op_fail:
+#endif
+#ifdef _MSC_VER
+    case OP_FAIL:
+#endif
+    {
       bool had = vm_pop_choice(vm);
       if (!had)
         goto fail_ret;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_JMP: {
+#ifndef _MSC_VER
+op_jmp:
+#endif
+#ifdef _MSC_VER
+    case OP_JMP:
+#endif
+    {
       uint32_t tgt = read_u32(vm->bc, vm->bc_len, &vm->ip);
       vm->ip = (size_t)tgt;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_SPLIT: {
+#ifndef _MSC_VER
+op_split:
+#endif
+#ifdef _MSC_VER
+    case OP_SPLIT:
+#endif
+    {
       uint32_t a = read_u32(vm->bc, vm->bc_len, &vm->ip);
       uint32_t b = read_u32(vm->bc, vm->bc_len, &vm->ip);
       vm_push_choice(vm, (size_t)b, vm->pos);
       vm->ip = (size_t)a;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_LIT: {
+#ifndef _MSC_VER
+op_lit:
+#endif
+#ifdef _MSC_VER
+    case OP_LIT:
+#endif
+    {
       uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip);
       uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
       if (off == vm->ip)
@@ -691,9 +795,19 @@ bool vm_run(VM *vm) {
         vm->pos += len;
       } else if (!vm_pop_choice(vm))
         goto fail_ret;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_ANY: {
+#ifndef _MSC_VER
+op_any:
+#endif
+#ifdef _MSC_VER
+    case OP_ANY:
+#endif
+    {
       uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
       uint16_t count, ci;
       const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
@@ -715,9 +829,19 @@ bool vm_run(VM *vm) {
         else if (!vm_pop_choice(vm))
           goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_NOTANY: {
+#ifndef _MSC_VER
+op_notany:
+#endif
+#ifdef _MSC_VER
+    case OP_NOTANY:
+#endif
+    {
       uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
       uint16_t count, ci;
       const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
@@ -740,9 +864,19 @@ bool vm_run(VM *vm) {
         } else
           vm->pos += bytes;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_SPAN: {
+#ifndef _MSC_VER
+op_span:
+#endif
+#ifdef _MSC_VER
+    case OP_SPAN:
+#endif
+    {
       uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
       uint16_t count, ci;
       const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
@@ -769,9 +903,19 @@ bool vm_run(VM *vm) {
             vm->pos += bytes;
         }
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_BREAK: {
+#ifndef _MSC_VER
+op_break:
+#endif
+#ifdef _MSC_VER
+    case OP_BREAK:
+#endif
+    {
       uint16_t set_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
       uint16_t count, ci;
       const uint8_t *ranges = get_ranges_ptr(vm, set_id, &count, &ci);
@@ -798,9 +942,19 @@ bool vm_run(VM *vm) {
                (!ranges || !range_contains(ranges, count, cp)))
           vm->pos += bytes;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_CAP_START: {
+#ifndef _MSC_VER
+op_cap_start:
+#endif
+#ifdef _MSC_VER
+    case OP_CAP_START:
+#endif
+    {
       uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
       if (r < MAX_CAPS) {
         if (vm->use_compact_choice) {
@@ -810,9 +964,19 @@ bool vm_run(VM *vm) {
         if (r >= vm->max_cap_used)
           vm->max_cap_used = r + 1;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_CAP_END: {
+#ifndef _MSC_VER
+op_cap_end:
+#endif
+#ifdef _MSC_VER
+    case OP_CAP_END:
+#endif
+    {
       uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
       if (r < MAX_CAPS) {
         if (vm->use_compact_choice) {
@@ -831,9 +995,19 @@ bool vm_run(VM *vm) {
             vm->var_count = (size_t)r + 1;
         }
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_ASSIGN: {
+#ifndef _MSC_VER
+op_assign:
+#endif
+#ifdef _MSC_VER
+    case OP_ASSIGN:
+#endif
+    {
       uint16_t var = read_u16(vm->bc, vm->bc_len, &vm->ip);
       uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
       if (var < MAX_VARS && r < MAX_CAPS) {
@@ -842,9 +1016,19 @@ bool vm_run(VM *vm) {
         vm->var_start[var] = vm->cap_start[r];
         vm->var_end[var] = vm->cap_end[r];
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_LEN: {
+#ifndef _MSC_VER
+op_len:
+#endif
+#ifdef _MSC_VER
+    case OP_LEN:
+#endif
+    {
       uint32_t n = read_u32(vm->bc, vm->bc_len, &vm->ip);
       size_t p = vm->pos;
       uint32_t i;
@@ -860,9 +1044,19 @@ bool vm_run(VM *vm) {
           goto fail_ret;
       } else
         vm->pos = p;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_EVAL: {
+#ifndef _MSC_VER
+op_eval:
+#endif
+#ifdef _MSC_VER
+    case OP_EVAL:
+#endif
+    {
       /* Built-in dispatch table.
        * If fn_id is a known built-in (< SNOBOL_FN_MAX), dispatch
        * directly to the C function.  Otherwise fall back to the
@@ -872,7 +1066,11 @@ bool vm_run(VM *vm) {
       if (r >= MAX_CAPS) {
         if (!vm_pop_choice(vm))
           goto fail_ret;
+#ifdef _MSC_VER
         break;
+#else
+        continue;
+#endif
       }
 
       /* Validate capture bounds */
@@ -881,7 +1079,11 @@ bool vm_run(VM *vm) {
       if (!cap_ok) {
         if (!vm_pop_choice(vm))
           goto fail_ret;
+#ifdef _MSC_VER
         break;
+#else
+        continue;
+#endif
       }
 
       const char *cap_s = vm->s + vm->cap_start[r];
@@ -965,18 +1167,38 @@ bool vm_run(VM *vm) {
         if (!vm_pop_choice(vm))
           goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_ANCHOR: {
+#ifndef _MSC_VER
+op_anchor:
+#endif
+#ifdef _MSC_VER
+    case OP_ANCHOR:
+#endif
+    {
       uint8_t type = read_u8(vm->bc, vm->bc_len, &vm->ip);
       bool ok = (type == 0) ? (vm->pos == 0) : (vm->pos == vm->len);
       if (!ok) {
         if (!vm_pop_choice(vm))
           goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_REPEAT_INIT: {
+#ifndef _MSC_VER
+op_repeat_init:
+#endif
+#ifdef _MSC_VER
+    case OP_REPEAT_INIT:
+#endif
+    {
       uint8_t loop_id = read_u8(vm->bc, vm->bc_len, &vm->ip);
       uint32_t min = read_u32(vm->bc, vm->bc_len, &vm->ip);
       uint32_t max = read_u32(vm->bc, vm->bc_len, &vm->ip);
@@ -991,9 +1213,19 @@ bool vm_run(VM *vm) {
         if (min == 0)
           vm_push_choice(vm, (size_t)skip, vm->pos);
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_REPEAT_STEP: {
+#ifndef _MSC_VER
+op_repeat_step:
+#endif
+#ifdef _MSC_VER
+    case OP_REPEAT_STEP:
+#endif
+    {
       uint8_t loop_id = read_u8(vm->bc, vm->bc_len, &vm->ip);
       uint32_t target = read_u32(vm->bc, vm->bc_len, &vm->ip);
       if (loop_id < MAX_LOOPS) {
@@ -1013,9 +1245,19 @@ bool vm_run(VM *vm) {
           }
         }
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_EMIT_LITERAL: {
+#ifndef _MSC_VER
+op_emit_literal:
+#endif
+#ifdef _MSC_VER
+    case OP_EMIT_LITERAL:
+#endif
+    {
       uint32_t off = read_u32(vm->bc, vm->bc_len, &vm->ip);
       uint32_t len = read_u32(vm->bc, vm->bc_len, &vm->ip);
       if (off == vm->ip)
@@ -1024,9 +1266,19 @@ bool vm_run(VM *vm) {
         snobol_buf_append(vm->out, (const char *)vm->bc + off, (size_t)len);
       if (vm->emit_fn)
         vm->emit_fn((const char *)vm->bc + off, (size_t)len, vm->emit_udata);
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_EMIT_CAPTURE: {
+#ifndef _MSC_VER
+op_emit_capture:
+#endif
+#ifdef _MSC_VER
+    case OP_EMIT_CAPTURE:
+#endif
+    {
       uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
       if (r < MAX_CAPS && vm->cap_end[r] >= vm->cap_start[r] &&
           vm->cap_end[r] <= vm->len) {
@@ -1037,9 +1289,19 @@ bool vm_run(VM *vm) {
           vm->emit_fn(vm->s + vm->cap_start[r],
                       vm->cap_end[r] - vm->cap_start[r], vm->emit_udata);
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_EMIT_EXPR: {
+#ifndef _MSC_VER
+op_emit_expr:
+#endif
+#ifdef _MSC_VER
+    case OP_EMIT_EXPR:
+#endif
+    {
       /* LEGACY alias: old discriminants 1=upper, 2=length.
        * Map to SNBL_FMT_* and fall through to the same logic
        * as OP_EMIT_FORMAT. */
@@ -1081,11 +1343,21 @@ bool vm_run(VM *vm) {
             vm->emit_fn(data, len, vm->emit_udata);
         }
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
     /* Table-backed and formatted replacement opcodes */
-    case OP_EMIT_TABLE: {
+#ifndef _MSC_VER
+op_emit_table:
+#endif
+#ifdef _MSC_VER
+    case OP_EMIT_TABLE:
+#endif
+    {
       /* Lookup table[key] and emit the value
        * Format: table_id u16 (SNBL_TABLE_ID_UNBOUND=unbound),
        *         key_type u8,
@@ -1165,9 +1437,19 @@ bool vm_run(VM *vm) {
         vm->ip += 1;
       }
 #endif
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_EMIT_FORMAT: {
+#ifndef _MSC_VER
+op_emit_format:
+#endif
+#ifdef _MSC_VER
+    case OP_EMIT_FORMAT:
+#endif
+    {
       /* Format capture with specified format type
        * Format: reg u8, format_type u8 (SNBL_FMT_*)
        * SNBL_FMT_LPAD / SNBL_FMT_RPAD also read: width u16, fill_char u8 */
@@ -1260,18 +1542,38 @@ bool vm_run(VM *vm) {
         }
         /* emit empty (graceful degradation) */
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
     /* Control flow opcodes */
-    case OP_LABEL: {
+#ifndef _MSC_VER
+op_label:
+#endif
+#ifdef _MSC_VER
+    case OP_LABEL:
+#endif
+    {
       /* Define a label target - just skip during execution
        * Labels are resolved at compile time, OP_LABEL is a no-op at runtime */
       uint16_t label_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
       (void)label_id;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_GOTO: {
+#ifndef _MSC_VER
+op_goto:
+#endif
+#ifdef _MSC_VER
+    case OP_GOTO:
+#endif
+    {
       /* Unconditional transfer to label
        * CRITICAL: GOTO does NOT restore backtracking state
        * This distinguishes explicit control flow from ordinary backtracking */
@@ -1290,9 +1592,19 @@ bool vm_run(VM *vm) {
          */
         vm->ip = target;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_GOTO_F: {
+#ifndef _MSC_VER
+op_goto_f:
+#endif
+#ifdef _MSC_VER
+    case OP_GOTO_F:
+#endif
+    {
       /* Transfer to label if last match failed
        * This is used for conditional control flow after a match attempt */
       uint16_t label_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
@@ -1308,14 +1620,28 @@ bool vm_run(VM *vm) {
         }
       } else {
         /* Continue normally - no failure occurred */
+#ifdef _MSC_VER
         break;
+#else
+        continue;
+#endif
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
     /* Table operations */
-    case OP_TABLE_GET: {
+#ifndef _MSC_VER
+op_table_get:
+#endif
+#ifdef _MSC_VER
+    case OP_TABLE_GET:
+#endif
+    {
       /* Lookup table[key] and store result in dest register
        * Format: table_id u16, key_reg u8, dest_reg u8
        * If key not found, fail (trigger backtracking) */
@@ -1372,9 +1698,19 @@ bool vm_run(VM *vm) {
        * For now, we just note the lookup succeeded
        * Full implementation would store value in a temp buffer */
       (void)dest_reg; /* Result available via table */
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_TABLE_SET: {
+#ifndef _MSC_VER
+op_table_set:
+#endif
+#ifdef _MSC_VER
+    case OP_TABLE_SET:
+#endif
+    {
       /* Set table[key] = value
        * Format: table_id u16, key_reg u8, value_reg u8
        * Always succeeds (table operations don't fail) */
@@ -1448,10 +1784,20 @@ bool vm_run(VM *vm) {
 
       snobol_free(key);
       snobol_free(value);
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
     /* Array operations */
-    case OP_ARRAY_GET: {
+#ifndef _MSC_VER
+op_array_get:
+#endif
+#ifdef _MSC_VER
+    case OP_ARRAY_GET:
+#endif
+    {
       uint16_t array_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
       uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
       uint8_t dest_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
@@ -1496,9 +1842,19 @@ bool vm_run(VM *vm) {
       }
 
       (void)dest_reg;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_ARRAY_SET: {
+#ifndef _MSC_VER
+op_array_set:
+#endif
+#ifdef _MSC_VER
+    case OP_ARRAY_SET:
+#endif
+    {
       uint16_t array_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
       uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
       uint8_t value_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
@@ -1564,9 +1920,19 @@ bool vm_run(VM *vm) {
       }
 
       snobol_free(value_str);
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_DYNAMIC_DEF: {
+#ifndef _MSC_VER
+op_dynamic_def:
+#endif
+#ifdef _MSC_VER
+    case OP_DYNAMIC_DEF:
+#endif
+    {
       /* Define dynamic pattern source and bytecode for runtime caching
        * Format: source_len(u32) + source_text + bc_len(u32) + bytecode
        *
@@ -1612,9 +1978,19 @@ bool vm_run(VM *vm) {
       if (bc_copy)
         snobol_free(bc_copy);
 #endif
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
-    case OP_DYNAMIC: {
+#ifndef _MSC_VER
+op_dynamic:
+#endif
+#ifdef _MSC_VER
+    case OP_DYNAMIC:
+#endif
+    {
       /* Evaluate dynamic pattern using cached compilation
        * Format: (no additional operands - uses data from OP_DYNAMIC_DEF)
        *
@@ -1778,7 +2154,11 @@ bool vm_run(VM *vm) {
       /* Dynamic pattern support not enabled */
       SNOBOL_LOG("OP_DYNAMIC: support not enabled");
 #endif
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 #endif /* SNOBOL_DYNAMIC_PATTERN */
 
@@ -1786,7 +2166,13 @@ bool vm_run(VM *vm) {
        * Pattern primitives
        * ------------------------------------------------------------------ */
 
-    case OP_BREAKX: {
+#ifndef _MSC_VER
+op_breakx:
+#endif
+#ifdef _MSC_VER
+    case OP_BREAKX:
+#endif
+    {
       /* BREAKX pre-scan optimization.
        *
        * Semantics: like BREAK (advance past non-break chars), but also
@@ -1836,10 +2222,20 @@ bool vm_run(VM *vm) {
           ; /* bx_skip now holds byte count of break char */
         vm_push_choice(vm, breakx_ip, vm->pos + (size_t)bx_skip);
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
-    case OP_BAL: {
+#ifndef _MSC_VER
+op_bal:
+#endif
+#ifdef _MSC_VER
+    case OP_BAL:
+#endif
+    {
       /* BAL: match balanced structure.
        * Operands: open_cp u32, close_cp u32
        * Fails if the subject at vm->pos does not start with open_cp,
@@ -1884,28 +2280,58 @@ bool vm_run(VM *vm) {
           goto fail_ret;
       } else
         vm->pos = bal_pos;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
-    case OP_FENCE: {
+#ifndef _MSC_VER
+op_fence:
+#endif
+#ifdef _MSC_VER
+    case OP_FENCE:
+#endif
+    {
       /* FENCE: cut the choice stack.
        * Drops all choice points pushed since execution started,
        * preventing backtracking past this point.
        * This implements "possessive" / atomic behaviour.
        */
       vm->choices_top = 0;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
-    case OP_REM: {
+#ifndef _MSC_VER
+op_rem:
+#endif
+#ifdef _MSC_VER
+    case OP_REM:
+#endif
+    {
       /* REM: match remainder of subject.
        * Advances pos to end of string unconditionally.
        */
       vm->pos = vm->len;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
-    case OP_RPOS: {
+#ifndef _MSC_VER
+op_rpos:
+#endif
+#ifdef _MSC_VER
+    case OP_RPOS:
+#endif
+    {
       /* REM: match remainder of subject.
        * codepoints from the end of the subject string.
        *
@@ -1926,10 +2352,20 @@ bool vm_run(VM *vm) {
         if (!vm_pop_choice(vm))
           goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
-    case OP_RTAB: {
+#ifndef _MSC_VER
+op_rtab:
+#endif
+#ifdef _MSC_VER
+    case OP_RTAB:
+#endif
+    {
       /* RTAB(n): advance cursor to the position that is
        * n codepoints from the end of the subject string.
        * RTAB(0) is equivalent to REM (advance to end).
@@ -1950,10 +2386,20 @@ bool vm_run(VM *vm) {
           goto fail_ret;
       } else
         vm->pos = rtab_target;
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
-    case OP_POS: {
+#ifndef _MSC_VER
+op_pos:
+#endif
+#ifdef _MSC_VER
+    case OP_POS:
+#endif
+    {
       /* POS(n): succeed only when the current match position
        * is exactly n codepoints from the start of the subject.
        *
@@ -1974,10 +2420,20 @@ bool vm_run(VM *vm) {
         if (!vm_pop_choice(vm))
           goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
-    case OP_TAB: {
+#ifndef _MSC_VER
+op_tab:
+#endif
+#ifdef _MSC_VER
+    case OP_TAB:
+#endif
+    {
       /* TAB(n): advance cursor to n codepoints from the
        * start of the subject string.
        *
@@ -2002,10 +2458,20 @@ bool vm_run(VM *vm) {
       } else {
         vm->pos = tab_target;
       }
+#ifdef _MSC_VER
       break;
+#else
+      continue;
+#endif
     }
 
-    case OP_ABORT: {
+#ifndef _MSC_VER
+op_abort:
+#endif
+#ifdef _MSC_VER
+    case OP_ABORT:
+#endif
+    {
       /* ABORT: immediately terminate the entire match.
        * Sets a VM abort flag and unwinds all choice points,
        * returning failure with no further backtracking possible.
@@ -2025,7 +2491,13 @@ bool vm_run(VM *vm) {
       return false;
     }
 
-    case OP_SUCCEED: {
+#ifndef _MSC_VER
+op_succeed:
+#endif
+#ifdef _MSC_VER
+    case OP_SUCCEED:
+#endif
+    {
       /* SUCCEED: force immediate match success at the
        * current position, skipping any remaining pattern.
        * No operands.
@@ -2048,11 +2520,13 @@ bool vm_run(VM *vm) {
        * matching the spec description "split + LEN(1) loop".
        * Helper: snobol_emit_arb() in pattern_build.c builds the bytecode. */
 
-    default:
+#ifdef _MSC_VER
+      default:
       if (!vm_pop_choice(vm))
         goto fail_ret;
       break;
     }
+#endif
     /* Interpreter dispatch time tracking retired with tracing JIT */
   }
   if (!vm->keep_choices) {

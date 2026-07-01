@@ -112,6 +112,7 @@ static bool capture_count_consistent(const char *pat_str, size_t pat_len,
 static bool substitution_roundtrip(const char *pat_str, size_t pat_len,
                                    const char *sub, size_t sub_len,
                                    const char *tpl, size_t tpl_len) {
+  (void)tpl; (void)tpl_len;
   snobol_context_t *ctx = snobol_context_create();
   if (!ctx)
     return true;
