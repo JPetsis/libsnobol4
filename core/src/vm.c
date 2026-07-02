@@ -111,6 +111,18 @@ const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id,
                               uint16_t *out_count, uint16_t *out_case) {
   if (set_id == 0)
     return nullptr;
+
+  /* Fast path: use cached range metadata if available.
+   * The table is indexed by (set_id - 1) and built at compile time. */
+  if (vm->range_meta && (size_t)set_id <= vm->range_meta_count) {
+    const snobol_range_meta_t *entry = &vm->range_meta[set_id - 1];
+    if (entry->ranges_ptr) {
+      *out_count = entry->count;
+      *out_case = entry->case_insensitive;
+      return entry->ranges_ptr;
+    }
+  }
+
   size_t tail_ip = vm->bc_len;
   if (tail_ip < 4)
     return nullptr;
@@ -171,6 +183,74 @@ const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id,
   *out_count = read_u16(vm->bc, vm->bc_len, &ip);
   *out_case = read_u16(vm->bc, vm->bc_len, &ip);
   return vm->bc + ip;
+}
+
+void snobol_build_range_meta(const uint8_t *bc, size_t bc_len,
+                              snobol_range_meta_t **out_table,
+                              size_t *out_count) {
+  *out_table = NULL;
+  *out_count = 0;
+  if (!bc || bc_len < 4)
+    return;
+
+  /* Detect charclass_count — same logic as get_ranges_ptr
+   * (we cannot call get_ranges_ptr here to detect the count
+   * because the cache doesn't exist yet). */
+  size_t tail_ip = bc_len;
+  uint32_t last4 = ((uint32_t)bc[tail_ip - 4] << 24) |
+                   ((uint32_t)bc[tail_ip - 3] << 16) |
+                   ((uint32_t)bc[tail_ip - 2] << 8) |
+                   (uint32_t)bc[tail_ip - 1];
+
+  size_t cc_tail;
+  if (last4 == SNOBOL_LABEL_TABLE_MAGIC) {
+    if (tail_ip < 8)
+      return;
+    uint32_t label_count = ((uint32_t)bc[tail_ip - 8] << 24) |
+                           ((uint32_t)bc[tail_ip - 7] << 16) |
+                           ((uint32_t)bc[tail_ip - 6] << 8) |
+                           (uint32_t)bc[tail_ip - 5];
+    size_t skip = 8 + (size_t)label_count * 4;
+    if (tail_ip < skip + 4)
+      return;
+    cc_tail = tail_ip - skip;
+  } else {
+    cc_tail = tail_ip;
+  }
+
+  if (cc_tail < 4)
+    return;
+  uint32_t class_count = ((uint32_t)bc[cc_tail - 4] << 24) |
+                          ((uint32_t)bc[cc_tail - 3] << 16) |
+                          ((uint32_t)bc[cc_tail - 2] << 8) |
+                          (uint32_t)bc[cc_tail - 1];
+
+  if (class_count == 0 || class_count > 65535)
+    return;
+
+  snobol_range_meta_t *table =
+      snobol_malloc((size_t)class_count * sizeof(snobol_range_meta_t));
+  if (!table)
+    return;
+
+  /* Build a temporary VM — range_meta is NULL so get_ranges_ptr
+   * will use the fallback re-parse path (exactly what we want:
+   * we are building the cache for future use). */
+  VM tmp_vm;
+  memset(&tmp_vm, 0, sizeof(tmp_vm));
+  tmp_vm.bc = bc;
+  tmp_vm.bc_len = bc_len;
+
+  for (uint32_t id = 1; id <= class_count; id++) {
+    uint16_t count = 0, ci = 0;
+    const uint8_t *ptr = get_ranges_ptr(&tmp_vm, (uint16_t)id, &count, &ci);
+    table[id - 1].ranges_ptr = ptr;
+    table[id - 1].count = count;
+    table[id - 1].case_insensitive = ci;
+  }
+
+  *out_table = table;
+  *out_count = (size_t)class_count;
 }
 
 bool ranges_to_ascii_bitmap(const uint8_t *ranges_ptr, size_t count,

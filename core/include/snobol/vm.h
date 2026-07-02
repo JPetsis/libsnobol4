@@ -41,6 +41,19 @@ typedef struct cp_range {
 } CpRange;
 
 /**
+ * @brief Cached range metadata for a single charclass set.
+ *
+ * Built once at compile time (or state-create time) so that
+ * get_ranges_ptr() can resolve set_id to range data via O(1)
+ * array lookup instead of re-parsing the bytecode trailer.
+ */
+typedef struct {
+  const uint8_t *ranges_ptr; /**< Pointer to packed range data in bytecode */
+  uint16_t count;            /**< Number of CpRange entries */
+  uint16_t case_insensitive; /**< Non-zero if case-insensitive */
+} snobol_range_meta_t;
+
+/**
  * @brief Decode the next UTF-8 codepoint from a byte string.
  *
  * @param[in]  s        Input string (UTF-8 bytes).
@@ -330,6 +343,12 @@ typedef struct {
   const uint8_t *bc; /**< Compiled bytecode pointer (not owned). */
   size_t bc_len;     /**< Bytecode length in bytes. */
 
+  /** @brief Cached charclass range metadata (set_id -> range data).
+   *  Built at compile time; index is set_id - 1. May be NULL if the
+   *  pattern has no charclass ops or was created via raw bytecode. */
+  const snobol_range_meta_t *range_meta;
+  size_t range_meta_count; /**< Number of entries in range_meta array. */
+
   const char *s;
   size_t len; // bytes of s
 
@@ -437,6 +456,23 @@ typedef struct {
  */
 const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id,
                               uint16_t *out_count, uint16_t *out_case);
+
+/**
+ * @brief Build a range metadata table from bytecode for O(1) set_id lookup.
+ *
+ * Scans the bytecode for the charclass trailer, resolves each set_id
+ * via get_ranges_ptr() (fallback path), and stores the results in a
+ * table indexed by (set_id - 1).  The caller owns the returned table
+ * and must free it with snobol_free().
+ *
+ * @param[in]  bc         Bytecode buffer.
+ * @param[in]  bc_len     Bytecode length.
+ * @param[out] out_table  Receives pointer to allocated table (or NULL).
+ * @param[out] out_count  Receives number of table entries (0 if none).
+ */
+void snobol_build_range_meta(const uint8_t *bc, size_t bc_len,
+                              snobol_range_meta_t **out_table,
+                              size_t *out_count);
 
 /**
  * @brief Build a 128-bit ASCII bitmap from range data; returns false if any

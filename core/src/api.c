@@ -45,6 +45,10 @@ struct snobol_pattern {
    * to avoid re-walking the bytecode on every call. */
   snobol_search_meta_t meta;
   bool meta_initialized;
+  /* Cached charclass range metadata — O(1) set_id lookup
+   * for get_ranges_ptr().  Built once at compile time. */
+  snobol_range_meta_t *range_meta;
+  size_t range_meta_count;
 };
 
 /* Maximum named variables returned from a match */
@@ -162,6 +166,8 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
    * and snobol_pattern_search_ex() don't re-walk the bytecode per call. */
   snobol_search_derive_meta(pat->bc, pat->bc_len, &pat->meta);
   pat->meta_initialized = true;
+  snobol_build_range_meta(pat->bc, pat->bc_len,
+                           &pat->range_meta, &pat->range_meta_count);
   return pat;
 }
 
@@ -192,6 +198,8 @@ void snobol_pattern_free(snobol_pattern_t *pattern) {
   if (!pattern)
     return;
   compiler_free(pattern->bc);
+  if (pattern->range_meta)
+    snobol_free(pattern->range_meta);
   snobol_free(pattern);
 }
 
@@ -219,6 +227,8 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
   memset(&vm, 0, sizeof(VM));
   vm.bc = pattern->bc;
   vm.bc_len = pattern->bc_len;
+  vm.range_meta = pattern->range_meta;
+  vm.range_meta_count = pattern->range_meta_count;
   vm.s = subject;
   vm.len = len;
   vm.out = &out_buf;
@@ -276,6 +286,8 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
   memset(&vm, 0, sizeof(VM));
   vm.bc = pattern->bc;
   vm.bc_len = pattern->bc_len;
+  vm.range_meta = pattern->range_meta;
+  vm.range_meta_count = pattern->range_meta_count;
   vm.s = subject;
   vm.len = len;
   vm.out = &out_buf;
@@ -363,6 +375,8 @@ struct snobol_pattern_search_state {
   VM vm;                     /* reused, fields-only reset per call */
   snobol_match_t match;      /* overwritten on each call */
   snobol_search_meta_t meta; /* derived once at create time */
+  snobol_range_meta_t *range_meta;  /* owned — derived once at create time */
+  size_t range_meta_count;
   bool vm_inited;            /* true after first search call sets it up */
   bool buf_inited;           /* true after first out_buf_init */
 };
@@ -380,6 +394,8 @@ snobol_pattern_search_state_create(const uint8_t *bc, size_t bc_len) {
   state->bc_len = bc_len;
   /* Derive search metadata once — reused across all search calls */
   snobol_search_derive_meta(bc, bc_len, &state->meta);
+  snobol_build_range_meta(bc, bc_len,
+                           &state->range_meta, &state->range_meta_count);
   return state;
 }
 
@@ -390,6 +406,8 @@ void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
     snobol_buf_free(&state->out_buf);
   }
   vm_free_labels(&state->vm);
+  if (state->range_meta)
+    snobol_free(state->range_meta);
   if (state->match.output) {
     snobol_free(state->match.output);
     state->match.output = NULL;
@@ -422,6 +440,8 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
     memset(&state->vm, 0, sizeof(VM));
     state->vm.bc = (uint8_t *)state->bc;
     state->vm.bc_len = state->bc_len;
+    state->vm.range_meta = state->range_meta;
+    state->vm.range_meta_count = state->range_meta_count;
     state->vm.out = &state->out_buf;
     state->vm_inited = true;
   }
@@ -590,6 +610,8 @@ snobol_match_result_t *snobol_match(const char *pattern, size_t pat_len,
   memset(&vm, 0, sizeof(VM));
   vm.bc = pat->bc;
   vm.bc_len = pat->bc_len;
+  vm.range_meta = pat->range_meta;
+  vm.range_meta_count = pat->range_meta_count;
   vm.s = subject;
   vm.len = sub_len;
   vm.out = &out_buf;

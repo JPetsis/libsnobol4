@@ -28,9 +28,6 @@
 #include "../../core/src/table.c"
 #include "../../core/src/array.c"
 #include "../../core/src/dynamic_pattern.c"
-#include "../../core/src/jit_ir.c"
-#include "../../core/src/jit_backend_sljit.c"
-#include "../../core/src/jit.c"
 #include "../../core/src/version.c"
 #include "../../core/src/unicode_fold.c"
 #include "../../core/src/string_fn.c"
@@ -38,5 +35,4 @@
 #include "../../core/src/pattern_build.c"
 #include "../../core/src/search.c"
 #include "../../core/src/api.c"
-#include "../../deps/sljit/sljitLir.c"
 
