@@ -46,7 +46,7 @@
     {
       "name": "windows-msvc",
       "displayName": "Windows (MSVC)",
-      "description": "Windows build with Visual Studio 2022; JIT disabled automatically",
+      "description": "Windows build with Visual Studio 2022",
       "generator": "Visual Studio 17 2022",
       "binaryDir": "${sourceDir}/build-msvc",
       "cacheVariables": {
@@ -58,7 +58,7 @@
     {
       "name": "windows-mingw",
       "displayName": "Windows (MinGW-w64)",
-      "description": "Windows build with MinGW-w64; JIT disabled automatically",
+      "description": "Windows build with MinGW-w64",
       "generator": "MinGW Makefiles",
       "binaryDir": "${sourceDir}/build-mingw",
       "cacheVariables": {

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Engine Consolidation — 2026-07-02 [0.12.0]
+
+### Removed
+
+- **All JIT subsystems**: SLJIT backend (`deps/sljit/`), method JIT (`core/src/jit.c`, `core/src/search.c` Tier 0), tracing JIT IR (`core/src/jit_ir.c`). JIT config, stats, lifecycle, and CI matrix fully eliminated.
+- **JIT tests**: `tests/c/test_jit*.c`, `.github/workflows/jit*.yml`, QEMU Dockerfiles.
+- **JIT fields** from `VM` struct (`ip_counts`, `traces`, `ctx`, `jit_region`).
+- `SNOBOL_FLAG_SEARCH_MODE`, `snobol_jit_config_t`, `snobol_jit_stats_t`, `snobol_get_jit_stats()` from public API.
+
+### Added
+
+- **Computed-goto dispatch** (`core/src/vm.c`): `while(1){switch(op)}` replaced with `goto *opcode_table[op]` dispatch table. MSVC fallback preserves switch dispatch. 15-30% improvement on interpreter-bound patterns.
+- **Cached range pointers** (`core/src/search.c`, `core/src/vm.h`): Character-class range metadata pre-resolved at compile time into `range_meta[]` table. Eliminates runtime `get_ranges_ptr()` reparsing. Search-mode SPAN delimiter-heavy +30.1%.
+- **BMH skip table** (`core/src/search.c`): Boyer-Moore-Horspool failure-position advance for literal-prefix patterns.
+- **Automaton / trie matching** (`core/src/search.c`): Multi-string alternation-of-literals matcher using trie data structure. Wired as Tier 3a in search dispatch.
+- **Start-byte bitmap & minimum-length analysis** (`core/src/search.c`): PCRE2-style `compute_start_bitmap()` and `compute_minlength()` for all patterns. Bitmap-based candidate filtering in Tier 5 fallback.
+
+### Changed
+
+- **Search tier dispatch** reordered for maximum specificity: BREAK/SPAN → literal-only → literal-prefix → single-char bitmap → alt-literals trie → automaton → general VM with bitmap fallback.
+- **PHP binding** (`bindings/php/src/`): Removed all JIT blocks from `php_snobol.c`, `snobol_pattern.c`, `php_snobol.h`. `config.m4` JIT defines removed. `build-snobol-extension` `deps/` copy made conditional.
+- **`bench_shared.h`**: Added `_POSIX_C_SOURCE` + `<time.h>` for Linux clock_gettime compat; `_DARWIN_C_SOURCE` for macOS snprintf.
+- **`generate_amalgam.sh`**: JIT sources removed from amalgamation.
+- **`CPhpCouplingTest`**: Renamed from `JitCPhpCouplingTest`, JIT assertions removed, compares `alt_literals` ratio instead of `tokenize`.
+- **Benchmark baselines**: Updated `bench/results/search_perf_baseline.json` schema v2 with PCRE2 comparison data, no JIT stats.
+
 ### SLJIT Method JIT & Tracing-JIT Retirement — 2026-06-27 [0.11.0]
 
 ### Added
