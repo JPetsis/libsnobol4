@@ -69,20 +69,11 @@ void snobol_pattern_cache_php_minit(void);
 void snobol_pattern_helper_php_minit(void);
 
 PHP_MINFO_FUNCTION(snobol);
-#ifdef SNOBOL_JIT
-#include "snobol/jit.h"
-#include "snobol/jit_backend.h"
-#endif
 
 PHP_MINFO_FUNCTION(snobol) {
     php_info_print_table_start();
     php_info_print_table_header(2, "snobol support", "enabled");
     php_info_print_table_row(2, "version", PHP_SNOBOL_VERSION);
-#ifdef SNOBOL_JIT
-    php_info_print_table_row(2, "micro-JIT", "enabled");
-#else
-    php_info_print_table_row(2, "micro-JIT", "disabled");
-#endif
 #ifdef SNOBOL_PROFILE
     php_info_print_table_row(2, "profiling", "enabled");
 #else
@@ -107,9 +98,6 @@ PHP_MINIT_FUNCTION(snobol) {
         return FAILURE;
     }
 
-#ifdef SNOBOL_JIT
-    snobol_jit_init();
-#endif
     snobol_pattern_minit();
     snobol_table_php_minit();
     snobol_array_php_minit();
@@ -120,71 +108,6 @@ PHP_MINIT_FUNCTION(snobol) {
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): DONE");
     return SUCCESS;
 }
-
-#ifdef SNOBOL_JIT
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_jit_stats, 0, 0, IS_ARRAY, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(ai_snobol_reset_jit_stats, 0, 0, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(ai_snobol_load_jit_config, 0, 0, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(ai_snobol_set_jit_config, 0, 0, 1)
-    ZEND_ARG_ARRAY_INFO(0, config, 0)
-ZEND_END_ARG_INFO()
-
-PHP_FUNCTION(snobol_get_jit_stats) {
-    if (zend_parse_parameters_none() == FAILURE) {
-        return;
-    }
-
-    SnobolJitStats *stats = snobol_jit_get_stats();
-    array_init(return_value);
-    /* Method JIT (whole-pattern compilation via SLJIT) — sole remaining JIT stats */
-    add_assoc_long(return_value, "jit_method_attempts_total",  (zend_long)stats->method_attempts_total);
-    add_assoc_long(return_value, "jit_method_successes_total", (zend_long)stats->method_successes_total);
-    add_assoc_long(return_value, "jit_method_fallbacks_total", (zend_long)stats->method_fallbacks_total);
-    add_assoc_long(return_value, "jit_method_evictions_total", (zend_long)stats->method_evictions_total);
-}
-
-PHP_FUNCTION(snobol_reset_jit_stats) {
-    if (zend_parse_parameters_none() == FAILURE) {
-        return;
-    }
-    snobol_jit_reset_stats();
-}
-
-PHP_FUNCTION(snobol_load_jit_config) {
-    if (zend_parse_parameters_none() == FAILURE) {
-        return;
-    }
-    snobol_jit_load_config_from_env();
-}
-
-PHP_FUNCTION(snobol_set_jit_config) {
-    zval *config_arr;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "a", &config_arr) == FAILURE) {
-        return;
-    }
-
-    SnobolJitConfig cfg = *snobol_jit_get_config();
-    zval *val;
-
-    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "method_enabled", sizeof("method_enabled")-1)) != NULL) {
-        cfg.method_enabled = (bool)zval_is_true(val);
-    }
-    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "max_compiled_patterns", sizeof("max_compiled_patterns")-1)) != NULL) {
-        cfg.max_compiled_patterns = (uint32_t)zval_get_long(val);
-    }
-    if ((val = zend_hash_str_find(Z_ARRVAL_P(config_arr), "scratch_size", sizeof("scratch_size")-1)) != NULL) {
-        cfg.scratch_size = (uint32_t)zval_get_long(val);
-    }
-
-    snobol_jit_set_config(&cfg);
-}
-#endif
 
 /* ============================================================
  * C function exports for libsnobol4 built-ins
@@ -538,12 +461,6 @@ PHP_FUNCTION(snobol_get_choice_stats) {
 }
 
 static const zend_function_entry snobol_functions[] = {
-#ifdef SNOBOL_JIT
-    PHP_FE(snobol_get_jit_stats, ai_snobol_get_jit_stats)
-    PHP_FE(snobol_reset_jit_stats, ai_snobol_reset_jit_stats)
-    PHP_FE(snobol_load_jit_config, ai_snobol_load_jit_config)
-    PHP_FE(snobol_set_jit_config, ai_snobol_set_jit_config)
-#endif
     /* C function exports for string/comparison built-ins */
     PHP_FE(snobol_text_size,         ai_text_size)
     PHP_FE(snobol_text_trim,         ai_text_str1)

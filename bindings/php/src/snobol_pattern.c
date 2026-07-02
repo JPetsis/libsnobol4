@@ -9,9 +9,6 @@
 #include "snobol/snobol_internal.h"
 #include "snobol/search.h"
 #include "snobol/table.h"
-#ifdef SNOBOL_JIT
-#include "snobol/jit.h"
-#endif
 
 #include <stdio.h>
 #include <time.h>
@@ -64,9 +61,6 @@ static zend_object *snobol_pattern_create(zend_class_entry *ce) {
     
     intern->bc = NULL;
     intern->bc_len = 0;
-#ifdef SNOBOL_JIT
-    intern->jit_enabled = true;
-#endif
     
     zend_object_std_init(&intern->std, ce);
     object_properties_init(&intern->std, ce);
@@ -292,11 +286,6 @@ PHP_METHOD(Snobol_Pattern, match) {
     vm.emit_fn = php_snobol_emit_cb;
     vm.emit_udata = &eb;
 
-#ifdef SNOBOL_JIT
-    vm.jit.enabled = intern->jit_enabled;
-    vm.jit.stats = snobol_jit_get_stats();
-#endif
-
 #ifdef SNOBOL_DYNAMIC_PATTERN
     /* Initialize dynamic pattern cache for EVAL(...) support */
     dynamic_pattern_cache_t dyn_cache;
@@ -337,45 +326,7 @@ PHP_METHOD(Snobol_Pattern, match) {
     }
 #endif
 
-#ifdef SNOBOL_JIT
-    /* Method JIT (whole-pattern native compilation).  If we can compile and
-     * run the pattern as native code, skip the bytecode VM entirely. */
-    bool jit_ok = false;
-    {
-        const SnobolJitConfig *jit_cfg = snobol_jit_get_config();
-        if (jit_cfg && jit_cfg->method_enabled) {
-            jit_trace_fn mfn = snobol_jit_method_query(vm.bc, vm.bc_len);
-            if (!mfn)
-                mfn = snobol_jit_method_compile(vm.bc, vm.bc_len, NULL);
-            if (mfn) {
-                VM local_vm;
-                memset(&local_vm, 0, sizeof(local_vm));
-                local_vm.bc      = vm.bc;
-                local_vm.bc_len  = vm.bc_len;
-                local_vm.s       = vm.s;
-                local_vm.len     = vm.len;
-                local_vm.ip      = 0;
-                local_vm.pos     = 0;
-                local_vm.emit_fn     = vm.emit_fn;
-                local_vm.emit_udata  = vm.emit_udata;
-                mfn(&local_vm);
-                if (local_vm.ip == local_vm.bc_len) {
-                    jit_ok = true;
-                    vm.pos = local_vm.pos;
-                    vm.var_count = local_vm.var_count;
-                    memcpy(vm.var_start, local_vm.var_start, sizeof(vm.var_start));
-                    memcpy(vm.var_end,   local_vm.var_end,   sizeof(vm.var_end));
-                    vm.choice_push_count = local_vm.choice_push_count;
-                    vm.choice_allocated  = local_vm.choice_allocated;
-                    vm.choice_peak_depth = local_vm.choice_peak_depth;
-                }
-            }
-        }
-    }
-    bool ok = jit_ok || vm_exec(&vm);
-#else
     bool ok = vm_exec(&vm);
-#endif
 
     SNOBOL_LOG("Snobol_Pattern::match: VM returned %d, pos=%zu, var_count=%zu", (int)ok, vm.pos, vm.var_count);
 
@@ -531,11 +482,6 @@ PHP_METHOD(Snobol_Pattern, subst) {
         vm.bc     = intern->bc;
         vm.bc_len = intern->bc_len;
 
-#ifdef SNOBOL_JIT
-        vm.jit.enabled = intern->jit_enabled;
-        vm.jit.stats   = snobol_jit_get_stats();
-#endif
-
 #ifdef SNOBOL_DYNAMIC_PATTERN
         dynamic_pattern_cache_t dyn_cache;
         if (dynamic_pattern_cache_init(&dyn_cache, 64)) {
@@ -570,9 +516,6 @@ PHP_METHOD(Snobol_Pattern, subst) {
         vm.bc_len = tpl_bc_len;
         vm.ip     = 0;
         vm.out    = &out;
-#ifdef SNOBOL_JIT
-        vm.jit.enabled   = false;
-#endif
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
         /* Register tables in the same sequential order as the bind step */
@@ -631,10 +574,6 @@ PHP_METHOD(Snobol_Pattern, setJit) {
         Z_PARAM_BOOL(enabled)
     ZEND_PARSE_PARAMETERS_END();
 
-#ifdef SNOBOL_JIT
-    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
-    intern->jit_enabled = enabled;
-#endif
     RETURN_TRUE;
 }
 
@@ -665,10 +604,6 @@ static void php_snobol_init_vm_for_search(VM *vm,
         vm->emit_fn    = php_snobol_emit_cb;
         vm->emit_udata = eb;
     }
-#ifdef SNOBOL_JIT
-    vm->jit.enabled     = intern->jit_enabled;
-    vm->jit.stats       = snobol_jit_get_stats();
-#endif
 }
 
 /* Core search loop shared by Pattern::searchAll and PatternHelper::matchAll.

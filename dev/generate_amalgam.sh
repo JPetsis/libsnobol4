@@ -29,9 +29,6 @@ CORE_FILES=(
     "table.c"
     "array.c"
     "dynamic_pattern.c"
-    "jit_ir.c"
-    "jit_backend_sljit.c"
-    "jit.c"
     "version.c"
     "unicode_fold.c"
     "string_fn.c"
@@ -42,9 +39,7 @@ CORE_FILES=(
 )
 
 # Dependency source files (outside core/src/)
-DEPS_FILES=(
-    "sljitLir.c"
-)
+DEPS_FILES=()
 
 # Header for the amalgamation file
 read -r -d '' AMALGAM_HEADER << 'EOF' || true
@@ -88,7 +83,7 @@ generate_amalgam() {
     done
     
     # Add includes for each dependency file
-    for file in "${DEPS_FILES[@]}"; do
+    for file in "${DEPS_FILES[@]+"${DEPS_FILES[@]}"}"; do
         if [ -f "$DEPS_SLJIT/$file" ]; then
             echo "#include \"../../deps/sljit/$file\"" >> "$AMALGAM_FILE"
         else
@@ -99,9 +94,15 @@ generate_amalgam() {
     # Add final newline
     echo "" >> "$AMALGAM_FILE"
     
-    total=$(( ${#CORE_FILES[@]} + ${#DEPS_FILES[@]} ))
+    core_count=${#CORE_FILES[@]}
+    deps_count=${#DEPS_FILES[@]}
+    total=$(( core_count + deps_count ))
     echo "✅ Generated $AMALGAM_FILE"
-    echo "   Included $total source files (${#CORE_FILES[@]} core + ${#DEPS_FILES[@]} deps)"
+    if [ "$deps_count" -gt 0 ]; then
+        echo "   Included $total source files ($core_count core + $deps_count deps)"
+    else
+        echo "   Included $total source files ($core_count core)"
+    fi
 }
 
 verify_amalgam() {
@@ -112,7 +113,7 @@ verify_amalgam() {
     local extra_includes=()
     
     # Merge all expected files
-    local expected_files=("${CORE_FILES[@]}" "${DEPS_FILES[@]}")
+    local expected_files=("${CORE_FILES[@]}" ${DEPS_FILES[@]+"${DEPS_FILES[@]}"})
     
     # Check that all required files are included
     for file in "${expected_files[@]}"; do
@@ -151,7 +152,8 @@ verify_amalgam() {
     if [ $errors -gt 0 ]; then
         echo "❌ Verification FAILED with $errors error(s):"
         
-        if [ ${#missing_files[@]} -gt 0 ]; then
+        mf_len=${#missing_files[@]+${#missing_files[@]}}; mf_len=${mf_len:-0}
+        if [ "$mf_len" -gt 0 ]; then
             echo ""
             echo "   Missing includes:"
             for file in "${missing_files[@]}"; do

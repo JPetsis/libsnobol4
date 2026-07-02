@@ -1,5 +1,8 @@
 #pragma once
 
+#define _POSIX_C_SOURCE 199309L
+
+#include <time.h>
 #include <snobol/snobol.h>
 #include <stdint.h>
 #include <stdbool.h>

@@ -82,6 +82,12 @@ typedef struct {
    * local (no DYNAMIC). */
   bool automaton_eligible;
 
+  /* Alternation-of-literals detection ----------------------------------- */
+  /* True when the pattern is a flat alternation of literal strings
+   * (e.g. "abc" | "def" | "ghi").  Enables trie-based multi-string matching
+   * (Tier 3a) which replaces the general VM loop for these patterns. */
+  bool is_alt_literals;
+
   /* Boyer-Moore-Horspool skip table -------------------------------------- */
   /* When has_bmh_skip is true, bmh_skip[byte] gives the distance to advance
    * the search position after a VM failure at the current candidate.  The

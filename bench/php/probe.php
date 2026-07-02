@@ -14,14 +14,13 @@
  * Output: a fixed-width ASCII table matching the C probe's format,
  * plus a "vs C" column showing the PHP/C ns/iter ratio.
  *
- * Requires: snobol extension loaded (snobol_get_jit_stats,
- * snobol_reset_jit_stats, \Snobol\Pattern, \Snobol\PatternHelper).
+ * Requires: snobol extension loaded (\Snobol\Pattern, \Snobol\PatternHelper).
  */
 
 declare(strict_types=1);
 
-if (!function_exists('snobol_get_jit_stats')) {
-    fwrite(STDERR, "FATAL: snobol_get_jit_stats() is not available. "
+if (!class_exists('Snobol\\Pattern', true)) {
+    fwrite(STDERR, "FATAL: Snobol\\Pattern is not available. "
         . "Build and load the snobol PHP extension first.\n");
     exit(2);
 }
@@ -198,32 +197,23 @@ $SUBJECT_MIXED =
     . "the a quick b brown c fox a jumps b over c the a lazy b dog c "
     . "the a quick b brown c fox a jumps b over c the a lazy b dog c ";
 
+$SUBJECT_ALTLIT =
+    "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox "
+    . "the cat went dog walking fox jumped cat over dog near fox ";
+
 // ---------------------------------------------------------------------------
-// Snapshot helpers
+// Timer
 // ---------------------------------------------------------------------------
-
-/** @return array<string,int> */
-function jit_snapshot(): array
-{
-    return snobol_get_jit_stats();
-}
-
-/** @param array<string,int> $a
- *  @param array<string,int> $b
- *  @return array<string,int> */
-function jit_delta(array $a, array $b): array
-{
-    $d = [];
-    foreach ($b as $k => $v) {
-        $d[$k] = (int)$v - (int)($a[$k] ?? 0);
-    }
-    return $d;
-}
-
-function reset_jit(): void
-{
-    snobol_reset_jit_stats();
-}
 
 function now_ns(): int
 {
@@ -234,16 +224,13 @@ function now_ns(): int
 // Scenario runners
 //
 // Each runner is a closure that takes (iterations) and returns
-// ['iters' => int, 'total_ns' => int] plus side-effect of advancing
-// the JIT stats (we snapshot before/after the call to get the delta).
+// ['iters' => int, 'total_ns' => int].
 // ---------------------------------------------------------------------------
 
 /** @return array{iters:int,total_ns:int} */
 function run_literal_fail(int $iters): array
 {
     $p = PatternHelper::fromString("'pqr'");
-    $p->setJit(true);
-    // warmup
     for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_NO_PQR']); }
     $start = now_ns();
     for ($i = 0; $i < $iters; $i++) {
@@ -256,7 +243,6 @@ function run_literal_fail(int $iters): array
 function run_literal_ok(int $iters): array
 {
     $p = PatternHelper::fromString("'pqr'");
-    $p->setJit(true);
     for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_WITH_PQR']); }
     $start = now_ns();
     for ($i = 0; $i < $iters; $i++) {
@@ -269,7 +255,6 @@ function run_literal_ok(int $iters): array
 function run_span_comma(int $iters): array
 {
     $p = PatternHelper::fromString("SPAN(',')");
-    $p->setJit(true);
     for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_CSV']); }
     $start = now_ns();
     for ($i = 0; $i < $iters; $i++) {
@@ -282,7 +267,6 @@ function run_span_comma(int $iters): array
 function run_alternation(int $iters): array
 {
     $p = PatternHelper::fromString("'a' | 'b' | 'c'");
-    $p->setJit(true);
     for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_MIXED']); }
     $start = now_ns();
     for ($i = 0; $i < $iters; $i++) {
@@ -292,10 +276,33 @@ function run_alternation(int $iters): array
 }
 
 /** @return array{iters:int,total_ns:int} */
+function run_alt_literals(int $iters): array
+{
+    $p = PatternHelper::fromString("'cat' | 'dog' | 'fox'");
+    for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_ALTLIT']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($GLOBALS['SUBJECT_ALTLIT']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+/** @return array{iters:int,total_ns:int} */
+function run_alt_literals_search(int $iters): array
+{
+    $p = PatternHelper::fromString("'cat' | 'dog' | 'fox'");
+    for ($i = 0; $i < 100; $i++) { $p->searchAll($GLOBALS['SUBJECT_ALTLIT']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->searchAll($GLOBALS['SUBJECT_ALTLIT']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+/** @return array{iters:int,total_ns:int} */
 function run_tokenize_php(int $outer_iters): array
 {
     $p = PatternHelper::fromString("' '");
-    $p->setJit(true);
     for ($i = 0; $i < 10; $i++) { $p->searchSplit($GLOBALS['SUBJECT_WHITESPACE']); }
 
     $total_search_calls = 0;
@@ -326,49 +333,40 @@ $tokenize_iters = max(1, (int)($iters / 10));
 echo "\n";
 echo "libsnobol4 diagnostic probe (PHP binding)\n";
 echo "==========================================\n";
-echo "JIT: " . (function_exists('snobol_get_jit_stats') ? "ENABLED (stats available)" : "DISABLED") . "\n";
 echo "Iterations per scenario: $iters (override with PROBE_ITERS)\n";
 echo "Tokenize uses $tokenize_iters outer iters (one searchSplit call each).\n\n";
 
 $scenarios = [
-    ['name' => 'literal_fail', 'run' => 'run_literal_fail',  'iter' => $iters],
-    ['name' => 'literal_ok',   'run' => 'run_literal_ok',    'iter' => $iters],
-    ['name' => 'span_comma',   'run' => 'run_span_comma',    'iter' => $iters],
-    ['name' => 'alternation',  'run' => 'run_alternation',   'iter' => $iters],
-    ['name' => 'tokenize_php', 'run' => 'run_tokenize_php',  'iter' => $tokenize_iters],
+    ['name' => 'literal_fail',        'run' => 'run_literal_fail',        'iter' => $iters],
+    ['name' => 'literal_ok',          'run' => 'run_literal_ok',          'iter' => $iters],
+    ['name' => 'span_comma',          'run' => 'run_span_comma',          'iter' => $iters],
+    ['name' => 'alternation',         'run' => 'run_alternation',         'iter' => $iters],
+    ['name' => 'alt_literals',        'run' => 'run_alt_literals',        'iter' => $iters],
+    ['name' => 'alt_literals_search', 'run' => 'run_alt_literals_search', 'iter' => $iters],
+    ['name' => 'tokenize_php',        'run' => 'run_tokenize_php',        'iter' => $tokenize_iters],
 ];
 
 $results = [];
 foreach ($scenarios as $s) {
-    reset_jit();
-    $before = jit_snapshot();
     $timing = $s['run']($s['iter']);
-    $after = jit_snapshot();
-    $delta = jit_delta($before, $after);
     $results[] = [
         'name'           => $s['name'],
         'iters'          => $timing['iters'],
         'total_ns'       => $timing['total_ns'],
         'ns_per_iter'    => $timing['iters'] > 0 ? (int)($timing['total_ns'] / $timing['iters']) : 0,
-        'jit_method_attempts'  => (int)($delta['jit_method_attempts_total'] ?? 0),
-        'jit_method_successes' => (int)($delta['jit_method_successes_total'] ?? 0),
-        'jit_method_fallbacks' => (int)($delta['jit_method_fallbacks_total'] ?? 0),
     ];
 }
 
-printf("%-16s %10s %10s %12s %12s %12s\n",
-    "scenario", "ns/iter", "iters", "jit_attempts", "jit_ok", "jit_fb");
-printf("%-16s %10s %10s %12s %12s %12s\n",
-    "-------", "-------", "-----", "-----------", "------", "------");
+printf("%-20s %10s %10s\n",
+    "scenario", "ns/iter", "iters");
+printf("%-20s %10s %10s\n",
+    "-------", "-------", "-----");
 
 foreach ($results as $r) {
-    printf("%-16s %10d %10d %12d %12d %12d\n",
+    printf("%-20s %10d %10d\n",
         $r['name'],
         $r['ns_per_iter'],
-        $r['iters'],
-        $r['jit_method_attempts'],
-        $r['jit_method_successes'],
-        $r['jit_method_fallbacks']);
+        $r['iters']);
 }
 
 echo "\n";
@@ -394,8 +392,8 @@ if (getenv('PROBE_BASELINE') === '1') {
     $threshold_pct = 25.0;
     echo "=== Baseline regression guard (PROBE_BASELINE=1) ===\n";
     echo "Baseline file: $baseline_path\n";
-    printf("%-16s %12s %12s %12s\n", "scenario", "baseline", "observed", "delta%");
-    printf("%-16s %12s %12s %12s\n", "-------", "--------", "--------", "------");
+    printf("%-20s %12s %12s %12s\n", "scenario", "baseline", "observed", "delta%");
+    printf("%-20s %12s %12s %12s\n", "-------", "--------", "--------", "------");
     $regressions = 0;
     $speedups = 0;
     foreach ($results as $r) {
@@ -408,7 +406,7 @@ if (getenv('PROBE_BASELINE') === '1') {
         if ($delta_pct > $threshold_pct) { $label = '  REGRESSION'; $regressions++; }
         elseif ($delta_pct < -10.0)     { $label = '  speedup';    $speedups++; }
         else                             { $label = '  ok'; }
-        printf("%-16s %12d %12d %+11.1f%%%s\n",
+        printf("%-20s %12d %12d %+11.1f%%%s\n",
             $r['name'], $base, $obs, $delta_pct, $label);
     }
     echo "\n{$regressions} regressions, {$speedups} speedups, " . count($results) . " scenarios checked\n";
@@ -419,5 +417,5 @@ if (getenv('PROBE_BASELINE') === '1') {
     echo "OK: no regressions exceeding {$threshold_pct}% threshold\n";
 }
 
-// Emit a machine-readable JSON block on stderr for the coupling test
-file_put_contents('php://stderr', json_encode($results, JSON_PRETTY_PRINT) . "\n");
+// Emit a machine-readable JSON block on stdout for the coupling test
+echo json_encode($results, JSON_PRETTY_PRINT) . "\n";

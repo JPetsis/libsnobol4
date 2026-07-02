@@ -38,9 +38,6 @@ static zend_always_inline void snobol_assoc_zval(zval *arr, const char *key,
 typedef struct snobol_pattern {
     uint8_t *bc;
     size_t bc_len;
-#ifdef SNOBOL_JIT
-    bool jit_enabled;
-#endif
     zend_object std;
 } snobol_pattern_t;
 

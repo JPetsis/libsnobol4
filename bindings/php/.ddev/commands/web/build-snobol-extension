@@ -84,7 +84,9 @@ mkdir -p "$BUILD_DIR"
 echo "📂 Staging source in ${BUILD_DIR}..."
 cp -r "${BINDINGS_DIR}/." "$BUILD_DIR/"
 cp -r "$CORE_DIR" "$BUILD_DIR/core"
-cp -r "${PROJECT_DIR}/deps" "$BUILD_DIR/deps"
+if [ -d "${PROJECT_DIR}/deps" ]; then
+    cp -r "${PROJECT_DIR}/deps" "$BUILD_DIR/deps"
+fi
 
 cd "$BUILD_DIR"
 

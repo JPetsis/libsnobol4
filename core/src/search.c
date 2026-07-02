@@ -63,6 +63,194 @@ static inline uint16_t search_read_u16(const uint8_t *bc, size_t ip) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Trie data structures for alternation-of-literals matching
+ *
+ * Uses a compact edge-list representation: each trie node references its
+ * first outgoing edge via `first_edge`; edges for the same parent form a
+ * singly-linked list via `sibling`.  Memory is pre-allocated on the stack
+ * as a fixed pool (no malloc/free in the hot path).
+ * ---------------------------------------------------------------------------
+ */
+
+/** Sentinel: no edge / no node. */
+#define SNOBOL_AUTO_NULL UINT16_MAX
+
+/** Maximum nodes in the automaton trie (stack-allocated pool). */
+#define SNOBOL_AUTO_MAX_NODES 256
+
+/** Maximum edges in the automaton trie (stack-allocated pool). */
+#define SNOBOL_AUTO_MAX_EDGES 1024
+
+/** A single outgoing edge from a trie node. */
+typedef struct {
+  uint8_t byte;          /**< Transition byte. */
+  uint16_t next;         /**< Target node index (SNOBOL_AUTO_NULL = none). */
+  uint16_t sibling;      /**< Next sibling edge index (SNOBOL_AUTO_NULL = end). */
+} snobol_auto_edge_t;
+
+/** A single trie node. */
+typedef struct {
+  uint16_t first_edge;   /**< Index of first outgoing edge (SNOBOL_AUTO_NULL = none). */
+  bool is_end;           /**< True when this node terminates a valid pattern. */
+} snobol_auto_node_t;
+
+/** Pre-allocated trie storage (stack-friendly, ~7 KB). */
+typedef struct {
+  snobol_auto_node_t nodes[SNOBOL_AUTO_MAX_NODES];
+  snobol_auto_edge_t edges[SNOBOL_AUTO_MAX_EDGES];
+  uint16_t node_count;
+  uint16_t edge_count;
+} snobol_auto_trie_t;
+
+/* ---------------------------------------------------------------------------
+ * Trie builder — inserts a single literal string into the trie.
+ * Returns false when the node/edge pool is exhausted.
+ * ---------------------------------------------------------------------------
+ */
+static bool trie_insert(snobol_auto_trie_t *t, const uint8_t *s, size_t len) {
+  uint16_t n = 0; /* start at root */
+  for (size_t i = 0; i < len; i++) {
+    uint8_t b = s[i];
+    /* Search for existing edge */
+    uint16_t e = t->nodes[n].first_edge;
+    uint16_t prev = SNOBOL_AUTO_NULL;
+    while (e != SNOBOL_AUTO_NULL) {
+      if (t->edges[e].byte == b)
+        break;
+      prev = e;
+      e = t->edges[e].sibling;
+    }
+    if (e != SNOBOL_AUTO_NULL) {
+      n = t->edges[e].next;
+    } else {
+      /* Create new edge + node */
+      if (t->edge_count >= SNOBOL_AUTO_MAX_EDGES ||
+          t->node_count >= SNOBOL_AUTO_MAX_NODES)
+        return false;
+      uint16_t ne = t->edge_count++;
+      uint16_t nn = t->node_count++;
+      t->edges[ne].byte = b;
+      t->edges[ne].next = nn;
+      t->edges[ne].sibling = SNOBOL_AUTO_NULL;
+      t->nodes[nn].first_edge = SNOBOL_AUTO_NULL;
+      t->nodes[nn].is_end = false;
+      if (prev == SNOBOL_AUTO_NULL) {
+        t->nodes[n].first_edge = ne;
+      } else {
+        t->edges[prev].sibling = ne;
+      }
+      n = nn;
+    }
+  }
+  t->nodes[n].is_end = true;
+  return true;
+}
+
+/* ---------------------------------------------------------------------------
+ * Trie matcher — scans the subject from `offset`, returning true when the
+ * trie matches at that position.  On match, `*match_len` receives the
+ * number of bytes consumed.
+ * ---------------------------------------------------------------------------
+ */
+static bool trie_match(const snobol_auto_trie_t *t, const char *subject,
+                       size_t subject_len, size_t offset, size_t *match_len) {
+  size_t pos = offset;
+  uint16_t n = 0; /* start at root */
+  while (pos < subject_len) {
+    uint8_t b = (uint8_t)subject[pos];
+    uint16_t e = t->nodes[n].first_edge;
+    while (e != SNOBOL_AUTO_NULL && t->edges[e].byte != b)
+      e = t->edges[e].sibling;
+    if (e == SNOBOL_AUTO_NULL)
+      return false;
+    n = t->edges[e].next;
+    pos++;
+    if (t->nodes[n].is_end) {
+      *match_len = pos - offset;
+      return true;
+    }
+  }
+  return false;
+}
+
+/* ---------------------------------------------------------------------------
+ * Trie-based search for alternation-of-literals patterns.
+ *
+ * Walks the bytecode SPLIT tree to collect literals, builds a trie, then
+ * scans the subject for matches.  Returns true and fills out_result on
+ * the first match at or after start_offset.
+ * ---------------------------------------------------------------------------
+ */
+static bool search_alt_literals_try(VM *vm, const char *subject,
+                                    size_t subject_len, size_t start_offset,
+                                    snobol_search_result_t *out_result) {
+  /* ---- Build trie from bytecode SPLIT tree ---- */
+  snobol_auto_trie_t trie;
+  trie.node_count = 1; /* root node (index 0) */
+  trie.edge_count = 0;
+  trie.nodes[0].first_edge = SNOBOL_AUTO_NULL;
+  trie.nodes[0].is_end = false;
+
+  /* Walk SPLIT tree and insert each LIT … ACCEPT branch */
+  /* We use a recursive helper on the C stack — depth is bounded by the
+   * bytecode length, typically < 10 for alternation patterns. */
+  bool build_ok = true;
+  size_t bc_len = vm->bc_len;
+  const uint8_t *bc = vm->bc;
+
+  /* Inline lambda via nested helper (C23 / GCC extension).  For portability
+   * we use a local function pointer trampoline. */
+  bool all_ok = true;
+  size_t stack[64]; /* explicit stack to avoid recursion */
+  int sp = 0;
+  stack[sp++] = 0; /* start at ip=0 */
+
+  while (sp > 0 && all_ok) {
+    size_t ip = stack[--sp];
+    if (ip + 2 > bc_len) { all_ok = false; break; }
+    uint8_t op = bc[ip];
+    if (op == OP_LIT) {
+      /* Leaf: insert literal into trie */
+      if (ip + 10 > bc_len) { all_ok = false; break; }
+      uint32_t off = search_read_u32(bc, ip + 1);
+      uint32_t len = search_read_u32(bc, ip + 5);
+      if (off >= bc_len || off + len > bc_len) { all_ok = false; break; }
+      if (!trie_insert(&trie, bc + off, len)) { all_ok = false; break; }
+    } else if (op == OP_SPLIT) {
+      if (ip + 9 > bc_len) { all_ok = false; break; }
+      uint32_t a = search_read_u32(bc, ip + 1);
+      uint32_t b = search_read_u32(bc, ip + 5);
+      if (a >= bc_len || b >= bc_len) { all_ok = false; break; }
+      if (sp + 2 > 64) { all_ok = false; break; }
+      stack[sp++] = b;
+      stack[sp++] = a;
+    } else {
+      all_ok = false;
+      break;
+    }
+  }
+
+  if (!all_ok)
+    return false;
+
+  /* ---- Scan subject from start_offset ---- */
+  size_t offset = start_offset;
+  while (offset <= subject_len) {
+    size_t match_len = 0;
+    if (trie_match(&trie, subject, subject_len, offset, &match_len)) {
+      out_result->success = true;
+      out_result->match_start = offset;
+      out_result->match_end = offset + match_len;
+      return true;
+    }
+    if (offset >= subject_len)
+      break;
+    offset++;
+  }
+  return false;
+}
+
+/* ---------------------------------------------------------------------------
  * Automaton eligibility checker
  *
  * A pattern is automaton-eligible if it:
@@ -168,6 +356,51 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Alternation-of-literals checker
+ *
+ * Walks the SPLIT tree starting at `ip` and returns true when every leaf
+ * branch is OP_LIT(…) followed by OP_ACCEPT — i.e. the pattern is a flat
+ * alternation of literal strings (e.g. "abc" | "def" | "ghi").
+ *
+ * When true, the search runtime can use a trie-based multi-string matcher
+ * (Tier 3a) instead of calling vm_exec at each candidate position.
+ * ---------------------------------------------------------------------------
+ */
+static bool check_alt_literals(const uint8_t *bc, size_t bc_len, size_t ip) {
+  if (ip + 2 > bc_len)
+    return false;
+  uint8_t op = bc[ip];
+
+  if (op == OP_LIT) {
+    /* Leaf: must be LIT(off, len) followed by ACCEPT.
+     * Compiler always emits data inline after the 9-byte header,
+     * so ACCEPT lives at ip + 9 + len. */
+    if (ip + 10 > bc_len)
+      return false;
+    uint32_t lit_len = search_read_u32(bc, ip + 5);
+    if (ip + 9 + lit_len + 1 > bc_len)
+      return false;
+    if (bc[ip + 9 + lit_len] != OP_ACCEPT)
+      return false;
+    return true;
+  }
+
+  if (op == OP_SPLIT) {
+    /* Branch node: recurse into both arms */
+    if (ip + 9 > bc_len)
+      return false;
+    uint32_t a = search_read_u32(bc, ip + 1);
+    uint32_t b = search_read_u32(bc, ip + 5);
+    if (a >= bc_len || b >= bc_len)
+      return false;
+    return check_alt_literals(bc, bc_len, a) &&
+           check_alt_literals(bc, bc_len, b);
+  }
+
+  return false;
+}
+
+/* ---------------------------------------------------------------------------
  * snobol_search_derive_meta
  *
  * Scans the compiled bytecode to extract search-acceleration hints:
@@ -175,6 +408,7 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
  *  - First-byte for memchr when prefix length is 1
  *  - ASCII candidate bitmap for alternation-of-single-chars
  *  - BREAK/SPAN/BREAKX root-op classification
+ *  - Alternation-of-literals flag for trie matching
  *  - Automaton eligibility for the lightweight path
  *
  * The function is pure (read-only), fast, and language-agnostic.
@@ -340,7 +574,7 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
       break;                                                                   \
     }                                                                          \
     uint8_t _byte = bc[_off2];                                                 \
-    if (bc[(off) + 9] != OP_ACCEPT) {                                          \
+    if (bc[(off) + 9 + _len] != OP_ACCEPT) {                                   \
       all_single = false;                                                      \
       break;                                                                   \
     }                                                                          \
@@ -375,6 +609,14 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
       out->always_consumes = true;
       out->may_match_empty = false;
     }
+  }
+
+  /* ---- Alternation-of-literals detection ---- */
+  /* Walk the SPLIT tree: every branch must be LIT(…) ACCEPT. */
+  if (op0 == OP_SPLIT && bc_len >= 10) {
+    size_t bc_remain = bc_len > 512 ? 512 : bc_len;
+    out->is_alt_literals =
+        check_alt_literals(bc, bc_remain, 0);
   }
 
   /* ---- Automaton eligibility ---- */
@@ -733,6 +975,17 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
       diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BITMAP;
     return search_bitmap_accelerated(vm, subject, subject_len, start_offset,
                                      meta, out_result, diag);
+  }
+
+  /* ---- Tier 3a: Alternation-of-literals (trie-based) ---- */
+  if (meta->is_alt_literals) {
+    /* The trie matcher builds a trie from the bytecode, then scans the
+     * subject linearly without invoking vm_exec.  Faster than Tier 4 for
+     * alternation-of-literals patterns (e.g. "abc"|"def"|"ghi"). */
+    if (diag)
+      diag->last_skip_reason = SNOBOL_SEARCH_SKIP_NONE;
+    return search_alt_literals_try(vm, subject, subject_len, start_offset,
+                                   out_result);
   }
 
   /* ---- Tier 4: Automaton path for eligible patterns ---- */

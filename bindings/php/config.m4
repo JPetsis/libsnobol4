@@ -49,42 +49,8 @@ if test "$PHP_SNOBOL" != "no"; then
   dnl Add include paths (absolute paths are fine for -I compiler flags)
   PHP_ADD_INCLUDE([$CORE_DIR/include])
   PHP_ADD_INCLUDE([$abs_srcdir/src])
-  dnl SLJIT headers — try several paths depending on build context
-  if test -d "$abs_srcdir/deps/sljit"; then
-    dnl Staged build (DDEV copies deps/ into build dir)
-    PHP_ADD_INCLUDE([$abs_srcdir/deps/sljit])
-  elif test -d "$abs_srcdir/../../deps/sljit"; then
-    dnl Native phpize from bindings/php/
-    PHP_ADD_INCLUDE([$abs_srcdir/../../deps/sljit])
-  elif test -d "$CORE_DIR/../deps/sljit"; then
-    dnl Fallback relative to core dir
-    PHP_ADD_INCLUDE([$CORE_DIR/../deps/sljit])
-  fi
 
-  dnl Enable JIT on ARM64 (requires mmap/mprotect with PROT_EXEC)
-  dnl The micro-JIT emits ARM64 machine code; it is not supported on other arches.
-  dnl SNOBOL_JIT=1 is the actual feature gate used throughout all C sources.
-  dnl HAVE_SNOBOL_JIT=1 is retained for autoconf-style capability detection.
-  dnl
-  dnl Note: phpize configure scripts do not call AC_CANONICAL_HOST, so $host_cpu
-  dnl is empty.  We detect the architecture via `uname -m` instead.
-  AC_DEFINE(HAVE_SNOBOL_JIT, 1, [Have libsnobol4 JIT support])
   AC_DEFINE(SNOBOL_DYNAMIC_PATTERN, 1, [Enable dynamic patterns and tables])
-  SNOBOL_HOST_CPU=`uname -m`
-  AC_MSG_NOTICE([Detected host CPU: $SNOBOL_HOST_CPU])
-  AC_MSG_NOTICE([PHP_SNOBOL value: $PHP_SNOBOL])
-  SNOBOL_JIT_FLAG=""
-  case "$SNOBOL_HOST_CPU" in
-    aarch64|arm64)
-      AC_DEFINE(SNOBOL_JIT, 1, [Enable SLJIT JIT backend (method JIT)])
-      AC_DEFINE(SNOBOL_JIT_BACKEND_SLJIT, 1, [Enable SLJIT JIT backend])
-      AC_MSG_NOTICE([SLJIT JIT enabled ($SNOBOL_HOST_CPU)])
-      SNOBOL_JIT_FLAG="-DSNOBOL_JIT=1 -DSNOBOL_JIT_BACKEND_SLJIT=1"
-      ;;
-    *)
-      AC_MSG_NOTICE([micro-JIT disabled (ARM64 only; detected=$SNOBOL_HOST_CPU)])
-      ;;
-  esac
 
   dnl phpize always builds shared extensions; make sure COMPILE_DL_SNOBOL is
   dnl present in config.h regardless of ext_shared value (belt-and-suspenders
@@ -113,5 +79,5 @@ if test "$PHP_SNOBOL" != "no"; then
   CFLAGS="$snobol_saved_cflags"
 
   dnl Create the extension
-  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [$SNOBOL_C23_FLAG $SNOBOL_JIT_FLAG -DSNOBOL_DYNAMIC_PATTERN=1 -I$CORE_DIR/include])
+  PHP_NEW_EXTENSION([snobol], $snobol_sources, $ext_shared,, [$SNOBOL_C23_FLAG -DSNOBOL_DYNAMIC_PATTERN=1 -I$CORE_DIR/include])
 fi
