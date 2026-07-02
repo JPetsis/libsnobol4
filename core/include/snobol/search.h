@@ -81,6 +81,20 @@ typedef struct {
    * ASCII-only, side-effect free (no EVAL/ASSIGN/EMIT ops), and structurally
    * local (no DYNAMIC). */
   bool automaton_eligible;
+
+  /* Boyer-Moore-Horspool skip table -------------------------------------- */
+  /* When has_bmh_skip is true, bmh_skip[byte] gives the distance to advance
+   * the search position after a VM failure at the current candidate.  The
+   * table is computed from the literal prefix (bmh_skip_len) and allows the
+   * search loop to skip more than one byte at a time for literal-leading
+   * patterns that fall through to the general VM or automaton paths.
+   *
+   * The skip value is computed for the byte at subject[pos + bmh_skip_len - 1]
+   * and is valid as long as pos + bmh_skip_len <= subject_len.
+   * bmh_skip_len is identical to literal_prefix_len when has_bmh_skip is set. */
+  bool has_bmh_skip;
+  uint8_t bmh_skip[256];
+  size_t bmh_skip_len;
 } snobol_search_meta_t;
 
 /* ---------------------------------------------------------------------------

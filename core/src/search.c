@@ -214,6 +214,17 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
       out->always_consumes = (lit_len > 0);
       /* Not an empty-match pattern if there's a non-empty literal */
       out->may_match_empty = false;
+
+      /* Compute BMH skip table for the literal prefix */
+      if (prefix_len >= 2) {
+        memset(out->bmh_skip, (int)prefix_len, sizeof(out->bmh_skip));
+        for (size_t i = 0; i < prefix_len - 1; i++) {
+          uint8_t b = bc[lit_off + i];
+          out->bmh_skip[b] = (uint8_t)(prefix_len - 1 - i);
+        }
+        out->has_bmh_skip = true;
+        out->bmh_skip_len = prefix_len;
+      }
     }
   }
 
@@ -736,10 +747,17 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
           search_automaton_try(vm, subject, subject_len, offset, out_result);
       if (ok)
         return true;
-      /* Advance: for non-empty-match patterns skip at least 1 byte */
+      /* Advance: use BMH skip when available, else +1 */
       if (offset >= subject_len)
         break;
-      offset++;
+      if (meta->has_bmh_skip &&
+          offset + meta->bmh_skip_len <= subject_len) {
+        size_t adv =
+            meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+        offset += adv > 0 ? adv : 1;
+      } else {
+        offset++;
+      }
     }
     out_result->success = false;
     return false;
@@ -760,7 +778,14 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
     }
     if (offset >= subject_len)
       break;
-    offset++;
+    if (meta->has_bmh_skip &&
+        offset + meta->bmh_skip_len <= subject_len) {
+      size_t adv =
+          meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+      offset += adv > 0 ? adv : 1;
+    } else {
+      offset++;
+    }
   }
 
   out_result->success = false;
