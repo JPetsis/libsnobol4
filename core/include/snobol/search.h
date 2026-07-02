@@ -76,6 +76,19 @@ typedef struct {
   bool ascii_class_only;    /**< Character class is entirely ASCII (<= 127) */
   uint64_t class_bitmap[2]; /**< ASCII bitmap for BREAK/SPAN/BREAKX root op */
 
+  /* Start-byte bitmap ---------------------------------------------------- */
+  /* 256-bit bitmap: bit i is set when the pattern can match starting with
+   * byte value i.  Computed by derive_meta for ALL patterns.
+   * Allows the search loop to reject candidate positions whose subject byte
+   * is not in the bitmap (inspired by PCRE2's start_bits). */
+  bool has_start_bitmap;
+  uint8_t start_bitmap[32];
+
+  /* Minimum match length (in bytes) -------------------------------------- */
+  /* Lower bound on the number of subject bytes consumed by a successful
+   * match.  Zero when unknown.  Inspired by PCRE2's find_minlength. */
+  uint32_t minlength;
+
   /* Automaton eligibility ------------------------------------------------ */
   /* True if the pattern is eligible for the lightweight automaton path:
    * ASCII-only, side-effect free (no EVAL/ASSIGN/EMIT ops), and structurally

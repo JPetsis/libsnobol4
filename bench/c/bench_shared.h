@@ -1,6 +1,9 @@
 #pragma once
 
 #define _POSIX_C_SOURCE 199309L
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE
+#endif
 
 #include <time.h>
 #include <snobol/snobol.h>

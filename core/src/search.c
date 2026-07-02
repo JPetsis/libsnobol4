@@ -251,6 +251,372 @@ static bool search_alt_literals_try(VM *vm, const char *subject,
 }
 
 /* ---------------------------------------------------------------------------
+ * Start-byte bitmap helpers
+ *
+ * A 256-bit bitmap: bit i set → pattern CAN match starting with byte i.
+ * Inspired by PCRE2's start_bits study data.
+ * ---------------------------------------------------------------------------
+ */
+
+static inline void bitmap256_set(uint8_t bm[32], uint8_t b) {
+  bm[b >> 3] |= (uint8_t)(1u << (b & 7));
+}
+static inline void bitmap256_set_all(uint8_t bm[32]) {
+  memset(bm, 0xFF, 32);
+}
+static inline void bitmap256_or(uint8_t dst[32], const uint8_t src[32]) {
+  for (int i = 0; i < 32; i++)
+    dst[i] |= src[i];
+}
+
+/**
+ * Recursively compute start-byte bitmap for bytecode rooted at `ip`.
+ *
+ * Walks forward through sequential ops; for SPLIT (alternation) recurses
+ * into both branches and OR's their bitmaps.  Depth-limited to prevent
+ * infinite loops from back-edges.
+ *
+ * @param bc       Bytecode buffer
+ * @param bc_len   Bytecode length
+ * @param ip       Current bytecode offset (pointing to an opcode)
+ * @param bm       Output bitmap (caller must zero before first call)
+ * @param depth    Recursion depth guard (pass 0)
+ * @param tmp_vm   Temporary VM for charclass resolution (zeroed by caller)
+ */
+static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
+                                  uint8_t bm[32], int depth, VM *tmp_vm) {
+  if (depth > 12) { bitmap256_set_all(bm); return; }
+
+  while (ip < bc_len) {
+    uint8_t op = bc[ip]; /* ip points to opcode */
+    switch (op) {
+
+    /* ---- Terminal consuming ops: determine start bytes and stop ---- */
+    case OP_LIT: {
+      if (ip + 9 > bc_len) { bitmap256_set_all(bm); return; }
+      uint32_t lit_off = search_read_u32(bc, ip + 1);
+      if (lit_off >= bc_len) { bitmap256_set_all(bm); return; }
+      bitmap256_set(bm, bc[lit_off]);
+      return;
+    }
+
+    case OP_ANY: {
+      if (ip + 3 > bc_len) { bitmap256_set_all(bm); return; }
+      uint16_t set_id = search_read_u16(bc, ip + 1);
+      uint16_t count = 0, ci = 0;
+      const uint8_t *rng = get_ranges_ptr(tmp_vm, set_id, &count, &ci);
+      if (rng) {
+        uint64_t abm[2] = {0, 0};
+        ranges_to_ascii_bitmap(rng, count, abm);
+        for (int i = 0; i < 256; i++)
+          if (bitmap_test(abm, (unsigned)i))
+            bitmap256_set(bm, (uint8_t)i);
+      } else {
+        bitmap256_set_all(bm);
+      }
+      return;
+    }
+
+    case OP_NOTANY: {
+      if (ip + 3 > bc_len) { bitmap256_set_all(bm); return; }
+      uint16_t set_id = search_read_u16(bc, ip + 1);
+      uint16_t count = 0, ci = 0;
+      const uint8_t *rng = get_ranges_ptr(tmp_vm, set_id, &count, &ci);
+      if (rng) {
+        uint64_t abm[2] = {0, 0};
+        ranges_to_ascii_bitmap(rng, count, abm);
+        for (int i = 0; i < 256; i++)
+          if (!bitmap_test(abm, (unsigned)i))
+            bitmap256_set(bm, (uint8_t)i);
+      } else {
+        bitmap256_set_all(bm);
+      }
+      return;
+    }
+
+    case OP_SPAN: {
+      if (ip + 3 > bc_len) { bitmap256_set_all(bm); return; }
+      uint16_t set_id = search_read_u16(bc, ip + 1);
+      uint16_t count = 0, ci = 0;
+      const uint8_t *rng = get_ranges_ptr(tmp_vm, set_id, &count, &ci);
+      if (rng) {
+        uint64_t abm[2] = {0, 0};
+        ranges_to_ascii_bitmap(rng, count, abm);
+        for (int i = 0; i < 256; i++)
+          if (bitmap_test(abm, (unsigned)i))
+            bitmap256_set(bm, (uint8_t)i);
+      } else {
+        bitmap256_set_all(bm);
+      }
+      return;
+    }
+
+    case OP_BREAK:
+    case OP_BREAKX:
+      /* BREAK can succeed at ANY position (zero-width at a delimiter or
+       * at end-of-subject).  Conservatively allow all bytes. */
+      bitmap256_set_all(bm);
+      return;
+
+    case OP_LEN:
+    case OP_REM:
+    case OP_BAL:
+      /* LEN: any byte (consumes n arbitrary codepoints).
+       * REM: any byte (consumes remainder).
+       * BAL: any byte (balanced pair can start with any char). */
+      bitmap256_set_all(bm);
+      return;
+
+    /* ---- Alternation: union of branch start bytes ---- */
+    case OP_SPLIT: {
+      if (ip + 9 > bc_len) { bitmap256_set_all(bm); return; }
+      uint32_t a = search_read_u32(bc, ip + 1);
+      uint32_t b = search_read_u32(bc, ip + 5);
+      if (a >= bc_len || b >= bc_len) { bitmap256_set_all(bm); return; }
+      uint8_t ba[32], bb[32];
+      memset(ba, 0, sizeof(ba));
+      memset(bb, 0, sizeof(bb));
+      compute_start_bitmap(bc, bc_len, (size_t)a, ba, depth + 1, tmp_vm);
+      compute_start_bitmap(bc, bc_len, (size_t)b, bb, depth + 1, tmp_vm);
+      bitmap256_or(bm, ba);
+      bitmap256_or(bm, bb);
+      return;
+    }
+
+    /* ---- Zero-width wrappers: skip to next instruction ---- */
+    case OP_CAP_START:
+    case OP_CAP_END:
+      ip += 2; /* opcode + reg byte */
+      continue;
+    case OP_FENCE:
+    case OP_NOP:
+      ip += 1;
+      continue;
+    case OP_ANCHOR:
+      ip += 2; /* opcode + type byte */
+      continue;
+    case OP_ASSIGN:
+      if (ip + 4 > bc_len) { bitmap256_set_all(bm); return; }
+      ip += 4;
+      continue;
+
+    case OP_POS:
+    case OP_RPOS:
+    case OP_TAB:
+    case OP_RTAB:
+      if (ip + 5 > bc_len) { bitmap256_set_all(bm); return; }
+      ip += 5;
+      continue;
+
+    /* ---- Unconditional jump: follow target ---- */
+    case OP_JMP: {
+      if (ip + 5 > bc_len) { bitmap256_set_all(bm); return; }
+      uint32_t target = search_read_u32(bc, ip + 1);
+      if (target >= bc_len) { bitmap256_set_all(bm); return; }
+      ip = (size_t)target;
+      continue;
+    }
+
+    /* ---- Unpredictable ops: set all bytes ---- */
+    case OP_REPEAT_INIT:
+    case OP_REPEAT_STEP:
+    case OP_EVAL:
+    case OP_DYNAMIC:
+    case OP_DYNAMIC_DEF:
+    case OP_TABLE_GET:
+    case OP_TABLE_SET:
+    case OP_ARRAY_GET:
+    case OP_ARRAY_SET:
+    case OP_EMIT_LITERAL:
+    case OP_EMIT_CAPTURE:
+    case OP_EMIT_EXPR:
+    case OP_EMIT_TABLE:
+    case OP_EMIT_FORMAT:
+    case OP_GOTO:
+    case OP_GOTO_F:
+    case OP_LABEL:
+      bitmap256_set_all(bm);
+      return;
+
+    /* ---- Terminals: no start bytes contributed ---- */
+    case OP_ACCEPT:
+    case OP_FAIL:
+    case OP_ABORT:
+    case OP_SUCCEED:
+      return;
+
+    default:
+      bitmap256_set_all(bm);
+      return;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Minimum match length computation (PCRE2-style find_minlength)
+ *
+ * Walk bytecode from `ip` and compute a lower bound on subject bytes consumed
+ * by a successful match.  Returns 0 when the bound is unknown (the skip loop
+ * simply skips the minlength check).
+ *
+ * For alternation (SPLIT) we take the MIN of branches; FAIL branches are
+ * treated as infinite (UINT32_MAX) so they don't affect the min.
+ * Depth-limited for safety.
+ * ---------------------------------------------------------------------------
+ */
+
+static uint32_t compute_minlength(const uint8_t *bc, size_t bc_len,
+                                   size_t ip, int depth) {
+  if (depth > 12)
+    return 0;
+
+  uint32_t len = 0;
+
+  while (ip < bc_len) {
+    uint8_t op = bc[ip]; /* ip points to opcode */
+    switch (op) {
+
+    case OP_LIT: {
+      if (ip + 9 > bc_len) return 0;
+      uint32_t lit_len = search_read_u32(bc, ip + 5);
+      len += lit_len;
+      ip += 9 + lit_len;
+      continue;
+    }
+
+    case OP_ANY:
+    case OP_NOTANY:
+      len += 1;
+      if (ip + 3 > bc_len) return len;
+      ip += 3;
+      continue;
+
+    case OP_SPAN:
+      len += 1;
+      if (ip + 3 > bc_len) return len;
+      ip += 3;
+      continue;
+
+    case OP_BREAK:
+    case OP_BREAKX:
+      /* BREAK can consume 0 bytes (match at delimiter or end) */
+      ip += 3;
+      continue;
+
+    case OP_LEN: {
+      if (ip + 5 > bc_len) return len;
+      uint32_t n = search_read_u32(bc, ip + 1);
+      len += n;
+      ip += 5;
+      continue;
+    }
+
+    case OP_POS:
+    case OP_RPOS:
+    case OP_TAB:
+    case OP_RTAB:
+      if (ip + 5 > bc_len) return len;
+      ip += 5;
+      continue;
+
+    case OP_ANCHOR:
+      ip += 2;
+      continue;
+
+    case OP_CAP_START:
+    case OP_CAP_END:
+      ip += 2;
+      continue;
+
+    case OP_FENCE:
+    case OP_NOP:
+      ip += 1;
+      continue;
+
+    case OP_ASSIGN:
+      if (ip + 4 > bc_len) return len;
+      ip += 4;
+      continue;
+
+    case OP_SPLIT: {
+      if (ip + 9 > bc_len) return len;
+      uint32_t a = search_read_u32(bc, ip + 1);
+      uint32_t b = search_read_u32(bc, ip + 5);
+      if (a >= bc_len || b >= bc_len) return len;
+      uint32_t ma = compute_minlength(bc, bc_len, (size_t)a, depth + 1);
+      uint32_t mb = compute_minlength(bc, bc_len, (size_t)b, depth + 1);
+      /* Treat FAIL (UINT32_MAX) branches as infinite */
+      uint32_t branch_min;
+      if (ma != UINT32_MAX && mb != UINT32_MAX)
+        branch_min = ma < mb ? ma : mb;
+      else if (ma != UINT32_MAX)
+        branch_min = ma;
+      else if (mb != UINT32_MAX)
+        branch_min = mb;
+      else
+        branch_min = 0;
+      len += branch_min;
+      return len;
+    }
+
+    case OP_JMP: {
+      if (ip + 5 > bc_len) return len;
+      uint32_t target = search_read_u32(bc, ip + 1);
+      if (target >= bc_len) return len;
+      ip = (size_t)target;
+      continue;
+    }
+
+    case OP_REPEAT_INIT:
+      /* Lower bound = inner_min * min_rep.  We can't determine inner min
+       * easily, so return 0 (conservative). */
+      return 0;
+
+    case OP_REPEAT_STEP:
+      return len;
+
+    case OP_BAL:
+      return len + 2;
+
+
+    case OP_REM:
+      return len;
+
+    case OP_ACCEPT:
+    case OP_ABORT:
+    case OP_SUCCEED:
+      return len;
+
+    case OP_FAIL:
+      /* Dead path — return sentinel so SPLIT ignores this branch */
+      return UINT32_MAX;
+
+    case OP_EVAL:
+    case OP_DYNAMIC:
+    case OP_DYNAMIC_DEF:
+    case OP_TABLE_GET:
+    case OP_TABLE_SET:
+    case OP_ARRAY_GET:
+    case OP_ARRAY_SET:
+    case OP_EMIT_LITERAL:
+    case OP_EMIT_CAPTURE:
+    case OP_EMIT_EXPR:
+    case OP_EMIT_TABLE:
+    case OP_EMIT_FORMAT:
+    case OP_GOTO:
+    case OP_GOTO_F:
+    case OP_LABEL:
+      return 0;
+
+    default:
+      return 0;
+    }
+  }
+
+  return len;
+}
+
+/* ---------------------------------------------------------------------------
  * Automaton eligibility checker
  *
  * A pattern is automaton-eligible if it:
@@ -626,6 +992,18 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
       (out->is_break_family || out->is_span_family) && !out->ascii_class_only) {
     out->automaton_eligible = false;
   }
+
+  /* ---- Start-byte bitmap & minimum match length ---- */
+  {
+    VM bm_vm;
+    memset(&bm_vm, 0, sizeof(bm_vm));
+    bm_vm.bc = bc;
+    bm_vm.bc_len = bc_len;
+    memset(out->start_bitmap, 0, sizeof(out->start_bitmap));
+    compute_start_bitmap(bc, bc_len, 0, out->start_bitmap, 0, &bm_vm);
+    out->has_start_bitmap = true;
+  }
+  out->minlength = compute_minlength(bc, bc_len, 0, 0);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1016,9 +1394,29 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
     return false;
   }
 
-  /* ---- Tier 5: General VM fallback ---- */
+  /* ---- Tier 5: General VM fallback with start-byte bitmap acceleration ---- */
   size_t offset = start_offset;
+
   while (offset <= subject_len) {
+    /* Start-byte bitmap filter: skip subject bytes that can never start
+     * the pattern.  On average this eliminates 255/256 ≈ 99.6% of
+     * candidate positions for constrained patterns. */
+    if (meta->has_start_bitmap && offset < subject_len) {
+      uint8_t b = (uint8_t)subject[offset];
+      if (!(meta->start_bitmap[b >> 3] & (uint8_t)(1u << (b & 7)))) {
+        if (diag)
+          diag->candidates_skipped++;
+        offset++;
+        continue;
+      }
+    }
+
+    /* Minimum-length filter: if too few remaining bytes, give up */
+    if (meta->minlength > 0 && offset + meta->minlength > subject_len) {
+      out_result->success = false;
+      return false;
+    }
+
     if (diag)
       diag->candidates_tested++;
     search_reset_vm(vm, subject, subject_len, offset);
