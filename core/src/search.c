@@ -767,6 +767,188 @@ static bool check_alt_literals(const uint8_t *bc, size_t bc_len, size_t ip) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Literal-only checker
+ *
+ * Returns true when the bytecode represents a single literal match with no
+ * side effects, captures, or output — i.e. the pattern is equivalent to
+ * a plain substring search.  Zero-width assertions (NOP, FENCE, ANCHOR,
+ * POS, RPOS) are allowed between the LIT and ACCEPT.
+ *
+ * When true, the search runtime can skip the VM entirely and use memmem()
+ * (unanchored) or memcmp() (anchored) to find matches.
+ * ---------------------------------------------------------------------------
+ */
+static bool check_literal_only(const uint8_t *bc, size_t bc_len) {
+  if (!bc || bc_len < 2)
+    return false;
+  size_t ip = 0;
+
+  /* Skip leading zero-width ops */
+  while (ip < bc_len) {
+    uint8_t op = bc[ip];
+    if (op == OP_NOP) {
+      ip++;
+      continue;
+    }
+    if (op == OP_FENCE || op == OP_ANCHOR) {
+      ip++;
+      continue;
+    }
+    if (op == OP_POS || op == OP_RPOS) {
+      if (ip + 5 > bc_len)
+        return false;
+      ip += 5;
+      continue;
+    }
+    break;
+  }
+
+  /* Must start with LIT */
+  if (ip + 9 > bc_len)
+    return false;
+  if (bc[ip] != OP_LIT)
+    return false;
+  uint32_t lit_off = search_read_u32(bc, ip + 1);
+  uint32_t lit_len = search_read_u32(bc, ip + 5);
+  ip += 9;
+  if (lit_off >= bc_len || lit_off + lit_len > bc_len || lit_len == 0)
+    return false;
+  ip += lit_len;
+
+  /* Skip trailing zero-width ops */
+  while (ip < bc_len) {
+    uint8_t op = bc[ip];
+    if (op == OP_NOP) {
+      ip++;
+      continue;
+    }
+    if (op == OP_FENCE || op == OP_ANCHOR) {
+      ip++;
+      continue;
+    }
+    if (op == OP_POS || op == OP_RPOS) {
+      if (ip + 5 > bc_len)
+        return false;
+      ip += 5;
+      continue;
+    }
+    break;
+  }
+
+  /* Must end with ACCEPT (possibly OP_ACCEPT = 0) */
+  if (ip >= bc_len)
+    return false;
+  return bc[ip] == OP_ACCEPT;
+}
+
+/* ---------------------------------------------------------------------------
+ * Search-VM eligibility checker
+ *
+ * Returns true when the pattern contains only opcodes from the safe set
+ * supported by the lightweight search-VM.  This includes all pattern-match
+ * primitives (LIT, LEN, ANY, NOTANY, SPAN, BREAK, POS, RPOS, TAB, RTAB,
+ * ANCHOR, FENCE, NOP), control flow (JMP, SPLIT, REPEAT_INIT, REPEAT_STEP,
+ * ACCEPT, FAIL, ABORT, SUCCEED), but EXCLUDES side-effect ops (EVAL, ASSIGN,
+ * CAP_START, CAP_END, EMIT_*), dynamic ops (DYNAMIC, DYNAMIC_DEF), table/array
+ * ops, GOTO/GOTO_F/LABEL, BAL, REM, and BREAKX.
+ *
+ * Patterns that pass are eligible for the lightweight search-VM path
+ * (Tier 6) which drops output buffer, capture tracking, and var tracking.
+ * ---------------------------------------------------------------------------
+ */
+static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
+  if (!bc || bc_len < 2)
+    return false;
+  size_t ip = 0;
+  while (ip < bc_len) {
+    uint8_t op = bc[ip++];
+    switch (op) {
+    /* Side-effect / complex ops — disqualify */
+    case OP_EVAL:
+    case OP_ASSIGN:
+    case OP_CAP_START:
+    case OP_CAP_END:
+    case OP_EMIT_LITERAL:
+    case OP_EMIT_CAPTURE:
+    case OP_EMIT_EXPR:
+    case OP_EMIT_TABLE:
+    case OP_EMIT_FORMAT:
+    case OP_DYNAMIC:
+    case OP_DYNAMIC_DEF:
+    case OP_TABLE_GET:
+    case OP_TABLE_SET:
+    case OP_ARRAY_GET:
+    case OP_ARRAY_SET:
+    case OP_GOTO:
+    case OP_GOTO_F:
+    case OP_LABEL:
+    case OP_BREAKX:
+    case OP_BAL:
+    case OP_REM:
+      return false;
+    /* Terminal — immediately eligible for this sub-pattern */
+    case OP_ACCEPT:
+    case OP_FAIL:
+    case OP_ABORT:
+    case OP_SUCCEED:
+      return true;
+    case OP_JMP:
+      if (ip + 4 > bc_len)
+        return false;
+      ip += 4;
+      break;
+    case OP_SPLIT:
+      if (ip + 8 > bc_len)
+        return false;
+      ip += 8;
+      break;
+    case OP_LIT: {
+      if (ip + 8 > bc_len)
+        return false;
+      uint32_t lit_len = search_read_u32(bc, ip + 4);
+      ip += 8 + lit_len;
+      break;
+    }
+    case OP_ANY:
+    case OP_NOTANY:
+    case OP_SPAN:
+    case OP_BREAK:
+      if (ip + 2 > bc_len)
+        return false;
+      ip += 2;
+      break;
+    case OP_LEN:
+    case OP_RPOS:
+    case OP_RTAB:
+    case OP_POS:
+    case OP_TAB:
+      if (ip + 4 > bc_len)
+        return false;
+      ip += 4;
+      break;
+    case OP_ANCHOR:
+    case OP_FENCE:
+    case OP_NOP:
+      /* zero-width, no operands beyond opcode */
+      break;
+    case OP_REPEAT_INIT:
+      if (ip + 13 > bc_len)
+        return false;
+      ip += 13;
+      break;
+    case OP_REPEAT_STEP:
+      if (ip + 5 > bc_len)
+        return false;
+      ip += 5;
+      break;
+    default:
+      return false;
+    }
+  }
+  return true;
+}
+
+/* ---------------------------------------------------------------------------
  * snobol_search_derive_meta
  *
  * Scans the compiled bytecode to extract search-acceleration hints:
@@ -992,6 +1174,12 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
       (out->is_break_family || out->is_span_family) && !out->ascii_class_only) {
     out->automaton_eligible = false;
   }
+
+  /* ---- Literal-only detection ---- */
+  out->is_literal_only = check_literal_only(bc, bc_len);
+
+  /* ---- Search-VM eligibility ---- */
+  out->search_vm_eligible = check_search_vm_eligible(bc, bc_len);
 
   /* ---- Start-byte bitmap & minimum match length ---- */
   {
@@ -1235,7 +1423,709 @@ static bool search_bitmap_accelerated(VM *vm, const char *subject,
 }
 
 /* ---------------------------------------------------------------------------
- * Tier 3: Lightweight automaton path
+ * Tier 2: Literal-only fast path
+ *
+ * For patterns that are a single literal (optionally wrapped in zero-width
+ * assertions) with no captures, output, or side effects, we bypass the VM
+ * entirely and use memmem() (unanchored) to find the literal position.
+ *
+ * This is the fastest possible search path: a single libc call per candidate,
+ * no bytecode dispatch, no choice stack, no capture tracking.
+ * ---------------------------------------------------------------------------
+ */
+static bool search_literal_only(VM *vm, const char *subject,
+                                size_t subject_len, size_t start_offset,
+                                const snobol_search_meta_t *meta,
+                                snobol_search_result_t *out_result,
+                                snobol_search_diag_t *diag) {
+  (void)vm;
+  (void)meta;
+  size_t offset = start_offset;
+
+  /* Extract the literal from bytecode: skip any leading zero-width ops,
+   * then read LIT(offset, len). */
+  size_t ip = 0;
+  const uint8_t *bc = vm->bc;
+  size_t bc_len = vm->bc_len;
+
+  while (ip < bc_len) {
+    uint8_t op = bc[ip];
+    if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR) {
+      ip++;
+      continue;
+    }
+    if ((op == OP_POS || op == OP_RPOS) && ip + 5 <= bc_len) {
+      ip += 5;
+      continue;
+    }
+    break;
+  }
+  if (ip + 9 > bc_len || bc[ip] != OP_LIT)
+    goto fallback;
+  uint32_t lit_off = search_read_u32(bc, ip + 1);
+  uint32_t lit_len = search_read_u32(bc, ip + 5);
+  if (lit_off >= bc_len || lit_off + lit_len > bc_len || lit_len == 0)
+    goto fallback;
+  const uint8_t *lit = bc + lit_off;
+
+  if (subject_len < lit_len)
+    goto nomatch;
+
+  while (offset + lit_len <= subject_len) {
+    const char *hay = subject + offset;
+    size_t haylen = subject_len - offset;
+
+    const char *found = (const char *)memmem(hay, haylen, lit, lit_len);
+    if (!found)
+      break;
+
+    size_t cand = (size_t)(found - subject);
+    if (diag) {
+      diag->candidates_skipped += (cand - offset);
+      diag->candidates_tested++;
+    }
+
+    /* No VM confirmation needed — the ENTIRE pattern is this literal. */
+    out_result->success = true;
+    out_result->match_start = cand;
+    out_result->match_end = cand + lit_len;
+    return true;
+  }
+
+nomatch:
+  out_result->success = false;
+  return false;
+
+fallback:
+  /* Should never happen if derive_meta correctly set is_literal_only */
+  out_result->success = false;
+  return false;
+}
+
+/* ---------------------------------------------------------------------------
+ * Tier 6: Search-VM dispatch
+ *
+ * Lightweight bytecode interpreter for search-mode-eligible patterns (no
+ * side effects, no captures, no output).  Uses computed-goto dispatch with
+ * a reduced opcode table supporting only the safe opcode set:
+ *
+ *   LIT, LEN, ANY, NOTANY, SPAN, BREAK, JMP, SPLIT, POS, RPOS, TAB, RTAB,
+ *   ANCHOR, FENCE, NOP, REPEAT_INIT, REPEAT_STEP, ACCEPT, FAIL, ABORT,
+ *   SUCCEED
+ *
+ * Key differences from vm_exec:
+ *  - No output buffer (vm->out is unused)
+ *  - No capture tracking (cap_start/cap_end arrays skipped)
+ *  - No var tracking (var_start/var_end/var_count skipped)
+ *  - Range pointers pre-resolved at entry from vm->range_meta
+ *  - Backtracking through shared vm_push_choice/vm_pop_choice
+ *
+ * The caller must reset vm->ip and vm->pos before each call.
+ * On success, vm->pos holds the match length (match_end - match_start).
+ * ---------------------------------------------------------------------------
+ */
+static bool search_vm_exec(VM *vm, const char *subject, size_t subject_len,
+                           size_t offset, snobol_search_result_t *out_result) {
+  (void)subject;
+  (void)subject_len;
+  const uint8_t *bc = vm->bc;
+  size_t bc_len = vm->bc_len;
+  size_t ip = vm->ip; /* set by search_reset_vm */
+  size_t pos = vm->pos;
+  const char *s = vm->s;
+  size_t len = vm->len;
+
+  /* ---- Pre-resolve range pointers ---- */
+#define SEARCH_VM_MAX_RANGES 64
+  struct {
+    const uint8_t *ranges_ptr;
+    uint16_t count;
+    uint16_t case_flag;
+  } srange[SEARCH_VM_MAX_RANGES];
+  size_t srange_count = 0;
+
+  if (vm->range_meta) {
+    srange_count = vm->range_meta_count;
+    if (srange_count > SEARCH_VM_MAX_RANGES)
+      srange_count = SEARCH_VM_MAX_RANGES;
+    for (size_t i = 0; i < srange_count; i++) {
+      srange[i].ranges_ptr = vm->range_meta[i].ranges_ptr;
+      srange[i].count = vm->range_meta[i].count;
+      srange[i].case_flag = vm->range_meta[i].case_insensitive;
+    }
+  }
+
+  /* ---- Prepare choice stack if not already initialised ---- */
+  if (!vm->choices) {
+    size_t initial_cap = 256;
+    vm->choices = snobol_malloc(initial_cap);
+    if (!vm->choices)
+      return false;
+    vm->choices_cap = initial_cap;
+  }
+  vm->use_compact_choice = true;
+  vm->choices_top = 0;
+  /* Don't touch compact-choice write log — we don't track captures */
+
+  /* ---- Computed-goto dispatch table ---- */
+#ifndef _MSC_VER
+  static void *search_opcode_table[] = {
+      [OP_ACCEPT] = &&svm_accept,
+      [OP_FAIL] = &&svm_fail,
+      [OP_JMP] = &&svm_jmp,
+      [OP_SPLIT] = &&svm_split,
+      [OP_LIT] = &&svm_lit,
+      [OP_ANY] = &&svm_any,
+      [OP_NOTANY] = &&svm_notany,
+      [OP_SPAN] = &&svm_span,
+      [OP_BREAK] = &&svm_break,
+      [OP_LEN] = &&svm_len,
+      [OP_ANCHOR] = &&svm_anchor,
+      [OP_REPEAT_INIT] = &&svm_repeat_init,
+      [OP_REPEAT_STEP] = &&svm_repeat_step,
+      [OP_FENCE] = &&svm_fence,
+      [OP_RPOS] = &&svm_rpos,
+      [OP_RTAB] = &&svm_rtab,
+      [OP_POS] = &&svm_pos,
+      [OP_TAB] = &&svm_tab,
+      [OP_ABORT] = &&svm_abort,
+      [OP_SUCCEED] = &&svm_succeed,
+      [OP_NOP] = &&svm_nop,
+  };
+#endif
+
+  while (1) {
+    if (ip >= bc_len) {
+      if (!vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      continue;
+    }
+    uint8_t op = bc[ip++];
+#ifndef _MSC_VER
+    goto *search_opcode_table[op];
+#else
+    switch (op) {
+#endif
+
+/* ---- Zero-width ops ---- */
+#ifndef _MSC_VER
+svm_nop:
+#endif
+#ifdef _MSC_VER
+    case OP_NOP:
+#endif
+      continue;
+
+#ifndef _MSC_VER
+svm_fence:
+#endif
+#ifdef _MSC_VER
+    case OP_FENCE:
+#endif
+      /* Cut: discard all prior choice points */
+      vm->choices_top = 0;
+      continue;
+
+#ifndef _MSC_VER
+svm_anchor:
+#endif
+#ifdef _MSC_VER
+    case OP_ANCHOR:
+#endif
+    {
+      uint8_t anchor_type = bc[ip++];
+      if (anchor_type == 0) {
+        /* Start anchor: must be at beginning */
+        if (pos != 0)
+          goto svm_fail;
+      } else {
+        /* End anchor: must be at end */
+        if (pos != len)
+          goto svm_fail;
+      }
+      continue;
+    }
+
+/* ---- Terminal opcodes ---- */
+#ifndef _MSC_VER
+svm_accept:
+#endif
+#ifdef _MSC_VER
+    case OP_ACCEPT:
+#endif
+      out_result->success = true;
+      out_result->match_start = offset;
+      out_result->match_end = offset + pos;
+      return true;
+
+#ifndef _MSC_VER
+svm_abort:
+#endif
+#ifdef _MSC_VER
+    case OP_ABORT:
+#endif
+      out_result->success = true;
+      out_result->match_start = offset;
+      out_result->match_end = offset + pos;
+      return true;
+
+#ifndef _MSC_VER
+svm_succeed:
+#endif
+#ifdef _MSC_VER
+    case OP_SUCCEED:
+#endif
+      /* Force success at current position, consuming nothing more */
+      out_result->success = true;
+      out_result->match_start = offset;
+      out_result->match_end = offset + pos;
+      return true;
+
+#ifndef _MSC_VER
+svm_fail:
+#endif
+#ifdef _MSC_VER
+    case OP_FAIL:
+#endif
+    {
+      bool had = vm_pop_choice(vm);
+      if (!had)
+        goto svm_fail_ret;
+      ip = vm->ip;
+      continue;
+    }
+
+/* ---- LIT: inline literal match ---- */
+#ifndef _MSC_VER
+svm_lit:
+#endif
+#ifdef _MSC_VER
+    case OP_LIT:
+#endif
+    {
+      uint32_t lit_off = read_u32(bc, bc_len, &ip);
+      uint32_t lit_len = read_u32(bc, bc_len, &ip);
+      if (lit_off == ip)
+        ip += lit_len;
+      if (lit_len <= len - pos &&
+          memcmp(s + pos, bc + lit_off, lit_len) == 0) {
+        pos += lit_len;
+      } else {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+      }
+      continue;
+    }
+
+/* ---- LEN: advance by N codepoints ---- */
+#ifndef _MSC_VER
+svm_len:
+#endif
+#ifdef _MSC_VER
+    case OP_LEN:
+#endif
+    {
+      uint32_t n = read_u32(bc, bc_len, &ip);
+      size_t p = pos;
+      for (uint32_t i = 0; i < n; i++) {
+        uint32_t cp;
+        int bytes;
+        if (!utf8_peek_next(s, len, p, &cp, &bytes))
+          goto svm_fail;
+        p += bytes;
+      }
+      pos = p;
+      continue;
+    }
+
+/* ---- ANY: match single char in class ---- */
+#ifndef _MSC_VER
+svm_any:
+#endif
+#ifdef _MSC_VER
+    case OP_ANY:
+#endif
+    {
+      uint16_t set_id = read_u16(bc, bc_len, &ip);
+      bool ok = false;
+      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+        const uint8_t *rp = srange[set_id - 1].ranges_ptr;
+        uint16_t cnt = srange[set_id - 1].count;
+        if (rp) {
+          if (pos < len) {
+            uint8_t c = (uint8_t)s[pos];
+            uint64_t map[2];
+            if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+                bitmap_test(map, c)) {
+              ok = true;
+            } else {
+              uint32_t cp;
+              int bytes;
+              if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+                  range_contains(rp, cnt, cp)) {
+                ok = true;
+              }
+            }
+          }
+        }
+      }
+      if (ok) {
+        /* Advance by 1 byte (ASCII) or multi-byte (UTF-8) */
+        uint32_t cp;
+        int bytes;
+        if (!utf8_peek_next(s, len, pos, &cp, &bytes))
+          goto svm_fail;
+        pos += bytes;
+      } else {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+      }
+      continue;
+    }
+
+/* ---- NOTANY: match single char NOT in class ---- */
+#ifndef _MSC_VER
+svm_notany:
+#endif
+#ifdef _MSC_VER
+    case OP_NOTANY:
+#endif
+    {
+      uint16_t set_id = read_u16(bc, bc_len, &ip);
+      bool in_class = false;
+      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+        const uint8_t *rp = srange[set_id - 1].ranges_ptr;
+        uint16_t cnt = srange[set_id - 1].count;
+        if (rp && pos < len) {
+          uint8_t c = (uint8_t)s[pos];
+          uint64_t map[2];
+          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+              bitmap_test(map, c)) {
+            in_class = true;
+          } else {
+            uint32_t cp;
+            int bytes;
+            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+                range_contains(rp, cnt, cp)) {
+              in_class = true;
+            }
+          }
+        }
+      }
+      if (!in_class && pos < len) {
+        uint32_t cp;
+        int bytes;
+        if (!utf8_peek_next(s, len, pos, &cp, &bytes))
+          goto svm_fail;
+        pos += bytes;
+      } else {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+      }
+      continue;
+    }
+
+/* ---- SPAN: consume 1+ characters in class ---- */
+#ifndef _MSC_VER
+svm_span:
+#endif
+#ifdef _MSC_VER
+    case OP_SPAN:
+#endif
+    {
+      uint16_t set_id = read_u16(bc, bc_len, &ip);
+      const uint8_t *rp = nullptr;
+      uint16_t cnt = 0;
+      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+        rp = srange[set_id - 1].ranges_ptr;
+        cnt = srange[set_id - 1].count;
+      }
+      size_t start = pos;
+      while (pos < len) {
+        bool in_class = false;
+        if (rp) {
+          uint8_t c = (uint8_t)s[pos];
+          uint64_t map[2];
+          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+              bitmap_test(map, c)) {
+            in_class = true;
+          } else {
+            uint32_t cp;
+            int bytes;
+            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+                range_contains(rp, cnt, cp)) {
+              in_class = true;
+            }
+          }
+        }
+        if (!in_class)
+          break;
+        uint32_t cp;
+        int bytes;
+        if (!utf8_peek_next(s, len, pos, &cp, &bytes))
+          break;
+        pos += bytes;
+      }
+      if (pos == start) {
+        /* SPAN requires at least 1 char */
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+      }
+      continue;
+    }
+
+/* ---- BREAK: consume 0+ characters until one in class ---- */
+#ifndef _MSC_VER
+svm_break:
+#endif
+#ifdef _MSC_VER
+    case OP_BREAK:
+#endif
+    {
+      uint16_t set_id = read_u16(bc, bc_len, &ip);
+      const uint8_t *rp = nullptr;
+      uint16_t cnt = 0;
+      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+        rp = srange[set_id - 1].ranges_ptr;
+        cnt = srange[set_id - 1].count;
+      }
+      while (pos < len) {
+        bool in_class = false;
+        if (rp) {
+          uint8_t c = (uint8_t)s[pos];
+          uint64_t map[2];
+          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+              bitmap_test(map, c)) {
+            in_class = true;
+          } else {
+            uint32_t cp;
+            int bytes;
+            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+                range_contains(rp, cnt, cp)) {
+              in_class = true;
+            }
+          }
+        }
+        if (in_class)
+          break;
+        uint32_t cp;
+        int bytes;
+        if (!utf8_peek_next(s, len, pos, &cp, &bytes))
+          break;
+        pos += bytes;
+      }
+      continue;
+    }
+
+/* ---- POS: succeed at exact byte offset ---- */
+#ifndef _MSC_VER
+svm_pos:
+#endif
+#ifdef _MSC_VER
+    case OP_POS:
+#endif
+    {
+      uint32_t n = read_u32(bc, bc_len, &ip);
+      if (pos != (size_t)n)
+        goto svm_fail;
+      continue;
+    }
+
+/* ---- RPOS: succeed at N codepoints from end ---- */
+#ifndef _MSC_VER
+svm_rpos:
+#endif
+#ifdef _MSC_VER
+    case OP_RPOS:
+#endif
+    {
+      uint32_t n = read_u32(bc, bc_len, &ip);
+      /* Count remaining codepoints from pos to end */
+      size_t p = pos;
+      uint32_t remaining = 0;
+      while (p < len) {
+        uint32_t cp;
+        int bytes;
+        if (!utf8_peek_next(s, len, p, &cp, &bytes))
+          break;
+        p += bytes;
+        remaining++;
+      }
+      if (remaining != n)
+        goto svm_fail;
+      continue;
+    }
+
+/* ---- TAB: advance to exact byte offset ---- */
+#ifndef _MSC_VER
+svm_tab:
+#endif
+#ifdef _MSC_VER
+    case OP_TAB:
+#endif
+    {
+      uint32_t n = read_u32(bc, bc_len, &ip);
+      /* Count codepoints from start to n, advance pos to that byte */
+      size_t p = 0;
+      for (uint32_t i = 0; i < n; i++) {
+        uint32_t cp;
+        int bytes;
+        if (!utf8_peek_next(s, len, p, &cp, &bytes))
+          goto svm_fail;
+        p += bytes;
+      }
+      if (p > len)
+        goto svm_fail;
+      pos = p;
+      continue;
+    }
+
+/* ---- RTAB: advance to N codepoints from end ---- */
+#ifndef _MSC_VER
+svm_rtab:
+#endif
+#ifdef _MSC_VER
+    case OP_RTAB:
+#endif
+    {
+      uint32_t n = read_u32(bc, bc_len, &ip);
+      /* Count total codepoints */
+      size_t p = 0;
+      uint32_t total_cp = 0;
+      while (p < len) {
+        uint32_t cp;
+        int bytes;
+        if (!utf8_peek_next(s, len, p, &cp, &bytes))
+          break;
+        p += bytes;
+        total_cp++;
+      }
+      if (n > total_cp)
+        goto svm_fail;
+      /* Advance to (total_cp - n)th codepoint */
+      uint32_t target = total_cp - n;
+      p = 0;
+      for (uint32_t i = 0; i < target; i++) {
+        uint32_t cp;
+        int bytes;
+        if (!utf8_peek_next(s, len, p, &cp, &bytes))
+          goto svm_fail;
+        p += bytes;
+      }
+      pos = p;
+      continue;
+    }
+
+/* ---- JMP: unconditional jump ---- */
+#ifndef _MSC_VER
+svm_jmp:
+#endif
+#ifdef _MSC_VER
+    case OP_JMP:
+#endif
+    {
+      uint32_t tgt = read_u32(bc, bc_len, &ip);
+      ip = (size_t)tgt;
+      continue;
+    }
+
+/* ---- SPLIT: non-deterministic branch ---- */
+#ifndef _MSC_VER
+svm_split:
+#endif
+#ifdef _MSC_VER
+    case OP_SPLIT:
+#endif
+    {
+      uint32_t a = read_u32(bc, bc_len, &ip);
+      uint32_t b = read_u32(bc, bc_len, &ip);
+      vm_push_choice(vm, (size_t)b, pos);
+      ip = (size_t)a;
+      continue;
+    }
+
+/* ---- REPEAT_INIT: begin bounded repetition ---- */
+#ifndef _MSC_VER
+svm_repeat_init:
+#endif
+#ifdef _MSC_VER
+    case OP_REPEAT_INIT:
+#endif
+    {
+      uint8_t loop_id = read_u8(bc, bc_len, &ip);
+      uint32_t min = read_u32(bc, bc_len, &ip);
+      uint32_t max = read_u32(bc, bc_len, &ip);
+      uint32_t skip_target = read_u32(bc, bc_len, &ip);
+      if (loop_id < MAX_LOOPS) {
+        vm->counters[loop_id] = 0;
+        vm->loop_min[loop_id] = min;
+        vm->loop_max[loop_id] = max;
+        vm->loop_last_pos[loop_id] = pos;
+      }
+      /* Push choice to skip the loop body entirely (for 0 iterations) */
+      vm_push_choice(vm, (size_t)skip_target, pos);
+      continue;
+    }
+
+/* ---- REPEAT_STEP: step bounded repetition ---- */
+#ifndef _MSC_VER
+svm_repeat_step:
+#endif
+#ifdef _MSC_VER
+    case OP_REPEAT_STEP:
+#endif
+    {
+      uint8_t loop_id = read_u8(bc, bc_len, &ip);
+      uint32_t jmp_target = read_u32(bc, bc_len, &ip);
+      if (loop_id < MAX_LOOPS) {
+        vm->counters[loop_id]++;
+        uint32_t c = vm->counters[loop_id];
+        uint32_t max = vm->loop_max[loop_id];
+        /* If last_pos didn't advance we're in an infinite loop */
+        size_t lp = vm->loop_last_pos[loop_id];
+        if (pos == lp)
+          goto svm_fail;
+        vm->loop_last_pos[loop_id] = pos;
+        if (c >= max) {
+          /* Done: fall through */
+          continue;
+        } else {
+          /* Push choice to exit after min is met */
+          if (c >= vm->loop_min[loop_id]) {
+            /* After skip_target meaning: after the loop body,
+             * the skip_target of REPEAT_INIT. We push a choice
+             * to jump to jmp_target to repeat, with fallthrough
+             * being the exit path (implicit choice already there). */
+            vm_push_choice(vm, (size_t)jmp_target, pos);
+          }
+          /* Continue to loop body (already there via jmp_target
+           * or fallthrough for first iteration) */
+          ip = (size_t)jmp_target;
+          continue;
+        }
+      }
+      /* Invalid loop_id — treat as no-op */
+      continue;
+    }
+
+#ifdef _MSC_VER
+    }
+#endif
+  }
+
+svm_fail_ret:
+  out_result->success = false;
+  return false;
+}
+#undef SEARCH_VM_MAX_RANGES
+
+/* ---------------------------------------------------------------------------
+ * Tier 8: Lightweight automaton path
  *
  * For automaton-eligible patterns (no side effects, no complex control flow,
  * ASCII-only), we use a simplified execution that avoids choice-stack overhead
@@ -1277,11 +2167,13 @@ static bool search_automaton_try(VM *vm, const char *subject,
  * Tier routing (highest priority first):
  *   1. BREAK/BREAKX with ASCII bitmap  → break_accelerated
  *   2. SPAN with ASCII bitmap           → span_accelerated
- *   3. Literal prefix (>=1 byte)        → literal_accelerated
- *   4. Single-char alt (candidate set)  → bitmap_accelerated
- *   5. Automaton-eligible               → automaton path (general VM + eligible
- * flag)
- *   6. General VM fallback
+ *   3. Literal-only (no VM)             → literal_only
+ *   4. Literal prefix (>=1 byte)        → literal_accelerated
+ *   5. Single-char alt (candidate set)  → bitmap_accelerated
+ *   6. Alternation-of-literals (trie)   → alt_literals_try
+ *   7. Search-VM eligible               → search_vm_exec
+ *   8. Automaton-eligible               → automaton path
+ *   9. General VM fallback              → vm_exec (start-byte accelerated)
  *
  * Semantics are identical to repeated anchored vm_exec calls in the caller:
  * the first non-overlapping match at or after start_offset is returned.
@@ -1336,7 +2228,15 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
                                    out_result, diag);
   }
 
-  /* ---- Tier 2: Literal prefix (memmem / memchr) ---- */
+  /* ---- Tier 2: Literal-only fast path (no VM needed) ---- */
+  if (meta->is_literal_only) {
+    if (diag)
+      diag->last_skip_reason = SNOBOL_SEARCH_SKIP_LITERAL;
+    return search_literal_only(vm, subject, subject_len, start_offset, meta,
+                               out_result, diag);
+  }
+
+  /* ---- Tier 3: Literal prefix (memmem / memchr) ---- */
   if (meta->has_literal_prefix && meta->literal_prefix_len > 0) {
     if (diag) {
       diag->last_skip_reason = (meta->literal_prefix_len == 1)
@@ -1347,7 +2247,7 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
                                       meta, out_result, diag);
   }
 
-  /* ---- Tier 3: Candidate-set bitmap for single-char alternation ---- */
+  /* ---- Tier 4: Candidate-set bitmap for single-char alternation ---- */
   if (meta->has_candidate_bitmap && meta->is_single_char_alt) {
     if (diag)
       diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BITMAP;
@@ -1355,18 +2255,42 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
                                      meta, out_result, diag);
   }
 
-  /* ---- Tier 3a: Alternation-of-literals (trie-based) ---- */
+  /* ---- Tier 5: Alternation-of-literals (trie-based) ---- */
   if (meta->is_alt_literals) {
-    /* The trie matcher builds a trie from the bytecode, then scans the
-     * subject linearly without invoking vm_exec.  Faster than Tier 4 for
-     * alternation-of-literals patterns (e.g. "abc"|"def"|"ghi"). */
     if (diag)
       diag->last_skip_reason = SNOBOL_SEARCH_SKIP_NONE;
     return search_alt_literals_try(vm, subject, subject_len, start_offset,
-                                   out_result);
+                                    out_result);
   }
 
-  /* ---- Tier 4: Automaton path for eligible patterns ---- */
+  /* ---- Tier 6: Search-VM for eligible patterns ---- */
+  if (meta->search_vm_eligible) {
+    size_t offset = start_offset;
+    while (offset <= subject_len) {
+      if (diag) {
+        diag->candidates_tested++;
+        diag->search_vm_tests++;
+      }
+      search_reset_vm(vm, subject, subject_len, offset);
+      bool ok = search_vm_exec(vm, subject, subject_len, offset, out_result);
+      if (ok)
+        return true;
+      if (offset >= subject_len)
+        break;
+      if (meta->has_bmh_skip &&
+          offset + meta->bmh_skip_len <= subject_len) {
+        size_t adv =
+            meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+        offset += adv > 0 ? adv : 1;
+      } else {
+        offset++;
+      }
+    }
+    out_result->success = false;
+    return false;
+  }
+
+  /* ---- Tier 7: Automaton path for eligible patterns (no captures/EVAL/etc.) ---- */
   if (meta->automaton_eligible) {
     size_t offset = start_offset;
     while (offset <= subject_len) {
@@ -1394,7 +2318,7 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
     return false;
   }
 
-  /* ---- Tier 5: General VM fallback with start-byte bitmap acceleration ---- */
+  /* ---- Tier 8: General VM fallback with start-byte bitmap acceleration ---- */
   size_t offset = start_offset;
 
   while (offset <= subject_len) {

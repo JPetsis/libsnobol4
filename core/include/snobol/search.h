@@ -114,6 +114,22 @@ typedef struct {
   bool has_bmh_skip;
   uint8_t bmh_skip[256];
   size_t bmh_skip_len;
+
+  /* Literal-only detection ------------------------------------------------ */
+  /* True when the pattern is a single literal followed by ACCEPT (optionally
+   * with zero-width assertions like POS/RPOS/ANCHOR between).  Enables a
+   * fast memmem/memcmp path that bypasses the VM entirely. */
+  bool is_literal_only;
+
+  /* Search-VM eligibility ------------------------------------------------- */
+  /* True when the pattern contains only opcodes from the safe set supported
+   * by the lightweight search-VM (search_vm_exec).  The safe set includes
+   * LIT, LEN, ANY, NOTANY, SPAN, BREAK, JMP, SPLIT, POS, RPOS, TAB, RTAB,
+   * ANCHOR, FENCE, NOP, REPEAT_INIT, REPEAT_STEP, ACCEPT, FAIL, ABORT,
+   * SUCCEED.  Patterns with EVAL, ASSIGN, CAP_START, CAP_END, EMIT_*,
+   * DYNAMIC, TABLE_*, ARRAY_*, GOTO, GOTO_F, LABEL, BAL, REM, BREAKX are
+   * NOT eligible. */
+  bool search_vm_eligible;
 } snobol_search_meta_t;
 
 /* ---------------------------------------------------------------------------
@@ -165,6 +181,7 @@ typedef struct {
   uint64_t candidates_tested;  /**< Positions where the VM was invoked */
   uint64_t candidates_skipped; /**< Positions skipped by candidate metadata */
   uint64_t automaton_tests;    /**< Positions tested by the automaton path */
+  uint64_t search_vm_tests;    /**< Positions tested by the search-VM path */
   snobol_search_skip_reason_t last_skip_reason;
 } snobol_search_diag_t;
 

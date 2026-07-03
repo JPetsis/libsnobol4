@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Search tier dispatch** reordered for maximum specificity: BREAK/SPAN → literal-only → literal-prefix → single-char bitmap → alt-literals trie → automaton → general VM with bitmap fallback.
+- **Search tier dispatch** reordered for maximum specificity: BREAK/SPAN → literal-only → literal-prefix → single-char bitmap → alt-literals trie → search-VM → automaton → general VM with bitmap fallback.
 - **PHP binding** (`bindings/php/src/`): Removed all JIT blocks from `php_snobol.c`, `snobol_pattern.c`, `php_snobol.h`. `config.m4` JIT defines removed. `build-snobol-extension` `deps/` copy made conditional.
 - **`bench_shared.h`**: Added `_POSIX_C_SOURCE` + `<time.h>` for Linux clock_gettime compat; `_DARWIN_C_SOURCE` for macOS snprintf.
 - **`generate_amalgam.sh`**: JIT sources removed from amalgamation.
