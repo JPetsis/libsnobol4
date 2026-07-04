@@ -162,6 +162,7 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
     }
     return NULL;
   }
+  memset(pat, 0, sizeof(snobol_pattern_t));
   pat->bc = bc;
   pat->bc_len = bc_len;
   pat->case_insensitive = case_insensitive;
@@ -234,6 +235,49 @@ void snobol_pattern_free(snobol_pattern_t *pattern) {
  * ---------------------------------------------------------------------------
  */
 
+snobol_literal_match_t snobol_pattern_match_literal(
+    snobol_pattern_t *pattern, const char *subject, size_t len) {
+  snobol_literal_match_t result = {false, 0, 0};
+  if (!pattern || !subject)
+    return result;
+
+  /* Derive meta on first use if not already initialized */
+  if (!pattern->meta_initialized) {
+    snobol_search_derive_meta(pattern->bc, pattern->bc_len, &pattern->meta);
+    pattern->meta_initialized = true;
+  }
+  if (!pattern->meta.is_literal_only)
+    return result;
+
+  /* Extract the literal from bytecode: skip leading zero-width ops */
+  const uint8_t *bc = pattern->bc;
+  size_t bc_len = pattern->bc_len;
+  size_t ip = 0;
+  while (ip < bc_len) {
+    uint8_t op = bc[ip];
+    if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR) { ip++; continue; }
+    if ((op == OP_POS || op == OP_RPOS) && ip + 5 <= bc_len) { ip += 5; continue; }
+    break;
+  }
+  if (ip + 9 > bc_len || bc[ip] != OP_LIT)
+    return result;
+
+  uint32_t lit_off = ((uint32_t)bc[ip + 1] << 24) | ((uint32_t)bc[ip + 2] << 16) |
+                     ((uint32_t)bc[ip + 3] << 8) | (uint32_t)bc[ip + 4];
+  uint32_t lit_len = ((uint32_t)bc[ip + 5] << 24) | ((uint32_t)bc[ip + 6] << 16) |
+                     ((uint32_t)bc[ip + 7] << 8) | (uint32_t)bc[ip + 8];
+  if (lit_off > bc_len || lit_off + lit_len > bc_len || lit_len == 0)
+    return result;
+
+  const char *lit = (const char *)(bc + lit_off);
+  if (len >= lit_len && memcmp(subject, lit, lit_len) == 0) {
+    result.success = true;
+    result.position = 0;
+    result.length = lit_len;
+  }
+  return result;
+}
+
 snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
                                      const char *subject, size_t len) {
   if (!pattern || !subject)
@@ -249,37 +293,23 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
   snobol_buf_init(&out_buf);
 
   /* ---- Literal-only fast path: bypass VM entirely ---- */
-  if (pattern->meta_initialized && pattern->meta.is_literal_only) {
-    const uint8_t *bc = pattern->bc;
-    size_t bc_len = pattern->bc_len;
-    size_t ip = 0;
-    /* Skip leading zero-width ops */
-    while (ip < bc_len) {
-      uint8_t op = bc[ip];
-      if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR) { ip++; continue; }
-      if ((op == OP_POS || op == OP_RPOS) && ip + 5 <= bc_len) { ip += 5; continue; }
-      break;
+  {
+    snobol_literal_match_t lr =
+        snobol_pattern_match_literal(pattern, subject, len);
+    if (lr.success) {
+      m->success = true;
+      m->position = lr.position;
+      m->length = lr.length;
+      m->var_count = 0;
+      snobol_buf_free(&out_buf);
+      return m;
     }
-    if (ip + 9 <= bc_len && bc[ip] == OP_LIT) {
-      uint32_t lit_off = ((uint32_t)bc[ip + 1] << 24) | ((uint32_t)bc[ip + 2] << 16) |
-                         ((uint32_t)bc[ip + 3] << 8) | (uint32_t)bc[ip + 4];
-      uint32_t lit_len = ((uint32_t)bc[ip + 5] << 24) | ((uint32_t)bc[ip + 6] << 16) |
-                         ((uint32_t)bc[ip + 7] << 8) | (uint32_t)bc[ip + 8];
-      if (lit_off <= bc_len && lit_off + lit_len <= bc_len && lit_len > 0) {
-        const char *lit = (const char *)(bc + lit_off);
-        if (len >= lit_len && memcmp(subject, lit, lit_len) == 0) {
-          m->success = true;
-          m->position = 0;
-          m->length = lit_len;
-          m->var_count = 0;
-          snobol_buf_free(&out_buf);
-          return m;
-        }
-      }
+    if (pattern && pattern->meta_initialized && pattern->meta.is_literal_only) {
+      /* Literal-only but non-matching — skip VM entirely */
+      m->success = false;
+      snobol_buf_free(&out_buf);
+      return m;
     }
-    m->success = false;
-    snobol_buf_free(&out_buf);
-    return m;
   }
 
   /* Initialise VM */

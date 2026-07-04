@@ -234,6 +234,37 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
                                      const char *subject, size_t len);
 
 /**
+ * @brief Lightweight result from snobol_pattern_match_literal().
+ *
+ * Zero heap allocations — returned by value.  Only valid for patterns
+ * whose bytecode is a single anchored literal (e.g. "'abc'").
+ */
+typedef struct snobol_literal_match {
+  bool success;      /**< Whether the literal matched at position 0. */
+  size_t position;   /**< Match start position (always 0 on success). */
+  size_t length;     /**< Byte length of the matched literal. */
+} snobol_literal_match_t;
+
+/**
+ * @brief Lightweight anchored literal match for literal-only patterns.
+ *
+ * If the compiled pattern's bytecode is a single anchored literal (e.g.
+ * @c "'abc'"), this function performs a @c memcmp at position 0 with
+ * zero heap allocations.  No VM setup, emit buffer, or capture tracking
+ * is performed — the result is returned by value.
+ *
+ * For non-literal patterns or when the subject does not start with the
+ * pattern literal, @c success is set to @c false.
+ *
+ * @param[in] pattern Compiled pattern to execute.
+ * @param[in] subject Subject string (UTF-8).
+ * @param[in] len     Byte length of @p subject.
+ * @return Lightweight result struct (zero heap allocations).
+ */
+snobol_literal_match_t snobol_pattern_match_literal(
+    snobol_pattern_t *pattern, const char *subject, size_t len);
+
+/**
  * @brief Execute a compiled pattern in search (un-anchored) mode.
  *
  * Uses the search tier dispatch (memchr/memmem/bitmap fast paths) before
