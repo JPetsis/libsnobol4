@@ -33,8 +33,35 @@
 /** Maximum single-char alternation bytes tracked. */
 #define SNOBOL_SEARCH_MAX_ALT 32
 
+/* ---------------------------------------------------------------------------
+ * Automaton (DFA) types
+ *
+ * Constructed from search-VM-eligible bytecode via powerset construction.
+ * Enables O(n) single-pass matching over the subject.
+ * ---------------------------------------------------------------------------
+ */
+
+/** Sentinel: no transition / DEAD state. */
+#define SNOBOL_DFA_DEAD UINT16_MAX
+
+/** Maximum DFA states before we give up and fall back to the search-VM. */
+#define SNOBOL_DFA_MAX_STATES 4096
+
+/**
+ * Compiled DFA for a single pattern.
+ *
+ * Transition table layout:  trans[state * 256 + byte] = next_state.
+ * The DEAD state (SNOBOL_DFA_DEAD) means no valid continuation.
+ */
 typedef struct {
-  /* Literal prefix acceleration ----------------------------------------- */
+  uint16_t *trans;        /**< Flattened 256 × num_states transition table */
+  uint32_t num_states;    /**< Number of DFA states (excluding DEAD) */
+  uint8_t *accepting;     /**< Bitmap: byte (num_states+7)/8, bit i set => state i is accepting */
+  uint16_t start_state;   /**< Start DFA state index */
+  uint32_t state_cap;     /**< Allocated capacity in states */
+} snobol_dfa_t;
+
+typedef struct {
   bool has_literal_prefix;
   uint8_t literal_prefix[SNOBOL_SEARCH_MAX_PREFIX];
   size_t literal_prefix_len;
@@ -233,5 +260,29 @@ SNOBOL_NODISCARD bool snobol_search_exec(VM *vm, const char *subject,
                                          size_t subject_len,
                                          size_t start_offset,
                                          const snobol_search_meta_t *meta,
+                                         const snobol_dfa_t *dfa,
                                          snobol_search_result_t *out_result,
                                          snobol_search_diag_t *diag);
+
+/**
+ * Build a DFA from search-VM-eligible bytecode via powerset construction.
+ * Returns NULL on allocation failure or state explosion (>4096 states).
+ * The caller owns the returned DFA (free with snobol_dfa_free()).
+ */
+snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len, const VM *vm);
+
+/* Forward declaration — complete type in snobol/snobol.h */
+struct snobol_pattern;
+
+/**
+ * Free a DFA allocated by build_dfa().
+ * Called from snobol_pattern_free() in api.c.
+ */
+void snobol_dfa_free(snobol_dfa_t *dfa);
+
+/**
+ * Check whether a pattern has a usable DFA automaton.
+ * Returns true when the DFA is constructed and its state count is under the
+ * SNOBOL_DFA_MAX_STATES cap (i.e. construction did not abort).
+ */
+bool snobol_pattern_automaton_available(const struct snobol_pattern *pattern);

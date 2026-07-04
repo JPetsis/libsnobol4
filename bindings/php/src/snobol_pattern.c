@@ -497,7 +497,8 @@ PHP_METHOD(Snobol_Pattern, subst) {
 
         snobol_search_result_t match_result;
         bool found = snobol_search_exec(&vm, subject_val, subject_len,
-                                         search_offset, &meta, &match_result, NULL);
+                                         search_offset, &meta, NULL,
+                                         &match_result, NULL);
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
         if (vm.dyn_cache) dynamic_pattern_cache_destroy(vm.dyn_cache);
@@ -638,7 +639,8 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
 
         snobol_search_result_t match;
         bool found = snobol_search_exec(&vm, subject_val, subject_len,
-                                         search_offset, &meta, &match, NULL);
+                                         search_offset, &meta, NULL,
+                                         &match, NULL);
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
         if (vm.dyn_pending_source) { efree(vm.dyn_pending_source); vm.dyn_pending_source = NULL; }

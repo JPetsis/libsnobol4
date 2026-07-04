@@ -138,7 +138,7 @@ static int run_search(const uint8_t *bc, size_t bc_len, const char *subject,
 
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, subject, strlen(subject), start_offset,
-                               &meta, &result, NULL);
+                               &meta, NULL, &result, NULL);
   return ok ? (int)result.match_start : -1;
 }
 
@@ -155,7 +155,7 @@ static int run_search_end(const uint8_t *bc, size_t bc_len, const char *subject,
 
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, subject, strlen(subject), start_offset,
-                               &meta, &result, NULL);
+                               &meta, NULL, &result, NULL);
   return ok ? (int)result.match_end : -1;
 }
 
@@ -382,7 +382,7 @@ static void test_search_diagnostics(void) {
   snobol_search_result_t result;
   snobol_search_diag_t diag;
 
-  bool ok = snobol_search_exec(&vm, "abcz", 4, 0, &meta, &result, &diag);
+  bool ok = snobol_search_exec(&vm, "abcz", 4, 0, &meta, NULL, &result, &diag);
   test_assert(ok, "diagnostics: 'z' found in 'abcz'");
   test_assert(result.match_start == 3, "diagnostics: match_start == 3");
   test_assert(diag.candidates_tested > 0, "diagnostics: candidates_tested > 0");
@@ -469,7 +469,7 @@ static void test_automaton_search_semantics(void) {
   vm.bc_len = bc_len;
 
   snobol_search_result_t result;
-  bool ok = snobol_search_exec(&vm, "xybz", 4, 0, &auto_meta, &result, NULL);
+  bool ok = snobol_search_exec(&vm, "xybz", 4, 0, &auto_meta, NULL, &result, NULL);
   test_assert(ok, "automaton search finds 'b' in 'xybz'");
   test_assert(result.match_start == 2, "automaton match_start == 2");
 }
@@ -513,19 +513,19 @@ static void test_alt_literals_search_simple(void) {
   bool ok;
 
   /* Match 'abc' */
-  ok = snobol_search_exec(&vm, "xxabcxx", 7, 0, &meta, &result, NULL);
+  ok = snobol_search_exec(&vm, "xxabcxx", 7, 0, &meta, NULL, &result, NULL);
   test_assert(ok, "alt-literals: 'abc' found in 'xxabcxx'");
   test_assert(result.match_start == 2, "alt-literals: match_start == 2");
   test_assert(result.match_end == 5, "alt-literals: match_end == 5");
 
   /* Match 'def' */
-  ok = snobol_search_exec(&vm, "xxdefxx", 7, 0, &meta, &result, NULL);
+  ok = snobol_search_exec(&vm, "xxdefxx", 7, 0, &meta, NULL, &result, NULL);
   test_assert(ok, "alt-literals: 'def' found in 'xxdefxx'");
   test_assert(result.match_start == 2, "alt-literals: 'def' match_start == 2");
   test_assert(result.match_end == 5, "alt-literals: 'def' match_end == 5");
 
   /* No match */
-  ok = snobol_search_exec(&vm, "xxxxxxx", 7, 0, &meta, &result, NULL);
+  ok = snobol_search_exec(&vm, "xxxxxxx", 7, 0, &meta, NULL, &result, NULL);
   test_assert(!ok, "alt-literals: no match for 'xxxxxxx'");
 }
 
@@ -591,27 +591,27 @@ static void test_alt_literals_tier3a_path(void) {
   bool ok;
 
   /* Match 'cat' at various positions */
-  ok = snobol_search_exec(&vm, "--cat--", 7, 0, &m, &result, NULL);
+  ok = snobol_search_exec(&vm, "--cat--", 7, 0, &m, NULL, &result, NULL);
   test_assert(ok, "alt-literals Tier3a: 'cat' found in '--cat--'");
   test_assert(result.match_start == 2, "alt-literals Tier3a: match_start == 2");
   test_assert(result.match_end == 5, "alt-literals Tier3a: match_end == 5");
 
   /* Match 'dog' */
-  ok = snobol_search_exec(&vm, "xxdogxx", 7, 0, &m, &result, NULL);
+  ok = snobol_search_exec(&vm, "xxdogxx", 7, 0, &m, NULL, &result, NULL);
   test_assert(ok, "alt-literals Tier3a: 'dog' found in 'xxdogxx'");
   test_assert(result.match_start == 2, "alt-literals Tier3a: 'dog' match_start == 2");
 
   /* No match */
-  ok = snobol_search_exec(&vm, "xxxxxxx", 7, 0, &m, &result, NULL);
+  ok = snobol_search_exec(&vm, "xxxxxxx", 7, 0, &m, NULL, &result, NULL);
   test_assert(!ok, "alt-literals Tier3a: no match for 'xxxxxxx'");
 
   /* Match at start */
-  ok = snobol_search_exec(&vm, "cat...", 6, 0, &m, &result, NULL);
+  ok = snobol_search_exec(&vm, "cat...", 6, 0, &m, NULL, &result, NULL);
   test_assert(ok, "alt-literals Tier3a: 'cat' at start");
   test_assert(result.match_start == 0, "alt-literals Tier3a: match_start == 0");
 
   /* Match at end */
-  ok = snobol_search_exec(&vm, "...dog", 6, 0, &m, &result, NULL);
+  ok = snobol_search_exec(&vm, "...dog", 6, 0, &m, NULL, &result, NULL);
   test_assert(ok, "alt-literals Tier3a: 'dog' at end");
   test_assert(result.match_start == 3, "alt-literals Tier3a: 'dog' at pos 3");
 }
@@ -778,7 +778,7 @@ static void test_search_vm_correctness(void) {
     vm.bc_len = n;
     snobol_search_result_t r;
     snobol_search_diag_t d;
-    bool ok = snobol_search_exec(&vm, "xxhelloxx", 9, 0, &m, &r, &d);
+    bool ok = snobol_search_exec(&vm, "xxhelloxx", 9, 0, &m, NULL, &r, &d);
     test_assert(ok, "search-vm: LIT+ACCEPT found 'hello'");
     test_assert(r.match_start == 2, "search-vm: match_start == 2");
     test_assert(d.search_vm_tests == 0,
@@ -805,7 +805,7 @@ static void test_search_vm_correctness(void) {
     vm.bc_len = n;
     snobol_search_result_t r;
     snobol_search_diag_t d;
-    bool ok = snobol_search_exec(&vm, "abcdef", 6, 0, &m, &r, &d);
+    bool ok = snobol_search_exec(&vm, "abcdef", 6, 0, &m, NULL, &r, &d);
     test_assert(ok, "search-vm: LEN(3) matches");
     test_assert(r.match_start == 0, "search-vm: LEN(3) match_start == 0");
     test_assert(d.search_vm_tests > 0,
@@ -843,7 +843,7 @@ static void test_search_vm_correctness(void) {
 
     snobol_search_result_t r;
     snobol_search_diag_t d;
-    bool ok = snobol_search_exec(&vm, "abc5xyz", 7, 0, &m, &r, &d);
+    bool ok = snobol_search_exec(&vm, "abc5xyz", 7, 0, &m, NULL, &r, &d);
     test_assert(ok, "search-vm: ANY matches digit at offset 3");
     test_assert(r.match_start == 3, "search-vm: ANY match_start == 3");
     test_assert(d.search_vm_tests == 0,
@@ -882,7 +882,7 @@ static void test_search_vm_correctness(void) {
 
     snobol_search_result_t r;
     snobol_search_diag_t d;
-    bool ok = snobol_search_exec(&vm, "1abc", 4, 0, &m, &r, &d);
+    bool ok = snobol_search_exec(&vm, "1abc", 4, 0, &m, NULL, &r, &d);
     test_assert(ok, "search-vm: NOTANY matches non-alpha at offset 0");
     test_assert(d.search_vm_tests > 0,
                 "search-vm: NOTANY routed through Tier 7");
@@ -918,7 +918,7 @@ static void test_search_vm_correctness(void) {
     vm.bc_len = n;
     snobol_search_result_t r;
     snobol_search_diag_t d;
-    bool ok = snobol_search_exec(&vm, "--cats", 6, 0, &m, &r, &d);
+    bool ok = snobol_search_exec(&vm, "--cats", 6, 0, &m, NULL, &r, &d);
     test_assert(ok, "search-vm: LIT+LIT matches 'cats'");
     test_assert(d.search_vm_tests == 0,
                 "search-vm: LIT+LIT routed through Tier 3, not Tier 7");
@@ -943,13 +943,13 @@ static void test_literal_only_path(void) {
   vm.bc_len = n;
 
   snobol_search_result_t r;
-  bool ok = snobol_search_exec(&vm, "xxhello", 7, 0, &m, &r, NULL);
+  bool ok = snobol_search_exec(&vm, "xxhello", 7, 0, &m, NULL, &r, NULL);
   test_assert(ok, "literal-only path: 'hello' found in 'xxhello'");
   test_assert(r.match_start == 2, "literal-only path: match_start == 2");
   test_assert(r.match_end == 7, "literal-only path: match_end == 7");
 
   /* no-match */
-  ok = snobol_search_exec(&vm, "xxworld", 7, 0, &m, &r, NULL);
+  ok = snobol_search_exec(&vm, "xxworld", 7, 0, &m, NULL, &r, NULL);
   test_assert(!ok, "literal-only path: no match for 'world'");
 
   /* anchored via snobol_pattern_match */
@@ -986,7 +986,7 @@ static void test_dispatch_order(void) {
   test_assert(m.is_literal_only, "dispatch: literal-only meta set");
   vm.bc = bc;
   vm.bc_len = n;
-  bool ok = snobol_search_exec(&vm, "xxhello", 7, 0, &m, &r, &d);
+  bool ok = snobol_search_exec(&vm, "xxhello", 7, 0, &m, NULL, &r, &d);
   test_assert(ok, "dispatch: literal-only match");
   test_assert(d.last_skip_reason == SNOBOL_SEARCH_SKIP_LITERAL,
               "dispatch: Tier 2 literal-only path used");
@@ -1012,7 +1012,7 @@ static void test_dispatch_order(void) {
     test_assert(!m.is_literal_only, "dispatch: NOT literal-only");
     vm.bc = bc;
     vm.bc_len = n;
-    ok = snobol_search_exec(&vm, "--cats", 6, 0, &m, &r, &d);
+    ok = snobol_search_exec(&vm, "--cats", 6, 0, &m, NULL, &r, &d);
     test_assert(ok, "dispatch: literal prefix match");
     test_assert(d.last_skip_reason == SNOBOL_SEARCH_SKIP_LITERAL,
                 "dispatch: Tier 3 literal prefix path used");

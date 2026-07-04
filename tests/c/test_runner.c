@@ -297,6 +297,7 @@ void test_pattern_case_suite(void);
 void test_api_version_suite(void);
 void test_api_match_suite(void);
 void test_property_based_suite(void);
+void test_search_automaton_suite(void);
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
@@ -356,6 +357,7 @@ int main(void) {
   RUN_SUITE("Search Runtime", test_search_runtime_suite);
   RUN_SUITE("Fusion: SPLIT/ANY", test_fusion_suite);
   RUN_SUITE("Compact Choice Stack", test_compact_choice_suite);
+  RUN_SUITE("Search: Automaton", test_search_automaton_suite);
   /* Unicode / API */
   RUN_SUITE("Unicode Fold Table", test_unicode_fold_suite);
   RUN_SUITE("Pattern: Case-Insensitive", test_pattern_case_suite);

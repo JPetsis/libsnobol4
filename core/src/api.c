@@ -49,6 +49,9 @@ struct snobol_pattern {
    * for get_ranges_ptr().  Built once at compile time. */
   snobol_range_meta_t *range_meta;
   size_t range_meta_count;
+  /* Cached DFA automaton (Tier 7). Constructed lazily on first
+   * eligible search; freed in snobol_pattern_free(). */
+  snobol_dfa_t *automaton;
 };
 
 /* Maximum named variables returned from a match */
@@ -194,12 +197,35 @@ size_t snobol_pattern_get_bc_len(const snobol_pattern_t *pattern) {
   return pattern ? pattern->bc_len : 0;
 }
 
+/* ---- Internal accessors (used by search.c) ---- */
+
+snobol_dfa_t *snobol_pattern_get_automaton(const snobol_pattern_t *pattern) {
+  return pattern ? pattern->automaton : NULL;
+}
+
+void snobol_pattern_set_automaton(snobol_pattern_t *pattern,
+                                   snobol_dfa_t *dfa) {
+  if (pattern) pattern->automaton = dfa;
+}
+
+const snobol_search_meta_t *snobol_pattern_get_meta(
+    const snobol_pattern_t *pattern) {
+  return pattern ? &pattern->meta : NULL;
+}
+
+bool snobol_pattern_automaton_available(const snobol_pattern_t *pattern) {
+  return pattern && pattern->automaton &&
+         pattern->automaton->num_states < SNOBOL_DFA_MAX_STATES;
+}
+
 void snobol_pattern_free(snobol_pattern_t *pattern) {
   if (!pattern)
     return;
   compiler_free(pattern->bc);
   if (pattern->range_meta)
     snobol_free(pattern->range_meta);
+  if (pattern->automaton)
+    snobol_dfa_free(pattern->automaton);
   snobol_free(pattern);
 }
 
@@ -337,8 +363,16 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
     snobol_search_derive_meta(pattern->bc, pattern->bc_len, &meta);
   }
 
+  /* Build and cache DFA for eligible patterns */
+  snobol_dfa_t *dfa = NULL;
+  if (meta.automaton_eligible) {
+    dfa = build_dfa(pattern->bc, pattern->bc_len, &vm);
+    if (dfa) snobol_pattern_set_automaton(pattern, dfa);
+  }
+
   snobol_search_result_t sr;
-  bool ok = snobol_search_exec(&vm, subject, len, 0, &meta, &sr, NULL);
+  bool ok = snobol_search_exec(&vm, subject, len, 0, &meta, dfa,
+                               &sr, NULL);
   m->success = ok;
   m->position = sr.match_start;
   m->length = sr.match_end - sr.match_start;
@@ -505,7 +539,7 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
   /* Use the search metadata derived at state creation time. */
   snobol_search_result_t sr;
   bool ok = snobol_search_exec(&state->vm, subject, subject_len, start_offset,
-                               &state->meta, &sr, NULL);
+                               &state->meta, NULL, &sr, NULL);
   state->match.success = ok;
   /* sr.match_start is already an absolute position in the subject
    * (not relative to start_offset). Do NOT add start_offset again. */

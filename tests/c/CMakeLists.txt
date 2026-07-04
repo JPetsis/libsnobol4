@@ -35,6 +35,7 @@ add_executable(snobol4_tests
     test_search_runtime.c
     test_fusion.c
     test_compact_choice.c
+    test_search_automaton.c
     # New: Unicode fold, case-insensitive patterns, API version
     test_unicode_fold.c
     test_pattern_case.c

@@ -15,8 +15,17 @@
  */
 
 #include "snobol/search.h"
+#include "snobol/snobol.h"
 #include "snobol/snobol_internal.h"
 #include "snobol/vm.h"
+
+/* ---- Internal pattern accessors (implemented in api.c) ---- */
+extern snobol_dfa_t *snobol_pattern_get_automaton(
+    const snobol_pattern_t *pattern);
+extern void snobol_pattern_set_automaton(snobol_pattern_t *pattern,
+                                          snobol_dfa_t *dfa);
+extern const snobol_search_meta_t *snobol_pattern_get_meta(
+    const snobol_pattern_t *pattern);
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -684,14 +693,18 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
       ip += 2;
       break;
     case OP_LEN:
-    case OP_RPOS:
-    case OP_RTAB:
-    case OP_POS:
-    case OP_TAB:
       if (ip + 4 > bc_len)
         return false;
       ip += 4;
       break;
+    /* Position-dependent zero-width ops: excluded from DFA because they
+     * require runtime position constraint checking.  The search-VM
+     * handles them correctly. */
+    case OP_POS:
+    case OP_RPOS:
+    case OP_TAB:
+    case OP_RTAB:
+      return false;
     case OP_ANCHOR:
     case OP_CAP_START:
     case OP_CAP_END:
@@ -2158,22 +2171,886 @@ static bool search_automaton_try(VM *vm, const char *subject,
 }
 
 /* ---------------------------------------------------------------------------
- * snobol_search_exec
+ * Automaton (DFA) — NFA-to-DFA construction
  *
+ * We treat the search-VM bytecode as an NFA and apply subset construction.
+ * Each VM offset is an NFA state; epsilon transitions come from JMP, SPLIT,
+ * and zero-width ops.  The DFA is a deterministic state machine with
+ * 256-entry-per-state transition tables indexed by input byte.
+ *
+ * Because we only handle ascii_class_only patterns, every consuming op
+ * operates on single bytes (no UTF-8 multi-byte sequences).
+ * ---------------------------------------------------------------------------
+ */
+
+/* ---- NFA modelling helpers ---- */
+
+/** Maximum NFA states (VM bytecode offsets) we track. */
+#define DFA_NFA_MAX 512
+
+/** A set of NFA states (VM offsets), stored as a sorted u16 array. */
+typedef struct {
+  uint16_t states[DFA_NFA_MAX];
+  uint16_t count;
+} nfa_set_t;
+
+/** Reset a set to empty. */
+static inline void nfa_set_clear(nfa_set_t *s) { s->count = 0; }
+
+/** Insert a value into a sorted set (no-op if already present). */
+static inline void nfa_set_add(nfa_set_t *s, uint16_t v) {
+  uint16_t i = 0;
+  while (i < s->count && s->states[i] < v) i++;
+  if (i < s->count && s->states[i] == v) return;
+  if (s->count >= DFA_NFA_MAX) return;
+  memmove(&s->states[i + 1], &s->states[i],
+          (size_t)(s->count - i) * sizeof(uint16_t));
+  s->states[i] = v;
+  s->count++;
+}
+
+/** Return true if the set contains v. */
+static inline bool nfa_set_contains(const nfa_set_t *s, uint16_t v) {
+  for (uint16_t i = 0; i < s->count; i++)
+    if (s->states[i] == v) return true;
+  return false;
+}
+
+/** Copy a set. */
+static inline void nfa_set_copy(nfa_set_t *dst, const nfa_set_t *src) {
+  dst->count = src->count;
+  memcpy(dst->states, src->states, src->count * sizeof(uint16_t));
+}
+
+/** Compare two sets for equality. */
+static inline bool nfa_set_eq(const nfa_set_t *a, const nfa_set_t *b) {
+  if (a->count != b->count) return false;
+  for (uint16_t i = 0; i < a->count; i++)
+    if (a->states[i] != b->states[i]) return false;
+  return true;
+}
+
+/*
+ * Get the bytecode opcode at the given offset.  Returns OP_NOP for out-of-range.
+ * The offset is treated as an absolute bytecode position.
+ */
+static inline uint8_t dfab_op(const uint8_t *bc, size_t bc_len, uint16_t off) {
+  return (off < bc_len) ? bc[off] : OP_ACCEPT;
+}
+
+/**
+ * Compute epsilon-closure: all NFA states reachable from `start` via
+ * epsilon transitions (JMP, both SPLIT branches, zero-width ops).
+ *
+ * Iterates until a fixed point is reached.
+ */
+static void epsilon_closure(const uint8_t *bc, size_t bc_len, uint16_t start,
+                            nfa_set_t *out) {
+  nfa_set_clear(out);
+  nfa_set_add(out, start);
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (uint16_t si = 0; si < out->count; si++) {
+      uint16_t off = out->states[si];
+      if (off >= bc_len) continue;
+      uint8_t op = bc[off];
+      size_t ip = (size_t)off;
+
+      switch (op) {
+
+      case OP_JMP: {
+        /* JMP target (u32) is an epsilon transition */
+        if (ip + 5 <= bc_len) {
+          uint32_t t = search_read_u32(bc, ip + 1);
+          if (t < bc_len && !nfa_set_contains(out, (uint16_t)t)) {
+            nfa_set_add(out, (uint16_t)t);
+            changed = true;
+          }
+        }
+        break;
+      }
+
+      case OP_SPLIT: {
+        /* Both SPLIT targets are epsilon transitions */
+        if (ip + 9 <= bc_len) {
+          uint32_t a = search_read_u32(bc, ip + 1);
+          uint32_t b = search_read_u32(bc, ip + 5);
+          if (a < bc_len && !nfa_set_contains(out, (uint16_t)a)) {
+            nfa_set_add(out, (uint16_t)a);
+            changed = true;
+          }
+          if (b < bc_len && !nfa_set_contains(out, (uint16_t)b)) {
+            nfa_set_add(out, (uint16_t)b);
+            changed = true;
+          }
+        }
+        break;
+      }
+
+      /* Zero-width ops — epsilon transition to next instruction */
+      case OP_NOP:
+        if (!nfa_set_contains(out, (uint16_t)(off + 1))) {
+          nfa_set_add(out, (uint16_t)(off + 1));
+          changed = true;
+        }
+        break;
+
+      case OP_FENCE:
+        if (!nfa_set_contains(out, (uint16_t)(off + 1))) {
+          nfa_set_add(out, (uint16_t)(off + 1));
+          changed = true;
+        }
+        break;
+
+      case OP_ANCHOR:
+        if (ip + 2 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 2))) {
+          nfa_set_add(out, (uint16_t)(off + 2));
+          changed = true;
+        }
+        break;
+
+      case OP_POS:
+      case OP_RPOS:
+      case OP_TAB:
+      case OP_RTAB:
+        if (ip + 5 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 5))) {
+          nfa_set_add(out, (uint16_t)(off + 5));
+          changed = true;
+        }
+        break;
+
+      case OP_REPEAT_INIT:
+        /* REPEAT_INIT: the skip_target is an epsilon transition to exit
+         * the loop; fall-through to the loop body is also epsilon. */
+        if (ip + 14 <= bc_len) {
+          uint32_t skip = search_read_u32(bc, ip + 9); /* after loop_id, min, max */
+          if (skip < bc_len && !nfa_set_contains(out, (uint16_t)skip)) {
+            nfa_set_add(out, (uint16_t)skip);
+            changed = true;
+          }
+          /* Also fall-through to the next instruction (the loop body) */
+          if (!nfa_set_contains(out, (uint16_t)(off + 14))) {
+            nfa_set_add(out, (uint16_t)(off + 14));
+            changed = true;
+          }
+        }
+        break;
+
+      case OP_BREAK:
+        /* BREAK has an epsilon transition to the next instruction (exit).
+         * This means the DFA can exit BREAK without consuming a delimiter byte. */
+        if (ip + 3 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 3))) {
+          nfa_set_add(out, (uint16_t)(off + 3));
+          changed = true;
+        }
+        break;
+
+      case OP_REPEAT_STEP: {
+        /* REPEAT_STEP: epsilon to jmp_target (next iteration) */
+        if (ip + 6 <= bc_len) {
+          uint32_t jmp_tgt = search_read_u32(bc, ip + 1); /* after loop_id */
+          if (jmp_tgt < bc_len && !nfa_set_contains(out, (uint16_t)jmp_tgt)) {
+            nfa_set_add(out, (uint16_t)jmp_tgt);
+            changed = true;
+          }
+        }
+        break;
+      }
+
+      default:
+        break;
+      }
+    }
+  }
+}
+
+/**
+ * Check if an NFA state (VM offset) contains ACCEPT.
+ */
+static inline bool nfa_is_accept(const uint8_t *bc, size_t bc_len,
+                                  uint16_t off) {
+  return off < bc_len && bc[off] == OP_ACCEPT;
+}
+
+/**
+ * For a consuming op at VM offset `off`, mark the bytes that trigger a
+ * transition in `byte_set` (256-bit bitmap, as 4 uint64_ts).
+ *
+ * Returns true if there is a consuming transition; false for non-consuming ops.
+ * For LEN and other ops that match any byte, all 256 bits are set.
+ */
+static bool get_op_bytes(const uint8_t *bc, size_t bc_len, uint16_t off,
+                         const VM *dfa_vm, uint64_t byte_set[4]) {
+  memset(byte_set, 0, 4 * sizeof(uint64_t));
+
+  if (off >= bc_len) return false;
+  uint8_t op = bc[off];
+  size_t ip = (size_t)off;
+
+  switch (op) {
+
+  case OP_LIT: {
+    /* LIT matches a specific sequence of bytes.  The first byte of the
+     * literal determines the consuming transition from this offset. */
+    if (ip + 9 > bc_len) return false;
+    uint32_t lit_off = search_read_u32(bc, ip + 1);
+    uint32_t lit_len = search_read_u32(bc, ip + 5);
+    if (lit_off >= bc_len || lit_len == 0) return false;
+    uint8_t b = bc[lit_off];
+    if (b < 64)       byte_set[0] |= (1ULL << b);
+    else if (b < 128) byte_set[1] |= (1ULL << (b - 64));
+    else if (b < 192) byte_set[2] |= (1ULL << (b - 128));
+    else              byte_set[3] |= (1ULL << (b - 192));
+    return true;
+  }
+
+  case OP_ANY: {
+    if (ip + 3 > bc_len) return false;
+    uint16_t set_id = search_read_u16(bc, ip + 1);
+    if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
+      return false;
+    const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
+    uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
+    if (!rp || cnt == 0) {
+      memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+      return true;
+    }
+    uint64_t abm[2] = {0, 0};
+    ranges_to_ascii_bitmap(rp, cnt, abm);
+    /* Copy 128-bit ASCII bitmap into 256-bit byte_set */
+    byte_set[0] = abm[0];
+    byte_set[1] = abm[1];
+    return true;
+  }
+
+  case OP_NOTANY: {
+    if (ip + 3 > bc_len) return false;
+    uint16_t set_id = search_read_u16(bc, ip + 1);
+    if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
+      return false;
+    const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
+    uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
+    if (!rp || cnt == 0) {
+      memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+      return true;
+    }
+    uint64_t abm[2] = {0, 0};
+    ranges_to_ascii_bitmap(rp, cnt, abm);
+    /* Invert: NOTANY matches bytes NOT in the class */
+    byte_set[0] = ~abm[0];
+    byte_set[1] = ~abm[1];
+    byte_set[2] = ~0ULL;
+    byte_set[3] = ~0ULL;
+    return true;
+  }
+
+  case OP_SPAN: {
+    /* SPAN first-byte transition: same as ANY */
+    if (ip + 3 > bc_len) return false;
+    uint16_t set_id = search_read_u16(bc, ip + 1);
+    if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
+      return false;
+    const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
+    uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
+    if (!rp || cnt == 0) {
+      memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+      return true;
+    }
+    uint64_t abm[2] = {0, 0};
+    ranges_to_ascii_bitmap(rp, cnt, abm);
+    byte_set[0] = abm[0];
+    byte_set[1] = abm[1];
+    return true;
+  }
+
+  case OP_BREAK: {
+    /* BREAK first-byte transition: bytes NOT in the class (matches the
+     * delimiter, so the transition would be triggered by a delimiter byte).
+     * Actually, BREAK consumes 0+ bytes until a delimiter.  The first
+     * consuming step is: if current byte IS in the class, BREAK matches
+     * 0 bytes (consuming nothing) and control passes to the next op.
+     * If current byte is NOT in the class, BREAK consumes 1 byte.
+     * Wait — BREAK matches 0+ bytes until a delimiter, so it consumes
+     * everything up to the delimiter.  The transition from the BREAK op
+     * itself is: "if not delimiter, consume one byte and stay". */
+    if (ip + 3 > bc_len) return false;
+    uint16_t set_id = search_read_u16(bc, ip + 1);
+    if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
+      return false;
+    const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
+    uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
+    if (!rp || cnt == 0) {
+      memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+      return true;
+    }
+    uint64_t abm[2] = {0, 0};
+    ranges_to_ascii_bitmap(rp, cnt, abm);
+    /* BREAK loop: stay in BREAK while byte is NOT in the delimiter set.
+     * The consuming transition (stay-in-loop) eats bytes outside the set. */
+    byte_set[0] = ~abm[0];
+    byte_set[1] = ~abm[1];
+    byte_set[2] = ~0ULL;
+    byte_set[3] = ~0ULL;
+    return true;
+  }
+
+  case OP_LEN: {
+    /* LEN(n): matches any byte (first byte of N). */
+    memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+    return true;
+  }
+
+  default:
+    return false; /* Not a consuming op */
+  }
+}
+
+/* ---- Byte-class comparison: two byte sets are equivalent iff the set of
+ * bytes that trigger a transition is identical.  We use a simple 256-bit
+ * bitmap comparison. */
+static inline bool byte_set_eq(const uint64_t a[4], const uint64_t b[4]) {
+  return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
+}
+
+/*
+ * Fast epsilon-closure merge: adds all states from the pre-computed
+ * epsilon closure of `off` into `out`.  Uses the table built by
+ * build_dfa so we avoid re-computing the fixed point each time.
+ */
+static inline void ec_merge(const nfa_set_t *eps_closures, uint16_t off,
+                             nfa_set_t *out) {
+  const nfa_set_t *src = &eps_closures[off];
+  for (uint16_t i = 0; i < src->count; i++)
+    nfa_set_add(out, src->states[i]);
+}
+
+/* ---- DFA state hash table for deduplication ---- */
+
+/* Simple modulo hash for a DFA state: hash the nfa_set_t contents. */
+static uint32_t dfa_state_hash(const nfa_set_t *s) {
+  uint32_t h = 0;
+  for (uint16_t i = 0; i < s->count; i++)
+    h = h * 31 + s->states[i];
+  return h;
+}
+
+/* A map from nfa_set_t -> DFA state index, using open addressing. */
+#define DFA_HASH_CAP 8192
+
+typedef struct {
+  nfa_set_t key;
+  uint16_t dfa_state;  /**< DFA state index */
+  bool occupied;
+} dfa_hash_entry_t;
+
+static void dfa_hash_init(dfa_hash_entry_t *ht, size_t cap) {
+  memset(ht, 0, cap * sizeof(dfa_hash_entry_t));
+}
+
+static uint16_t dfa_hash_find_or_insert(dfa_hash_entry_t *ht, size_t cap,
+                                         const nfa_set_t *s,
+                                         uint16_t *next_id) {
+  if (s->count == 0) return SNOBOL_DFA_DEAD;
+  uint32_t h = dfa_state_hash(s);
+  for (size_t i = 0; i < cap; i++) {
+    size_t idx = (size_t)((h + i) % cap);
+    if (!ht[idx].occupied) {
+      /* Insert */
+      nfa_set_copy(&ht[idx].key, s);
+      ht[idx].dfa_state = *next_id;
+      ht[idx].occupied = true;
+      uint16_t id = *next_id;
+      (*next_id)++;
+      return id;
+    }
+    if (nfa_set_eq(&ht[idx].key, s))
+      return ht[idx].dfa_state;
+  }
+  return SNOBOL_DFA_DEAD; /* Table full */
+}
+
+/* ---- Main DFA builder ---- */
+
+/**
+ * Build a DFA from search-VM-eligible bytecode.
+ *
+ * Returns the constructed DFA on success, or NULL on failure (state
+ * explosion, allocation failure, etc.).  The caller owns the DFA and
+ * must free it via snobol_dfa_free().
+ *
+ * @param bc       Bytecode buffer (search-VM-eligible subset)
+ * @param bc_len   Bytecode length
+ * @param dfa_vm   VM with range_meta populated for charclass resolution
+ * @return Allocated DFA, or NULL on failure
+ */
+snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
+                        const VM *dfa_vm) {
+  if (!bc || bc_len == 0) return NULL;
+
+  /* ---- Pre-scan bytecode for multi-byte LIT data positions ---- */
+  /* Build a table mapping each literal data byte offset to its continuation:
+   *   lit_next[pos] = next position after matching byte at pos
+   * For the last byte of a LIT, this is the instruction after the LIT.
+   * For intermediate bytes, it's the next byte of the literal data.
+   * Positions not within literal data stay SNOBOL_DFA_DEAD.
+   */
+  uint16_t *lit_next = (uint16_t *)snobol_calloc(bc_len, sizeof(uint16_t));
+  if (!lit_next) goto fail;
+  for (size_t i = 0; i < bc_len; i++) lit_next[i] = SNOBOL_DFA_DEAD;
+  {
+    size_t ip = 0;
+    while (ip < bc_len) {
+      uint8_t op = bc[ip];
+      size_t next_ip = ip + 1;
+      if (op == OP_LIT && ip + 9 <= bc_len) {
+        uint32_t lo = search_read_u32(bc, ip + 1);
+        uint32_t ll = search_read_u32(bc, ip + 5);
+        next_ip = ip + 9 + ll;
+        if (ll > 1 && lo < bc_len && lo + ll <= bc_len) {
+          for (uint32_t k = 0; k < ll; k++) {
+            uint16_t pos = (uint16_t)(lo + k);
+            if (k == ll - 1) {
+              /* Last byte → next instruction after LIT */
+              lit_next[pos] = (uint16_t)next_ip;
+            } else {
+              lit_next[pos] = (uint16_t)(lo + k + 1);
+            }
+          }
+        }
+      } else if (op == OP_LEN && ip + 5 <= bc_len && search_read_u32(bc, ip + 1) > 1) {
+        /* For LEN(n > 1): we chain through virtual offsets beyond bc_len.
+         * Handled during transition computation using a tracking counter. */
+        next_ip = ip + 5;
+      } else if (op == OP_ACCEPT || op == OP_ABORT || op == OP_SUCCEED) {
+        /* Don't break — later code may be reachable via epsilon edges (SPLIT).
+         * Just advance by 1 (these are 1-byte instructions). */
+      } else if (op == OP_JMP && ip + 5 <= bc_len) {
+        next_ip = search_read_u32(bc, ip + 1);
+      } else if (op == OP_SPLIT && ip + 9 <= bc_len) {
+        /* Don't scan past SPLIT; epsilon closure handles branching */
+        ip++; /* scan byte-by-byte */
+        continue;
+      } else if (op == OP_NOP || op == OP_FENCE) {
+        /* no-op: advance 1 */
+      } else if (op == OP_ANCHOR) {
+        next_ip = ip + 2;
+      } else if (op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB) {
+        next_ip = ip + 5;
+      } else if (op == OP_ANY || op == OP_NOTANY || op == OP_SPAN || op == OP_BREAK) {
+        next_ip = ip + 3;
+      } else if (op == OP_REPEAT_INIT) {
+        next_ip = ip + 14;
+      } else if (op == OP_REPEAT_STEP) {
+        next_ip = ip + 6;
+      } else if (op == OP_CAP_START || op == OP_CAP_END) {
+        next_ip = ip + 2;
+      } else {
+        next_ip = ip + 1;
+      }
+      ip = next_ip > ip ? next_ip : ip + 1;
+    }
+  }
+
+  /* Pre-compute epsilon closure for every VM offset up to bc_len */
+  nfa_set_t *eps_closures = NULL;
+  snobol_dfa_t *dfa = NULL;
+
+  eps_closures = (nfa_set_t *)snobol_calloc(bc_len, sizeof(nfa_set_t));
+  if (!eps_closures) goto fail;
+
+  for (uint16_t off = 0; off < bc_len; off++) {
+    uint8_t op = bc[off];
+    if (op == OP_ACCEPT || op == OP_ABORT || op == OP_SUCCEED) {
+      nfa_set_clear(&eps_closures[off]);
+      nfa_set_add(&eps_closures[off], off);
+    } else {
+      epsilon_closure(bc, bc_len, off, &eps_closures[off]);
+    }
+  }
+
+  /* Allocate DFA */
+  dfa = (snobol_dfa_t *)snobol_calloc(1, sizeof(snobol_dfa_t));
+  if (!dfa) goto fail;
+
+  dfa->state_cap = 64;
+  dfa->trans = (uint16_t *)snobol_calloc(dfa->state_cap * 256, sizeof(uint16_t));
+  if (!dfa->trans) goto fail;
+  dfa->accepting = (uint8_t *)snobol_calloc((dfa->state_cap + 7) / 8, 1);
+  if (!dfa->accepting) goto fail;
+  dfa->num_states = 0;
+  dfa->start_state = SNOBOL_DFA_DEAD;
+
+  /* Hash table for mapping NFA sets -> DFA states.
+   * Must be heap-allocated (≈4.2 MB) to avoid stack overflow. */
+  dfa_hash_entry_t *ht = (dfa_hash_entry_t *)snobol_calloc(DFA_HASH_CAP, sizeof(dfa_hash_entry_t));
+  if (!ht) goto fail;
+  dfa_hash_init(ht, DFA_HASH_CAP);
+
+  uint16_t next_dfa_id = 0;
+
+  /* Start state = epsilon closure of offset 0 */
+  nfa_set_t start_set;
+  epsilon_closure(bc, bc_len, 0, &start_set);
+  if (start_set.count == 0) goto fail;
+
+  dfa->start_state = dfa_hash_find_or_insert(ht, DFA_HASH_CAP, &start_set,
+                                              &next_dfa_id);
+
+  /* BFS queue of DFA states to process */
+  uint16_t *queue = NULL;
+  size_t q_head = 0, q_tail = 0;
+  size_t q_cap = 512;
+  queue = (uint16_t *)snobol_malloc(q_cap * sizeof(uint16_t));
+  if (!queue) goto fail;
+  queue[q_tail++] = dfa->start_state;
+  dfa->num_states = next_dfa_id;
+
+#define DFA_ENSURE(s) do { \
+  if ((s) >= dfa->state_cap) { \
+    uint32_t new_cap = dfa->state_cap * 2; \
+    if (new_cap > SNOBOL_DFA_MAX_STATES) new_cap = SNOBOL_DFA_MAX_STATES; \
+    if ((s) >= new_cap) goto fail; \
+    uint16_t *nt = (uint16_t *)snobol_realloc(dfa->trans, new_cap * 256 * sizeof(uint16_t)); \
+    if (!nt) goto fail; \
+    memset(nt + dfa->state_cap * 256, 0, (new_cap - dfa->state_cap) * 256 * sizeof(uint16_t)); \
+    dfa->trans = nt; \
+    uint8_t *na = (uint8_t *)snobol_realloc(dfa->accepting, (new_cap + 7) / 8); \
+    if (!na) goto fail; \
+    memset(na + (dfa->state_cap + 7) / 8, 0, ((new_cap + 7) / 8) - ((dfa->state_cap + 7) / 8)); \
+    dfa->accepting = na; \
+    dfa->state_cap = new_cap; \
+  } \
+} while(0)
+
+  while (q_head < q_tail && dfa->num_states < SNOBOL_DFA_MAX_STATES) {
+    uint16_t cur_dfa = queue[q_head++];
+    DFA_ENSURE(cur_dfa);
+
+    const nfa_set_t *cur_set = NULL;
+    for (size_t i = 0; i < DFA_HASH_CAP; i++) {
+      if (ht[i].occupied && ht[i].dfa_state == cur_dfa) {
+        cur_set = &ht[i].key;
+        break;
+      }
+    }
+    if (!cur_set) continue;
+
+    bool is_accepting = false;
+    for (uint16_t si = 0; si < cur_set->count && !is_accepting; si++) {
+      if (nfa_is_accept(bc, bc_len, cur_set->states[si]))
+        is_accepting = true;
+    }
+    if (is_accepting) {
+      dfa->accepting[cur_dfa / 8] |= (uint8_t)(1u << (cur_dfa % 8));
+    }
+
+    /* Compute byte-by-byte transitions (union across all NFA states) */
+    for (int b = 0; b < 256; b++) {
+      nfa_set_t next_set;
+      nfa_set_clear(&next_set);
+
+      for (uint16_t si = 0; si < cur_set->count; si++) {
+        uint16_t off = cur_set->states[si];
+        if (off >= bc_len) continue;
+
+        /* LIT data byte positions — handle before opcode switch so data
+         * bytes that happen to match opcode values aren't misinterpreted. */
+        if (lit_next[off] != SNOBOL_DFA_DEAD) {
+          if ((uint8_t)b == bc[off]) {
+            uint16_t cont = lit_next[off];
+            if (cont < bc_len && cont != off &&
+                lit_next[cont] != SNOBOL_DFA_DEAD) {
+              /* cont is another LIT data byte — just add it */
+              nfa_set_add(&next_set, cont);
+            } else {
+              /* cont is a real instruction — merge its epsilon closure */
+              ec_merge(eps_closures, cont, &next_set);
+            }
+          }
+          continue;
+        }
+
+        uint8_t op = bc[off];
+
+        switch (op) {
+
+        /* ---- LIT ---- */
+        case OP_LIT: {
+          if ((size_t)off + 9 > bc_len) break;
+          uint32_t lit_off = search_read_u32(bc, (size_t)off + 1);
+          uint32_t lit_len = search_read_u32(bc, (size_t)off + 5);
+          if (lit_off >= bc_len || lit_len == 0) break;
+          if (bc[lit_off] != (uint8_t)b) break;
+
+          if (lit_len == 1) {
+            /* Single-byte literal: advance past LIT + data + 1 */
+            ec_merge(eps_closures, (uint16_t)(off + 9 + 1), &next_set);
+          } else {
+            /* Multi-byte literal: transition to second byte */
+            uint16_t second_byte = (uint16_t)(lit_off + 1);
+            if (second_byte < bc_len && lit_next[second_byte] != SNOBOL_DFA_DEAD)
+              nfa_set_add(&next_set, second_byte);
+          }
+          break;
+        }
+
+        /* ---- SPAN ---- */
+        case OP_SPAN: {
+          uint64_t bs[4];
+          if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs)) break;
+          bool in_class = (b < 64)   ? (bs[0] & (1ULL << b)) != 0 :
+                          (b < 128)  ? (bs[1] & (1ULL << (b - 64))) != 0 :
+                          (b < 192)  ? (bs[2] & (1ULL << (b - 128))) != 0 :
+                                       (bs[3] & (1ULL << (b - 192))) != 0;
+          if (!in_class) break;
+          /* On a class byte: both stay in SPAN (loop) and exit to next instruction */
+          ec_merge(eps_closures, off, &next_set);           /* stay in SPAN */
+          ec_merge(eps_closures, (uint16_t)(off + 3), &next_set); /* exit SPAN */
+          break;
+        }
+
+        /* ---- ANY ---- */
+        case OP_ANY: {
+          uint64_t bs[4];
+          if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs)) break;
+          bool in_class = (b < 64)   ? (bs[0] & (1ULL << b)) != 0 :
+                          (b < 128)  ? (bs[1] & (1ULL << (b - 64))) != 0 :
+                          (b < 192)  ? (bs[2] & (1ULL << (b - 128))) != 0 :
+                                       (bs[3] & (1ULL << (b - 192))) != 0;
+          if (!in_class) break;
+          ec_merge(eps_closures, (uint16_t)(off + 3), &next_set);
+          break;
+        }
+
+        /* ---- NOTANY ---- */
+        case OP_NOTANY: {
+          uint64_t bs[4];
+          if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs)) break;
+          bool in_class = (b < 64)   ? (bs[0] & (1ULL << b)) == 0 :
+                          (b < 128)  ? (bs[1] & (1ULL << (b - 64))) == 0 :
+                          (b < 192)  ? (bs[2] & (1ULL << (b - 128))) == 0 :
+                                       (bs[3] & (1ULL << (b - 192))) == 0;
+          if (!in_class) break;
+          ec_merge(eps_closures, (uint16_t)(off + 3), &next_set);
+          break;
+        }
+
+        /* ---- BREAK ---- */
+        case OP_BREAK: {
+          uint64_t bs[4];
+          if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs)) break;
+          /* get_op_bytes for BREAK returns bytes NOT in delimiter set */
+          bool is_delim = (b < 64)   ? (bs[0] & (1ULL << b)) == 0 :
+                          (b < 128)  ? (bs[1] & (1ULL << (b - 64))) == 0 :
+                          (b < 192)  ? (bs[2] & (1ULL << (b - 128))) == 0 :
+                                       (bs[3] & (1ULL << (b - 192))) == 0;
+          if (is_delim) {
+            /* Delimiter: BREAK doesn't consume it. The epsilon exit to off+3
+             * (set in epsilon_closure) and the next instruction handle it. */
+            break;
+          }
+          /* Non-delimiter: stay in BREAK loop */
+          ec_merge(eps_closures, off, &next_set);
+          break;
+        }
+
+        /* ---- LEN ---- */
+        case OP_LEN: {
+          if ((size_t)off + 5 > bc_len) break;
+          uint32_t n = search_read_u32(bc, (size_t)off + 1);
+          if (n <= 1) {
+            ec_merge(eps_closures, (uint16_t)(off + 5), &next_set);
+          } else {
+            /* n > 1: stay at LEN (consume one byte, loop back) */
+            nfa_set_add(&next_set, off);
+          }
+          break;
+        }
+
+        default:
+          break;
+        }
+      }
+
+      /* Commit the transition for byte b */
+      if (next_set.count > 0) {
+        uint16_t target = dfa_hash_find_or_insert(ht, DFA_HASH_CAP, &next_set,
+                                                   &next_dfa_id);
+        if (target == SNOBOL_DFA_DEAD && next_dfa_id >= SNOBOL_DFA_MAX_STATES)
+          goto fail;
+        dfa->trans[(size_t)cur_dfa * 256 + b] = target;
+        if (target != SNOBOL_DFA_DEAD && target >= dfa->num_states) {
+          dfa->num_states = next_dfa_id;
+          if (q_tail >= q_cap) {
+            size_t new_qc = q_cap * 2;
+            if (new_qc > 65536) goto fail;
+            uint16_t *nq = (uint16_t *)snobol_realloc(queue, new_qc * sizeof(uint16_t));
+            if (!nq) goto fail;
+            queue = nq;
+            q_cap = new_qc;
+          }
+          queue[q_tail++] = target;
+        }
+      } else {
+        dfa->trans[(size_t)cur_dfa * 256 + b] = SNOBOL_DFA_DEAD;
+      }
+    }
+  }
+
+  if (dfa->num_states >= SNOBOL_DFA_MAX_STATES)
+    goto fail;
+
+  snobol_free(lit_next);
+  snobol_free(eps_closures);
+  snobol_free(queue);
+  snobol_free(ht);
+
+  dfa->trans = (uint16_t *)snobol_realloc(dfa->trans,
+                    dfa->num_states * 256 * sizeof(uint16_t));
+  dfa->accepting = (uint8_t *)snobol_realloc(dfa->accepting,
+                      (dfa->num_states + 7) / 8);
+  dfa->state_cap = dfa->num_states;
+
+  return dfa;
+
+fail:
+  if (lit_next) snobol_free(lit_next);
+  if (eps_closures) snobol_free(eps_closures);
+  if (queue) snobol_free(queue);
+  snobol_free(ht);
+  if (dfa) {
+    if (dfa->trans) snobol_free(dfa->trans);
+    if (dfa->accepting) snobol_free(dfa->accepting);
+    snobol_free(dfa);
+  }
+  return NULL;
+}
+
+/* ---- DFA execution engine ---- */
+
+/**
+ * Execute the automaton over the subject from `offset`, returning
+ * the first match.
+ *
+ * The DFA walks the subject in a single linear scan:
+ *   state = start_state
+ *   for each position p in subject:
+ *     state = trans[state][byte]
+ *     if state == DEAD: restart from start_state at next position
+ *     if accepting: record match
+ *
+ * On success, fills out_result with match start/end.
+ */
+static bool search_automaton_exec(const snobol_dfa_t *dfa,
+                                  const char *subject, size_t subject_len,
+                                  size_t offset,
+                                  snobol_search_result_t *out_result) {
+  if (!dfa || dfa->num_states == 0) {
+    out_result->success = false;
+    return false;
+  }
+
+  const uint16_t *trans = dfa->trans;
+  uint16_t num_states = dfa->num_states;
+  uint16_t start_state = dfa->start_state;
+  const uint8_t *accepting = dfa->accepting;
+
+  size_t pos = offset;
+
+  while (pos <= subject_len) {
+    uint16_t state = start_state;
+    size_t match_start = pos;
+    size_t start_pos = pos;
+
+    while (pos < subject_len) {
+      uint8_t byte = (uint8_t)subject[pos];
+      uint16_t next = trans[(size_t)state * 256 + byte];
+
+      if (next == SNOBOL_DFA_DEAD) {
+        /* DEAD: restart at next subject position */
+        pos = start_pos + 1;
+        state = start_state;
+        goto next_position;
+      }
+
+      state = next;
+
+      /* Check if accepting */
+      if (accepting[state / 8] & (uint8_t)(1u << (state % 8))) {
+        /* Match found: position tracking.
+         * If the automaton tracked the match start, we'd return it.
+         * For the DFA, the match starts at match_start (the position
+         * where we entered the start state) and ends at pos + 1
+         * (current position after consuming this byte). */
+        out_result->success = true;
+        out_result->match_start = match_start;
+        out_result->match_end = pos + 1;
+
+        /* Handle empty match (accepting at start position) */
+        if (pos + 1 == start_pos) {
+          out_result->match_end = pos + 1;
+        }
+
+        return true;
+      }
+
+      pos++;
+    }
+
+    /* Reached end of subject without accepting */
+    out_result->success = false;
+    return false;
+
+  next_position:
+    continue;
+  }
+
+  out_result->success = false;
+  return false;
+}
+
+/** Free a DFA allocated by build_dfa(). */
+void snobol_dfa_free(snobol_dfa_t *dfa) {
+  if (!dfa) return;
+  if (dfa->trans) snobol_free(dfa->trans);
+  if (dfa->accepting) snobol_free(dfa->accepting);
+  snobol_free(dfa);
+}
+
+/**
+ * Lazy-build or retrieve the automaton for a pattern.
+ * Returns the DFA pointer if available, NULL if not.
+ */
+static snobol_dfa_t *get_or_build_automaton(snobol_pattern_t *pattern,
+                                              const VM *dfa_vm) {
+  snobol_dfa_t *cached = snobol_pattern_get_automaton(pattern);
+  if (cached) return cached;
+
+  const snobol_search_meta_t *meta = snobol_pattern_get_meta(pattern);
+  if (!meta || !meta->automaton_eligible) return NULL;
+
+  snobol_dfa_t *dfa = build_dfa(snobol_pattern_get_bc(pattern),
+                                 snobol_pattern_get_bc_len(pattern), dfa_vm);
+  if (dfa)
+    snobol_pattern_set_automaton(pattern, dfa);
+  return dfa;
+}
+/* ---------------------------------------------------------------------------
  * Unified search entrypoint.  Dispatches to the most specific tier available
  * using the pre-derived (or inline-derived) metadata, then falls back to the
  * general VM.
  *
  * Tier routing (highest priority first):
- *   1. BREAK/BREAKX with ASCII bitmap  → break_accelerated
- *   2. SPAN with ASCII bitmap           → span_accelerated
- *   3. Literal-only (no VM)             → literal_only
- *   4. Literal prefix (>=1 byte)        → literal_accelerated
- *   5. Single-char alt (candidate set)  → bitmap_accelerated
- *   6. Alternation-of-literals (trie)   → alt_literals_try
- *   7. Search-VM eligible               → search_vm_exec
- *   8. Automaton-eligible               → automaton path
- *   9. General VM fallback              → vm_exec (start-byte accelerated)
+ *   1. BREAK/BREAKX with ASCII bitmap  -> break_accelerated
+ *   2. SPAN with ASCII bitmap           -> span_accelerated
+ *   3. Literal-only (no VM)             -> literal_only
+ *   4. Literal prefix (>=1 byte)        -> literal_accelerated
+ *   5. Single-char alt (candidate set)  -> bitmap_accelerated
+ *   6. Alternation-of-literals (trie)   -> alt_literals_try
+ *   7. Search-VM eligible               -> search_vm_exec
+ *   8. Automaton-eligible               -> automaton path
+ *   9. General VM fallback              -> vm_exec (start-byte accelerated)
  *
  * Semantics are identical to repeated anchored vm_exec calls in the caller:
  * the first non-overlapping match at or after start_offset is returned.
@@ -2188,12 +3065,13 @@ static bool search_automaton_try(VM *vm, const char *subject,
  * Callers that loop snobol_search_exec() (e.g. snobol_pattern_search_ex,
  * PHP Pattern::searchSplit) MUST initialise the VM struct once (setting
  * vm->bc, vm->bc_len, vm->out) and then call this function
- * repeatedly without re-memset'ing the VM. snobol_pattern_search_ex()
+ * repeatedly without re-memsetting the VM. snobol_pattern_search_ex()
  * in core/src/api.c is the reference implementation.
  * ---------------------------------------------------------------------------
  */
 bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
                         size_t start_offset, const snobol_search_meta_t *meta,
+                        const snobol_dfa_t *dfa,
                         snobol_search_result_t *out_result,
                         snobol_search_diag_t *diag) {
   if (diag)
@@ -2292,30 +3170,41 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
 
   /* ---- Tier 7: Automaton path for eligible patterns (no captures/EVAL/etc.) ---- */
   if (meta->automaton_eligible) {
-    size_t offset = start_offset;
-    while (offset <= subject_len) {
-      if (diag)
-        diag->candidates_tested++;
-      if (diag)
-        diag->automaton_tests++;
-      bool ok =
-          search_automaton_try(vm, subject, subject_len, offset, out_result);
-      if (ok)
-        return true;
-      /* Advance: use BMH skip when available, else +1 */
-      if (offset >= subject_len)
-        break;
-      if (meta->has_bmh_skip &&
-          offset + meta->bmh_skip_len <= subject_len) {
-        size_t adv =
-            meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
-        offset += adv > 0 ? adv : 1;
-      } else {
-        offset++;
+    /* Use caller-supplied DFA if available, otherwise build on the fly */
+    snobol_dfa_t *owned = NULL;
+    if (!dfa) {
+      owned = build_dfa(vm->bc, vm->bc_len, vm);
+      dfa = owned;
+    }
+    if (dfa) {
+      size_t offset = start_offset;
+      while (offset <= subject_len) {
+        if (diag) {
+          diag->candidates_tested++;
+          diag->automaton_tests++;
+        }
+        bool ok =
+            search_automaton_exec(dfa, subject, subject_len, offset, out_result);
+        if (ok) {
+          if (owned) snobol_dfa_free(owned);
+          return true;
+        }
+        if (offset >= subject_len)
+          break;
+        if (meta->has_bmh_skip &&
+            offset + meta->bmh_skip_len <= subject_len) {
+          size_t adv =
+              meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+          offset += adv > 0 ? adv : 1;
+        } else {
+          offset++;
+        }
       }
     }
-    out_result->success = false;
-    return false;
+    /* No DFA available (construction failed or OOM) — fall through to
+     * the general VM fallback below with start-byte acceleration. */
+    if (owned) snobol_dfa_free(owned);
+    /* Fall through to Tier 8 */
   }
 
   /* ---- Tier 8: General VM fallback with start-byte bitmap acceleration ---- */
