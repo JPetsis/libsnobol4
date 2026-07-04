@@ -403,45 +403,85 @@ static void test_state_explosion_cap(void) {
 }
 
 /* ---------------------------------------------------------------------------
- * 5.8  LEN pattern (replaces SPAN in automaton context)
+ * 5.8  REPEAT_INIT/STEP in automaton
  * ---------------------------------------------------------------------------
  */
-static void test_len_in_automaton(void) {
-  test_suite("5.8  LEN in automaton (LIT + LEN + ACCEPT)");
+static void test_repeat_in_automaton(void) {
+  test_suite("5.8  REPEAT_INIT/STEP in automaton");
 
+  /* Build bytecode: REPEAT_INIT(min=0, max=-1) { LIT 'a' } REPEAT_STEP LIT 'b' ACCEPT
+   * This is ARB('a') 'b' — matches zero or more 'a' followed by 'b' */
   uint8_t bc[256];
   size_t ip = 0;
+
+  /* REPEAT_INIT: opcode(1) + loop_id(1) + min(4) + max(4) + skip_target(4) = 14 bytes */
+  size_t init_ip = ip;
+  bc[ip++] = OP_REPEAT_INIT;
+  bc[ip++] = 0;  /* loop_id */
+  emit_u32_be(bc, &ip, 0);        /* min = 0 */
+  emit_u32_be(bc, &ip, (uint32_t)-1);  /* max = -1 (unbounded) */
+  emit_u32_be(bc, &ip, 0);        /* skip_target placeholder */
+
+  /* Body: LIT 'a' */
+  size_t body_ip = ip;
   bc[ip++] = OP_LIT;
-  emit_u32_be(bc, &ip, (uint32_t)(1 + 4 + 4));
-  emit_u32_be(bc, &ip, 1);
+  emit_u32_be(bc, &ip, (uint32_t)(ip + 8));  /* data offset (after len field) */
+  emit_u32_be(bc, &ip, 1);        /* length = 1 */
   bc[ip++] = 'a';
-  bc[ip++] = OP_LEN;
-  emit_u32_be(bc, &ip, 3);
+
+  /* REPEAT_STEP: opcode(1) + loop_id(1) + jmp_target(4) = 6 bytes */
+  bc[ip++] = OP_REPEAT_STEP;
+  bc[ip++] = 0;  /* loop_id */
+  emit_u32_be(bc, &ip, (uint32_t)body_ip);
+
+  /* Skip target: LIT 'b' ACCEPT */
+  size_t skip_ip = ip;
+  bc[ip++] = OP_LIT;
+  emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
+  emit_u32_be(bc, &ip, 1);
+  bc[ip++] = 'b';
   bc[ip++] = OP_ACCEPT;
+
+  /* Patch skip_target in REPEAT_INIT */
+  size_t patch = init_ip + 1 + 1 + 4 + 4;  /* after opcode, loop_id, min, max */
+  bc[patch + 0] = (uint8_t)((skip_ip >> 24) & 0xFF);
+  bc[patch + 1] = (uint8_t)((skip_ip >> 16) & 0xFF);
+  bc[patch + 2] = (uint8_t)((skip_ip >> 8) & 0xFF);
+  bc[patch + 3] = (uint8_t)(skip_ip & 0xFF);
+
   size_t bc_len = ip;
 
   snobol_search_meta_t meta = make_automaton_meta(bc, bc_len);
-  test_assert(meta.automaton_eligible, "LIT+LEN+ACCEPT is automaton-eligible");
+  test_assert(meta.automaton_eligible, "REPEAT pattern is automaton-eligible");
 
   VM vm = make_vm(bc, bc_len);
   snobol_dfa_t *dfa = build_dfa(bc, bc_len, &vm);
-  test_assert(dfa != NULL, "build_dfa succeeded");
+  test_assert(dfa != NULL, "build_dfa succeeded for REPEAT pattern");
   if (!dfa) return;
 
   snobol_search_result_t result;
 
-  bool ok = snobol_search_exec(&vm, "axyz", 4, 0, &meta, dfa, &result, NULL);
-  test_assert(ok, "LIT 'a' then LEN(3) matches 'axyz'");
+  /* Test: "b" matches (zero 'a's followed by 'b') */
+  bool ok = snobol_search_exec(&vm, "b", 1, 0, &meta, dfa, &result, NULL);
+  test_assert(ok, "ARB('a') 'b' matches 'b' (zero repeats)");
+  test_assert(result.match_start == 0, "match_start == 0");
+  test_assert(result.match_end == 1, "match_end == 1");
+
+  /* Test: "ab" matches (one 'a' followed by 'b') */
+  ok = snobol_search_exec(&vm, "ab", 2, 0, &meta, dfa, &result, NULL);
+  test_assert(ok, "ARB('a') 'b' matches 'ab'");
+  test_assert(result.match_start == 0, "match_start == 0");
+  test_assert(result.match_end == 2, "match_end == 2");
+
+  /* Test: "aaab" matches (three 'a's followed by 'b') */
+  ok = snobol_search_exec(&vm, "aaab", 4, 0, &meta, dfa, &result, NULL);
+  test_assert(ok, "ARB('a') 'b' matches 'aaab'");
   test_assert(result.match_start == 0, "match_start == 0");
   test_assert(result.match_end == 4, "match_end == 4");
 
-  ok = snobol_search_exec(&vm, "axyzb", 5, 0, &meta, dfa, &result, NULL);
-  test_assert(ok, "match in longer subject");
-  test_assert(result.match_start == 0, "match_start == 0");
-  test_assert(result.match_end == 4, "match_end == 4");
-
-  ok = snobol_search_exec(&vm, "bxyz", 4, 0, &meta, dfa, &result, NULL);
-  test_assert(!ok, "no match when LEN(3) bytes don't follow 'b' that is l");
+  /* Test: "a" does not match (no 'b') */
+  ok = snobol_search_exec(&vm, "a", 1, 0, &meta, dfa, &result, NULL);
+  test_assert(!ok, "ARB('a') 'b' does not match 'a' (no 'b')");
 
   snobol_dfa_free(dfa);
 }
@@ -510,6 +550,6 @@ void test_search_automaton_suite(void) {
   test_dfa_exec_no_match();
   test_non_eligible_fallback();
   test_state_explosion_cap();
-  test_len_in_automaton();
+  test_repeat_in_automaton();
   test_dfa_lifecycle();
 }
