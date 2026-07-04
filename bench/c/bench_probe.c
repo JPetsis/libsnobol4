@@ -345,6 +345,11 @@ static void run_tokenize(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "' '", 3);
     size_t slen = strlen(SUBJECT_WHITESPACE);
+    
+    /* Create search state for efficient repeated searches */
+    const uint8_t *bc = snobol_pattern_get_bc(pat);
+    size_t bc_len = snobol_pattern_get_bc_len(pat);
+    snobol_pattern_search_state_t *state = snobol_pattern_search_state_create(bc, bc_len);
 
     int64_t total_search_calls = 0;
     int64_t start = bench_ns();
@@ -352,15 +357,13 @@ static void run_tokenize(int64_t iters, probe_result_t *r) {
         /* one full pass of the subject, splitting on ' ' */
         size_t pos = 0;
         while (pos <= slen) {
-            snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_WHITESPACE, slen);
+            snobol_match_t *m = snobol_pattern_search_ex(state, SUBJECT_WHITESPACE, slen, pos);
             total_search_calls++;
             if (!snobol_match_success(m)) {
-                snobol_match_free(m);
                 break;
             }
             /* advance past the match (single space → len 1) */
-            snobol_match_free(m);
-            pos += 1;
+            pos = snobol_match_get_position(m) + snobol_match_get_length(m);
         }
     }
     int64_t end = bench_ns();
@@ -369,6 +372,7 @@ static void run_tokenize(int64_t iters, probe_result_t *r) {
     r->total_ns = end - start;
     r->ns_per_iter = (total_search_calls > 0) ? (r->total_ns / total_search_calls) : 0;
 
+    snobol_pattern_search_state_destroy(state);
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
 }
@@ -402,6 +406,41 @@ static void run_alt_literals_search(int64_t iters, probe_result_t *r) {
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
         snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_ALTLIT, slen);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+/* ---------------------------------------------------------------------------
+ * DFA automaton scenario (Tier 7)
+ * --------------------------------------------------------------------------- */
+
+/* Subject with repeated patterns for automaton testing */
+static const char *SUBJECT_AUTOMATON =
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd";
+
+/* DFA automaton: SPAN('abc') 'd' — matches run of a/b/c followed by 'd'
+ * This exercises the DFA path (Tier 7) which handles character classes
+ * more efficiently than the search-VM fallback (Tier 6). */
+static void run_automaton(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    /* Pattern: SPAN('abc') 'd' — automaton-eligible, exercises DFA path */
+    snobol_pattern_t *pat = compile_or_die(ctx, "SPAN('abc') 'd'", 14);
+    size_t slen = strlen(SUBJECT_AUTOMATON);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_AUTOMATON, slen);
         snobol_match_free(m);
     }
     int64_t end = bench_ns();
@@ -545,7 +584,9 @@ static void run_pcre2_tokenize(int64_t iters, probe_result_t *r) {
                                   pos, 0, md, NULL);
             total_search_calls++;
             if (rc < 0) break;
-            pos += 1;
+            /* Advance past the match */
+            PCRE2_SIZE *ovector = pcre2_get_ovector_pointer(md);
+            pos = ovector[1];  /* end of match */
         }
     }
     int64_t end = bench_ns();
@@ -764,8 +805,8 @@ int main(void) {
     printf("Tokenize uses %" PRId64 " outer iters (multi-pass of subject).\n\n",
            tokenize_iters);
 
-    /* Total scenarios: 9 snobol + 6 PCRE2 (when available) */
-    probe_result_t results[15];
+    /* Total scenarios: 9 snobol + 7 PCRE2 (when available) = 16 */
+    probe_result_t results[16];
     memset(results, 0, sizeof(results));
 
     /* Run each scenario */
@@ -782,6 +823,7 @@ int main(void) {
         { "alt_search",          run_alt_search,          iters            },
         { "alt_literals",        run_alt_literals,        iters            },
         { "alt_literals_search", run_alt_literals_search, iters            },
+        { "automaton",           run_automaton,           iters            },
         { "tokenize",            run_tokenize,            tokenize_iters   },
 #ifdef HAVE_PCRE2
         { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            },
