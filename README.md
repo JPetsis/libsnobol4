@@ -90,6 +90,8 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
    * Code-page model: `mmap` + `mprotect` on Linux, `MAP_JIT` on macOS, `VirtualAlloc`/`VirtualProtect` on Windows.
      DEP-compliant: never uses `PAGE_EXECUTE_READWRITE`.
 * **Modern C Code Quality** (v0.6.0): Core adopts `nullptr`, `SNOBOL_NODISCARD`, `[[maybe_unused]]`, and `constexpr` with MSVC-compatible fallbacks throughout.
+* **DFA Automaton** (v0.12.0): NFA-to-DFA subset construction for automaton-eligible patterns. Tier 7 in search dispatch. Handles LIT, LEN, SPAN, BREAK, ANY, NOTANY with epsilon closure for SPLIT/JMP. State explosion cap at 4096 states.
+* **Literal-Match API** (v0.12.0): `snobol_pattern_match_literal()` for zero-allocation anchored literal matching. Returns lightweight struct by value.
 * **Profiling Support**: Built-in execution profiling for performance analysis
 
 ### Available Bindings
@@ -188,6 +190,32 @@ The function returns a heap-allocated result.  Always check `r->success` (true =
 false = no match) and `r->error` (NULL on success, otherwise an error message string).  Captures
 are 0-indexed; `r->captures[i]` is the value bound to positional capture `i` from the pattern
 (where `i = 0` is the first capture).  Free the result with `snobol_match_result_free()`.
+
+#### Literal-match API (zero-allocation, v0.12.0+)
+
+For patterns that are pure literals (e.g., `'abc'`), use `snobol_pattern_match_literal()` for
+zero-allocation anchored matching. Returns a lightweight struct by value with `success`,
+`position`, and `length` fields. No VM setup, no heap allocations.
+
+```c
+#include <snobol/snobol.h>
+
+int main(void) {
+    snobol_context_t* ctx = snobol_context_create();
+    snobol_pattern_t* pat = snobol_pattern_compile(ctx, "'hello'", 7, NULL);
+    
+    snobol_literal_match_t r = snobol_pattern_match_literal(pat, "hello world", 11);
+    if (r.success) {
+        printf("Matched at position %zu, length %zu\n", r.position, r.length);
+    }
+    
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+    return 0;
+}
+```
+
+For non-literal patterns, `snobol_pattern_match_literal()` returns `{false, 0, 0}` immediately.
 
 #### Multi-step API (fine-grained control)
 
