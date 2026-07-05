@@ -1648,14 +1648,12 @@ svm_anchor:
 #endif
     {
       uint8_t anchor_type = bc[ip++];
-      if (anchor_type == 0) {
-        /* Start anchor: must be at beginning */
-        if (pos != 0)
-          goto svm_fail;
-      } else {
-        /* End anchor: must be at end */
-        if (pos != len)
-          goto svm_fail;
+      bool anchor_ok = (anchor_type == 0) ? (pos == 0) : (pos == len);
+      if (!anchor_ok) {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+        continue;
       }
       continue;
     }
@@ -3152,7 +3150,7 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
       search_reset_vm(vm, subject, subject_len, offset);
       bool ok = search_vm_exec(vm, subject, subject_len, offset, out_result);
       if (ok)
-        return true;
+        goto done;
       if (offset >= subject_len)
         break;
       if (meta->has_bmh_skip &&
@@ -3165,7 +3163,7 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
       }
     }
     out_result->success = false;
-    return false;
+    goto done;
   }
 
   /* ---- Tier 7: Automaton path for eligible patterns (no captures/EVAL/etc.) ---- */
@@ -3227,7 +3225,7 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
     /* Minimum-length filter: if too few remaining bytes, give up */
     if (meta->minlength > 0 && offset + meta->minlength > subject_len) {
       out_result->success = false;
-      return false;
+      goto done;
     }
 
     if (diag)
@@ -3238,7 +3236,7 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
       out_result->success = true;
       out_result->match_start = offset;
       out_result->match_end = offset + vm->pos;
-      return true;
+      goto done;
     }
     if (offset >= subject_len)
       break;
@@ -3253,5 +3251,10 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
   }
 
   out_result->success = false;
-  return false;
+
+done:
+  snobol_free(vm->choices);
+  vm->choices = NULL;
+  vm->choices_cap = 0;
+  return out_result->success;
 }

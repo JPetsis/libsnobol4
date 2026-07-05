@@ -356,6 +356,7 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
 
   snobol_buf_free(&out_buf);
   vm_free_labels(&vm);
+  if (vm.choices) snobol_free(vm.choices);
   return m;
 }
 
@@ -393,11 +394,14 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
     snobol_search_derive_meta(pattern->bc, pattern->bc_len, &meta);
   }
 
-  /* Build and cache DFA for eligible patterns */
+  /* Build and cache DFA for eligible patterns (lazy: reuse cached) */
   snobol_dfa_t *dfa = NULL;
   if (meta.automaton_eligible) {
-    dfa = build_dfa(pattern->bc, pattern->bc_len, &vm);
-    if (dfa) snobol_pattern_set_automaton(pattern, dfa);
+    dfa = snobol_pattern_get_automaton(pattern);
+    if (!dfa) {
+      dfa = build_dfa(pattern->bc, pattern->bc_len, &vm);
+      if (dfa) snobol_pattern_set_automaton(pattern, dfa);
+    }
   }
 
   snobol_search_result_t sr;
@@ -436,6 +440,7 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
 
   snobol_buf_free(&out_buf);
   vm_free_labels(&vm);
+  if (vm.choices) snobol_free(vm.choices);
   return m;
 }
 
@@ -504,6 +509,8 @@ void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
     snobol_buf_free(&state->out_buf);
   }
   vm_free_labels(&state->vm);
+  if (state->vm.choices)
+    snobol_free(state->vm.choices);
   if (state->range_meta)
     snobol_free(state->range_meta);
   if (state->match.output) {
