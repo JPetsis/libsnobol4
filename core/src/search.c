@@ -1740,12 +1740,19 @@ svm_len:
     {
       uint32_t n = read_u32(bc, bc_len, &ip);
       size_t p = pos;
-      for (uint32_t i = 0; i < n; i++) {
+      uint32_t i;
+      for (i = 0; i < n; i++) {
         uint32_t cp;
         int bytes;
         if (!utf8_peek_next(s, len, p, &cp, &bytes))
-          goto svm_fail;
+          break;
         p += bytes;
+      }
+      if (i < n) {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+        continue;
       }
       pos = p;
       continue;
@@ -1786,8 +1793,12 @@ svm_any:
         /* Advance by 1 byte (ASCII) or multi-byte (UTF-8) */
         uint32_t cp;
         int bytes;
-        if (!utf8_peek_next(s, len, pos, &cp, &bytes))
-          goto svm_fail;
+        if (!utf8_peek_next(s, len, pos, &cp, &bytes)) {
+          if (!vm_pop_choice(vm))
+            goto svm_fail_ret;
+          ip = vm->ip;
+          continue;
+        }
         pos += bytes;
       } else {
         if (!vm_pop_choice(vm))
@@ -1829,8 +1840,12 @@ svm_notany:
       if (!in_class && pos < len) {
         uint32_t cp;
         int bytes;
-        if (!utf8_peek_next(s, len, pos, &cp, &bytes))
-          goto svm_fail;
+        if (!utf8_peek_next(s, len, pos, &cp, &bytes)) {
+          if (!vm_pop_choice(vm))
+            goto svm_fail_ret;
+          ip = vm->ip;
+          continue;
+        }
         pos += bytes;
       } else {
         if (!vm_pop_choice(vm))
@@ -1942,8 +1957,12 @@ svm_pos:
 #endif
     {
       uint32_t n = read_u32(bc, bc_len, &ip);
-      if (pos != (size_t)n)
-        goto svm_fail;
+      if (pos != (size_t)n) {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+        continue;
+      }
       continue;
     }
 
@@ -1967,8 +1986,12 @@ svm_rpos:
         p += bytes;
         remaining++;
       }
-      if (remaining != n)
-        goto svm_fail;
+      if (remaining != n) {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+        continue;
+      }
       continue;
     }
 
@@ -1983,15 +2006,20 @@ svm_tab:
       uint32_t n = read_u32(bc, bc_len, &ip);
       /* Count codepoints from start to n, advance pos to that byte */
       size_t p = 0;
-      for (uint32_t i = 0; i < n; i++) {
+      uint32_t i;
+      for (i = 0; i < n; i++) {
         uint32_t cp;
         int bytes;
         if (!utf8_peek_next(s, len, p, &cp, &bytes))
-          goto svm_fail;
+          break;
         p += bytes;
       }
-      if (p > len)
-        goto svm_fail;
+      if (i < n || p > len) {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+        continue;
+      }
       pos = p;
       continue;
     }
@@ -2016,17 +2044,28 @@ svm_rtab:
         p += bytes;
         total_cp++;
       }
-      if (n > total_cp)
-        goto svm_fail;
+      if (n > total_cp) {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+        continue;
+      }
       /* Advance to (total_cp - n)th codepoint */
       uint32_t target = total_cp - n;
       p = 0;
-      for (uint32_t i = 0; i < target; i++) {
+      uint32_t i;
+      for (i = 0; i < target; i++) {
         uint32_t cp;
         int bytes;
         if (!utf8_peek_next(s, len, p, &cp, &bytes))
-          goto svm_fail;
+          break;
         p += bytes;
+      }
+      if (i < target) {
+        if (!vm_pop_choice(vm))
+          goto svm_fail_ret;
+        ip = vm->ip;
+        continue;
       }
       pos = p;
       continue;
@@ -2099,8 +2138,12 @@ svm_repeat_step:
         uint32_t max = vm->loop_max[loop_id];
         /* If last_pos didn't advance we're in an infinite loop */
         size_t lp = vm->loop_last_pos[loop_id];
-        if (pos == lp)
-          goto svm_fail;
+        if (pos == lp) {
+          if (!vm_pop_choice(vm))
+            goto svm_fail_ret;
+          ip = vm->ip;
+          continue;
+        }
         vm->loop_last_pos[loop_id] = pos;
         if (c >= max) {
           /* Done: fall through */
