@@ -42,6 +42,7 @@ add_executable(snobol4_tests
     test_api_version.c
     test_api_match.c
     test_api_literal_match.c
+    test_reusable_match.c
     test_compiler.c
     test_property_based.c
 )

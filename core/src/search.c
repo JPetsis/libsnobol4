@@ -1012,13 +1012,16 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
 
       /* Compute BMH skip table for the literal prefix */
       if (prefix_len >= 2) {
-        memset(out->bmh_skip, (int)prefix_len, sizeof(out->bmh_skip));
-        for (size_t i = 0; i < prefix_len - 1; i++) {
-          uint8_t b = bc[lit_off + i];
-          out->bmh_skip[b] = (uint8_t)(prefix_len - 1 - i);
+        out->bmh_skip = (uint8_t *)snobol_malloc(256);
+        if (out->bmh_skip) {
+          memset(out->bmh_skip, (int)prefix_len, 256);
+          for (size_t i = 0; i < prefix_len - 1; i++) {
+            uint8_t b = bc[lit_off + i];
+            out->bmh_skip[b] = (uint8_t)(prefix_len - 1 - i);
+          }
+          out->has_bmh_skip = true;
+          out->bmh_skip_len = prefix_len;
         }
-        out->has_bmh_skip = true;
-        out->bmh_skip_len = prefix_len;
       }
     }
   }
@@ -1205,6 +1208,63 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     out->has_start_bitmap = true;
   }
   out->minlength = compute_minlength(bc, bc_len, 0, 0);
+
+  /* ---- Pack boolean flags into flags bitfield ---- */
+  out->flags = 0;
+  if (out->has_literal_prefix)    out->flags |= META_HAS_LITERAL_PREFIX;
+  if (out->has_first_byte)        out->flags |= META_HAS_FIRST_BYTE;
+  if (out->has_candidate_bitmap)  out->flags |= META_HAS_CANDIDATE_BITMAP;
+  if (out->may_match_empty)       out->flags |= META_MAY_MATCH_EMPTY;
+  if (out->always_consumes)       out->flags |= META_ALWAYS_CONSUMES;
+  if (out->is_single_char_alt)    out->flags |= META_IS_SINGLE_CHAR_ALT;
+  if (out->is_break_family)       out->flags |= META_IS_BREAK_FAMILY;
+  if (out->is_span_family)        out->flags |= META_IS_SPAN_FAMILY;
+  if (out->is_breakx)             out->flags |= META_IS_BREAKX;
+  if (out->ascii_class_only)      out->flags |= META_ASCII_CLASS_ONLY;
+  if (out->has_start_bitmap)      out->flags |= META_HAS_START_BITMAP;
+  if (out->automaton_eligible)    out->flags |= META_AUTOMATON_ELIGIBLE;
+  if (out->is_alt_literals)       out->flags |= META_IS_ALT_LITERALS;
+  if (out->has_bmh_skip)          out->flags |= META_HAS_BMH_SKIP;
+  if (out->is_literal_only)       out->flags |= META_IS_LITERAL_ONLY;
+  if (out->search_vm_eligible)    out->flags |= META_SEARCH_VM_ELIGIBLE;
+
+  /* ---- Compute tier index from flags ---- */
+  if (out->is_break_family && out->ascii_class_only)
+    out->tier = TIER_BREAK_SCAN;
+  else if (out->is_span_family && out->ascii_class_only)
+    out->tier = TIER_SPAN_SCAN;
+  else if (out->is_literal_only)
+    out->tier = TIER_LITERAL;
+  else if (out->has_literal_prefix && out->literal_prefix_len > 0)
+    out->tier = TIER_PREFIX;
+  else if (out->has_candidate_bitmap && out->is_single_char_alt)
+    out->tier = TIER_BITMAP;
+  else if (out->is_alt_literals)
+    out->tier = TIER_ALT_LIT;
+  else if (out->search_vm_eligible)
+    out->tier = TIER_SEARCH_VM;
+  else if (out->automaton_eligible)
+    out->tier = TIER_AUTOMATON;
+  else
+    out->tier = TIER_GENERAL;
+
+  /* ---- Allocate BMH table separately (heap) ---- */
+  if (out->has_bmh_skip && out->bmh_skip_len > 0) {
+    out->bmh_skip = (uint8_t *)snobol_malloc(256);
+    if (out->bmh_skip) {
+      memset(out->bmh_skip, (int)out->bmh_skip_len, 256);
+      /* Repopulate from literal prefix if available */
+      if (out->has_literal_prefix) {
+        size_t plen = out->literal_prefix_len < SNOBOL_SEARCH_MAX_PREFIX
+                          ? out->literal_prefix_len
+                          : SNOBOL_SEARCH_MAX_PREFIX;
+        for (size_t i = 0; i < plen - 1; i++) {
+          uint8_t b = out->literal_prefix[i];
+          out->bmh_skip[b] = (uint8_t)(plen - 1 - i);
+        }
+      }
+    }
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -1537,7 +1597,96 @@ fallback:
  * On success, vm->pos holds the match length (match_end - match_start).
  * ---------------------------------------------------------------------------
  */
-static bool search_vm_exec(VM *vm, const char *subject, size_t subject_len,
+
+/* ---------------------------------------------------------------------------
+ * Simplified choice stack for search_vm_t (Tier 6 search-VM)
+ *
+ * The search-VM never tracks captures, variables, or loop counters.
+ * These simplified push/pop functions only save/restore ip and pos,
+ * avoiding the overhead of the full vm_push_choice/vm_pop_choice.
+ * ---------------------------------------------------------------------------
+ */
+typedef struct {
+  size_t ip;
+  size_t pos;
+} search_choice_t;
+
+static inline bool search_vm_push_choice(search_vm_t *vm, size_t ip, size_t pos) {
+  if (!vm->choices)
+    return false;
+  if (vm->choices_top + sizeof(search_choice_t) >= vm->choices_cap) {
+    size_t new_cap = vm->choices_cap ? vm->choices_cap * 2 : 256;
+    void *new_choices = snobol_realloc(vm->choices, new_cap);
+    if (!new_choices)
+      return false;
+    vm->choices = new_choices;
+    vm->choices_cap = new_cap;
+  }
+  search_choice_t *c = (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top);
+  c->ip = ip;
+  c->pos = pos;
+  vm->choices_top += sizeof(search_choice_t);
+  return true;
+}
+
+static inline bool search_vm_pop_choice(search_vm_t *vm) {
+  if (!vm->choices || vm->choices_top == 0)
+    return false;
+  vm->choices_top -= sizeof(search_choice_t);
+  if (vm->choices_top > 0) {
+    search_choice_t *c = (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top - sizeof(search_choice_t));
+    vm->ip = c->ip;
+    vm->pos = c->pos;
+  } else {
+    vm->ip = 0;
+    vm->pos = 0;
+  }
+  return true;
+}
+
+/* ---------------------------------------------------------------------------
+ * Initialize a search_vm_t from a full VM struct.
+ * Copies only the fields needed by the search-VM (Tier 6).
+ * ---------------------------------------------------------------------------
+ */
+static inline void search_vm_init_from_vm(search_vm_t *svm, const VM *vm) {
+  svm->bc = vm->bc;
+  svm->bc_len = vm->bc_len;
+  svm->s = vm->s;
+  svm->len = vm->len;
+  svm->ip = vm->ip;
+  svm->pos = vm->pos;
+  svm->range_meta = vm->range_meta;
+  svm->range_meta_count = vm->range_meta_count;
+  svm->choices = vm->choices;
+  svm->choices_cap = vm->choices_cap;
+  svm->choices_top = vm->choices_top;
+  svm->use_compact_choice = vm->use_compact_choice;
+  memcpy(svm->counters, vm->counters, sizeof(svm->counters));
+  memcpy(svm->loop_min, vm->loop_min, sizeof(svm->loop_min));
+  memcpy(svm->loop_max, vm->loop_max, sizeof(svm->loop_max));
+  memcpy(svm->loop_last_pos, vm->loop_last_pos, sizeof(svm->loop_last_pos));
+  svm->max_counter_used = vm->max_counter_used;
+}
+
+/* ---------------------------------------------------------------------------
+ * Write back search_vm_t state to full VM struct.
+ * Copies only the fields that may have changed during search-VM execution.
+ * ---------------------------------------------------------------------------
+ */
+static inline void search_vm_writeback_to_vm(const search_vm_t *svm, VM *vm) {
+  vm->ip = svm->ip;
+  vm->pos = svm->pos;
+  vm->choices = svm->choices;
+  vm->choices_cap = svm->choices_cap;
+  vm->choices_top = svm->choices_top;
+  vm->use_compact_choice = svm->use_compact_choice;
+  memcpy(vm->counters, svm->counters, sizeof(svm->counters));
+  memcpy(vm->loop_last_pos, svm->loop_last_pos, sizeof(vm->loop_last_pos));
+  vm->max_counter_used = svm->max_counter_used;
+}
+
+static bool search_vm_exec(search_vm_t *vm, const char *subject, size_t subject_len,
                            size_t offset, snobol_search_result_t *out_result) {
   (void)subject;
   (void)subject_len;
@@ -1609,7 +1758,7 @@ static bool search_vm_exec(VM *vm, const char *subject, size_t subject_len,
 
   while (1) {
     if (ip >= bc_len) {
-      if (!vm_pop_choice(vm))
+      if (!search_vm_pop_choice(vm))
         goto svm_fail_ret;
       ip = vm->ip;
       continue;
@@ -1650,7 +1799,7 @@ svm_anchor:
       uint8_t anchor_type = bc[ip++];
       bool anchor_ok = (anchor_type == 0) ? (pos == 0) : (pos == len);
       if (!anchor_ok) {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
         continue;
@@ -1700,7 +1849,7 @@ svm_fail:
     case OP_FAIL:
 #endif
     {
-      bool had = vm_pop_choice(vm);
+      bool had = search_vm_pop_choice(vm);
       if (!had)
         goto svm_fail_ret;
       ip = vm->ip;
@@ -1723,7 +1872,7 @@ svm_lit:
           memcmp(s + pos, bc + lit_off, lit_len) == 0) {
         pos += lit_len;
       } else {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
       }
@@ -1749,7 +1898,7 @@ svm_len:
         p += bytes;
       }
       if (i < n) {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
         continue;
@@ -1794,14 +1943,14 @@ svm_any:
         uint32_t cp;
         int bytes;
         if (!utf8_peek_next(s, len, pos, &cp, &bytes)) {
-          if (!vm_pop_choice(vm))
+          if (!search_vm_pop_choice(vm))
             goto svm_fail_ret;
           ip = vm->ip;
           continue;
         }
         pos += bytes;
       } else {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
       }
@@ -1841,14 +1990,14 @@ svm_notany:
         uint32_t cp;
         int bytes;
         if (!utf8_peek_next(s, len, pos, &cp, &bytes)) {
-          if (!vm_pop_choice(vm))
+          if (!search_vm_pop_choice(vm))
             goto svm_fail_ret;
           ip = vm->ip;
           continue;
         }
         pos += bytes;
       } else {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
       }
@@ -1898,7 +2047,7 @@ svm_span:
       }
       if (pos == start) {
         /* SPAN requires at least 1 char */
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
       }
@@ -1958,7 +2107,7 @@ svm_pos:
     {
       uint32_t n = read_u32(bc, bc_len, &ip);
       if (pos != (size_t)n) {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
         continue;
@@ -1987,7 +2136,7 @@ svm_rpos:
         remaining++;
       }
       if (remaining != n) {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
         continue;
@@ -2015,7 +2164,7 @@ svm_tab:
         p += bytes;
       }
       if (i < n || p > len) {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
         continue;
@@ -2045,7 +2194,7 @@ svm_rtab:
         total_cp++;
       }
       if (n > total_cp) {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
         continue;
@@ -2062,7 +2211,7 @@ svm_rtab:
         p += bytes;
       }
       if (i < target) {
-        if (!vm_pop_choice(vm))
+        if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
         ip = vm->ip;
         continue;
@@ -2094,7 +2243,7 @@ svm_split:
     {
       uint32_t a = read_u32(bc, bc_len, &ip);
       uint32_t b = read_u32(bc, bc_len, &ip);
-      vm_push_choice(vm, (size_t)b, pos);
+      search_vm_push_choice(vm, (size_t)b, pos);
       ip = (size_t)a;
       continue;
     }
@@ -2118,7 +2267,7 @@ svm_repeat_init:
         vm->loop_last_pos[loop_id] = pos;
       }
       /* Push choice to skip the loop body entirely (for 0 iterations) */
-      vm_push_choice(vm, (size_t)skip_target, pos);
+      search_vm_push_choice(vm, (size_t)skip_target, pos);
       continue;
     }
 
@@ -2139,7 +2288,7 @@ svm_repeat_step:
         /* If last_pos didn't advance we're in an infinite loop */
         size_t lp = vm->loop_last_pos[loop_id];
         if (pos == lp) {
-          if (!vm_pop_choice(vm))
+          if (!search_vm_pop_choice(vm))
             goto svm_fail_ret;
           ip = vm->ip;
           continue;
@@ -2155,7 +2304,7 @@ svm_repeat_step:
              * the skip_target of REPEAT_INIT. We push a choice
              * to jump to jmp_target to repeat, with fallthrough
              * being the exit path (implicit choice already there). */
-            vm_push_choice(vm, (size_t)jmp_target, pos);
+            search_vm_push_choice(vm, (size_t)jmp_target, pos);
           }
           /* Continue to loop body (already there via jmp_target
            * or fallthrough for first iteration) */
@@ -3110,6 +3259,242 @@ static snobol_dfa_t *get_or_build_automaton(snobol_pattern_t *pattern,
  * in core/src/api.c is the reference implementation.
  * ---------------------------------------------------------------------------
  */
+
+/* ---------------------------------------------------------------------------
+ * Tier handler function pointer type and wrappers
+ *
+ * All tier handlers share a uniform signature matching snobol_search_exec().
+ * The tier_table[] array maps tier index to handler for single-dispatch
+ * routing, replacing the 8 sequential if-branches.
+ * ---------------------------------------------------------------------------
+ */
+typedef bool (*tier_fn)(VM *vm, const char *subject, size_t subject_len,
+                        size_t start_offset, const snobol_search_meta_t *meta,
+                        const snobol_dfa_t *dfa,
+                        snobol_search_result_t *out_result,
+                        snobol_search_diag_t *diag);
+
+/* Tier 0: BREAK/BREAKX with ASCII bitmap scan */
+static bool tier_break_scan(VM *vm, const char *subject, size_t subject_len,
+                            size_t start_offset, const snobol_search_meta_t *meta,
+                            const snobol_dfa_t *dfa,
+                            snobol_search_result_t *out_result,
+                            snobol_search_diag_t *diag) {
+  (void)dfa;
+  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BREAK_SCAN;
+  return search_break_accelerated(vm, subject, subject_len, start_offset,
+                                  meta, out_result, diag);
+}
+
+/* Tier 1: SPAN with ASCII bitmap scan */
+static bool tier_span_scan(VM *vm, const char *subject, size_t subject_len,
+                           size_t start_offset, const snobol_search_meta_t *meta,
+                           const snobol_dfa_t *dfa,
+                           snobol_search_result_t *out_result,
+                           snobol_search_diag_t *diag) {
+  (void)dfa;
+  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_SPAN_SCAN;
+  return search_span_accelerated(vm, subject, subject_len, start_offset,
+                                 meta, out_result, diag);
+}
+
+/* Tier 2: Literal-only fast path (no VM needed) */
+static bool tier_literal_only(VM *vm, const char *subject, size_t subject_len,
+                              size_t start_offset, const snobol_search_meta_t *meta,
+                              const snobol_dfa_t *dfa,
+                              snobol_search_result_t *out_result,
+                              snobol_search_diag_t *diag) {
+  (void)dfa;
+  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_LITERAL;
+  return search_literal_only(vm, subject, subject_len, start_offset,
+                             meta, out_result, diag);
+}
+
+/* Tier 3: Literal prefix (memmem / memchr) */
+static bool tier_literal_prefix(VM *vm, const char *subject, size_t subject_len,
+                                size_t start_offset, const snobol_search_meta_t *meta,
+                                const snobol_dfa_t *dfa,
+                                snobol_search_result_t *out_result,
+                                snobol_search_diag_t *diag) {
+  (void)dfa;
+  if (diag) {
+    diag->last_skip_reason = (meta->literal_prefix_len == 1)
+                                 ? SNOBOL_SEARCH_SKIP_FIRST_BYTE
+                                 : SNOBOL_SEARCH_SKIP_LITERAL;
+  }
+  return search_literal_accelerated(vm, subject, subject_len, start_offset,
+                                    meta, out_result, diag);
+}
+
+/* Tier 4: Candidate-set bitmap for single-char alternation */
+static bool tier_bitmap(VM *vm, const char *subject, size_t subject_len,
+                        size_t start_offset, const snobol_search_meta_t *meta,
+                        const snobol_dfa_t *dfa,
+                        snobol_search_result_t *out_result,
+                        snobol_search_diag_t *diag) {
+  (void)dfa;
+  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BITMAP;
+  return search_bitmap_accelerated(vm, subject, subject_len, start_offset,
+                                   meta, out_result, diag);
+}
+
+/* Tier 5: Alternation-of-literals (trie-based) */
+static bool tier_alt_literals(VM *vm, const char *subject, size_t subject_len,
+                              size_t start_offset, const snobol_search_meta_t *meta,
+                              const snobol_dfa_t *dfa,
+                              snobol_search_result_t *out_result,
+                              snobol_search_diag_t *diag) {
+  (void)meta; (void)dfa;
+  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_NONE;
+  return search_alt_literals_try(vm, subject, subject_len, start_offset, out_result);
+}
+
+/* Tier 6: Search-VM for eligible patterns */
+static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
+                           size_t start_offset, const snobol_search_meta_t *meta,
+                           const snobol_dfa_t *dfa,
+                           snobol_search_result_t *out_result,
+                           snobol_search_diag_t *diag) {
+  (void)dfa;
+  size_t offset = start_offset;
+  while (offset <= subject_len) {
+    if (diag) {
+      diag->candidates_tested++;
+      diag->search_vm_tests++;
+    }
+    search_reset_vm(vm, subject, subject_len, offset);
+    search_vm_t svm;
+    search_vm_init_from_vm(&svm, vm);
+    svm.choices_top = 0;
+    bool ok = search_vm_exec(&svm, subject, subject_len, offset, out_result);
+    search_vm_writeback_to_vm(&svm, vm);
+    if (ok)
+      return true;
+    if (offset >= subject_len)
+      break;
+    if (meta->has_bmh_skip &&
+        offset + meta->bmh_skip_len <= subject_len) {
+      size_t adv =
+          meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+      offset += adv > 0 ? adv : 1;
+    } else {
+      offset++;
+    }
+  }
+  out_result->success = false;
+  return false;
+}
+
+/* Tier 8: General VM fallback with start-byte bitmap acceleration */
+static bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
+                                  size_t start_offset, const snobol_search_meta_t *meta,
+                                  const snobol_dfa_t *dfa,
+                                  snobol_search_result_t *out_result,
+                                  snobol_search_diag_t *diag) {
+  (void)dfa;
+  size_t offset = start_offset;
+
+  while (offset <= subject_len) {
+    /* Start-byte bitmap filter: skip subject bytes that can never start
+     * the pattern.  On average this eliminates 255/256 ≈ 99.6% of
+     * candidate positions for constrained patterns. */
+    if (meta->has_start_bitmap && offset < subject_len) {
+      uint8_t b = (uint8_t)subject[offset];
+      if (!(meta->start_bitmap[b >> 3] & (uint8_t)(1u << (b & 7)))) {
+        if (diag)
+          diag->candidates_skipped++;
+        offset++;
+        continue;
+      }
+    }
+
+    /* Minimum-length filter: if too few remaining bytes, give up */
+    if (meta->minlength > 0 && offset + meta->minlength > subject_len) {
+      out_result->success = false;
+      return false;
+    }
+
+    if (diag)
+      diag->candidates_tested++;
+    search_reset_vm(vm, subject, subject_len, offset);
+    bool ok = vm_exec(vm);
+    if (ok) {
+      out_result->success = true;
+      out_result->match_start = offset;
+      out_result->match_end = offset + vm->pos;
+      return true;
+    }
+    if (offset >= subject_len)
+      break;
+    if (meta->has_bmh_skip &&
+        offset + meta->bmh_skip_len <= subject_len) {
+      size_t adv =
+          meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+      offset += adv > 0 ? adv : 1;
+    } else {
+      offset++;
+    }
+  }
+
+  out_result->success = false;
+  return false;
+}
+
+/* Tier 7: Automaton path for eligible patterns */
+static bool tier_automaton(VM *vm, const char *subject, size_t subject_len,
+                           size_t start_offset, const snobol_search_meta_t *meta,
+                           const snobol_dfa_t *dfa,
+                           snobol_search_result_t *out_result,
+                           snobol_search_diag_t *diag) {
+  snobol_dfa_t *owned = NULL;
+  if (!dfa) {
+    owned = build_dfa(vm->bc, vm->bc_len, vm);
+    dfa = owned;
+  }
+  if (dfa) {
+    size_t offset = start_offset;
+    while (offset <= subject_len) {
+      if (diag) {
+        diag->candidates_tested++;
+        diag->automaton_tests++;
+      }
+      bool ok =
+          search_automaton_exec(dfa, subject, subject_len, offset, out_result);
+      if (ok) {
+        if (owned) snobol_dfa_free(owned);
+        return true;
+      }
+      if (offset >= subject_len)
+        break;
+      if (meta->has_bmh_skip &&
+          offset + meta->bmh_skip_len <= subject_len) {
+        size_t adv =
+            meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+        offset += adv > 0 ? adv : 1;
+      } else {
+        offset++;
+      }
+    }
+  }
+  if (owned) snobol_dfa_free(owned);
+  /* Fall through to general VM */
+  return tier_general_fallback(vm, subject, subject_len, start_offset,
+                               meta, NULL, out_result, diag);
+}
+
+/** Tier dispatch table: index by meta->tier */
+static const tier_fn tier_table[TIER_COUNT] = {
+  [TIER_BREAK_SCAN] = tier_break_scan,
+  [TIER_SPAN_SCAN]  = tier_span_scan,
+  [TIER_LITERAL]    = tier_literal_only,
+  [TIER_PREFIX]     = tier_literal_prefix,
+  [TIER_BITMAP]     = tier_bitmap,
+  [TIER_ALT_LIT]    = tier_alt_literals,
+  [TIER_SEARCH_VM]  = tier_search_vm,
+  [TIER_AUTOMATON]  = tier_automaton,
+  [TIER_GENERAL]    = tier_general_fallback,
+};
+
 bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
                         size_t start_offset, const snobol_search_meta_t *meta,
                         const snobol_dfa_t *dfa,
@@ -3131,173 +3516,14 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
     meta = &local_meta;
   }
 
-/* ---- Tier 1a: BREAK / BREAKX with ASCII bitmap ---- */
-  if (meta->is_break_family && meta->ascii_class_only) {
-    if (diag)
-      diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BREAK_SCAN;
-    return search_break_accelerated(vm, subject, subject_len, start_offset,
-                                    meta, out_result, diag);
+  /* If caller provided a DFA, force automaton tier regardless of meta->tier.
+   * This preserves the caller's intent: passing a DFA means "use it". */
+  if (dfa && meta->automaton_eligible) {
+    return tier_table[TIER_AUTOMATON](vm, subject, subject_len, start_offset,
+                                      meta, dfa, out_result, diag);
   }
 
-  /* ---- Tier 1b: SPAN with ASCII bitmap ---- */
-  if (meta->is_span_family && meta->ascii_class_only) {
-    if (diag)
-      diag->last_skip_reason = SNOBOL_SEARCH_SKIP_SPAN_SCAN;
-    return search_span_accelerated(vm, subject, subject_len, start_offset, meta,
-                                   out_result, diag);
-  }
-
-  /* ---- Tier 2: Literal-only fast path (no VM needed) ---- */
-  if (meta->is_literal_only) {
-    if (diag)
-      diag->last_skip_reason = SNOBOL_SEARCH_SKIP_LITERAL;
-    return search_literal_only(vm, subject, subject_len, start_offset, meta,
-                               out_result, diag);
-  }
-
-  /* ---- Tier 3: Literal prefix (memmem / memchr) ---- */
-  if (meta->has_literal_prefix && meta->literal_prefix_len > 0) {
-    if (diag) {
-      diag->last_skip_reason = (meta->literal_prefix_len == 1)
-                                   ? SNOBOL_SEARCH_SKIP_FIRST_BYTE
-                                   : SNOBOL_SEARCH_SKIP_LITERAL;
-    }
-    return search_literal_accelerated(vm, subject, subject_len, start_offset,
-                                      meta, out_result, diag);
-  }
-
-  /* ---- Tier 4: Candidate-set bitmap for single-char alternation ---- */
-  if (meta->has_candidate_bitmap && meta->is_single_char_alt) {
-    if (diag)
-      diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BITMAP;
-    return search_bitmap_accelerated(vm, subject, subject_len, start_offset,
-                                     meta, out_result, diag);
-  }
-
-  /* ---- Tier 5: Alternation-of-literals (trie-based) ---- */
-  if (meta->is_alt_literals) {
-    if (diag)
-      diag->last_skip_reason = SNOBOL_SEARCH_SKIP_NONE;
-    return search_alt_literals_try(vm, subject, subject_len, start_offset,
-                                    out_result);
-  }
-
-  /* ---- Tier 6: Search-VM for eligible patterns ---- */
-  if (meta->search_vm_eligible) {
-    size_t offset = start_offset;
-    while (offset <= subject_len) {
-      if (diag) {
-        diag->candidates_tested++;
-        diag->search_vm_tests++;
-      }
-      search_reset_vm(vm, subject, subject_len, offset);
-      bool ok = search_vm_exec(vm, subject, subject_len, offset, out_result);
-      if (ok)
-        goto done;
-      if (offset >= subject_len)
-        break;
-      if (meta->has_bmh_skip &&
-          offset + meta->bmh_skip_len <= subject_len) {
-        size_t adv =
-            meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
-        offset += adv > 0 ? adv : 1;
-      } else {
-        offset++;
-      }
-    }
-    out_result->success = false;
-    goto done;
-  }
-
-  /* ---- Tier 7: Automaton path for eligible patterns (no captures/EVAL/etc.) ---- */
-  if (meta->automaton_eligible) {
-    /* Use caller-supplied DFA if available, otherwise build on the fly */
-    snobol_dfa_t *owned = NULL;
-    if (!dfa) {
-      owned = build_dfa(vm->bc, vm->bc_len, vm);
-      dfa = owned;
-    }
-    if (dfa) {
-      size_t offset = start_offset;
-      while (offset <= subject_len) {
-        if (diag) {
-          diag->candidates_tested++;
-          diag->automaton_tests++;
-        }
-        bool ok =
-            search_automaton_exec(dfa, subject, subject_len, offset, out_result);
-        if (ok) {
-          if (owned) snobol_dfa_free(owned);
-          return true;
-        }
-        if (offset >= subject_len)
-          break;
-        if (meta->has_bmh_skip &&
-            offset + meta->bmh_skip_len <= subject_len) {
-          size_t adv =
-              meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
-          offset += adv > 0 ? adv : 1;
-        } else {
-          offset++;
-        }
-      }
-    }
-    /* No DFA available (construction failed or OOM) — fall through to
-     * the general VM fallback below with start-byte acceleration. */
-    if (owned) snobol_dfa_free(owned);
-    /* Fall through to Tier 8 */
-  }
-
-  /* ---- Tier 8: General VM fallback with start-byte bitmap acceleration ---- */
-  size_t offset = start_offset;
-
-  while (offset <= subject_len) {
-    /* Start-byte bitmap filter: skip subject bytes that can never start
-     * the pattern.  On average this eliminates 255/256 ≈ 99.6% of
-     * candidate positions for constrained patterns. */
-    if (meta->has_start_bitmap && offset < subject_len) {
-      uint8_t b = (uint8_t)subject[offset];
-      if (!(meta->start_bitmap[b >> 3] & (uint8_t)(1u << (b & 7)))) {
-        if (diag)
-          diag->candidates_skipped++;
-        offset++;
-        continue;
-      }
-    }
-
-    /* Minimum-length filter: if too few remaining bytes, give up */
-    if (meta->minlength > 0 && offset + meta->minlength > subject_len) {
-      out_result->success = false;
-      goto done;
-    }
-
-    if (diag)
-      diag->candidates_tested++;
-    search_reset_vm(vm, subject, subject_len, offset);
-    bool ok = vm_exec(vm);
-    if (ok) {
-      out_result->success = true;
-      out_result->match_start = offset;
-      out_result->match_end = offset + vm->pos;
-      goto done;
-    }
-    if (offset >= subject_len)
-      break;
-    if (meta->has_bmh_skip &&
-        offset + meta->bmh_skip_len <= subject_len) {
-      size_t adv =
-          meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
-      offset += adv > 0 ? adv : 1;
-    } else {
-      offset++;
-    }
-  }
-
-  out_result->success = false;
-
-done:
-  snobol_free(vm->choices);
-  vm->choices = NULL;
-  vm->choices_cap = 0;
-  return out_result->success;
+  /* Single-dispatch via tier function pointer table */
+  return tier_table[meta->tier](vm, subject, subject_len, start_offset,
+                                meta, dfa, out_result, diag);
 }

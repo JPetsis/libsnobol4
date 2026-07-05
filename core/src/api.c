@@ -55,31 +55,7 @@ struct snobol_pattern {
 };
 
 /* Maximum named variables returned from a match */
-#define API_MAX_VARS 64
-
-struct snobol_match {
-  bool success;
-
-  /* Output buffer (from OP_EMIT_* instructions) */
-  char *output;
-  size_t output_len;
-
-  /* Named capture variables: var_values[i] points into subject or is a
-   * NUL-terminated copy; var_lens[i] is the byte length.
-   * Variable names are stored as decimal strings "1", "2", …, "64".
-   * Index 0 corresponds to variable name "1" (1-based). */
-  char *var_values[API_MAX_VARS];
-  size_t var_lens[API_MAX_VARS];
-  int var_count;
-
-  /* Match position within the subject. Set by search_ex (and
-   * snobol_match() via the same code path). Always 0 for matches
-   * returned by the legacy non-stateful snobol_pattern_search()
-   * unless the search metadata is supplied; for that code path
-   * the position is 0 and match_len is the full subject length. */
-  size_t position;
-  size_t length;
-};
+#define API_MAX_VARS SNOBOL_API_MAX_VARS
 
 /* ---------------------------------------------------------------------------
  * Context lifecycle
@@ -452,6 +428,100 @@ void snobol_match_free(snobol_match_t *match) {
     snobol_free(match->var_values[i]);
   }
   snobol_free(match);
+}
+
+snobol_match_t *snobol_match_create(void) {
+  snobol_match_t *m = (snobol_match_t *)snobol_malloc(sizeof(snobol_match_t));
+  if (m)
+    memset(m, 0, sizeof(snobol_match_t));
+  return m;
+}
+
+void snobol_match_reset(snobol_match_t *match) {
+  if (!match)
+    return;
+  /* Free allocated strings before zeroing */
+  snobol_free(match->output);
+  for (int i = 0; i < API_MAX_VARS; i++) {
+    snobol_free(match->var_values[i]);
+  }
+  /* Zero the entire struct */
+  memset(match, 0, sizeof(snobol_match_t));
+}
+
+bool snobol_pattern_search_reuse(snobol_pattern_t *pattern,
+                                 const char *subject, size_t len,
+                                 snobol_match_t *match_out) {
+  if (!pattern || !subject || !match_out)
+    return false;
+
+  /* Reset the match object for reuse */
+  snobol_match_reset(match_out);
+
+  snobol_buf out_buf = {0};
+  snobol_buf_init(&out_buf);
+
+  VM vm;
+  memset(&vm, 0, sizeof(VM));
+  vm.bc = pattern->bc;
+  vm.bc_len = pattern->bc_len;
+  vm.range_meta = pattern->range_meta;
+  vm.range_meta_count = pattern->range_meta_count;
+  vm.s = subject;
+  vm.len = len;
+  vm.out = &out_buf;
+
+  /* Use cached search metadata from compile time */
+  const snobol_search_meta_t *meta = &pattern->meta;
+
+  /* Build and cache DFA for eligible patterns */
+  snobol_dfa_t *dfa = NULL;
+  if (meta->automaton_eligible) {
+    dfa = snobol_pattern_get_automaton(pattern);
+    if (!dfa) {
+      dfa = build_dfa(pattern->bc, pattern->bc_len, &vm);
+      if (dfa) snobol_pattern_set_automaton(pattern, dfa);
+    }
+  }
+
+  snobol_search_result_t sr;
+  bool ok = snobol_search_exec(&vm, subject, len, 0, meta, dfa,
+                               &sr, NULL);
+  match_out->success = ok;
+  match_out->position = sr.match_start;
+  match_out->length = sr.match_end - sr.match_start;
+
+  if (ok && out_buf.len > 0) {
+    match_out->output = (char *)snobol_malloc(out_buf.len + 1);
+    if (match_out->output) {
+      memcpy(match_out->output, out_buf.data, out_buf.len);
+      match_out->output[out_buf.len] = '\0';
+      match_out->output_len = out_buf.len;
+    }
+  }
+
+  int n = (int)vm.var_count;
+  if (n > API_MAX_VARS)
+    n = API_MAX_VARS;
+  match_out->var_count = n;
+  for (int i = 0; i < n; i++) {
+    size_t vs = vm.var_start[i];
+    size_t ve = vm.var_end[i];
+    if (ve > vs && ve <= len) {
+      size_t vlen = ve - vs;
+      match_out->var_values[i] = (char *)snobol_malloc(vlen + 1);
+      if (match_out->var_values[i]) {
+        memcpy(match_out->var_values[i], subject + vs, vlen);
+        match_out->var_values[i][vlen] = '\0';
+        match_out->var_lens[i] = vlen;
+      }
+    }
+  }
+
+  snobol_buf_free(&out_buf);
+  vm_free_labels(&vm);
+  if (vm.choices) snobol_free(vm.choices);
+  return ok;
 }
 
 /* ---------------------------------------------------------------------------

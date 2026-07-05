@@ -114,12 +114,36 @@ typedef struct snobol_context snobol_context_t;
 typedef struct snobol_pattern snobol_pattern_t;
 
 /**
- * @brief Match result (opaque handle)
+ * @brief Maximum named variables returned from a match.
+ */
+#define SNOBOL_API_MAX_VARS 64
+
+/**
+ * @brief Match result object.
  *
  * Contains the result of a successful pattern match,
  * including captured variables and output buffer.
+ * Use snobol_match_create() to allocate, snobol_match_free() to release.
  */
-typedef struct snobol_match snobol_match_t;
+typedef struct snobol_match {
+  bool success;
+
+  /* Output buffer (from OP_EMIT_* instructions) */
+  char *output;
+  size_t output_len;
+
+  /* Named capture variables: var_values[i] points into subject or is a
+   * NUL-terminated copy; var_lens[i] is the byte length.
+   * Variable names are stored as decimal strings "1", "2", …, "64".
+   * Index 0 corresponds to variable name "1" (1-based). */
+  char *var_values[SNOBOL_API_MAX_VARS];
+  size_t var_lens[SNOBOL_API_MAX_VARS];
+  int var_count;
+
+  /* Match position within the subject. */
+  size_t position;
+  size_t length;
+} snobol_match_t;
 
 /**
  * @brief Associative table (opaque handle)
@@ -371,6 +395,50 @@ size_t snobol_match_get_length(const snobol_match_t *match);
  * @param[in] match Match result to free.  NULL is safe.
  */
 void snobol_match_free(snobol_match_t *match);
+
+/**
+ * @brief Create a new match result object.
+ *
+ * Allocates and zero-initializes a snobol_match_t. The caller owns the
+ * returned pointer and must free it with snobol_match_free() or reuse it
+ * with snobol_pattern_search_reuse().
+ *
+ * @return Newly allocated match object, or NULL on allocation failure.
+ */
+snobol_match_t *snobol_match_create(void);
+
+/**
+ * @brief Reset a match result for reuse without freeing.
+ *
+ * Clears all fields and frees any allocated capture strings.
+ * The match object remains allocated and ready for reuse.
+ * Safe to call on a zeroed or freshly allocated match object.
+ *
+ * @param[in,out] match Match result to reset.  NULL is safe (no-op).
+ */
+void snobol_match_reset(snobol_match_t *match);
+
+/**
+ * @brief Search using a caller-allocated, reusable match object.
+ *
+ * Functionally equivalent to snobol_pattern_search() but uses a
+ * caller-provided match object instead of allocating one per call.
+ * Eliminates per-call malloc/free overhead (~30 ns).
+ *
+ * The caller owns the match object and must call snobol_match_reset()
+ * or snobol_match_free() when done.  The match object is overwritten
+ * on each call.
+ *
+ * @param[in]     pattern    Compiled pattern to search.
+ * @param[in]     subject    Subject string (UTF-8).
+ * @param[in]     len        Byte length of @p subject.
+ * @param[in,out] match_out  Caller-allocated match object (reusable).
+ * @return true if match succeeded, false otherwise.
+ *         Results are written to *match_out.
+ */
+bool snobol_pattern_search_reuse(snobol_pattern_t *pattern,
+                                 const char *subject, size_t len,
+                                 snobol_match_t *match_out);
 
 /* Match result access */
 /**

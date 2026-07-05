@@ -447,6 +447,44 @@ typedef struct {
 } VM;
 
 /**
+ * @brief Lightweight VM state for search-mode execution (Tier 1-7).
+ *
+ * Contains only the fields needed by the search-VM, DFA, and specialized
+ * accelerator tiers.  Excludes capture registers, variable registers,
+ * loop counters, output buffer, and callback fields used only by the
+ * full VM (Tier 8).
+ *
+ * Size target: ≤96 bytes (vs ~2500 bytes for full VM).
+ */
+typedef struct {
+  const uint8_t *bc; /**< Compiled bytecode pointer (not owned). */
+  size_t bc_len;     /**< Bytecode length in bytes. */
+
+  const char *s;     /**< Subject string pointer (adjusted by offset). */
+  size_t len;        /**< Remaining subject length (subject_len - offset). */
+
+  size_t ip;         /**< Instruction pointer. */
+  size_t pos;        /**< Subject byte position. */
+
+  /** Cached charclass range metadata (set_id -> range data). */
+  const snobol_range_meta_t *range_meta;
+  size_t range_meta_count;
+
+  /* Choice stack for backtracking (Tier 6 search-VM). */
+  void *choices;
+  size_t choices_cap;
+  size_t choices_top;
+  bool use_compact_choice;
+
+  /* Loop counters for REPEAT_INIT/REPEAT_STEP (Tier 6 search-VM). */
+  uint32_t counters[MAX_LOOPS];
+  uint32_t loop_min[MAX_LOOPS];
+  uint32_t loop_max[MAX_LOOPS];
+  size_t loop_last_pos[MAX_LOOPS];
+  uint8_t max_counter_used;
+} search_vm_t;
+
+/**
  * @brief Retrieve charclass range data for a set ID.
  * @param[in]  vm         VM instance (for bytecode range table).
  * @param[in]  set_id     Charclass set ID from the bytecode.

@@ -34,6 +34,49 @@
 #define SNOBOL_SEARCH_MAX_ALT 32
 
 /* ---------------------------------------------------------------------------
+ * Tier constants for single-dispatch routing
+ *
+ * Each tier corresponds to a matching strategy in snobol_search_exec().
+ * The tier is computed at compile time and stored in snobol_search_meta_t.tier.
+ * ---------------------------------------------------------------------------
+ */
+typedef enum {
+  TIER_BREAK_SCAN = 0,    /**< BREAK/BREAKX with ASCII bitmap scan */
+  TIER_SPAN_SCAN = 1,     /**< SPAN with ASCII bitmap scan */
+  TIER_LITERAL = 2,       /**< Literal-only fast path (no VM) */
+  TIER_PREFIX = 3,        /**< Literal prefix (memmem / memchr) */
+  TIER_BITMAP = 4,        /**< Candidate-set bitmap for single-char alt */
+  TIER_ALT_LIT = 5,       /**< Alternation-of-literals (trie-based) */
+  TIER_SEARCH_VM = 6,     /**< Search-VM for eligible patterns */
+  TIER_AUTOMATON = 7,     /**< DFA automaton for eligible patterns */
+  TIER_GENERAL = 8,       /**< General VM fallback with start-byte bitmap */
+  TIER_COUNT = 9          /**< Number of tiers (sentinel) */
+} snobol_search_tier_t;
+
+/* ---------------------------------------------------------------------------
+ * Metadata flag bit constants
+ *
+ * Packed into snobol_search_meta_t.flags for single-word access.
+ * ---------------------------------------------------------------------------
+ */
+#define META_HAS_LITERAL_PREFIX   (1u << 0)
+#define META_HAS_FIRST_BYTE       (1u << 1)
+#define META_HAS_CANDIDATE_BITMAP (1u << 2)
+#define META_MAY_MATCH_EMPTY      (1u << 3)
+#define META_ALWAYS_CONSUMES      (1u << 4)
+#define META_IS_SINGLE_CHAR_ALT   (1u << 5)
+#define META_IS_BREAK_FAMILY      (1u << 6)
+#define META_IS_SPAN_FAMILY       (1u << 7)
+#define META_IS_BREAKX            (1u << 8)
+#define META_ASCII_CLASS_ONLY     (1u << 9)
+#define META_HAS_START_BITMAP     (1u << 10)
+#define META_AUTOMATON_ELIGIBLE   (1u << 11)
+#define META_IS_ALT_LITERALS      (1u << 12)
+#define META_HAS_BMH_SKIP         (1u << 13)
+#define META_IS_LITERAL_ONLY      (1u << 14)
+#define META_SEARCH_VM_ELIGIBLE   (1u << 15)
+
+/* ---------------------------------------------------------------------------
  * Automaton (DFA) types
  *
  * Constructed from search-VM-eligible bytecode via powerset construction.
@@ -62,6 +105,10 @@ typedef struct {
 } snobol_dfa_t;
 
 typedef struct {
+  /* Packed flags and tier index ------------------------------------------ */
+  uint32_t flags;     /**< Bitfield of META_* flag constants */
+  uint8_t tier;       /**< Tier index (snobol_search_tier_t) for dispatch */
+
   bool has_literal_prefix;
   uint8_t literal_prefix[SNOBOL_SEARCH_MAX_PREFIX];
   size_t literal_prefix_len;
@@ -139,7 +186,7 @@ typedef struct {
    * and is valid as long as pos + bmh_skip_len <= subject_len.
    * bmh_skip_len is identical to literal_prefix_len when has_bmh_skip is set. */
   bool has_bmh_skip;
-  uint8_t bmh_skip[256];
+  uint8_t *bmh_skip;  /**< Heap-allocated BMH table (NULL if not computed) */
   size_t bmh_skip_len;
 
   /* Literal-only detection ------------------------------------------------ */
@@ -158,6 +205,42 @@ typedef struct {
    * NOT eligible. */
   bool search_vm_eligible;
 } snobol_search_meta_t;
+
+/* ---------------------------------------------------------------------------
+ * Metadata flag accessor macros
+ *
+ * Type-safe bitfield access for snobol_search_meta_t.flags.
+ * Each macro tests exactly one bit; arguments are evaluated once.
+ * ---------------------------------------------------------------------------
+ */
+#define snobol_meta_has_literal_prefix(m)  (!!((m)->flags & META_HAS_LITERAL_PREFIX))
+#define snobol_meta_has_first_byte(m)      (!!((m)->flags & META_HAS_FIRST_BYTE))
+#define snobol_meta_has_candidate_bitmap(m) (!!((m)->flags & META_HAS_CANDIDATE_BITMAP))
+#define snobol_meta_may_match_empty(m)     (!!((m)->flags & META_MAY_MATCH_EMPTY))
+#define snobol_meta_always_consumes(m)     (!!((m)->flags & META_ALWAYS_CONSUMES))
+#define snobol_meta_is_single_char_alt(m)  (!!((m)->flags & META_IS_SINGLE_CHAR_ALT))
+#define snobol_meta_is_break_family(m)     (!!((m)->flags & META_IS_BREAK_FAMILY))
+#define snobol_meta_is_span_family(m)      (!!((m)->flags & META_IS_SPAN_FAMILY))
+#define snobol_meta_is_breakx(m)           (!!((m)->flags & META_IS_BREAKX))
+#define snobol_meta_ascii_class_only(m)    (!!((m)->flags & META_ASCII_CLASS_ONLY))
+#define snobol_meta_has_start_bitmap(m)    (!!((m)->flags & META_HAS_START_BITMAP))
+#define snobol_meta_automaton_eligible(m)  (!!((m)->flags & META_AUTOMATON_ELIGIBLE))
+#define snobol_meta_is_alt_literals(m)     (!!((m)->flags & META_IS_ALT_LITERALS))
+#define snobol_meta_has_bmh_skip(m)        (!!((m)->flags & META_HAS_BMH_SKIP))
+#define snobol_meta_is_literal_only(m)     (!!((m)->flags & META_IS_LITERAL_ONLY))
+#define snobol_meta_search_vm_eligible(m)  (!!((m)->flags & META_SEARCH_VM_ELIGIBLE))
+
+/**
+ * @brief Set a flag bit in metadata flags.
+ *
+ * Used during snobol_search_derive_meta() to populate the flags bitfield.
+ *
+ * @param m     Pointer to metadata struct.
+ * @param flag  Flag constant (META_*).
+ */
+static inline void snobol_meta_set_flag(snobol_search_meta_t *m, uint32_t flag) {
+  m->flags |= flag;
+}
 
 /* ---------------------------------------------------------------------------
  * Search execution result
