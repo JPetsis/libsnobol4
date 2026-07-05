@@ -2595,6 +2595,10 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
    * For intermediate bytes, it's the next byte of the literal data.
    * Positions not within literal data stay SNOBOL_DFA_DEAD.
    */
+  nfa_set_t *eps_closures = NULL;
+  snobol_dfa_t *dfa = NULL;
+  dfa_hash_entry_t *ht = NULL;
+  uint16_t *queue = NULL;
   uint16_t *lit_next = (uint16_t *)snobol_calloc(bc_len, sizeof(uint16_t));
   if (!lit_next) goto fail;
   for (size_t i = 0; i < bc_len; i++) lit_next[i] = SNOBOL_DFA_DEAD;
@@ -2653,9 +2657,6 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
   }
 
   /* Pre-compute epsilon closure for every VM offset up to bc_len */
-  nfa_set_t *eps_closures = NULL;
-  snobol_dfa_t *dfa = NULL;
-
   eps_closures = (nfa_set_t *)snobol_calloc(bc_len, sizeof(nfa_set_t));
   if (!eps_closures) goto fail;
 
@@ -2683,7 +2684,7 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
 
   /* Hash table for mapping NFA sets -> DFA states.
    * Must be heap-allocated (≈4.2 MB) to avoid stack overflow. */
-  dfa_hash_entry_t *ht = (dfa_hash_entry_t *)snobol_calloc(DFA_HASH_CAP, sizeof(dfa_hash_entry_t));
+  ht = (dfa_hash_entry_t *)snobol_calloc(DFA_HASH_CAP, sizeof(dfa_hash_entry_t));
   if (!ht) goto fail;
   dfa_hash_init(ht, DFA_HASH_CAP);
 
@@ -2698,7 +2699,6 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
                                               &next_dfa_id);
 
   /* BFS queue of DFA states to process */
-  uint16_t *queue = NULL;
   size_t q_head = 0, q_tail = 0;
   size_t q_cap = 512;
   queue = (uint16_t *)snobol_malloc(q_cap * sizeof(uint16_t));
@@ -2918,7 +2918,7 @@ fail:
   if (lit_next) snobol_free(lit_next);
   if (eps_closures) snobol_free(eps_closures);
   if (queue) snobol_free(queue);
-  snobol_free(ht);
+  if (ht) snobol_free(ht);
   if (dfa) {
     if (dfa->trans) snobol_free(dfa->trans);
     if (dfa->accepting) snobol_free(dfa->accepting);

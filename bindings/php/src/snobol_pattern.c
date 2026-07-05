@@ -102,6 +102,10 @@ ZEND_BEGIN_ARG_INFO_EX(ai_searchAll, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(ai_matchLiteral, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, input, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(ai_searchSplit, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
 ZEND_END_ARG_INFO()
@@ -273,6 +277,67 @@ PHP_METHOD(Snobol_Pattern, match) {
         SNOBOL_LOG("Snobol_Pattern::match: ABORT, no bytecode");
         zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
         RETURN_FALSE;
+    }
+
+    /* Fast path: literal-only pattern — skip VM setup entirely.
+     * Only safe when there are NO position constraints (POS, RPOS) anywhere
+     * in the bytecode, since we match at position 0 unconditionally. */
+    {
+        snobol_search_meta_t meta;
+        snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+        if (meta.is_literal_only) {
+            const uint8_t *bc = intern->bc;
+            size_t bc_len = intern->bc_len;
+            /* Scan entire bytecode for any POS/RPOS op — even after the
+             * literal, position constraints can cause the VM to fail.
+             * LIT bytecode layout: [0]:op [1..4]:lit_off(==9) [5..8]:lit_len [9..]:data */
+            bool has_position_op = false;
+            for (size_t i = 0; i < bc_len; ) {
+                uint8_t op = bc[i];
+                if (op == OP_POS || op == OP_RPOS) {
+                    has_position_op = true;
+                    break;
+                }
+                if (op == OP_LIT && i + 9 <= bc_len) {
+                    uint32_t lit_len = ((uint32_t)bc[i + 5] << 24) |
+                                       ((uint32_t)bc[i + 6] << 16) |
+                                       ((uint32_t)bc[i + 7] << 8) | (uint32_t)bc[i + 8];
+                    i += 9 + lit_len;
+                    continue;
+                }
+                if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR) { i++; continue; }
+                if (op == OP_ACCEPT || op == OP_ABORT) { i++; continue; }
+                break;
+            }
+            if (has_position_op) {
+                SNOBOL_LOG("Snobol_Pattern::match: literal fast-path SKIPPED (position op)");
+            } else {
+                /* Extract the literal from bytecode */
+                size_t ip = 0;
+                while (ip < bc_len) {
+                    uint8_t op = bc[ip];
+                    if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR) { ip++; continue; }
+                    if ((op == OP_POS || op == OP_RPOS) && ip + 5 <= bc_len) { ip += 5; continue; }
+                    break;
+                }
+                if (ip + 9 <= bc_len && bc[ip] == OP_LIT) {
+                    uint32_t lit_off = ((uint32_t)bc[ip + 1] << 24) | ((uint32_t)bc[ip + 2] << 16) |
+                                       ((uint32_t)bc[ip + 3] << 8) | (uint32_t)bc[ip + 4];
+                    uint32_t lit_len = ((uint32_t)bc[ip + 5] << 24) | ((uint32_t)bc[ip + 6] << 16) |
+                                       ((uint32_t)bc[ip + 7] << 8) | (uint32_t)bc[ip + 8];
+                    const char *lit = (const char *)(bc + lit_off);
+                    if (ZSTR_LEN(input) >= lit_len && memcmp(ZSTR_VAL(input), lit, lit_len) == 0) {
+                        SNOBOL_LOG("Snobol_Pattern::match: literal fast-path SUCCESS");
+                        array_init(return_value);
+                        add_assoc_long(return_value, "_match_len", (zend_long)lit_len);
+                        add_assoc_string(return_value, "_output", "");
+                        return;
+                    }
+                    SNOBOL_LOG("Snobol_Pattern::match: literal fast-path NO MATCH");
+                    RETURN_FALSE;
+                }
+            }
+        }
     }
 
     EmitBuf eb = {NULL, 0, 0};
@@ -724,6 +789,88 @@ PHP_METHOD(Snobol_Pattern, searchAll) {
 }
 
 /**
+ * Pattern::matchLiteral(string $input): array
+ *
+ * Lightweight anchored literal pattern match. Returns a simple associative
+ * array with {success: bool, position: int, length: int} — no captures,
+ * no output, no VM metrics. Only works for literal-only patterns; returns
+ * {success: false, position: 0, length: 0} for non-literal patterns.
+ */
+PHP_METHOD(Snobol_Pattern, matchLiteral) {
+    zend_string *input;
+    ZEND_PARSE_PARAMETERS_START(1,1)
+        Z_PARAM_STR(input)
+    ZEND_PARSE_PARAMETERS_END();
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    if (!intern->bc || intern->bc_len == 0) {
+        zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
+        RETURN_FALSE;
+    }
+
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+
+    array_init(return_value);
+    if (!meta.is_literal_only) {
+        add_assoc_bool(return_value, "success", 0);
+        add_assoc_long(return_value, "position", 0);
+        add_assoc_long(return_value, "length", 0);
+        return;
+    }
+
+    /* Scan entire bytecode for any POS/RPOS op.
+     * LIT bytecode layout: [0]:op [1..4]:lit_off(==9) [5..8]:lit_len [9..]:data */
+    const uint8_t *bc = intern->bc;
+    size_t bc_len = intern->bc_len;
+    bool has_position_op = false;
+    for (size_t i = 0; i < bc_len; ) {
+        uint8_t op = bc[i];
+        if (op == OP_POS || op == OP_RPOS) {
+            has_position_op = true;
+            break;
+        }
+        if (op == OP_LIT && i + 9 <= bc_len) {
+            uint32_t lit_len = ((uint32_t)bc[i + 5] << 24) |
+                               ((uint32_t)bc[i + 6] << 16) |
+                               ((uint32_t)bc[i + 7] << 8) | (uint32_t)bc[i + 8];
+            i += 9 + lit_len;
+            continue;
+        }
+        if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR) { i++; continue; }
+        if (op == OP_ACCEPT || op == OP_ABORT) { i++; continue; }
+        break;
+    }
+
+    zend_long pos = 0, len = 0;
+    bool matched = false;
+    if (!has_position_op) {
+        size_t ip = 0;
+        while (ip < bc_len) {
+            uint8_t op = bc[ip];
+            if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR) { ip++; continue; }
+            if ((op == OP_POS || op == OP_RPOS) && ip + 5 <= bc_len) { ip += 5; continue; }
+            break;
+        }
+        if (ip + 9 <= bc_len && bc[ip] == OP_LIT) {
+            uint32_t lit_off = ((uint32_t)bc[ip + 1] << 24) | ((uint32_t)bc[ip + 2] << 16) |
+                               ((uint32_t)bc[ip + 3] << 8) | (uint32_t)bc[ip + 4];
+            uint32_t lit_len = ((uint32_t)bc[ip + 5] << 24) | ((uint32_t)bc[ip + 6] << 16) |
+                               ((uint32_t)bc[ip + 7] << 8) | (uint32_t)bc[ip + 8];
+            const char *lit = (const char *)(bc + lit_off);
+            if (ZSTR_LEN(input) >= lit_len && memcmp(ZSTR_VAL(input), lit, lit_len) == 0) {
+                matched = true;
+                len = (zend_long)lit_len;
+            }
+        }
+    }
+
+    add_assoc_bool(return_value, "success", matched ? 1 : 0);
+    add_assoc_long(return_value, "position", pos);
+    add_assoc_long(return_value, "length", len);
+}
+
+/**
  * Pattern::searchSplit(string $subject): array
  *
  * Split a subject on non-overlapping pattern matches using one native C loop.
@@ -1041,6 +1188,7 @@ static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, setEvalCallbacks, ai_setEval, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, setJit, ai_setJit, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, searchAll, ai_searchAll, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, matchLiteral, ai_matchLiteral, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, searchSplit, ai_searchSplit, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, searchReplace, ai_searchReplace, ZEND_ACC_PUBLIC)
     PHP_FE_END

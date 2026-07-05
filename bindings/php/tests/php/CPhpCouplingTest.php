@@ -5,6 +5,8 @@ namespace Snobol\Tests;
 use PHPUnit\Framework\TestCase;
 
 /**
+ * @group coupling-probe
+ *
  * Regression guard: the C probe and the PHP probe must both produce valid
  * output and stay within a loose ratio bound.
  *
@@ -161,11 +163,11 @@ class CPhpCouplingTest extends TestCase
     private function resolveCProbe(): ?string
     {
         $candidates = [
+            '/usr/local/bin/snobol4_probe',                 // ddev installed
             __DIR__ . '/../../../build/bench/c/snobol4_probe',
             '/var/www/build/bench/c/snobol4_probe',         // ddev (html)
             '/var/www/html-root/build/bench/c/snobol4_probe', // ddev (html-root)
             __DIR__ . '/../../../../build/bench/c/snobol4_probe',
-            '/usr/local/bin/snobol4_probe',                 // ddev installed
         ];
         foreach ($candidates as $p) {
             if (is_file($p) && is_executable($p)) return $p;

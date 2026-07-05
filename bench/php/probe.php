@@ -197,6 +197,12 @@ $SUBJECT_MIXED =
     . "the a quick b brown c fox a jumps b over c the a lazy b dog c "
     . "the a quick b brown c fox a jumps b over c the a lazy b dog c ";
 
+$SUBJECT_AUTOMATON =
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    . "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    . "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    . "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd";
+
 $SUBJECT_ALTLIT =
     "the cat went dog walking fox jumped cat over dog near fox "
     . "the cat went dog walking fox jumped cat over dog near fox "
@@ -300,6 +306,18 @@ function run_alt_literals_search(int $iters): array
 }
 
 /** @return array{iters:int,total_ns:int} */
+function run_automatons(int $iters): array
+{
+    $p = PatternHelper::fromString("SPAN('abc') 'd'");
+    for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_AUTOMATON']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($GLOBALS['SUBJECT_AUTOMATON']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+/** @return array{iters:int,total_ns:int} */
 function run_tokenize_php(int $outer_iters): array
 {
     $p = PatternHelper::fromString("' '");
@@ -343,6 +361,7 @@ $scenarios = [
     ['name' => 'alternation',         'run' => 'run_alternation',         'iter' => $iters],
     ['name' => 'alt_literals',        'run' => 'run_alt_literals',        'iter' => $iters],
     ['name' => 'alt_literals_search', 'run' => 'run_alt_literals_search', 'iter' => $iters],
+    ['name' => 'automata',             'run' => 'run_automatons',         'iter' => $iters],
     ['name' => 'tokenize_php',        'run' => 'run_tokenize_php',        'iter' => $tokenize_iters],
 ];
 

@@ -290,6 +290,20 @@ $result = $pattern->match($subject);
 $output = $pattern->subst($subject, $template);
 ```
 
+`Pattern::match()` uses an inline literal fast-path (v0.12.0+): when the pattern is a pure literal
+(e.g., `"'abc'"`), the VM setup is bypassed entirely — no emit buffer, no `memset`, no dynamic init.
+The result is identical but the allocation overhead is eliminated.
+
+`Pattern::matchLiteral()` (v0.12.0+): lightweight anchored literal match returning
+`['success' => bool, 'position' => int, 'length' => int]`. Delegates to the C
+`snobol_pattern_match_literal()` with zero heap allocations. For non-literal patterns
+returns `['success' => false, 'position' => 0, 'length' => 0]` immediately.
+
+```php
+$res = $pattern->matchLiteral("hello world");
+// ['success' => true, 'position' => 0, 'length' => 5]
+```
+
 ### Table
 
 Associative table for runtime lookups:
@@ -409,7 +423,7 @@ $minor = ($v >> 8) & 0xFF;   // 7
 $patch = $v & 0xFF;          // 0
 ```
 
-For v0.11.0 this returns `0x00000B00` (2816 in decimal).
+For v0.12.0 this returns `0x00000C00` (3072 in decimal).
 
 ## Running Tests
 
@@ -424,12 +438,23 @@ This project has two `composer.json` files:
 # Install/update dependencies
 ddev composer install
 
-# Run tests
-ddev exec vendor/bin/phpunit tests/php
+# Run tests (excludes slow coupling-probe group)
+ddev test
+
+# Run coupling-probe tests only (C probe ~2 min)
+ddev test-c-probe
+
+# Run single test file
+ddev exec vendor/bin/phpunit tests/php/PatternTest.php
 
 # Run with coverage
 ddev exec vendor/bin/phpunit tests/php --coverage-html /tmp/coverage
 ```
+
+The `CPhpCouplingTest` (runs both the C and PHP diagnostic probes) is marked
+`@group coupling-probe` and excluded from the default `ddev test` suite because
+the C probe takes ~2 minutes. Run `ddev test-c-probe` after any engine change
+to verify the PHP/C ratio stays within bounds.
 
 ### Without DDEV
 
@@ -485,9 +510,8 @@ ddev logs
 
 1. **Use compiled patterns**: Patterns are cached by default. Use `['cache' => false]` to disable.
 2. **Prefer Builder API**: The Builder API produces optimized AST structures.
-3. **Use JIT for hot patterns**: JIT is enabled by default (`Pattern::setJit(true)`). The first match with a given pattern triggers SLJIT whole-pattern compilation; subsequent matches reuse the cached native function. Simple patterns (literals, anchors, captures, emits) benefit most — patterns with SPAN/BREAK/SPLIT/ASSIGN fall back to the VM interpreter transparently.
-4. **Monitor JIT behavior**: Use `snobol_get_jit_stats()` to check compilation counts: `jit_method_attempts_total`, `jit_method_successes_total`, `jit_method_fallbacks_total`.
-5. **Minimize captures**: Only capture what you need; captures have overhead.
+3. **Literal patterns are fastest**: Pure-literal patterns (e.g., `"'abc'"`) trigger a zero-allocation fast-path in `Pattern::match()`, bypassing VM setup entirely. Use `Pattern::matchLiteral()` when you only need anchored literal matching.
+4. **Minimize captures**: Only capture what you need; captures have overhead.
 
 ## License
 

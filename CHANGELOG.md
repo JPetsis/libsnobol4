@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Engine Consolidation — 2026-07-02 [0.12.0]
+### Engine Consolidation
 
 ### Removed
 
@@ -22,9 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cached range pointers** (`core/src/search.c`, `core/src/vm.h`): Character-class range metadata pre-resolved at compile time into `range_meta[]` table. Eliminates runtime `get_ranges_ptr()` reparsing. Search-mode SPAN delimiter-heavy +30.1%.
 - **BMH skip table** (`core/src/search.c`): Boyer-Moore-Horspool failure-position advance for literal-prefix patterns.
 - **Automaton / trie matching** (`core/src/search.c`): Multi-string alternation-of-literals matcher using trie data structure. Wired as Tier 3a in search dispatch.
-- **DFA automaton** (`core/src/search.c`): NFA-to-DFA subset construction for automaton-eligible patterns. Wired as Tier 7 in search dispatch. Handles LIT, LEN, SPAN, BREAK, ANY, NOTANY with epsilon closure for SPLIT/JMP. State explosion cap at 4096 states.
+- **DFA automaton** (`core/src/search.c`): NFA-to-DFA subset construction for automaton-eligible patterns. Wired as Tier 7 in search dispatch. Handles LIT, LEN, SPAN, BREAK, ANY, NOTANY with epsilon closure for SPLIT/JMP. State explosion cap at 4096 states. Automaton scenario added to C probe (`bench_probe.c`).
 - **Literal-match API** (`core/src/api.c`, `core/include/snobol/snobol.h`): `snobol_pattern_match_literal()` for zero-allocation anchored literal matching. Returns `snobol_literal_match_t` by value with `success`, `position`, `length` fields. Bypasses VM entirely for literal-only patterns.
 - **Start-byte bitmap & minimum-length analysis** (`core/src/search.c`): PCRE2-style `compute_start_bitmap()` and `compute_minlength()` for all patterns. Bitmap-based candidate filtering in Tier 5 fallback.
+- **PHP literal fast-path** (`bindings/php/src/snobol_pattern.c`): `Pattern::match()` now detects literal-only patterns via `snobol_search_derive_meta()` and bypasses VM setup entirely, calling `snobol_pattern_match_literal()` inline. Zero-allocation path for pure-literal patterns.
+- **PHP `Pattern::matchLiteral()`** (`bindings/php/src/snobol_pattern.c`): new public method returning `{success, position, length}` associative array. Delegates directly to C `snobol_pattern_match_literal()`.
+- **`ddev test-c-probe`** DDEV command (`.ddev/commands/web/test-c-probe`): runs only the `@group coupling-probe` filter. `CPhpCouplingTest` excluded from default `ddev test` (marked with `@group coupling-probe` and excluded in `phpunit.xml`).
 
 ### Changed
 
@@ -32,8 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PHP binding** (`bindings/php/src/`): Removed all JIT blocks from `php_snobol.c`, `snobol_pattern.c`, `php_snobol.h`. `config.m4` JIT defines removed. `build-snobol-extension` `deps/` copy made conditional.
 - **`bench_shared.h`**: Added `_POSIX_C_SOURCE` + `<time.h>` for Linux clock_gettime compat; `_DARWIN_C_SOURCE` for macOS snprintf.
 - **`generate_amalgam.sh`**: JIT sources removed from amalgamation.
-- **`CPhpCouplingTest`**: Renamed from `JitCPhpCouplingTest`, JIT assertions removed, compares `alt_literals` ratio instead of `tokenize`.
+- **`CPhpCouplingTest`**: Renamed from `JitCPhpCouplingTest`, JIT assertions removed, compares `alt_literals` ratio instead of `tokenize`. Marked `@group coupling-probe`, excluded from default `ddev test`.
 - **Benchmark baselines**: Updated `bench/results/search_perf_baseline.json` schema v2 with PCRE2 comparison data, no JIT stats.
+- **`bench_delimiter.c`**: Removed dead JIT/search path; subject reduced from 16 KB to 1 KB all-comma (71M search calls → 100K single `snobol_pattern_match()` calls per iteration). 2000× faster (82 ms vs >3 min).
+- **`bench_literal.c`**: Added literal-match-API scenario comparing `snobol_pattern_match_literal()` vs `snobol_pattern_match()` for pure-literal patterns. Literal API is 30.6× faster (612 µs vs 18,739 µs).
+
+### Fixed
+
+- **DFA build warnings**: `build_dfa()` in `search.c` had variables declared after `goto fail` paths; moved all cleanup variable declarations before the first failure point and added null guard on `snobol_free(ht)`. 14 `-Wsometimes-uninitialized` warnings eliminated.
 
 ### SLJIT Method JIT & Tracing-JIT Retirement — 2026-06-27 [0.11.0]
 

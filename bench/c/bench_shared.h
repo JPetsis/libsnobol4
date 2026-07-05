@@ -29,9 +29,10 @@
 typedef struct {
     const char *name;
     const char *label;
-    int64_t snobol_ns;   /* total ns for snobol4 interpreter matches */
-    int64_t pcre2_ns;    /* total ns for pcre2 matches (-1 = unavailable) */
-    int64_t search_ns;   /* total ns for snobol4 search-mode (JIT) matches */
+    int64_t snobol_ns;        /* total ns for snobol4 match (VM path) */
+    int64_t literal_ns;       /* total ns for snobol_pattern_match_literal (-1=unavail) */
+    int64_t pcre2_ns;         /* total ns for pcre2 matches (-1 = unavailable) */
+    int64_t search_ns;        /* total ns for snobol4 search-mode matches */
 } bench_results_t;
 
 /* Timer: nanosecond-scale using clock_gettime or mach_absolute_time */

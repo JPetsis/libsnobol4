@@ -367,4 +367,104 @@ class ConvenienceApiTest extends TestCase
         $this->assertNotFalse($partial);
         $this->assertNotFalse($full);
     }
+
+    /* ============================================================
+     *  Pattern::matchLiteral() — literal-match API
+     * ============================================================ */
+
+    public function testMatchLiteralSimple(): void
+    {
+        $pat = Pattern::fromString("'hello'");
+        $res = $pat->matchLiteral("hello world");
+        $this->assertIsArray($res);
+        $this->assertTrue($res['success']);
+        $this->assertEquals(0, $res['position']);
+        $this->assertEquals(5, $res['length']);
+    }
+
+    public function testMatchLiteralReturnsFalseOnNoMatch(): void
+    {
+        $pat = Pattern::fromString("'xyz'");
+        $res = $pat->matchLiteral("hello world");
+        $this->assertIsArray($res);
+        $this->assertFalse($res['success']);
+        $this->assertEquals(0, $res['position']);
+        $this->assertEquals(0, $res['length']);
+    }
+
+    public function testMatchLiteralWithNonLiteralPattern(): void
+    {
+        $pat = Pattern::fromString("SPAN('abc')");
+        $res = $pat->matchLiteral("abc");
+        $this->assertIsArray($res);
+        $this->assertFalse($res['success'], "non-literal pattern should not match via matchLiteral");
+    }
+
+    public function testMatchLiteralRespectsPositionConstraint(): void
+    {
+        $ast = Builder::concat([Builder::pos(3), Builder::lit("the")]);
+        $pat = Pattern::compileFromAst($ast);
+        $res = $pat->matchLiteral("the quick brown fox");
+        $this->assertIsArray($res);
+        $this->assertFalse($res['success'], "position-constrained literal should not fast-path");
+    }
+
+    public function testMatchLiteralMatchesAnchoredOnly(): void
+    {
+        $pat = Pattern::fromString("'the'");
+        $res = $pat->matchLiteral("the quick brown fox");
+        $this->assertTrue($res['success']);
+        $this->assertEquals(0, $res['position']);
+        $this->assertEquals(3, $res['length']);
+    }
+
+    public function testMatchLiteralAgainstBuilder(): void
+    {
+        $ast = Builder::lit("snobol");
+        $pat = Pattern::compileFromAst($ast);
+        $res = $pat->matchLiteral("snobol rulez");
+        $this->assertTrue($res['success']);
+        $this->assertEquals(6, $res['length']);
+    }
+
+    /* ============================================================
+     *  Pattern::match() literal fast path — automaton tier
+     * ============================================================ */
+
+    public function testMatchLiteralFastPath(): void
+    {
+        $pat = Pattern::fromString("'fastpath'");
+        $res = $pat->match("fastpath");
+        $this->assertIsArray($res);
+        $this->assertArrayHasKey('_match_len', $res);
+        $this->assertEquals(8, $res['_match_len']);
+    }
+
+    public function testMatchFastPathFallsThroughToVm(): void
+    {
+        $pat = Pattern::fromString("SPAN('abc') 'd'");
+        $res = $pat->match("abcd");
+        $this->assertIsArray($res);
+        $this->assertEquals(4, $res['_match_len']);
+    }
+
+    /* ============================================================
+     *  Automaton tier via Pattern::searchAll()
+     * ============================================================ */
+
+    public function testSearchAllAutomatonEligible(): void
+    {
+        $pat = Pattern::fromString("SPAN('abc') 'd'");
+        $res = $pat->searchAll("abcd abcxd abcd");
+        $this->assertIsArray($res);
+        $this->assertCount(2, $res, "SPAN('abc')'d' matches at 'abcd' (2 occurrences)");
+    }
+
+    public function testSearchAllAutomatonSpanOnly(): void
+    {
+        $pat = Pattern::fromString("SPAN('0-9')");
+        $res = $pat->searchAll("abc 123 def 4567");
+        $this->assertIsArray($res);
+        $this->assertCount(2, $res);
+    }
 }

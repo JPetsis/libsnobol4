@@ -6,6 +6,11 @@
          failOnWarning="true"
          failOnRisky="true"
          beStrictAboutOutputDuringTests="true">
+    <groups>
+        <exclude>
+            <group>coupling-probe</group>
+        </exclude>
+    </groups>
     <testsuites>
         <testsuite name="SNOBOL4 Test Suite">
             <directory>tests/php</directory>

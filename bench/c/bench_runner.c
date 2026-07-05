@@ -46,20 +46,30 @@ int main(void) {
     run_one(bench_delimiter_suite);
 
     /* Header */
-    printf("%-30s %16s %16s %10s %16s %10s\n",
-           "Scenario", "snobol4 (ns)", "search (ns)", "s/s4",
+    printf("%-30s %16s %16s %10s %16s %10s %16s %10s\n",
+           "Scenario", "snobol4 (ns)", "literal (ns)", "l/s4",
+           "search (ns)", "s/s4",
            "pcre2 (ns)", "ratio");
-    printf("%-30s %16s %16s %10s %16s %10s\n",
+    printf("%-30s %16s %16s %10s %16s %10s %16s %10s\n",
            "-------", "------------", "-----------", "-----",
+           "-----------", "-----",
            "-----------", "-----");
 
     for (int i = 0; i < result_count; i++) {
         bench_results_t *r = &results[i];
         double snobol_us = (double)r->snobol_ns / 1000.0;
+        double literal_us = r->literal_ns > 0 ? (double)r->literal_ns / 1000.0 : 0.0;
         double search_us = r->search_ns > 0 ? (double)r->search_ns / 1000.0 : 0.0;
         double ratio = 0.0;
         char ratio_str[32] = "N/A";
+        char lit_ratio_str[32] = "N/A";
         char search_ratio_str[32] = "N/A";
+
+        /* snobol4 match vs literal API */
+        if (r->literal_ns > 0) {
+            double lr = snobol_us / literal_us;
+            snprintf(lit_ratio_str, sizeof(lit_ratio_str), "%.2f", lr);
+        }
 
         /* snobol4 match time vs search time */
         if (r->search_ns > 0) {
@@ -74,9 +84,11 @@ int main(void) {
             snprintf(ratio_str, sizeof(ratio_str), "%.2f", ratio);
         }
 
-        printf("%-30s %8.0f us (%lld) %8.0f us (%lld) %10s %8.0f us (%lld) %10s\n",
+        printf("%-30s %8.0f us (%lld) %8.0f us (%lld) %10s %8.0f us (%lld) %10s %8.0f us (%lld) %10s\n",
                r->label,
                snobol_us, (long long)r->snobol_ns,
+               literal_us, (long long)r->literal_ns,
+               lit_ratio_str,
                search_us, (long long)r->search_ns,
                search_ratio_str,
                (r->pcre2_ns > 0 ? (double)r->pcre2_ns / 1000.0 : 0.0),
@@ -86,6 +98,11 @@ int main(void) {
         /* ops/sec for each engine */
         double s4_ops = (double)BENCH_ITERATIONS / (snobol_us / 1e6);
         printf("  %30s ops/sec (snobol4):  %.0f\n", "", s4_ops);
+
+        if (r->literal_ns > 0) {
+            double literal_ops = (double)BENCH_ITERATIONS / (literal_us / 1e6);
+            printf("  %30s ops/sec (literal):  %.0f\n", "", literal_ops);
+        }
 
         if (r->search_ns > 0) {
             double search_ops = (double)BENCH_ITERATIONS / (search_us / 1e6);
@@ -102,5 +119,6 @@ int main(void) {
     printf("---\n");
     printf("Ratio = snobol4 time / pcre2 time.  <1.0 = snobol4 faster.\n");
     printf("s/s4  = snobol4 match time / search-mode time.  >1.0 = search faster.\n");
+    printf("l/s4  = snobol4 match time / literal API time.  >1.0 = literal API faster.\n");
     return 0;
 }

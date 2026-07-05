@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+## Description: Run coupling-probe tests (slow: ~2 min for C probe)
+## Usage: test-c-probe [args]
+## Example: ddev test-c-probe
+
+./vendor/bin/phpunit --group coupling-probe "$@"

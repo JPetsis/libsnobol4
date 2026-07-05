@@ -73,6 +73,26 @@ void bench_literal_suite(bench_results_t *out) {
 
     out->snobol_ns = snobol_ns;
 
+    /* snobol4 literal-match API: snobol_pattern_match_literal()
+     * zero-allocation anchored literal match, bypasses VM setup entirely. */
+    {
+        snobol_context_t *ctx = snobol_context_create();
+        char *err = NULL;
+        snobol_pattern_t *pat = snobol_pattern_compile(ctx, "'pqr'", 5, &err);
+        if (!pat) { fprintf(stderr, "snobol lit compile failed: %s\n", err ? err : "??"); free(err); snobol_context_destroy(ctx); out->literal_ns = -1; }
+        else {
+            free(err);
+            int64_t start = bench_ns();
+            for (int i = 0; i < BENCH_ITERATIONS; i++) {
+                snobol_literal_match_t lm = snobol_pattern_match_literal(pat, subject_1k, subj_len);
+                (void)lm;
+            }
+            out->literal_ns = bench_ns() - start;
+            snobol_pattern_free(pat);
+            snobol_context_destroy(ctx);
+        }
+    }
+
     /* snobol4 search-mode (JIT): compile once, search 100K times */
     {
         snobol_context_t *ctx = snobol_context_create();

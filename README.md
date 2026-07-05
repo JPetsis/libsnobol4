@@ -90,8 +90,8 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
    * Code-page model: `mmap` + `mprotect` on Linux, `MAP_JIT` on macOS, `VirtualAlloc`/`VirtualProtect` on Windows.
      DEP-compliant: never uses `PAGE_EXECUTE_READWRITE`.
 * **Modern C Code Quality** (v0.6.0): Core adopts `nullptr`, `SNOBOL_NODISCARD`, `[[maybe_unused]]`, and `constexpr` with MSVC-compatible fallbacks throughout.
-* **DFA Automaton** (v0.12.0): NFA-to-DFA subset construction for automaton-eligible patterns. Tier 7 in search dispatch. Handles LIT, LEN, SPAN, BREAK, ANY, NOTANY with epsilon closure for SPLIT/JMP. State explosion cap at 4096 states.
-* **Literal-Match API** (v0.12.0): `snobol_pattern_match_literal()` for zero-allocation anchored literal matching. Returns lightweight struct by value.
+* **DFA Automaton** (v0.11.0): NFA-to-DFA subset construction for automaton-eligible patterns. Tier 7 in search dispatch. Handles LIT, LEN, SPAN, BREAK, ANY, NOTANY with epsilon closure for SPLIT/JMP. State explosion cap at 4096 states.
+* **Literal-Match API** (v0.11.0): `snobol_pattern_match_literal()` for zero-allocation anchored literal matching. Returns lightweight struct by value.
 * **Profiling Support**: Built-in execution profiling for performance analysis
 
 ### Available Bindings
@@ -477,8 +477,8 @@ libsnobol4 uses independent versioning for core and each binding:
 
 | Component              | Current | Next        | Status               | Install                               |
 |------------------------|---------|-------------|----------------------|---------------------------------------|
-| **Core**               | v0.10.0 | **v0.11.0** | ✅ v0.10.0 shipped    | `brew install JPetsis/tap/libsnobol4` |
-| **PHP Binding**        | v0.11.0 | v0.11.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
+| **Core**               | v0.12.0 | v0.12.0     | ✅ v0.12.0 shipped    | `brew install JPetsis/tap/libsnobol4` |
+| **PHP Binding**        | v0.12.0 | v0.12.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
 | **Python (reference)** | —       | —           | Prototype only       | `examples/python-binding/`            |
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees. See [ROADMAP.md](ROADMAP.md) for the full plan toward v1.0.0.
