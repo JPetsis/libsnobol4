@@ -1010,18 +1010,11 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
       /* Not an empty-match pattern if there's a non-empty literal */
       out->may_match_empty = false;
 
-      /* Compute BMH skip table for the literal prefix */
+      /* BMH skip table is allocated later (line ~1253) after all flags
+       * are computed. Here we only record eligibility. */
       if (prefix_len >= 2) {
-        out->bmh_skip = (uint8_t *)snobol_malloc(256);
-        if (out->bmh_skip) {
-          memset(out->bmh_skip, (int)prefix_len, 256);
-          for (size_t i = 0; i < prefix_len - 1; i++) {
-            uint8_t b = bc[lit_off + i];
-            out->bmh_skip[b] = (uint8_t)(prefix_len - 1 - i);
-          }
-          out->has_bmh_skip = true;
-          out->bmh_skip_len = prefix_len;
-        }
+        out->has_bmh_skip = true;
+        out->bmh_skip_len = prefix_len;
       }
     }
   }

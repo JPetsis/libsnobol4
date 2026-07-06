@@ -197,6 +197,9 @@ static snobol_search_meta_t make_automaton_meta(const uint8_t *bc, size_t bc_len
   m.is_single_char_alt = false;
   m.has_start_bitmap = false;
   m.has_bmh_skip = false;
+  /* Free BMH skip table — it was allocated by derive_meta but disabled
+   * above.  The automaton tier never touches it. */
+  snobol_search_meta_free(&m);
   return m;
 }
 
@@ -378,6 +381,8 @@ static void test_non_eligible_fallback(void) {
   test_assert(ok, "BREAKX matches via accelerated BREAK path (Tier 1a)");
   test_assert(result.match_start == 1, "BREAKX match_start == 1 (0-length at delimiter)");
   test_assert(result.match_end == 1, "BREAKX match_end == 1 (before ',')");
+
+  snobol_search_meta_free(&meta);
 }
 
 /* ---------------------------------------------------------------------------

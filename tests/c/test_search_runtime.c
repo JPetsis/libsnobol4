@@ -836,6 +836,7 @@ static void test_search_vm_correctness(void) {
     test_assert(r.match_start == 0, "search-vm: LEN(3) match_start == 0");
     test_assert(d.search_vm_tests > 0,
                 "search-vm: LEN+ACCEPT routed through Tier 7");
+    free(vm.choices);
   }
 
   /* ANY + ACCEPT (digit) — Tier 3 bitmap captures this before Tier 7 */
@@ -916,6 +917,7 @@ static void test_search_vm_correctness(void) {
                 "search-vm: NOTANY routed through Tier 7");
 
     if (rm) free((void*)rm);
+    free(vm.choices);
   }
 
   /* LIT + LIT + ACCEPT — not literal-only (two LITs), has prefix,
@@ -1067,6 +1069,7 @@ static void test_tier_index_matches_if_branches(void) {
       /* If compile fails, test that we at least tried */
       test_assert(true, "LEN+LIT compile failed (syntax may differ)");
     }
+    if (err) free(err);
     snobol_context_destroy(ctx);
   }
 }
@@ -1231,6 +1234,7 @@ static void test_dispatch_order(void) {
     test_assert(ok, "dispatch: literal prefix match");
     test_assert(d.last_skip_reason == SNOBOL_SEARCH_SKIP_LITERAL,
                 "dispatch: Tier 3 literal prefix path used");
+    snobol_search_meta_free(&m);
   }
 }
 

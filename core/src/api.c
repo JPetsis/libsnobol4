@@ -577,6 +577,7 @@ snobol_pattern_search_state_create(const uint8_t *bc, size_t bc_len) {
 void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
   if (!state)
     return;
+  snobol_search_meta_free(&state->meta);
   if (state->buf_inited) {
     snobol_buf_free(&state->out_buf);
   }
