@@ -135,10 +135,12 @@ static int run_search(const uint8_t *bc, size_t bc_len, const char *subject,
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, subject, strlen(subject), start_offset,
                                &meta, NULL, &result, NULL);
+  snobol_search_meta_free(&meta);
   return ok ? (int)result.match_start : -1;
 }
 
@@ -152,10 +154,12 @@ static int run_search_end(const uint8_t *bc, size_t bc_len, const char *subject,
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, subject, strlen(subject), start_offset,
                                &meta, NULL, &result, NULL);
+  snobol_search_meta_free(&meta);
   return ok ? (int)result.match_end : -1;
 }
 
@@ -172,6 +176,7 @@ static void test_derive_meta_literal(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   test_assert(meta.has_literal_prefix,
               "has_literal_prefix set for LIT pattern");
@@ -194,6 +199,7 @@ static void test_derive_meta_break(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   test_assert(meta.is_break_family, "is_break_family set for BREAK pattern");
   test_assert(!meta.is_breakx, "is_breakx false for OP_BREAK");
@@ -209,6 +215,7 @@ static void test_derive_meta_breakx(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   test_assert(meta.is_break_family, "is_break_family set for BREAKX pattern");
   test_assert(meta.is_breakx, "is_breakx set for OP_BREAKX");
@@ -223,6 +230,7 @@ static void test_derive_meta_span(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   test_assert(meta.is_span_family, "is_span_family set for SPAN pattern");
   test_assert(meta.always_consumes, "always_consumes set for SPAN");
@@ -235,6 +243,7 @@ static void test_derive_meta_empty_bc(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(NULL, 0, &meta);
+  snobol_search_meta_free(&meta);
 
   test_assert(!meta.has_literal_prefix, "no prefix for NULL bc");
   test_assert(!meta.is_break_family, "no break_family for NULL bc");
@@ -378,6 +387,7 @@ static void test_search_diagnostics(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   snobol_search_result_t result;
   snobol_search_diag_t diag;
@@ -443,6 +453,7 @@ static void test_automaton_eligible_simple_lit(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   test_assert(meta.automaton_eligible,
               "simple LIT ACCEPT is automaton-eligible");
@@ -456,6 +467,7 @@ static void test_automaton_search_semantics(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   /* Force automaton path by temporarily clearing literal prefix */
   snobol_search_meta_t auto_meta = meta;
@@ -487,6 +499,7 @@ static void test_alt_literals_detection(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
 
   test_assert(meta.is_alt_literals,
               "alt-literals: SPLIT(LIT LIT ACCEPT ACCEPT) detected");
@@ -502,6 +515,7 @@ static void test_alt_literals_search_simple(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
   test_assert(meta.is_alt_literals, "alt-literals: meta flag set");
 
   VM vm;
@@ -573,6 +587,7 @@ static void test_alt_literals_tier3a_path(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
+  snobol_search_meta_free(&meta);
   test_assert(meta.is_alt_literals, "alt-literals Tier3a: meta flag set");
 
   /* Clear literal-prefix and bitmap to prevent higher-tier dispatch,
@@ -627,6 +642,7 @@ static void test_literal_only_meta(void) {
   size_t n = build_lit_accept(bc, "hello", 5);
   snobol_search_meta_t m;
   snobol_search_derive_meta(bc, n, &m);
+  snobol_search_meta_free(&m);
   test_assert(m.is_literal_only, "literal-only: LIT+ACCEPT detected");
   test_assert(m.search_vm_eligible,
               "literal-only: also search-vm eligible");
@@ -643,6 +659,7 @@ static void test_literal_only_meta(void) {
     bc[ip++] = 'f'; bc[ip++] = 'o'; bc[ip++] = 'o';
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
+  snobol_search_meta_free(&m);
     test_assert(m.is_literal_only,
                 "literal-only: POS LIT ACCEPT detected");
   }
@@ -650,6 +667,7 @@ static void test_literal_only_meta(void) {
   /* SPLIT pattern — NOT literal-only */
   n = build_break_accept(bc, OP_SPLIT, "x", 1);
   snobol_search_derive_meta(bc, n, &m);
+  snobol_search_meta_free(&m);
   test_assert(!m.is_literal_only,
               "literal-only: SPLIT pattern NOT detected");
 }
@@ -665,6 +683,7 @@ static void test_search_vm_eligible_meta(void) {
   size_t n = build_lit_accept(bc, "hello", 5);
   snobol_search_meta_t m;
   snobol_search_derive_meta(bc, n, &m);
+  snobol_search_meta_free(&m);
   test_assert(m.search_vm_eligible,
               "search-vm eligible: LIT+ACCEPT is eligible");
 
@@ -681,6 +700,7 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = 0;
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
+  snobol_search_meta_free(&m);
     test_assert(!m.search_vm_eligible,
                 "search-vm eligible: CAP_START not eligible");
   }
@@ -697,6 +717,7 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = 0;
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
+  snobol_search_meta_free(&m);
     test_assert(!m.search_vm_eligible,
                 "search-vm eligible: EVAL not eligible");
   }
@@ -720,6 +741,7 @@ static void test_search_vm_eligible_meta(void) {
     emit_u32_be(bc, &ip, (uint32_t)class_off);
     emit_u32_be(bc, &ip, 1);
     snobol_search_derive_meta(bc, ip, &m);
+  snobol_search_meta_free(&m);
     test_assert(m.search_vm_eligible,
                 "search-vm eligible: ANY is eligible");
   }
@@ -736,6 +758,7 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = 0;
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
+  snobol_search_meta_free(&m);
     test_assert(!m.search_vm_eligible,
                 "search-vm eligible: ASSIGN not eligible");
   }
@@ -750,6 +773,7 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = OP_DYNAMIC;
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
+  snobol_search_meta_free(&m);
     test_assert(!m.search_vm_eligible,
                 "search-vm eligible: DYNAMIC not eligible");
   }
@@ -769,6 +793,7 @@ static void test_search_vm_correctness(void) {
     size_t n = build_lit_accept(bc, "hello", 5);
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
+  snobol_search_meta_free(&m);
     test_assert(m.is_literal_only, "search-vm: LIT+ACCEPT is literal-only");
     test_assert(m.search_vm_eligible, "search-vm: LIT+ACCEPT is search-vm-eligible");
 
@@ -796,6 +821,7 @@ static void test_search_vm_correctness(void) {
     size_t n = ip;
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
+  snobol_search_meta_free(&m);
     test_assert(!m.is_literal_only, "search-vm: LEN+ACCEPT not literal-only");
     test_assert(m.search_vm_eligible, "search-vm: LEN+ACCEPT is search-vm-eligible");
 
@@ -828,6 +854,7 @@ static void test_search_vm_correctness(void) {
 
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
+  snobol_search_meta_free(&m);
     test_assert(m.search_vm_eligible, "search-vm: ANY eligible");
 
     VM vm;
@@ -868,6 +895,7 @@ static void test_search_vm_correctness(void) {
 
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
+  snobol_search_meta_free(&m);
     test_assert(m.search_vm_eligible, "search-vm: NOTANY eligible");
 
     VM vm;
@@ -908,6 +936,7 @@ static void test_search_vm_correctness(void) {
 
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
+  snobol_search_meta_free(&m);
     test_assert(!m.is_literal_only, "search-vm: LIT+LIT not literal-only");
     test_assert(m.has_literal_prefix, "search-vm: LIT+LIT has prefix");
     test_assert(m.search_vm_eligible, "search-vm: LIT+LIT is search-vm-eligible");
@@ -935,6 +964,7 @@ static void test_literal_only_path(void) {
   size_t n = build_lit_accept(bc, "hello", 5);
   snobol_search_meta_t m;
   snobol_search_derive_meta(bc, n, &m);
+  snobol_search_meta_free(&m);
   test_assert(m.is_literal_only, "literal-only path: meta flag set");
 
   VM vm;
@@ -984,6 +1014,7 @@ static void test_tier_index_matches_if_branches(void) {
     test_assert(p != NULL, "tier test: literal pattern compiled");
     snobol_search_meta_t meta;
     snobol_search_derive_meta(snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p), &meta);
+  snobol_search_meta_free(&meta);
     test_assert(meta.tier == TIER_LITERAL, "literal pattern tier == TIER_LITERAL");
     test_assert(meta.tier == 2, "TIER_LITERAL == 2");
     snobol_pattern_free(p);
@@ -1001,6 +1032,7 @@ static void test_tier_index_matches_if_branches(void) {
     bc[ip++] = OP_ACCEPT;
     snobol_search_meta_t meta;
     snobol_search_derive_meta(bc, ip, &meta);
+  snobol_search_meta_free(&meta);
     /* Without range_meta, ascii_class_only is false, so tier is not BREAK_SCAN */
     test_assert(meta.tier < TIER_COUNT, "BREAK pattern tier is valid");
   }
@@ -1015,6 +1047,7 @@ static void test_tier_index_matches_if_branches(void) {
     bc[ip++] = OP_ACCEPT;
     snobol_search_meta_t meta;
     snobol_search_derive_meta(bc, ip, &meta);
+  snobol_search_meta_free(&meta);
     test_assert(meta.tier < TIER_COUNT, "SPAN pattern tier is valid");
   }
 
@@ -1024,9 +1057,11 @@ static void test_tier_index_matches_if_branches(void) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *p = snobol_pattern_compile(ctx, "LEN(1) 'a'", 10, &err);
     if (p) {
+      /* Use accessor to check tier */
       snobol_search_meta_t meta;
       snobol_search_derive_meta(snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p), &meta);
       test_assert(meta.tier == TIER_SEARCH_VM, "LEN+LIT tier == TIER_SEARCH_VM");
+      snobol_search_meta_free(&meta);
       snobol_pattern_free(p);
     } else {
       /* If compile fails, test that we at least tried */
@@ -1076,6 +1111,7 @@ static void test_search_vm_reset_fields(void) {
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p), &meta);
+  snobol_search_meta_free(&meta);
 
   snobol_search_result_t result;
   VM vm;
@@ -1129,8 +1165,9 @@ static void test_bmh_table_alloc_free(void) {
     test_assert(meta.bmh_skip[(unsigned char)'l'] <= 4, "BMH: skip for 'l' is valid");
   }
 
-  /* Free the BMH table (simulating pattern free) */
-  free(meta.bmh_skip);
+  /* Free the BMH table and pattern */
+  snobol_search_meta_free(&meta);
+  snobol_pattern_free(p);
 
   /* Pattern without literal prefix should NOT have BMH */
   /* Use a simple single-char pattern which has no BMH */
@@ -1141,8 +1178,7 @@ static void test_bmh_table_alloc_free(void) {
   /* Single-char literal has prefix_len=1, which is < 2, so no BMH */
   test_assert(!meta2.has_bmh_skip, "BMH test: single-char has no BMH");
   test_assert(meta2.bmh_skip == NULL, "BMH test: single-char bmh_skip is NULL");
-
-  snobol_pattern_free(p);
+  snobol_search_meta_free(&meta2);
   snobol_pattern_free(p2);
   snobol_context_destroy(ctx);
 }
@@ -1168,6 +1204,7 @@ static void test_dispatch_order(void) {
   test_assert(ok, "dispatch: literal-only match");
   test_assert(d.last_skip_reason == SNOBOL_SEARCH_SKIP_LITERAL,
               "dispatch: Tier 2 literal-only path used");
+  snobol_search_meta_free(&m);
 
   /* Tier 3 (literal prefix): via non-literal-only pattern
    * Build LIT + LIT (two literals) — not literal-only but has prefix */

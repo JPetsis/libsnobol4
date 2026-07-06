@@ -346,6 +346,17 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
                                snobol_search_meta_t *out);
 
 /**
+ * @brief Free heap-allocated fields in a metadata struct.
+ *
+ * Must be called when a metadata struct is no longer needed and was
+ * populated by snobol_search_derive_meta(). Currently frees the
+ * bmh_skip table if allocated.
+ *
+ * @param meta  Metadata struct to clean up (NULL is safe).
+ */
+void snobol_search_meta_free(snobol_search_meta_t *meta);
+
+/**
  * Execute a single search over [subject, subject+subject_len) from
  * start_offset, returning the first non-overlapping match using one native C
  * control loop.

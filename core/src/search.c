@@ -1267,6 +1267,15 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   }
 }
 
+void snobol_search_meta_free(snobol_search_meta_t *meta) {
+  if (!meta)
+    return;
+  if (meta->bmh_skip) {
+    snobol_free(meta->bmh_skip);
+    meta->bmh_skip = NULL;
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * Internal: reset a VM for a fresh match attempt at the given position
  * within [subject, subject+subject_len).
