@@ -203,6 +203,8 @@ void snobol_pattern_free(snobol_pattern_t *pattern) {
     snobol_free(pattern->range_meta);
   if (pattern->automaton)
     snobol_dfa_free(pattern->automaton);
+  if (pattern->meta.bmh_skip)
+    snobol_free(pattern->meta.bmh_skip);
   snobol_free(pattern);
 }
 

@@ -50,6 +50,10 @@ static void php_snobol_pattern_dtor(zend_object *object) {
         compiler_free(intern->bc);
         intern->bc = NULL;
     }
+    if (intern->meta.bmh_skip) {
+        snobol_free(intern->meta.bmh_skip);
+        intern->meta.bmh_skip = NULL;
+    }
 
     zend_object_std_dtor(object);
     SNOBOL_LOG("php_snobol_pattern_dtor: done");
