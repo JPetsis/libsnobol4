@@ -8,6 +8,16 @@
  * pattern matching. This header provides the main API entry point,
  * re-exporting common types and functions for convenient single-include usage.
  *
+ * ## Reusable Match API
+ *
+ * For hot loops (e.g. searchSplit with 1000+ matches), use:
+ * - snobol_match_create(): allocate a reusable match object
+ * - snobol_pattern_search_reuse(): search using a caller-allocated match object
+ * - snobol_match_reset(): clear match state between reuse cycles
+ * - snobol_match_free(): release the match object
+ *
+ * This eliminates per-call malloc/free overhead (~30 ns per match).
+ *
  * @version 0.11.0
  */
 

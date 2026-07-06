@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Engine Consolidation
 
+### Added
+
+- **Tier dispatch function pointer table** (`core/src/search.c`): Replaced 8 sequential if-branches in `snobol_search_exec()` with single `tier_table[meta->tier]` dispatch. Pre-computed `tier` field in `snobol_search_meta_t` enables O(1) tier selection.
+- **`search_vm_t`** (`core/include/snobol/vm.h`): Lightweight VM state (~424 bytes) for Tier 1-7 execution. Excludes capture registers, variable registers, output buffer, and callback fields used by the full VM (~2500 bytes).
+- **Metadata bitfield flags** (`core/include/snobol/search.h`): `snobol_search_meta_t.flags` packs 16 boolean flags into `uint32_t` for single-word access. `uint8_t tier` field stores pre-computed tier index.
+- **BMH table on-demand** (`core/src/search.c`): `bmh_skip[256]` moved from inline metadata to heap-allocated pointer. Only allocated when `has_bmh_skip` is true. Reduces metadata copy from ~420 to ~200 bytes.
+- **Reusable match API** (`core/src/api.c`, `core/include/snobol/snobol.h`): `snobol_match_create()`, `snobol_match_reset()`, and `snobol_pattern_search_reuse()` for hot-loop scenarios. Eliminates per-call malloc/free overhead (~30 ns per match).
+- **`snobol_match_t` struct exposed** (`core/include/snobol/snobol.h`): Match result struct is now non-opaque, allowing callers to allocate on stack or reuse across calls.
+
 ### Removed
 
 - **All JIT subsystems**: SLJIT backend (`deps/sljit/`), method JIT (`core/src/jit.c`, `core/src/search.c` Tier 0), tracing JIT IR (`core/src/jit_ir.c`). JIT config, stats, lifecycle, and CI matrix fully eliminated.

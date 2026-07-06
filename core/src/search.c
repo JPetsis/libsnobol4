@@ -3482,17 +3482,25 @@ static bool tier_automaton(VM *vm, const char *subject, size_t subject_len,
                                meta, NULL, out_result, diag);
 }
 
-/** Tier dispatch table: index by meta->tier */
+/**
+ * Tier dispatch table: index by meta->tier for single-dispatch routing.
+ * Replaces the 8 sequential if-branches in the old snobol_search_exec().
+ *
+ * Each handler has uniform signature: tier_fn(VM*, subject, len, offset,
+ * meta, dfa, result, diag). Handlers for Tiers 1-5 bypass the VM entirely;
+ * Tier 6 uses the lightweight search_vm_t; Tier 7 uses the DFA automaton;
+ * Tier 8 uses the full SNOBOL4 VM.
+ */
 static const tier_fn tier_table[TIER_COUNT] = {
-  [TIER_BREAK_SCAN] = tier_break_scan,
-  [TIER_SPAN_SCAN]  = tier_span_scan,
-  [TIER_LITERAL]    = tier_literal_only,
-  [TIER_PREFIX]     = tier_literal_prefix,
-  [TIER_BITMAP]     = tier_bitmap,
-  [TIER_ALT_LIT]    = tier_alt_literals,
-  [TIER_SEARCH_VM]  = tier_search_vm,
-  [TIER_AUTOMATON]  = tier_automaton,
-  [TIER_GENERAL]    = tier_general_fallback,
+  [TIER_BREAK_SCAN] = tier_break_scan,     /* BREAK/BREAKX ASCII bitmap scan */
+  [TIER_SPAN_SCAN]  = tier_span_scan,      /* SPAN ASCII bitmap scan */
+  [TIER_LITERAL]    = tier_literal_only,   /* Literal-only (no VM) */
+  [TIER_PREFIX]     = tier_literal_prefix, /* Literal prefix (memmem/memchr) */
+  [TIER_BITMAP]     = tier_bitmap,         /* Candidate bitmap (single-char alt) */
+  [TIER_ALT_LIT]    = tier_alt_literals,   /* Alt-of-literals (trie) */
+  [TIER_SEARCH_VM]  = tier_search_vm,      /* Search-VM (backtracking NFA) */
+  [TIER_AUTOMATON]  = tier_automaton,      /* DFA automaton (O(n) scan) */
+  [TIER_GENERAL]    = tier_general_fallback,/* General VM fallback */
 };
 
 bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,

@@ -65,6 +65,18 @@ The `tokenize` scenario mimics the inner loop of `Pattern::searchSplit` —
 it advances one byte at a time through the subject, calling
 `snobol_pattern_search` at each position.
 
+### Performance targets
+
+| Scenario       | Baseline (ns) | Target (ns) | Notes                       |
+|----------------|---------------|-------------|-----------------------------|
+| `literal_fail` | 215           | <200        | Base overhead (no match)    |
+| `literal_ok`   | 214           | <200        | Base overhead (match found) |
+| `span_comma`   | 355           | <300        | SPAN bitmap scan            |
+| `automaton`    | 482           | <200        | DFA automaton               |
+
+The diagnostic probe (`snobol4_probe`) includes PCRE2 comparison scenarios
+for direct performance comparison.
+
 ### Output columns
 
 | Column         | Source                                    | Meaning                             |

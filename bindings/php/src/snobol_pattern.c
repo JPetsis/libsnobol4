@@ -146,6 +146,9 @@ PHP_METHOD(Snobol_Pattern, compileFromAst) {
     snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(return_value));
     intern->bc = bc;
     intern->bc_len = bc_len;
+    /* Cache search metadata at compile time */
+    snobol_search_derive_meta(bc, bc_len, &intern->meta);
+    intern->meta_initialized = true;
 
     SNOBOL_LOG("Snobol_Pattern::compileFromAst: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
 }
@@ -242,6 +245,9 @@ PHP_METHOD(Snobol_Pattern, fromString) {
     snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(return_value));
     intern->bc = bc;
     intern->bc_len = bc_len;
+    /* Cache search metadata at compile time */
+    snobol_search_derive_meta(bc, bc_len, &intern->meta);
+    intern->meta_initialized = true;
 
     SNOBOL_LOG("Snobol_Pattern::fromString: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
 }
@@ -283,9 +289,8 @@ PHP_METHOD(Snobol_Pattern, match) {
      * Only safe when there are NO position constraints (POS, RPOS) anywhere
      * in the bytecode, since we match at position 0 unconditionally. */
     {
-        snobol_search_meta_t meta;
-        snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
-        if (meta.is_literal_only) {
+        const snobol_search_meta_t *meta = &intern->meta;
+        if (meta->is_literal_only) {
             const uint8_t *bc = intern->bc;
             size_t bc_len = intern->bc_len;
             /* Scan entire bytecode for any POS/RPOS op — even after the
@@ -535,9 +540,8 @@ PHP_METHOD(Snobol_Pattern, subst) {
     size_t subject_len = ZSTR_LEN(subject);
     size_t last_match_end = 0;
 
-    /* Derive search metadata once for this pattern */
-    snobol_search_meta_t meta;
-    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+    /* Use cached metadata from compile time */
+    const snobol_search_meta_t *meta = &intern->meta;
 
     /* Core search loop */
     size_t search_offset = 0;
@@ -562,7 +566,7 @@ PHP_METHOD(Snobol_Pattern, subst) {
 
         snobol_search_result_t match_result;
         bool found = snobol_search_exec(&vm, subject_val, subject_len,
-                                         search_offset, &meta, NULL,
+                                         search_offset, meta, NULL,
                                          &match_result, NULL);
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
@@ -678,8 +682,8 @@ static void php_snobol_init_vm_for_search(VM *vm,
 void php_snobol_do_search_all(snobol_pattern_t *intern,
                                const char *subject_val, size_t subject_len,
                                zval *result) {
-    snobol_search_meta_t meta;
-    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+    /* Use cached metadata from compile time */
+    const snobol_search_meta_t *meta = &intern->meta;
 
     array_init(result);
     size_t search_offset = 0;
@@ -704,7 +708,7 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
 
         snobol_search_result_t match;
         bool found = snobol_search_exec(&vm, subject_val, subject_len,
-                                         search_offset, &meta, NULL,
+                                         search_offset, meta, NULL,
                                          &match, NULL);
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
@@ -808,11 +812,10 @@ PHP_METHOD(Snobol_Pattern, matchLiteral) {
         RETURN_FALSE;
     }
 
-    snobol_search_meta_t meta;
-    snobol_search_derive_meta(intern->bc, intern->bc_len, &meta);
+    const snobol_search_meta_t *meta = &intern->meta;
 
     array_init(return_value);
-    if (!meta.is_literal_only) {
+    if (!meta->is_literal_only) {
         add_assoc_bool(return_value, "success", 0);
         add_assoc_long(return_value, "position", 0);
         add_assoc_long(return_value, "length", 0);

@@ -6,6 +6,7 @@
 #endif
 
 #include "php.h"
+#include "snobol/search.h"
 
 /* Forward declare AST type to avoid circular dependency */
 typedef struct ast_node ast_node_t;
@@ -38,6 +39,12 @@ static zend_always_inline void snobol_assoc_zval(zval *arr, const char *key,
 typedef struct snobol_pattern {
     uint8_t *bc;
     size_t bc_len;
+    /* Cached search metadata (derived once at compile time) */
+    snobol_search_meta_t meta;
+    bool meta_initialized;
+    /* Cached charclass range metadata */
+    snobol_range_meta_t *range_meta;
+    size_t range_meta_count;
     zend_object std;
 } snobol_pattern_t;
 

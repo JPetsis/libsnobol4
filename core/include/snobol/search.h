@@ -10,6 +10,37 @@
  *
  * The search runtime is language-agnostic: it depends only on the compiled
  * bytecode, the VM structure, and standard C library primitives.
+ *
+ * ## Tier Dispatch
+ *
+ * Search execution is dispatched through a function pointer table indexed
+ * by meta->tier (snobol_search_tier_t). Each tier represents a matching
+ * strategy with different performance characteristics:
+ *
+ *   Tier 0: BREAK/BREAKX ASCII bitmap scan
+ *   Tier 1: SPAN ASCII bitmap scan
+ *   Tier 2: Literal-only fast path (no VM)
+ *   Tier 3: Literal prefix (memmem/memchr)
+ *   Tier 4: Candidate-set bitmap for single-char alternation
+ *   Tier 5: Alternation-of-literals (trie-based)
+ *   Tier 6: Search-VM (lightweight backtracking NFA)
+ *   Tier 7: DFA automaton (O(n) linear scan)
+ *   Tier 8: General VM fallback (full SNOBOL4 VM)
+ *
+ * ## search_vm_t
+ *
+ * Lightweight VM state (~424 bytes) for Tier 1-7 execution. Contains only
+ * the fields needed by the search-VM and specialized accelerators: bytecode
+ * pointer, subject pointer, instruction/position pointers, range metadata,
+ * choice stack, and loop counters. Excludes capture registers, variable
+ * registers, output buffer, and callback fields used by the full VM.
+ *
+ * ## Metadata Bitfield Flags
+ *
+ * snobol_search_meta_t.flags packs 16 boolean flags into a uint32_t for
+ * single-word access. Each flag corresponds to a META_* constant defined
+ * below. The tier field (uint8_t) stores the pre-computed tier index for
+ * single-dispatch routing via tier_table[meta->tier].
  */
 
 #include "snobol/snobol_attrs.h"
