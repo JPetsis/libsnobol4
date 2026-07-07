@@ -437,12 +437,12 @@ are exposed via `snobol_get_jit_stats()` / `snobol_reset_jit_stats()`.
 
 | Suite         | Tests | Assertions | Status   |
 |---------------|-------|------------|----------|
-| C Tests       | 1,615 | -          | ✅ Pass   |
-| PHP Tests     | 228   | 556        | ✅ Pass   |
+| C Tests       | 1,928 | -          | ✅ Pass   |
+| PHP Tests     | 349   | 680        | ✅ Pass   |
 | Compatibility | 26    | -          | ✅ Pass   |
 | Skipped       | 4     | -          | Expected |
 
-**Total:** 1,869 tests passing
+**Total:** 2,303 tests passing
 
 ## Case-Insensitive Matching
 
