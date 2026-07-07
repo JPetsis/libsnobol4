@@ -26,6 +26,7 @@
  *   Tier 6: Search-VM (lightweight backtracking NFA)
  *   Tier 7: DFA automaton (O(n) linear scan)
  *   Tier 8: General VM fallback (full SNOBOL4 VM)
+ *   Tier 9: SIMD Thompson NFA (AVX2/NEON-accelerated byte-parallel NFA)
  *
  * ## search_vm_t
  *
@@ -81,7 +82,8 @@ typedef enum {
   TIER_SEARCH_VM = 6,     /**< Search-VM for eligible patterns */
   TIER_AUTOMATON = 7,     /**< DFA automaton for eligible patterns */
   TIER_GENERAL = 8,       /**< General VM fallback with start-byte bitmap */
-  TIER_COUNT = 9          /**< Number of tiers (sentinel) */
+  TIER_SIMD_NFA = 9,      /**< SIMD-accelerated Thompson NFA for charclass patterns */
+  TIER_COUNT = 10         /**< Number of tiers (sentinel) */
 } snobol_search_tier_t;
 
 /* ---------------------------------------------------------------------------
@@ -106,6 +108,7 @@ typedef enum {
 #define META_HAS_BMH_SKIP         (1u << 13)
 #define META_IS_LITERAL_ONLY      (1u << 14)
 #define META_SEARCH_VM_ELIGIBLE   (1u << 15)
+#define META_SIMD_ELIGIBLE        (1u << 16)
 
 /* ---------------------------------------------------------------------------
  * Automaton (DFA) types
@@ -235,6 +238,13 @@ typedef struct {
    * DYNAMIC, TABLE_*, ARRAY_*, GOTO, GOTO_F, LABEL, BAL, REM, BREAKX are
    * NOT eligible. */
   bool search_vm_eligible;
+
+  /* SIMD NFA eligibility -------------------------------------------------- */
+  /* True when the pattern is eligible for the SIMD-accelerated NFA path:
+   * ASCII-only character-class operations (SPAN, BREAK, ANY, NOTANY) with
+   * no side effects, captures, or complex control flow.  Patterns that pass
+   * are routed to Tier 9 (TIER_SIMD_NFA). */
+  bool simd_eligible;
 } snobol_search_meta_t;
 
 /* ---------------------------------------------------------------------------
@@ -260,6 +270,7 @@ typedef struct {
 #define snobol_meta_has_bmh_skip(m)        (!!((m)->flags & META_HAS_BMH_SKIP))
 #define snobol_meta_is_literal_only(m)     (!!((m)->flags & META_IS_LITERAL_ONLY))
 #define snobol_meta_search_vm_eligible(m)  (!!((m)->flags & META_SEARCH_VM_ELIGIBLE))
+#define snobol_meta_simd_eligible(m)       (!!((m)->flags & META_SIMD_ELIGIBLE))
 
 /**
  * @brief Set a flag bit in metadata flags.
@@ -269,6 +280,11 @@ typedef struct {
  * @param m     Pointer to metadata struct.
  * @param flag  Flag constant (META_*).
  */
+/* Verify tier field is within the first cache line (64 bytes)
+ * so that dispatch decisions don't pull in the full metadata struct. */
+_Static_assert(offsetof(snobol_search_meta_t, tier) < 64,
+               "tier field must be within first 64 bytes of snobol_search_meta_t");
+
 static inline void snobol_meta_set_flag(snobol_search_meta_t *m, uint32_t flag) {
   m->flags |= flag;
 }
@@ -398,6 +414,42 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len, const VM *vm);
 
 /* Forward declaration — complete type in snobol/snobol.h */
 struct snobol_pattern;
+
+/**
+ * Check whether a pattern is eligible for SIMD NFA execution.
+ *
+ * Returns true when the bytecode contains only character-class ops
+ * (SPAN, BREAK, ANY, NOTANY) with no side effects, captures, or
+ * complex control flow.  All character classes must be ASCII-only.
+ *
+ * @param bc      Compiled bytecode buffer
+ * @param bc_len  Bytecode length
+ * @return true if the pattern is SIMD-eligible
+ */
+bool check_simd_eligible(const uint8_t *bc, size_t bc_len);
+
+/**
+ * Tier 9: SIMD-accelerated Thompson NFA entry point.
+ *
+ * Processes eligible character-class patterns (SPAN, BREAK, ANY, NOTANY with
+ * ASCII-only ranges) using SIMD instructions when available, falling back to
+ * a scalar reference implementation for short subjects and non-SIMD platforms.
+ *
+ * @param vm           VM with bc/bc_len set for the pattern
+ * @param subject      Subject string
+ * @param subject_len  Subject length
+ * @param start_offset Search start offset
+ * @param meta         Pre-derived metadata (unused, must be non-NULL)
+ * @param dfa          Unused (must be NULL)
+ * @param out_result   Match result
+ * @param diag         Diagnostics (may be NULL)
+ * @return true when a match is found
+ */
+bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
+                   size_t start_offset, const snobol_search_meta_t *meta,
+                   const snobol_dfa_t *dfa,
+                   snobol_search_result_t *out_result,
+                   snobol_search_diag_t *diag);
 
 /**
  * Free a DFA allocated by build_dfa().

@@ -172,17 +172,17 @@ These primitives give the pattern author fine-grained control over backtracking 
 
 ## Performance Comparison
 
-Benchmark results from `snobol4_probe` (diagnostic probe):
+Benchmark results from `snobol4_probe` (diagnostic probe, 100k iterations):
 
 | Scenario         | SNOBOL4 (ns) | PCRE2 (ns) | Ratio                 |
 |------------------|--------------|------------|-----------------------|
-| Literal match    | 202          | 36         | 5.6×                  |
-| SPAN comma (CSV) | 287          | 30         | 9.6×                  |
-| Alternation      | 241          | 30         | 8.0×                  |
+| Literal match    | 183          | 36         | 5.1×                  |
+| SPAN comma (CSV) | 269          | 30         | 9.0×                  |
+| Alternation      | 237          | 31         | 7.6×                  |
 | Search+Replace   | 35           | 2,558,000  | 0.00001× (50× faster) |
 
 **Where SNOBOL4 wins**: Search+Replace is 50× faster because capture substitution is native. SNOBOL4 patterns are more readable for complex string manipulation.
 
-**Where PCRE2 wins**: Pure matching is 3-18× faster due to JIT-compiled native code. PCRE2's per-byte dispatch cost (~1 ns) is lower than SNOBOL4's interpreter dispatch (~5-15 ns).
+**Where PCRE2 wins**: Pure matching is 5-9× faster due to JIT-compiled native code. PCRE2's per-byte dispatch cost (~1 ns) is lower than SNOBOL4's interpreter dispatch (~5-15 ns).
 
-**SNOBOL4 optimization**: Tier dispatch via function pointer table, `search_vm_t` lightweight VM state, and metadata bitfield flags reduce base overhead to ~200 ns per search invocation.
+**SNOBOL4 optimization**: Tier dispatch via function pointer table, `search_vm_t` lightweight VM state, metadata bitfield flags, and SIMD-accelerated Thompson NFA (Tier 9) reduce base overhead. SIMD accelerates SPAN, BREAK, ANY, and NOTANY patterns on subjects >16 bytes.

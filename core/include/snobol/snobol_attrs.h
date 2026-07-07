@@ -42,3 +42,14 @@
 #define SNOBOL_MAYBE_UNUSED
 #endif
 #endif
+
+/* ── SNOBOL_ALWAYS_INLINE / SNOBOL_FORCE_INLINE ────────────────────────── */
+#ifndef SNOBOL_ALWAYS_INLINE
+#if defined(__GNUC__) || defined(__clang__)
+#define SNOBOL_ALWAYS_INLINE __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define SNOBOL_ALWAYS_INLINE __forceinline
+#else
+#define SNOBOL_ALWAYS_INLINE inline
+#endif
+#endif

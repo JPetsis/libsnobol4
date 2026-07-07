@@ -524,6 +524,21 @@ bool ranges_to_ascii_bitmap(const uint8_t *ranges_ptr, size_t count,
                             uint64_t map[2]);
 
 /**
+ * @brief Build a 256-bit byte-level bitmap from range data; supports the full
+ * 0-255 byte range (UTF-8 safe).
+ *
+ * Each bit position corresponds to a byte value (bit 0 → byte 0x00,
+ * bit 255 → byte 0xFF).  Returns false if any range exceeds 255.
+ *
+ * @param[in]  ranges_ptr  Range data from get_ranges_ptr().
+ * @param[in]  count       Number of ranges.
+ * @param[out] map         Output 4×uint64 bitmap (256 bits).
+ * @return true if all codepoints fit in [0, 255]; false otherwise.
+ */
+bool ranges_to_full_bitmap(const uint8_t *ranges_ptr, size_t count,
+                           uint64_t map[4]);
+
+/**
  * @brief Test whether a codepoint is contained in a packed range array.
  * @param[in] ranges_ptr  Range data from get_ranges_ptr().
  * @param[in] count       Number of ranges.
@@ -540,6 +555,12 @@ static inline bool bitmap_test(const uint64_t map[2], uint8_t c) {
   if (c < 64)
     return (map[0] & (1ULL << c)) != 0;
   return (map[1] & (1ULL << (c - 64))) != 0;
+}
+
+/** @brief Test bit @p c in a 256-bit byte-level bitmap. */
+static inline bool bitmap_test_256(const uint64_t map[4], uint8_t c) {
+  unsigned idx = (unsigned)c >> 6;
+  return (map[idx] & (1ULL << (c & 63))) != 0;
 }
 
 /* VM entry */

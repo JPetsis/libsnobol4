@@ -197,6 +197,13 @@ static const char *SUBJECT_ALTLIT =
     "the cat went dog walking fox jumped cat over dog near fox "
     "the cat went dog walking fox jumped cat over dog near fox ";
 
+/* 1KB subject: all digits except last byte → SPAN('0-9') scans 1023 bytes */
+static char SUBJECT_SIMD_SPAN[1024];
+static void init_simd_subjects(void) {
+    memset(SUBJECT_SIMD_SPAN, '0', 1023);
+    SUBJECT_SIMD_SPAN[1023] = 'x';  /* non-digit terminator */
+}
+
 /* Compile a pattern; abort on failure. */
 static snobol_pattern_t *compile_or_die(snobol_context_t *ctx,
                                          const char *src, size_t len) {
@@ -454,6 +461,54 @@ static void run_automaton(int64_t iters, probe_result_t *r) {
 }
 
 /* ---------------------------------------------------------------------------
+ * SIMD-focused scenarios — long subjects where SIMD scanning matters
+ * --------------------------------------------------------------------------- */
+
+/* SPAN('0-9') on 1KB of digits: SIMD scans 1023 bytes (Tier 9 on NEON/AVX2) */
+static void run_span_simd(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "SPAN('0-9')", 11);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_SIMD_SPAN, 1024);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+/* SPAN('0-9') on 1KB of letters: SIMD quickly determines no match */
+static void run_span_simd_miss(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "SPAN('0-9')", 11);
+
+    fprintf(stderr, "[DBG bench] run_span_simd_miss: bc_len=%zu SUBJECT_NO_PQR[0]='%c'\n",
+            snobol_pattern_get_bc_len(pat),
+            SUBJECT_NO_PQR[0]);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_NO_PQR, 1024);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+/* ---------------------------------------------------------------------------
  * PCRE2 comparison scenarios (only when PCRE2 is available)
  * --------------------------------------------------------------------------- */
 
@@ -594,6 +649,42 @@ static void run_pcre2_tokenize(int64_t iters, probe_result_t *r) {
     r->iters = total_search_calls;
     r->total_ns = end - start;
     r->ns_per_iter = (total_search_calls > 0) ? (r->total_ns / total_search_calls) : 0;
+
+    pcre2_match_data_free(md);
+    pcre2_code_free(re);
+}
+
+static void run_pcre2_span_simd(int64_t iters, probe_result_t *r) {
+    pcre2_code *re = pcre2_compile_or_die("[0-9]+", 0);
+    pcre2_match_data *md = pcre2_match_data_create_from_pattern(re, NULL);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        pcre2_match(re, (PCRE2_SPTR)SUBJECT_SIMD_SPAN, 1024, 0, 0, md, NULL);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    pcre2_match_data_free(md);
+    pcre2_code_free(re);
+}
+
+static void run_pcre2_span_simd_miss(int64_t iters, probe_result_t *r) {
+    pcre2_code *re = pcre2_compile_or_die("[0-9]+", 0);
+    pcre2_match_data *md = pcre2_match_data_create_from_pattern(re, NULL);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        pcre2_match(re, (PCRE2_SPTR)SUBJECT_NO_PQR, 1024, 0, 0, md, NULL);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
 
     pcre2_match_data_free(md);
     pcre2_code_free(re);
@@ -799,14 +890,16 @@ int main(void) {
     int64_t tokenize_iters = iters / 10;
     if (tokenize_iters < 1) tokenize_iters = 1;
 
+    init_simd_subjects();
+
     print_header();
     printf("Iterations per scenario: %" PRId64 " (override with PROBE_ITERS)\n",
            iters);
     printf("Tokenize uses %" PRId64 " outer iters (multi-pass of subject).\n\n",
            tokenize_iters);
 
-    /* Total scenarios: 9 snobol + 7 PCRE2 (when available) = 16 */
-    probe_result_t results[16];
+    /* Total scenarios: 11 snobol + 9 PCRE2 (when available) = 20 */
+    probe_result_t results[20];
     memset(results, 0, sizeof(results));
 
     /* Run each scenario */
@@ -824,6 +917,8 @@ int main(void) {
         { "alt_literals",        run_alt_literals,        iters            },
         { "alt_literals_search", run_alt_literals_search, iters            },
         { "automaton",           run_automaton,           iters            },
+        { "span_simd",           run_span_simd,           iters            },
+        { "span_simd_miss",      run_span_simd_miss,      iters            },
         { "tokenize",            run_tokenize,            tokenize_iters   },
 #ifdef HAVE_PCRE2
         { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            },
@@ -831,6 +926,8 @@ int main(void) {
         { "pcre2_span_comma",    run_pcre2_span_comma,    iters            },
         { "pcre2_alternation",   run_pcre2_alternation,   iters            },
         { "pcre2_alt_literals",  run_pcre2_alt_literals,  iters            },
+        { "pcre2_span_simd",     run_pcre2_span_simd,     iters            },
+        { "pcre2_span_simd_miss",run_pcre2_span_simd_miss, iters           },
         { "pcre2_tokenize",      run_pcre2_tokenize,      tokenize_iters   },
 #endif
     };

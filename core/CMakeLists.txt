@@ -20,6 +20,7 @@ set(_core_sources
     src/type_fn.c
     src/pattern_build.c
     src/search.c
+    src/search_simd.c
     src/unicode_fold.c
     src/api.c
 )
@@ -67,6 +68,13 @@ else()
         -Wno-implicit-int-conversion
         -Wno-shorten-64-to-32
     )
+endif()
+
+# SIMD compiler flags for accelerated search tiers (AVX2 on x86-64)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+  target_compile_options(snobol4 PRIVATE -mavx2)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|ARM64)$")
+  target_compile_options(snobol4 PRIVATE -march=armv8.2-a+simd)
 endif()
 
 # Optional: Enable VM profiling

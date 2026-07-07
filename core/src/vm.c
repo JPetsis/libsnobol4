@@ -278,6 +278,29 @@ bool ranges_to_ascii_bitmap(const uint8_t *ranges_ptr, size_t count,
   return true;
 }
 
+bool ranges_to_full_bitmap(const uint8_t *ranges_ptr, size_t count,
+                           uint64_t map[4]) {
+  map[0] = map[1] = map[2] = map[3] = 0;
+  for (size_t i = 0; i < count; ++i) {
+    size_t offset = i * 8;
+    uint32_t start = ((uint32_t)ranges_ptr[offset + 0] << 24) |
+                     ((uint32_t)ranges_ptr[offset + 1] << 16) |
+                     ((uint32_t)ranges_ptr[offset + 2] << 8) |
+                     (uint32_t)ranges_ptr[offset + 3];
+    uint32_t end = ((uint32_t)ranges_ptr[offset + 4] << 24) |
+                   ((uint32_t)ranges_ptr[offset + 5] << 16) |
+                   ((uint32_t)ranges_ptr[offset + 6] << 8) |
+                   (uint32_t)ranges_ptr[offset + 7];
+    if (start > 255 || end > 255)
+      return false;
+    for (uint32_t c = start; c <= end; ++c) {
+      unsigned idx = (unsigned)c >> 6;
+      map[idx] |= (1ULL << ((unsigned)c & 63));
+    }
+  }
+  return true;
+}
+
 bool range_contains(const uint8_t *ranges_ptr, size_t count, uint32_t cp) {
   size_t lo = 0, hi = count;
   while (lo < hi) {

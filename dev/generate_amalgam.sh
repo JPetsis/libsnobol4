@@ -35,6 +35,7 @@ CORE_FILES=(
     "type_fn.c"
     "pattern_build.c"
     "search.c"
+    "search_simd.c"
     "api.c"
 )
 

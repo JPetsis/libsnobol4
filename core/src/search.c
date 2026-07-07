@@ -17,6 +17,7 @@
 #include "snobol/search.h"
 #include "snobol/snobol.h"
 #include "snobol/snobol_internal.h"
+#include "snobol/simd.h"
 #include "snobol/vm.h"
 
 /* ---- Internal pattern accessors (implemented in api.c) ---- */
@@ -28,6 +29,7 @@ extern const snobol_search_meta_t *snobol_pattern_get_meta(
     const snobol_pattern_t *pattern);
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1190,6 +1192,9 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   /* ---- Search-VM eligibility ---- */
   out->search_vm_eligible = check_search_vm_eligible(bc, bc_len);
 
+  /* ---- SIMD NFA eligibility ---- */
+  out->simd_eligible = check_simd_eligible(bc, bc_len);
+
   /* ---- Start-byte bitmap & minimum match length ---- */
   {
     VM bm_vm;
@@ -1220,6 +1225,7 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   if (out->has_bmh_skip)          out->flags |= META_HAS_BMH_SKIP;
   if (out->is_literal_only)       out->flags |= META_IS_LITERAL_ONLY;
   if (out->search_vm_eligible)    out->flags |= META_SEARCH_VM_ELIGIBLE;
+  if (out->simd_eligible)         out->flags |= META_SIMD_ELIGIBLE;
 
   /* ---- Compute tier index from flags ---- */
   if (out->is_break_family && out->ascii_class_only)
@@ -1234,6 +1240,8 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     out->tier = TIER_BITMAP;
   else if (out->is_alt_literals)
     out->tier = TIER_ALT_LIT;
+  else if (out->simd_eligible)
+    out->tier = TIER_SIMD_NFA;
   else if (out->search_vm_eligible)
     out->tier = TIER_SEARCH_VM;
   else if (out->automaton_eligible)
@@ -3388,7 +3396,7 @@ static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
 }
 
 /* Tier 8: General VM fallback with start-byte bitmap acceleration */
-static bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
+bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
                                   size_t start_offset, const snobol_search_meta_t *meta,
                                   const snobol_dfa_t *dfa,
                                   snobol_search_result_t *out_result,
@@ -3503,9 +3511,11 @@ static const tier_fn tier_table[TIER_COUNT] = {
   [TIER_SEARCH_VM]  = tier_search_vm,      /* Search-VM (backtracking NFA) */
   [TIER_AUTOMATON]  = tier_automaton,      /* DFA automaton (O(n) scan) */
   [TIER_GENERAL]    = tier_general_fallback,/* General VM fallback */
+  [TIER_SIMD_NFA]   = tier_simd_nfa,       /* SIMD-accelerated Thompson NFA */
 };
 
-bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
+bool snobol_search_exec(VM *vm, const char *subject,
+                        size_t subject_len,
                         size_t start_offset, const snobol_search_meta_t *meta,
                         const snobol_dfa_t *dfa,
                         snobol_search_result_t *out_result,
@@ -3526,14 +3536,56 @@ bool snobol_search_exec(VM *vm, const char *subject, size_t subject_len,
     meta = &local_meta;
   }
 
-  /* If caller provided a DFA, force automaton tier regardless of meta->tier.
-   * This preserves the caller's intent: passing a DFA means "use it". */
-  if (dfa && meta->automaton_eligible) {
-    return tier_table[TIER_AUTOMATON](vm, subject, subject_len, start_offset,
-                                      meta, dfa, out_result, diag);
+  /* Lazy VM initialization: zero only the fields needed by the selected tier.
+   * Tiers 0-5 bypass the VM entirely, so no initialization is needed.
+   * Tiers 6-7 use the lightweight search_vm_t and need minimal setup.
+   * Tier 8+ uses the full VM and relies on caller-provided bc/bc_len.
+   * Tier 9 (SIMD NFA) uses its own internal state from the bytecode;
+   * it needs only vm->bc and vm->bc_len which the caller has set. */
+  if (meta->tier <= TIER_ALT_LIT) {
+    /* Tiers 0-5: no VM fields needed */
+  } else if (meta->tier <= TIER_AUTOMATON) {
+    /* Tiers 6-7: minimal search_vm_t fields */
+    vm->ip = 0;
+    vm->pos = 0;
+    vm->var_count = 0;
+    vm->max_cap_used = 0;
+    vm->max_counter_used = 0;
+    vm->choices_top = 0;
   }
 
-  /* Single-dispatch via tier function pointer table */
+  /* If caller provided a DFA, consider automaton acceleration.
+    * The automaton's per-offset trial loop is O(n) per position — harmless
+    * when BMH skip is available (advances several bytes per try), but O(n^2)
+    * when every byte is tried individually for patterns with NO literal
+    * structure (pure SPAN/BREAK on failing subjects).
+    *
+    * Enable the automaton when:
+    *  - The pattern has BMH skip (literal prefix ≥ 2 bytes makes the
+    *    per-position trial O(n) overall instead of O(n²)), or
+    *  - The pattern is NOT a pure SPAN/BREAK (simd_eligible=false) AND
+    *    would need the full VM anyway (tier ≥ TIER_SEARCH_VM).
+    *
+    * Pure SPAN/BREAK patterns (simd_eligible=true, any tier) skip the
+    * automaton: the O(n) bitmap or SIMD NFA scan is faster and avoids
+    * the O(n²) per-position automaton trial loop. */
+  if (dfa && meta->automaton_eligible &&
+      (meta->has_bmh_skip ||
+       (!meta->simd_eligible && meta->tier >= TIER_SEARCH_VM))) {
+    return tier_table[TIER_AUTOMATON](vm, subject, subject_len, start_offset,
+                                       meta, dfa, out_result, diag);
+  }
+
+  /* NOTE: Runtime SIMD override (Tier 9) is not yet enabled. The SIMD NFA
+   * infrastructure exists in search_simd.c (build_nfa_masks + NEON/AVX2/scalar
+   * exec) but the anchored per-position loop in tier_simd_nfa() makes it
+   * O(n^2) for failing matches — slower than the O(n) bitmap scan for
+   * BREAK/SPAN patterns.  Enable once tier_simd_nfa() supports true
+   * multi-position SIMD scanning. */
+
+  /* Direct tier dispatch for remaining common tiers — use __builtin_expect
+   * to hint the hottest paths. The fast-path tiers above (0/1 overridden to 9)
+   * are handled by the dispatcher below when the subject is too short for SIMD. */
   return tier_table[meta->tier](vm, subject, subject_len, start_offset,
                                 meta, dfa, out_result, diag);
 }

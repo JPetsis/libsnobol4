@@ -913,8 +913,10 @@ static void test_search_vm_correctness(void) {
     snobol_search_diag_t d;
     bool ok = snobol_search_exec(&vm, "1abc", 4, 0, &m, NULL, &r, &d);
     test_assert(ok, "search-vm: NOTANY matches non-alpha at offset 0");
-    test_assert(d.search_vm_tests > 0,
-                "search-vm: NOTANY routed through Tier 7");
+    /* NOTANY may route through Tier 9 (SIMD NFA) when simd_eligible, or
+     * through Tier 7 (search-VM) otherwise.  Either is correct. */
+    test_assert(d.search_vm_tests > 0 || m.simd_eligible,
+                "NOTANY routed through Tier 7 or Tier 9");
 
     if (rm) free((void*)rm);
     free(vm.choices);
