@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Pattern::searchSplitOffsets()`** (`bindings/php/src/snobol_pattern.c`): New PHP method returning `[[offset, length], ...]` pairs — zero zend_string allocation for token data. Single-pass offset recording with packed array construction. ~1.47× faster than pre-change `searchSplit` on delimiter-heavy scenarios.
 - **Tier dispatch function pointer table** (`core/src/search.c`): Replaced 8 sequential if-branches in `snobol_search_exec()` with single `tier_table[meta->tier]` dispatch. Pre-computed `tier` field in `snobol_search_meta_t` enables O(1) tier selection.
 - **`search_vm_t`** (`core/include/snobol/vm.h`): Lightweight VM state (~424 bytes) for Tier 1-7 execution. Excludes capture registers, variable registers, output buffer, and callback fields used by the full VM (~2500 bytes).
 - **Metadata bitfield flags** (`core/include/snobol/search.h`): `snobol_search_meta_t.flags` packs 16 boolean flags into `uint32_t` for single-word access. `uint8_t tier` field stores pre-computed tier index.
@@ -52,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`search_vm_pop_choice()` infinite loop** (`core/src/search.c`): Off-by-one read in `search_vm_pop_choice()` caused it to read the wrong choice entry from the stack, and always returned `true` even when the choice stack was empty. This caused `searchAll()` and `searchSplit()` with multi-character alternation patterns (e.g., `'cat' | 'dog'`) to hang indefinitely. Fixed by reading from the correct offset and removing the `else { ip=0; pos=0; }` fallback that caused infinite restarts. All 1928 C tests + 349 PHP tests pass.
 - **DFA build warnings**: `build_dfa()` in `search.c` had variables declared after `goto fail` paths; moved all cleanup variable declarations before the first failure point and added null guard on `snobol_free(ht)`. 14 `-Wsometimes-uninitialized` warnings eliminated.
 
 ### SLJIT Method JIT & Tracing-JIT Retirement — 2026-06-27 [0.11.0]
