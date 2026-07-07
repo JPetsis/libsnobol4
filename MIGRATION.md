@@ -5,7 +5,7 @@ monorepo structure.
 
 ---
 
-## v0.11.0 → v0.12.0 (SLJIT Method JIT)
+## v0.11.0 → v0.12.0 (JIT Retirement & Search Engine Consolidation)
 
 ### No breaking changes
 
@@ -14,63 +14,63 @@ All existing consumers require no code changes.
 
 ### Behaviour changes consumers should be aware of
 
-- **SLJIT is the only JIT backend** (`-DSNOBOL_JIT_BACKEND=sljit`, default).  The four
-  architecture-specific backends (ARM64, ARM32, RISC-V 64, x86-64) have been retired.
-  All existing CMake build configurations using `arm64`, `arm32`, `riscv64`, or `x86_64`
-  will produce a CMake `FATAL_ERROR`.  Remove the `-DSNOBOL_JIT_BACKEND` flag or set it
-  to `sljit` explicitly.
-- **Method JIT replaces per-trace JIT** (always-on under `SNOBOL_JIT`).  The method JIT
-  compiles entire patterns into a single native function via SLJIT on the first match,
-  then caches the compiled function.  Previously, the tracing JIT compiled hot bytecode
-  regions per-IP after multiple executions.
-- **`SnobolJitContext` removed** — the JIT context struct, `snobol_jit_acquire_context()`,
-  and `snobol_jit_release_context()` no longer exist.  The method cache replaces the
-  per-IP trace cache.
-- **JIT stats renamed**: `jit_entries_total` → method-JIT stats (`jit_method_attempts_total`,
-  `jit_method_successes_total`, `jit_method_fallbacks_total`, `jit_method_evictions_total`).
-  Old `jit_bailouts_total`, `jit_exec_time_ns_total`, `jit_interp_time_ns_total` and
-  other tracing-JIT counters have been removed.  Update any monitoring code to use the
-  new stat names.
-- **`SnobolJitConfig` simplified** to three fields: `method_enabled`, `max_compiled_patterns`,
-  `scratch_size`.  Old fields (`hotness_threshold`, `max_exit_rate_pct`, `compile_budget_ns`,
-  `cache_max_entries`, `min_useful_ops`, `skip_backtrack_heavy`, `search_hotness_threshold`,
-  `search_min_useful_ops`) have been removed.
-- **Compiler fusion passes no longer apply** to the method JIT path. The method JIT
-  compiles the raw bytecode as emitted by the compiler. Post-compilation optimization
-  (DCE, copy propagation, GVN, LICM) runs on the architecture-neutral IR in the JIT
-  pipeline itself.
-- **`SNOBOL_JIT_METHOD` environment variable** is no longer used; method JIT is always-on
-  under `SNOBOL_JIT=1`.  Toggle it via `SnobolJitConfig.method_enabled` at runtime.
-- **Uncompilable patterns**: patterns containing `SPAN`, `BREAK`, `BREAKX`, `SPLIT`,
-  `ASSIGN`, `REPEAT_*`, `EMIT_EXPR/FORMAT/TABLE`, `TABLE_GET/SET`, or `DYNAMIC` now
-  fall back to the VM interpreter at all times (the IR lifter marks them non-compilable).
-  Previously, the tracing JIT compiled them as call-outs with potential bailouts.
+- **All JIT subsystems removed**: SLJIT backend, method JIT, tracing JIT IR, JIT config,
+  stats, lifecycle, and CI matrix have been fully eliminated. The `-DSNOBOL_JIT` CMake
+  option is ignored. Patterns that previously benefited from JIT compilation now execute
+  through the multi-tier search engine (Tiers 0–9).
+- **JIT-related public API removed**: `snobol_jit_config_t`, `snobol_jit_stats_t`,
+  `snobol_get_jit_stats()`, `snobol_jit_acquire_context()`, `snobol_jit_release_context()`,
+  and `SNOBOL_FLAG_SEARCH_MODE` no longer exist. Update any monitoring code that referenced
+  these symbols.
+- **JIT fields removed from VM struct**: `ip_counts`, `traces`, `ctx`, `jit_region` are
+  gone from the `VM` struct.
+- **JIT tests and CI removed**: `tests/c/test_jit*.c`, `.github/workflows/jit*.yml`, and
+  QEMU Dockerfiles have been deleted.
+- **Build options simplified**: `SNOBOL_JIT`, `SNOBOL_JIT_BACKEND`, `SNOBOL_JIT_METHOD`,
+  and `SNOBOL_JIT_DUMP_IR` CMake options are no longer recognized.
+
+### New: Multi-tier search engine (Tiers 0–9)
+
+The search engine now auto-selects the optimal matching strategy via a function pointer
+table (`tier_table[meta->tier]`). Pre-computed tier metadata is stored in
+`snobol_search_meta_t.tier` at compile time. Key tiers:
+
+| Tier | Name | Description |
+|------|------|-------------|
+| 0 | `BREAK_SCAN` | BREAK/BREAKX ASCII bitmap scan |
+| 1 | `SPAN_SCAN` | SPAN ASCII bitmap scan |
+| 2 | `LITERAL` | Pure literal (memcmp) |
+| 3 | `PREFIX` | Literal prefix (memmem + BMH skip) |
+| 4 | `BITMAP` | Single-char alternation (candidate bitmap) |
+| 5 | `ALT_LIT` | Alt-of-literals (trie) |
+| 6 | `SEARCH_VM` | Lightweight backtracking NFA (~424 bytes) |
+| 7 | `AUTOMATON` | DFA via powerset construction |
+| 8 | `GENERAL` | Full SNOBOL4 VM fallback |
+| 9 | `SIMD_NFA` | SIMD Thompson NFA (AVX2/NEON) |
+
+### New: `Pattern::searchSplitOffsets()` (PHP)
+
+Returns `[[offset, length], ...]` pairs instead of segment strings. Zero zend_string
+allocation. Useful when you need positions for further processing without creating
+intermediate string objects.
 
 ### Migration Steps
 
-1. **Update CMake configuration**: remove `-DSNOBOL_JIT_BACKEND=arm64` (or other arch)
-   or set it to `-DSNOBOL_JIT_BACKEND=sljit`.  SLJIT is the default, so omitting the
-   flag entirely also works.
-
-2. **Update JIT monitoring code**: replace references to old stat names with the new
-   method-JIT names:
+1. **Remove JIT CMake flags** if present:
    ```diff
-   - $stats['jit_entries_total']
-   + $stats['jit_method_attempts_total']
+   - cmake -B build -DSNOBOL_JIT=ON -DSNOBOL_JIT_BACKEND=sljit
+   + cmake -B build
    ```
 
-3. **Remove calls to removed APIs**:
+2. **Remove JIT code** from custom builds:
    ```diff
-   - snobol_jit_acquire_context()
-   - snobol_jit_release_context()
-   - config->hotness_threshold = 100;  // removed
-   + config->method_enabled = true;     // new API
+   - #include <snobol/jit.h>
+   - snobol_jit_config_t config = {...};
+   - snobol_jit_stats_t stats;
+   - snobol_get_jit_stats(&stats);
    ```
 
-4. **Test fallback patterns**: patterns with `SPAN`, `BREAK`, `SPLIT`, or `ASSIGN` now
-   always use the VM interpreter. If your application relies on these being JIT-compiled
-   for performance, file an issue — these opcodes are candidates for future SLJIT backend
-   implementation.
+3. **No PHP code changes needed** — the PHP binding API is unchanged.
 
 ---
 
