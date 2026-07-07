@@ -451,6 +451,90 @@ class PatternTest extends TestCase
         $this->assertEquals("Boston", $table->get("city"));
     }
 
+    // === searchSplitOffsets tests ===
+
+    public function testSearchSplitOffsetsCommaSeparated(): void
+    {
+        $pattern = PatternHelper::fromString("','");
+        $result = $pattern->searchSplitOffsets("a,b,c");
+        $this->assertIsArray($result);
+        $this->assertCount(3, $result);
+        $this->assertSame([0, 1], $result[0]);
+        $this->assertSame([2, 1], $result[1]);
+        $this->assertSame([4, 1], $result[2]);
+    }
+
+    public function testSearchSplitOffsetsEmptySubject(): void
+    {
+        $pattern = PatternHelper::fromString("','");
+        $result = $pattern->searchSplitOffsets("");
+        $this->assertIsArray($result);
+        $this->assertCount(1, $result);
+        $this->assertSame([0, 0], $result[0]);
+    }
+
+    public function testSearchSplitOffsetsNoMatch(): void
+    {
+        $pattern = PatternHelper::fromString("'x'");
+        $result = $pattern->searchSplitOffsets("hello");
+        $this->assertIsArray($result);
+        $this->assertCount(1, $result);
+        $this->assertSame([0, 5], $result[0]);
+    }
+
+    public function testSearchSplitOffsetsZeroLengthMatch(): void
+    {
+        $pattern = PatternHelper::fromString("''");
+        $result = $pattern->searchSplitOffsets("abc");
+        $this->assertIsArray($result);
+        // Empty pattern matches at position 0 (zero-length), advances by 1
+        // So we get segments at [0,1]=0, [1,1]=1, [2,1]=2, [3,0]=empty
+        // Empty pattern matches at positions 0,1,2,3 (including end)
+        // giving 5 segments (before each match + trailing)
+        $this->assertCount(5, $result);
+        // Segments: "" (0→0), "a" (0→1), "b" (1→2), "c" (2→3), "" (3→3)
+        $this->assertSame([0, 0], $result[0]);
+        $this->assertSame([0, 1], $result[1]);
+        $this->assertSame([1, 1], $result[2]);
+        $this->assertSame([2, 1], $result[3]);
+        $this->assertSame([3, 0], $result[4]);
+    }
+
+    public function testSearchSplitOffsetsTrailingSegment(): void
+    {
+        $pattern = PatternHelper::fromString("','");
+        $result = $pattern->searchSplitOffsets("a,b,");
+        $this->assertIsArray($result);
+        $this->assertCount(3, $result);
+        // "a", "b", ""
+        $this->assertSame([0, 1], $result[0]);
+        $this->assertSame([2, 1], $result[1]);
+        $this->assertSame([4, 0], $result[2]);
+    }
+
+    public function testSearchSplitOffsetsMultipleMatches(): void
+    {
+        $pattern = PatternHelper::fromString("' '");
+        $result = $pattern->searchSplitOffsets("a b c d e");
+        $this->assertIsArray($result);
+        $this->assertCount(5, $result);
+        $this->assertSame([0, 1], $result[0]);
+        $this->assertSame([2, 1], $result[1]);
+        $this->assertSame([4, 1], $result[2]);
+        $this->assertSame([6, 1], $result[3]);
+        $this->assertSame([8, 1], $result[4]);
+    }
+
+    public function testSearchSplitOffsetsWithSpanPattern(): void
+    {
+        $pattern = PatternHelper::fromString("SPAN(' ')");
+        $result = $pattern->searchSplitOffsets("a  b   c");
+        $this->assertIsArray($result);
+        $this->assertGreaterThanOrEqual(3, count($result));
+        // First segment "a" at [0,1], then "b" at some offset, then "c" at some offset
+        $this->assertSame([0, 1], $result[0]);
+    }
+
     protected function setUp(): void
     {
         parent::setUp();

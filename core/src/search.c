@@ -1643,14 +1643,9 @@ static inline bool search_vm_pop_choice(search_vm_t *vm) {
   if (!vm->choices || vm->choices_top == 0)
     return false;
   vm->choices_top -= sizeof(search_choice_t);
-  if (vm->choices_top > 0) {
-    search_choice_t *c = (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top - sizeof(search_choice_t));
-    vm->ip = c->ip;
-    vm->pos = c->pos;
-  } else {
-    vm->ip = 0;
-    vm->pos = 0;
-  }
+  search_choice_t *c = (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top);
+  vm->ip = c->ip;
+  vm->pos = c->pos;
   return true;
 }
 
