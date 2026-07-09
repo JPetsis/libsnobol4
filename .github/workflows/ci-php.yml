@@ -5,18 +5,16 @@ on:
     branches: [ main, develop ]
     paths:
       - 'bindings/php/**'
-      - 'composer.json'
-      - 'composer.lock'
-      - 'phpunit.xml'
+      - 'bindings/php/composer.json'
+      - 'bindings/php/composer.lock'
       - 'dev/generate_amalgam.sh'
       - '.github/workflows/ci-php.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'bindings/php/**'
-      - 'composer.json'
-      - 'composer.lock'
-      - 'phpunit.xml'
+      - 'bindings/php/composer.json'
+      - 'bindings/php/composer.lock'
       - 'dev/generate_amalgam.sh'
       - '.github/workflows/ci-php.yml'
 

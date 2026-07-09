@@ -12,7 +12,7 @@
 set -euo pipefail
 
 BINDINGS_DIR="/var/www/html"   # = bindings/php/ inside the container
-PROJECT_DIR="/var/www/html-root"  # = project root (mounted from repo root)
+PROJECT_DIR="/var/www/project-root"  # = project root (mounted from repo root)
 
 # --- Locate core directory ---
 if [ -d "/var/www/core/src" ]; then
@@ -95,28 +95,38 @@ PHP_VER=$(php -n -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/n
 PHP_BIN=$(readlink -f "$(command -v php)" 2>/dev/null || command -v php)
 PHP_BINDIR="$(dirname "$PHP_BIN")"
 
-# Install php-dev if not already present (fast-path: image pre-installs it).
-if [ ! -x "${PHP_BINDIR}/phpize${PHP_VER}" ]; then
-    echo "📦 phpize${PHP_VER} not found – installing php${PHP_VER}-dev..."
+# Search directories for phpize / php-config.
+# DDEV's PHP may live at /usr/local/bin while apt installs to /usr/bin.
+SEARCH_DIRS=("$PHP_BINDIR" /usr/bin /usr/local/bin)
+
+find_phpize() {
+    PHPIZE_BIN=""
+    PHP_CONFIG_BIN=""
+    for dir in "${SEARCH_DIRS[@]}"; do
+        for VSUFFIX in "${PHP_VER}" ""; do
+            if [ -x "${dir}/phpize${VSUFFIX}" ]; then
+                PHPIZE_BIN="${dir}/phpize${VSUFFIX}"
+                PHP_CONFIG_BIN="${dir}/php-config${VSUFFIX}"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+# Only install php-dev if phpize is truly not found anywhere.
+if ! find_phpize; then
+    echo "📦 phpize not found – installing php${PHP_VER}-dev..."
     sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         -o Dpkg::Options::="--force-confold" \
         "php${PHP_VER}-dev"
-fi
-
-PHPIZE_BIN=""
-PHP_CONFIG_BIN=""
-for VSUFFIX in "${PHP_VER}" ""; do
-    if [ -x "${PHP_BINDIR}/phpize${VSUFFIX}" ]; then
-        PHPIZE_BIN="${PHP_BINDIR}/phpize${VSUFFIX}"
-        PHP_CONFIG_BIN="${PHP_BINDIR}/php-config${VSUFFIX}"
-        break
+    # Re-search after install
+    if ! find_phpize; then
+        echo "❌ Cannot find phpize for PHP ${PHP_VER} after install"
+        echo "   Searched: ${SEARCH_DIRS[*]}"
+        exit 1
     fi
-done
-
-if [ -z "$PHPIZE_BIN" ]; then
-    echo "❌ Cannot find phpize for PHP ${PHP_VER} (looked in ${PHP_BINDIR})"
-    exit 1
 fi
 
 echo "Using PHP:        ${PHP_VER}"

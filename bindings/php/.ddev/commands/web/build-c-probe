@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="/var/www/html-root"   # = repo root
+PROJECT_DIR="/var/www/project-root"   # = repo root
 CORE_DIR="/var/www/core"
 BENCH_DIR="${PROJECT_DIR}/bench/c"
 BUILD_DIR="/tmp/snobol_probe_build"

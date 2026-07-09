@@ -31,8 +31,9 @@
 13. [Caching](#13-caching)
 14. [Tier Dispatch System](#14-tier-dispatch-system)
 15. [Common Use Cases](#15-common-use-cases)
-16. [Performance Characteristics](#16-performance-characteristics)
-17. [Appendix: SNOBOL4 String Syntax](#17-appendix-snobol4-string-syntax)
+16. [Reusable Pattern Library](#16-reusable-pattern-library)
+17. [Performance Characteristics](#17-performance-characteristics)
+18. [Appendix: SNOBOL4 String Syntax](#18-appendix-snobol4-string-syntax)
 
 ---
 
@@ -189,14 +190,14 @@ Builder::breakx(string $set): array    // BREAK with retry on backtrack
 
 **PCRE equivalents:**
 
-| Snobol | PCRE | PHP |
-|--------|------|-----|
-| `span("a-z0-9")` | `[a-z0-9]+` | `strspn()` |
-| `brk(":")` | `[^:]*` | `strcspn()` |
-| `any("aeiou")` | `[aeiou]` | `str_contains($set, $s[$pos])` |
-| `notany("aeiou")` | `[^aeiou]` | `!str_contains(...)` |
-| `breakx(",")` | `(.*?),` | tokenization loop |
-| `any()` | `.` | always true |
+| Snobol            | PCRE        | PHP                            |
+|-------------------|-------------|--------------------------------|
+| `span("a-z0-9")`  | `[a-z0-9]+` | `strspn()`                     |
+| `brk(":")`        | `[^:]*`     | `strcspn()`                    |
+| `any("aeiou")`    | `[aeiou]`   | `str_contains($set, $s[$pos])` |
+| `notany("aeiou")` | `[^aeiou]`  | `!str_contains(...)`           |
+| `breakx(",")`     | `(.*?),`    | tokenization loop              |
+| `any()`           | `.`         | always true                    |
 
 **Range syntax:** Strings like `"a-z"`, `"0-9"`, `"a-zA-Z"` are expanded into ranges. Hyphen at start/end is literal. Multi-byte Unicode characters can be included directly.
 
@@ -1369,7 +1370,7 @@ Note: `LEN(n)` is available through AST construction but not directly through `B
 
 ```php
 // PCRE: /^(\d{4})-(\d{2})-(\d{2})$/
-$digits = Builder::span("0123456789");
+$digits = Builder::span("0-9");
 
 $ast = Builder::concat([
     Builder::anchor('start'),
@@ -1459,7 +1460,7 @@ if ($res['success']) {
 $ast = Builder::concat([
     Builder::anchor('start'),
     Builder::any("+-"),
-    Builder::span("0123456789"),
+    Builder::span("0-9"),
     Builder::anchor('end'),
 ]);
 $p = Pattern::compileFromAst($ast);
@@ -1469,7 +1470,796 @@ $p->match("12.5");  // false (decimal not in span set)
 
 ---
 
-## 16. Performance Characteristics
+## 16. Reusable Pattern Library
+
+For patterns used frequently across a project, define them once as static methods on a helper class. This avoids repeated compilation and centralises pattern logic.
+
+### 16.1 Base Helper Class
+
+```php
+use Snobol\Builder;
+use Snobol\Pattern;
+
+class Patterns
+{
+    /**
+     * Match an empty string (zero-length).
+     */
+    public static function empty(): Pattern
+    {
+        return Builder::len(0);
+    }
+
+    /**
+     * Match any single character (identical to ARB with length 1).
+     */
+    public static function anyChar(): Pattern
+    {
+        return Builder::arb();
+    }
+
+    // -----------------------------------------------------------------
+    // Character classes
+    // -----------------------------------------------------------------
+
+    /**
+     * Match any single ASCII digit (0123456789).
+     */
+    public static function digit(): Pattern
+    {
+        return Builder::any('0-9');
+    }
+
+    /**
+     * Match any single ASCII letter
+     * (ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz).
+     */
+    public static function letter(): Pattern
+    {
+        return Builder::any('A-Za-z');
+    }
+
+    /**
+     * Match any single whitespace character (space, tab, newline).
+     */
+    public static function whitespace(): Pattern
+    {
+        return Builder::any(" \t\n\r\f\v");
+    }
+
+    /**
+     * Match any single hex digit (0123456789ABCDEFabcdef).
+     */
+    public static function hexDigit(): Pattern
+    {
+        return Builder::any('0-9A-Fa-f');
+    }
+
+    /**
+     * Match any single alphanumeric character
+     * (ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789).
+     */
+    public static function alnum(): Pattern
+    {
+        return Builder::any('A-Za-z0-9');
+    }
+
+    // -----------------------------------------------------------------
+    // Negated character classes
+    // -----------------------------------------------------------------
+
+    /**
+     * Match any character NOT in (0123456789).
+     */
+    public static function notDigit(): Pattern
+    {
+        return Builder::notany('0-9');
+    }
+
+    /**
+     * Match any character NOT in
+     * (ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz).
+     */
+    public static function notLetter(): Pattern
+    {
+        return Builder::notany('A-Za-z');
+    }
+
+    /**
+     * Match any character that is NOT whitespace.
+     */
+    public static function notWhitespace(): Pattern
+    {
+        return Builder::notany(" \t\n\r\f\v");
+    }
+
+    // -----------------------------------------------------------------
+    // Structural patterns
+    // -----------------------------------------------------------------
+
+    /**
+     * One or more digits (greedy).
+     */
+    public static function integer(): Pattern
+    {
+        return Builder::arbno(static::digit());
+    }
+
+    /**
+     * An unsigned integer: one or more digits.
+     */
+    public static function unsignedInt(): Pattern
+    {
+        return Builder::arbno(static::digit());
+    }
+
+    /**
+     * A signed integer: optional [+/-] followed by one or more digits.
+     */
+    public static function signedInt(): Pattern
+    {
+        return Builder::alt(
+            Builder::concat([
+                Builder::any('+-'),
+                Builder::arbno(static::digit()),
+            ]),
+            Builder::arbno(static::digit())
+        );
+    }
+
+    /**
+     * A floating-point number: optional sign, digits, optional [.digits].
+     */
+    public static function float(): Pattern
+    {
+        return Builder::alt(
+            Builder::concat([
+                Builder::any('+-'),
+                static::unsignedInt(),
+                Builder::alt(
+                    Builder::concat([
+                        Builder::lit('.'),
+                        Builder::arbno(static::digit()),
+                    ]),
+                    Builder::lit('')  // option without fractional part
+                ),
+            ]),
+            Builder::concat([
+                Builder::arbno(static::digit()),
+                Builder::alt(
+                    Builder::concat([
+                        Builder::lit('.'),
+                        Builder::arbno(static::digit()),
+                    ]),
+                    Builder::lit('')
+                ),
+            ])
+        );
+    }
+
+    /**
+     * A simple word: one or more alphanumeric characters.
+     */
+    public static function word(): Pattern
+    {
+        return Builder::arbno(static::alnum());
+    }
+
+    /**
+     * A quoted string (double quotes, no escapes).
+     */
+    public static function doubleQuotedString(): Pattern
+    {
+        return Builder::concat([
+            Builder::lit('"'),
+            Builder::arbno(Builder::notany('"')),
+            Builder::lit('"'),
+        ]);
+    }
+
+    /**
+     * A quoted string (single quotes, no escapes).
+     */
+    public static function singleQuotedString(): Pattern
+    {
+        return Builder::concat([
+            Builder::lit("'"),
+            Builder::arbno(Builder::notany("'")),
+            Builder::lit("'"),
+        ]);
+    }
+
+    /**
+     * A quoted string (either single or double quotes, no escapes).
+     */
+    public static function quotedString(): Pattern
+    {
+        return Builder::alt(
+            static::doubleQuotedString(),
+            static::singleQuotedString()
+        );
+    }
+
+    /**
+     * Parenthesised content: '(' ... ')' with no nesting.
+     */
+    public static function parenthesised(): Pattern
+    {
+        return Builder::concat([
+            Builder::lit('('),
+            Builder::arbno(Builder::notany(')')),
+            Builder::lit(')'),
+        ]);
+    }
+
+    /**
+     * Comma-separated list (simple, no nesting):
+     * tokens separated by optional-whitespace commas optional-whitespace.
+     *
+     * Tokens are non-empty sequences of non-comma, non-whitespace characters.
+     * Returns the whole match (including commas). For individual tokens,
+     * use searchSplit() with the token pattern.
+     */
+    public static function commaList(): Pattern
+    {
+        $token = Builder::arbno(Builder::notany(','));
+        return Builder::arbno(
+            Builder::concat([
+                $token,
+                Builder::span(','),
+            ])
+        );
+    }
+
+    /**
+     * An email address (simplified; does not validate TLD length, RFC5321
+     * quirks, etc.).
+     */
+    public static function emailSimple(): Pattern
+    {
+        $local  = Builder::arbno(Builder::any('A-Za-z0-9.!#$%&\'*+/=?^_`{|}~-'));
+        $domain = Builder::arbno(Builder::any('A-Za-z0-9.-'));
+        return Builder::concat([
+            $local,
+            Builder::lit('@'),
+            $domain,
+        ]);
+    }
+
+    // -----------------------------------------------------------------
+    // URL / path patterns
+    // -----------------------------------------------------------------
+
+    /**
+     * A file path segment (no slash, no null).
+     */
+    public static function pathSegment(): Pattern
+    {
+        return Builder::arbno(Builder::notany("/\0"));
+    }
+
+    /**
+     * A POSIX-style absolute path: '/foo/bar/baz'.
+     */
+    public static function absolutePath(): Pattern
+    {
+        return Builder::concat([
+            Builder::lit('/'),
+            Builder::arbno(
+                Builder::concat([
+                    Builder::arbno(Builder::notany("/\0")),
+                    Builder::lit('/'),
+                ])
+            ),
+            Builder::arbno(Builder::notany("/\0")),
+        ]);
+    }
+
+    // -----------------------------------------------------------------
+    // Utility / production patterns
+    // -----------------------------------------------------------------
+
+    /**
+     * Strip HTML/XML tags (including self-closing).
+     *
+     * Matches '<' + content up to '>' + '>'. Use with searchReplace()
+     * to remove all tags from a string.
+     *
+     * ```php
+     * $clean = Pattern::searchReplace($html, Patterns::stripTags(), '');
+     * ```
+     */
+    public static function stripTags(): Pattern
+    {
+        return Builder::concat([
+            Builder::lit('<'),
+            Builder::brk('>'),
+            Builder::lit('>'),
+        ]);
+    }
+
+    /**
+     * Match an HTTP(S) URL (simplified — no IP-literal, no userinfo).
+     *
+     * Captures: scheme, host, port, path, query, fragment as consecutive
+     * captured groups when used with searchSplitOffsets().
+     */
+    public static function urlSimple(): Pattern
+    {
+        $scheme = Builder::concat([
+            Builder::any('hH'),
+            Builder::any('tT'),
+            Builder::any('tT'),
+            Builder::any('pP'),
+            Builder::arbno(Builder::any('sS')),
+            Builder::lit('://'),
+        ]);
+        $host   = Builder::arbno(Builder::any('A-Za-z0-9.-'));
+        $port   = Builder::arbno(static::digit());
+        $path   = Builder::arbno(Builder::notany("?#\0"));
+        $query  = Builder::arbno(Builder::notany("#\0"));
+        $frag   = Builder::arbno(Builder::any('A-Za-z0-9%-._~:/?#[]@!$&\'()*+,;='));
+        return Builder::concat([
+            $scheme,
+            $host,
+            Builder::alt(
+                Builder::concat([Builder::lit(':'), $port]),
+                Builder::lit('')
+            ),
+            $path,
+            Builder::alt(
+                Builder::concat([Builder::lit('?'), $query]),
+                Builder::lit('')
+            ),
+            Builder::alt(
+                Builder::concat([Builder::lit('#'), $frag]),
+                Builder::lit('')
+            ),
+        ]);
+    }
+
+    /**
+     * A single line of text (up to but not including a newline).
+     */
+    public static function line(): Pattern
+    {
+        return Builder::arbno(Builder::notany("\n\r"));
+    }
+
+    /**
+     * A UUID (hex digits with dashes, e.g. 550e8400-e29b-41d4-a716-446655440000).
+     */
+    public static function uuid(): Pattern
+    {
+        return Builder::concat([
+            Builder::len(8), static::hexDigit(),
+            Builder::lit('-'),
+            Builder::len(4), static::hexDigit(),
+            Builder::lit('-'),
+            Builder::len(4), static::hexDigit(),
+            Builder::lit('-'),
+            Builder::len(4), static::hexDigit(),
+            Builder::lit('-'),
+            Builder::len(12), static::hexDigit(),
+        ]);
+    }
+
+    /**
+     * A two-letter ISO 3166-1 alpha-2 country code (case-insensitive match).
+     *
+     * Matches any two ASCII letters without validating the specific code.
+     */
+    public static function countryCodeAlpha2(): Pattern
+    {
+        return Builder::len(2, static::letter());
+    }
+
+    /**
+     * IPv4 address: four dot-separated decimal octets (simple form — does
+     * not reject values > 255).
+     */
+    public static function ipv4Simple(): Pattern
+    {
+        $octet = Builder::concat([
+            Builder::arbno(static::digit()),
+            Builder::span(''),
+        ]);
+        return Builder::concat([
+            $octet, Builder::lit('.'),
+            $octet, Builder::lit('.'),
+            $octet, Builder::lit('.'),
+            $octet,
+        ]);
+    }
+}
+```
+
+### 16.2 Usage Reference
+
+The table below maps each `Patterns::*()` helper to the best API functions for common
+tasks, with PHP/PCRE equivalents as a familiar reference point.
+
+| Patterns helper | `match()` | `searchAll()` | `searchSplit()` | `searchReplace()` | `subst()` | `PatternHelper` | Good for | PCRE equivalent |
+|---|---|---|---|---|---|---|---|---|
+| **Literals & character classes** | | | | | | | | |
+| `literal('abc')` | ★ | ★ | ★ | ★ | ★ | ★ | Exact match, find, split, replace | `abc` |
+| `any('A-Z')` | ★ | ★ | ★ | | | ★ | Validate single char is in set | `[A-Z]` |
+| `notAny('A-Z')` | ★ | ★ | ★ | | | ★ | Validate single char not in set | `[^A-Z]` |
+| `span('0-9')` | | | ★ | | | ★ | Consume consecutive chars from set | `[0-9]+` (greedy) |
+| `brk(',;')` | | | ★ | | | | Up-to-delimiter split | `[^,;]*` (in split context) |
+| `len(5)` | ★ | | | | | ★ | Fixed-width field validation | `.{5}` |
+| `arb()` | | ★ | | | | ★ | Match any single char (inside alternation) | `.` |
+| `rem()` | ★ | | | | | | Remainder / end-of-string extraction | `\z` or `$` |
+| **Repetition** | | | | | | | | |
+| `arbno(any('0-9'))` | ★ | ★ | ★ | | | ★ | Repeat sub-pattern zero-or-more | `[0-9]*` |
+| `repeat(any('0-9'),2,4)` | ★ | | | | | ★ | Bounded repetition (e.g. 2–4 digits) | `[0-9]{2,4}` |
+| **Positions** | | | | | | | | |
+| `pos(5)` / `rpos(3)` | ★ | | | | | ★ | Anchored position assertions | `(?<=...)/^` / `$` |
+| `tab(5)` / `rtab(3)` | ★ | | | | | ★ | Cursor movement (skip N chars) | `(?<=.{5})` / `.{5}` (tricky) |
+| **Flow control** | | | | | | | | |
+| `fence()` | ★ | | | | | | Commit / prevent backtracking | `(?>...)` (atomic) |
+| `fail()` / `abort()` | ★ | | | | | | Deliberate failure (in alternation) | `(*FAIL)` |
+| `succeed()` | ★ | | | | | | Always-succeed placeholder | empty alternative |
+| **Built-in composites** | | | | | | | | |
+| `digit()` | ★ | ★ | ★ | | | ★ | Validate/find/extract digits | `[0-9]` |
+| `integer()` | ★ | ★ | ★ | | | ★ | Extract or validate integers | `[0-9]+` |
+| `unsignedInt()` | ★ | ★ | ★ | | | ★ | Unsigned integer token | `[0-9]+` |
+| `signedInt()` | ★ | ★ | ★ | | | ★ | Optional-sign integer | `[-+]?[0-9]+` |
+| `float()` | ★ | ★ | ★ | | | ★ | Floating-point numbers | `[-+]?[0-9]+(\.[0-9]+)?` |
+| `hexDigit()` | ★ | ★ | ★ | | | ★ | Hex digit token | `[0-9A-Fa-f]` |
+| `letter()` | ★ | ★ | ★ | | | ★ | ASCII letter token | `[A-Za-z]` |
+| `word()` | ★ | ★ | ★ | | | ★ | Alphanumeric word token | `[A-Za-z0-9]+` |
+| `alnum()` | ★ | ★ | ★ | | | ★ | Alphanumeric single char | `[A-Za-z0-9]` |
+| `whitespace()` | ★ | ★ | ★ | | | ★ | Whitespace char | `[ \t\n\r\f\v]` |
+| `notDigit()` / `notLetter()` / `notWhitespace()` | ★ | ★ | ★ | | | ★ | Negated character classes | `[^0-9]` / `[^A-Za-z]` / `\S` |
+| **Structural** | | | | | | | | |
+| `doubleQuotedString()` | ★ | ★ | ★ | | | ★ | Extract `"…"` tokens | `"[^"]*"` |
+| `singleQuotedString()` | ★ | ★ | ★ | | | ★ | Extract `'…'` tokens | `'[^']*'` |
+| `quotedString()` | ★ | ★ | ★ | | | ★ | Either quote style | `"[^"]*"|'[^']*'` |
+| `parenthesised()` | ★ | ★ | ★ | | | ★ | Parenthesised (no nesting) | `\([^()]*\)` |
+| `balanced('(',')')` | ★ | ★ | ★ | | | ★ | Nested delimiters | (recursive — PCRE `(?R)`) |
+| `commaList()` | | | ★ | | | | Split by comma+space | `[^,]+` (in split context) |
+| `stripTags()` | | | ★ | ★ | | | Remove HTML tags | `/<[^>]*>/` |
+| `urlSimple()` | ★ | ★ | | | | ★ | Validate/find HTTP(S) URLs | `https?://[^\s/$.?#][^\s]*` |
+| `emailSimple()` | ★ | ★ | | | | ★ | Validate/find email-like strings | `\S+@\S+\.\S+` |
+| `uuid()` | ★ | ★ | ★ | | | ★ | Validate/find/extract UUIDs | `[0-9a-f]{8}-(?:…){4}-(?:…){12}` |
+| `ipv4Simple()` | ★ | ★ | | | | ★ | Validate/find IPv4-like tokens | `\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}` |
+| `countryCodeAlpha2()` | ★ | | | | | ★ | Validate two-letter country code | `[A-Z]{2}` |
+| `pathSegment()` | ★ | ★ | ★ | | | ★ | POSIX path segment | `[^/]+` |
+| `absolutePath()` | ★ | | | | | ★ | POSIX absolute path | `/([^/]+/?)*` |
+| `line()` | ★ | ★ | ★ | | | ★ | Single-line token | `[^\n]*` |
+| **Advanced** | | | | | | | | |
+| `empty()` | ★ | | | | | ★ | Zero-length match (lookahead) | empty string |
+| `anyChar()` | ★ | ★ | ★ | | | ★ | Match any single byte | `.` |
+| `capture($n, ‘abc’)` | ★ | | | ★ | ★ | ★ | Named captures for substitution | `(?P<vN>…)` |
+| `alt(lit('a'), lit('b'))` | ★ | ★ | ★ | | | ★ | Alternation | `a|b` |
+
+**Legend**
+
+| Column | Meaning |
+|---|---|
+| `match()` | Anchored full-string match (`Pattern::match`). Use for **validation** (is this input a UUID, email, integer, …?). Returns captures on success. |
+| `searchAll()` | Find all non-overlapping matches (`Pattern::searchAll`). Use for **extraction** (find all numbers, all quoted strings, all tags, …). |
+| `searchSplit()` | Split subject at pattern boundaries (`Pattern::searchSplit`). Use for **tokenization** (split on commas, whitespace, tags, …). |
+| `searchReplace()` | Replace each match with a literal string (`Pattern::searchReplace`). Use for **stripping** (strip tags, remove punctuation, …). |
+| `subst()` | Template substitution with capture references (`Pattern::subst`). Use for **reformatting** (reorder captured groups, interpolate captures into a template). |
+| `PatternHelper` | `PatternHelper::matchOnce()`, `::matchAll()`, `::split()`, `::replace()`. Compiles from string/AST on the fly with an internal 128-slot ring cache. Use for **adhoc/interactive** usage where you don't hold a `Pattern` object. |
+
+★ = primary / most idiomatic use. Blank entries are technically possible but
+rarely useful (e.g. `pos()` with `searchAll()` — matches at every cursor
+position).
+
+**Which function should I use?**
+
+| Task | Recommended |
+|---|---|
+| **Validate** that a whole string matches a pattern | `$pattern->match($subject)` |
+| **Find all** occurrences in a string | `$pattern->searchAll($subject)` |
+| **Tokenize** / split into segments | `$pattern->searchSplit($subject)` or `PatternHelper::split()` |
+| **Strip** / delete matches | `$pattern->searchReplace($subject, '')` |
+| **Replace** matches with fixed text | `$pattern->searchReplace($subject, $replacement)` |
+| **Reformat** with capture-group references (`$v0`, `${v1}`) | `$pattern->subst($subject, $template)` |
+| **One-off** match (no stored Pattern) | `PatternHelper::matchOnce('digit', $input)` |
+| **Performance-sensitive** tokenization (avoid string alloc) | `$pattern->searchSplitOffsets($subject)` |
+| **Pure literal** match (zero alloc, no VM) | `$pattern->matchLiteral($subject)` |
+
+### 16.3 Usage Examples
+
+All examples use the `Patterns` helper class from §16.1.
+
+#### Validation (`match`)
+
+```php
+// UUID validation — anchored full-string match
+$res = Patterns::uuid()->match('550e8400-e29b-41d4-a716-446655440000');
+// $res['_match_len'] === 36
+
+// Email validation
+$res = Patterns::emailSimple()->match('user@example.org');       // true
+$res = Patterns::emailSimple()->match('not an email');           // false
+
+// Signed integer validation
+$res = Patterns::signedInt()->match('-42');                      // true
+$res = Patterns::signedInt()->match('+42');                      // true
+$res = Patterns::signedInt()->match('12.5');                     // false
+
+// Pattern::matchLiteral() — faster for pure-literal patterns (no VM)
+$name = Pattern::compileFromAst(Builder::lit('admin'));
+$res  = $name->matchLiteral('admin');  // ['success' => true, 'position' => 0, 'length' => 5]
+```
+
+#### Extraction (`searchAll`)
+
+```php
+// Extract all integers from a string
+$ints = Patterns::integer()->searchAll('abc 123 def 4567 x');
+// Returns match-result arrays for "123" and "4567"
+
+// Find all quoted strings
+$quoted = Patterns::quotedString()->searchAll('say "hello" then "goodbye"');
+// Matches: '"hello"', '"goodbye"'
+
+// Find all IPv4-like tokens
+$ips = Patterns::ipv4Simple()->searchAll('Server: 192.168.1.1, GW: 10.0.0.1');
+// Matches: '192.168.1.1', '10.0.0.1'
+
+// Find all hex words
+$hex = Patterns::hexDigit()->searchAll('color: #ff8800, bg: #eee');
+// Matches: 'f', 'f', '8', '8', '0', '0', ... (individual chars — use arbno(hexDigit()) for words)
+```
+
+#### Tokenization (`searchSplit`)
+
+```php
+// Split on whitespace
+$parts = Patterns::whitespace()->searchSplit("one two\tthree\nfour");
+// ['one', 'two', 'three', 'four']
+
+// Split CSV-like input
+$parts = Patterns::commaList()->searchSplit('apple, banana, cherry');
+// ['apple', 'banana', 'cherry']
+
+// Split on digits (keep text segments)
+$parts = Patterns::integer()->searchSplit('abc123def456ghi');
+// ['abc', 'def', 'ghi']
+
+// Zero-allocation tokenization (avoids intermediate strings)
+$offsets = Patterns::integer()->searchSplitOffsets('abc123def456ghi');
+// [[3, 3], [9, 3]] — [[offset, length], ...]
+```
+
+#### Stripping & Replacing (`searchReplace`)
+
+```php
+// Strip HTML tags
+$clean = Patterns::stripTags()->searchReplace('<p>Hello <b>world</b></p>', '');
+// 'Hello world'
+
+// Remove all digits
+$clean = Patterns::digit()->searchReplace('abc123def456', '');
+// 'abcdef'
+
+// Normalize whitespace — replace runs of whitespace with single space
+$clean = Patterns::whitespace()->searchReplace("too  much\t space", ' ');
+// 'too much space'
+
+// Mask credit-card digits
+$card = Pattern::compileFromAst(Builder::repeat(Patterns::digit(), 4, 4));
+$masked = $card->searchReplace('Card: 1234 5678 9012 3456', '****');
+// 'Card: **** **** **** ****'
+```
+
+#### Template Substitution (`subst`)
+
+```php
+// Extract and reformat a number
+$pattern = Pattern::compileFromAst(
+    Builder::concat([
+        Builder::cap(0, Patterns::integer()),
+        Builder::assign(0, 0),
+    ])
+);
+$pattern->subst('order: 42 items', '${v0}');        // '42'
+$pattern->subst('order: 42 items', '${v0.upper()}'); // '42' (no-op; digits unchanged)
+$pattern->subst('order: 42 items', '${v0.lpad(6,"0")}'); // '000042'
+
+// Reformat a name capture — "last, first" → "first last"
+$namePat = Pattern::compileFromAst(
+    Builder::concat([
+        Builder::cap(0, Patterns::word()),     // last name
+        Builder::lit(', '),
+        Builder::cap(1, Patterns::word()),     // first name
+        Builder::assign(0, 0),
+        Builder::assign(1, 1),
+    ])
+);
+$namePat->subst('Doe, John', '${v1} ${v0}');  // 'John Doe'
+```
+
+#### Pattern Combination & Chaining
+
+Patterns compose via `Builder` calls — there is no implicit string concatenation
+as in PCRE. Every combination is explicit:
+
+```php
+// --- Chain 1: concat of multiple helpers ---
+$greeting = Pattern::compileFromAst(
+    Builder::concat([
+        Patterns::word(),                          // first word
+        Patterns::whitespace(),                    // separator
+        Patterns::word(),                          // second word
+    ])
+);
+$greeting->match('hello world');  // true (match_len=11)
+
+// --- Chain 2: cap + assign + subst for bidirectional transform ---
+$amount = Pattern::compileFromAst(
+    Builder::concat([
+        Builder::cap(0, Patterns::digit()),         // capture leading digit
+        Builder::lit('.'),
+        Builder::cap(1, Patterns::integer()),       // capture fractional part
+        Builder::assign(0, 0),
+        Builder::assign(1, 1),
+    ])
+);
+$amount->subst('9.99', '${v0} dollars and ${v1} cents');
+// '9 dollars and 99 cents'
+
+// --- Chain 3: arbno(any(...)) for repetition ---
+$digits = Pattern::compileFromAst(
+    Builder::arbno(Patterns::digit())
+);
+$digits->match('12345abc');   // match_len=5  (greedy, stops at 'a')
+
+// --- Chain 4: alt(..., ...) for alternatives ---
+$bool = Pattern::compileFromAst(
+    Builder::alt(
+        Builder::lit('true'),
+        Builder::lit('false')
+    )
+);
+$bool->match('true');   // true
+$bool->match('false');  // true
+$bool->match('tru');    // false
+
+// --- Chain 5: multi-capture extraction ---
+$parts = Pattern::compileFromAst(
+    Builder::concat([
+        Builder::cap(0, Patterns::word()),           // capture 0: first
+        Patterns::whitespace(),
+        Builder::cap(1, Patterns::word()),           // capture 1: last
+        Builder::assign(0, 0),
+        Builder::assign(1, 1),
+    ])
+);
+$res = $parts->match('John Doe');
+echo $res['v0'];  // 'John'
+echo $res['v1'];  // 'Doe'
+
+// --- Chain 6: alt inside concat — optional port in URL ---
+$hostPort = Pattern::compileFromAst(
+    Builder::concat([
+        Patterns::word(),
+        Builder::alt(
+            Builder::concat([Builder::lit(':'), Patterns::integer()]),
+            Builder::lit('')           // empty = no port
+        ),
+    ])
+);
+$hostPort->match('example.com:8080');  // true includes port
+$hostPort->match('example.com');       // true without port
+
+// --- Chain 7: Patterns helper calling another Patterns helper ---
+// signedInt() already chains any('+-') + digit() via alt:
+//   Patterns::signedInt() ===
+//     alt(concat(any('+-'), digit()), digit())
+Patterns::signedInt()->match('+42');  // true
+
+// --- Chain 8: repeat with shorthand counting ---
+$threeDigits = Pattern::compileFromAst(
+    Builder::repeat(Patterns::digit(), 3, 3)
+);
+$threeDigits->match('123');   // true
+$threeDigits->match('12');    // false
+
+$twoOrMore = Pattern::compileFromAst(
+    Builder::repeat(Patterns::digit(), 2)
+);
+$twoOrMore->match('abc123');  // match_len=3 (at cursor)
+```
+
+#### PatternHelper Convenience (One-Off Usage)
+
+`PatternHelper` accepts strings, Builder AST arrays, or Pattern objects — useful
+when you don't need a named helper:
+
+```php
+use Snobol\PatternHelper;
+
+// Match from source string
+$res = PatternHelper::matchOnce("SPAN('0-9')", 'abc123');
+// Uses internal 128-slot ring cache — recompilation avoided
+
+// Split with inline AST
+$parts = PatternHelper::split(
+    Builder::span(','),   // or PatternHelper::fromAst(Builder::span(','))
+    'a,b,c'
+);
+// ['a', 'b', 'c']
+
+// Replace with template detection (auto-chooses searchReplace vs subst)
+$result = PatternHelper::replace(
+    Builder::cap(0, Patterns::integer()),
+    '[\$v0]',
+    'id:123 code:456'
+);
+// 'id:[123] code:[456]'
+
+// matchAll convenience
+$nums = PatternHelper::matchAll(
+    Builder::arbno(Builder::any('0-9')),
+    'ab42cd99ef'
+);
+```
+
+#### Cross-Function Combo
+
+Patterns defined once can be used across all API entry points:
+
+```php
+$intPat = Patterns::integer();
+
+// 1) Validate
+$intPat->match('42');                 // true
+
+// 2) Extract all
+$intPat->searchAll('a1b22c333');      // ['1', '22', '333']
+
+// 3) Split
+$intPat->searchSplit('x1y22z333');    // ['x', 'y', 'z']
+
+// 4) Replace
+$intPat->searchReplace('x1y22z333', 'N'); // 'xNyNzN'
+
+// 5) Template subst
+$pat = Pattern::compileFromAst(
+    Builder::concat([
+        Builder::cap(0, $intPat),
+        Builder::assign(0, 0),
+    ])
+);
+$pat->subst('42', 'value=${v0}');    // 'value=42'
+```
+
+### 16.4 Caching
+
+Define patterns as class constants or use `PatternCache` to avoid repeated
+compilation when the same helper is called many times:
+
+```php
+class Patterns
+{
+    private static ?Pattern $digit = null;
+
+    public static function digit(): Pattern
+    {
+        if (self::$digit === null) {
+            self::$digit = Builder::any('0-9');
+        }
+        return self::$digit;
+    }
+}
+```
+
+Or rely on `PatternCache` (see §13):
+
+```php
+PatternCache::remember('patterns.digit', fn() => Builder::any('0-9'));
+```
+
+---
+
+## 17. Performance Characteristics
 
 ### Optimization Strategies
 
@@ -1509,7 +2299,7 @@ PHP overhead adds ~50–300 ns per call depending on the tier. The PHP/C couplin
 
 ---
 
-## 17. Appendix: SNOBOL4 String Syntax
+## 18. Appendix: SNOBOL4 String Syntax
 
 The `Pattern::fromString()` method accepts SNOBOL4 pattern syntax:
 

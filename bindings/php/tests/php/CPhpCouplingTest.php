@@ -166,7 +166,7 @@ class CPhpCouplingTest extends TestCase
             '/usr/local/bin/snobol4_probe',                 // ddev installed
             __DIR__ . '/../../../build/bench/c/snobol4_probe',
             '/var/www/build/bench/c/snobol4_probe',         // ddev (html)
-            '/var/www/html-root/build/bench/c/snobol4_probe', // ddev (html-root)
+            '/var/www/project-root/build/bench/c/snobol4_probe', // ddev (project-root)
             __DIR__ . '/../../../../build/bench/c/snobol4_probe',
         ];
         foreach ($candidates as $p) {

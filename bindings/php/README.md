@@ -427,10 +427,7 @@ For v0.12.0 this returns `0x00000C00` (3072 in decimal).
 
 ## Running Tests
 
-This project has two `composer.json` files:
-
-- `bindings/php/composer.json` — used inside DDEV (`/var/www/html`)
-- `composer.json` (root) — for native (non-DDEV) development and IDE integration
+This project uses `bindings/php/composer.json` for dependency management (used inside DDEV at `/var/www/html`).
 
 ### With DDEV
 

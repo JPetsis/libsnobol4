@@ -19,6 +19,10 @@
        source: /your/path/to/libsnobol4/public  # Update this!
        target: /var/www/public
        consistency: cached
+     - type: bind
+       source: /your/path/to/libsnobol4  # Update this!
+       target: /var/www/project-root
+       consistency: cached
    ```
 
 3. **Configure Docker Desktop (macOS/Windows):**
@@ -35,22 +39,7 @@ The PHP extension will be built automatically on start.
 
 ### Root composer.json
 
-The repository root `composer.json` is for **native (non-DDEV)** development and IDE integration. Inside DDEV you only need `bindings/php/composer.json` (auto-detected).
-
-To update the root `composer.json` via DDEV, add a bind mount to your `docker-compose.local.yaml`:
-
-```yaml
-      - type: bind
-        source: /your/path/to/libsnobol4
-        target: /var/www/html-root
-        consistency: cached
-```
-
-Then:
-
-```bash
-ddev exec composer update --working-dir=/var/www/html-root
-```
+The repository root no longer has a `composer.json`. Inside DDEV, `bindings/php/composer.json` is used automatically.
 
 ## Verification
 
@@ -76,33 +65,6 @@ You should see `snobol` in the output.
 Check the full output with:
 ```bash
 ddev start --verbose
-```
-
-## Alternative: Manual Build
-
-If DDEV build doesn't work, you can build manually:
-
-```bash
-# Inside DDEV container
-ddev ssh
-
-# Build the extension
-cd /tmp
-cp -r /var/www/html .
-cp -r /path/to/core .
-cd html
-phpize
-./configure --enable-snobol
-make
-sudo make install
-
-# Enable extension
-echo "extension=snobol.so" | sudo tee /etc/php/8.5/mods-available/snobol.ini
-sudo ln -s /etc/php/8.5/mods-available/snobol.ini /etc/php/8.5/cli/conf.d/20-snobol.ini
-exit
-
-# Verify
-ddev exec php -m | grep snobol
 ```
 
 ## File Structure
