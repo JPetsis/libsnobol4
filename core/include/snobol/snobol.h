@@ -247,6 +247,18 @@ const uint8_t *snobol_pattern_get_bc(const snobol_pattern_t *pattern);
 size_t snobol_pattern_get_bc_len(const snobol_pattern_t *pattern);
 
 /**
+ * @brief Get the pre-derived search metadata for a compiled pattern.
+ *
+ * The metadata is computed once at compile time and reused by the search
+ * runtime.  Exposed read-only for introspection and testing.
+ *
+ * @param[in] pattern Compiled pattern.
+ * @return Read-only pointer to the search metadata, or NULL if pattern is NULL.
+ */
+const snobol_search_meta_t *snobol_pattern_get_meta(
+    const snobol_pattern_t *pattern);
+
+/**
  * @brief Free a compiled pattern.
  *
  * @param[in] pattern Pattern to free.  NULL is safe.

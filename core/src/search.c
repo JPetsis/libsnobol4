@@ -185,6 +185,89 @@ static bool trie_match(const snobol_auto_trie_t *t, const char *subject,
 }
 
 /* ---------------------------------------------------------------------------
+ * Trie-shape classifier.
+ *
+ * A trie is "flat" when no node below the root has more than one outgoing
+ * edge, i.e. the alternatives share no common prefix.  Such a trie gives no
+ * benefit over the general VM, which already has start-bitmap + BMH +
+ * minlength acceleration.  A "bushy" trie (at least one deeper branch point)
+ * benefits from trie matching.
+ * ---------------------------------------------------------------------------
+ */
+static bool trie_is_flat(const snobol_auto_trie_t *trie) {
+  for (uint16_t n = 1; n < trie->node_count; n++) {
+    uint16_t e = trie->nodes[n].first_edge;
+    int outgoing = 0;
+    while (e != SNOBOL_AUTO_NULL) {
+      outgoing++;
+      e = trie->edges[e].sibling;
+    }
+    if (outgoing > 1)
+      return false;
+  }
+  return true;
+}
+
+/* ---------------------------------------------------------------------------
+ * Bytecode-level alternation-of-literals shared-prefix detector.
+ *
+ * Walks the SPLIT tree collecting every LIT(..)ACC branch.  The trie is
+ * "bushy" (and worth using) when at least two alternatives share a leading
+ * byte — that forces a branch point in the trie.  When every alternative's
+ * first byte is distinct the alternatives share no prefix, the trie is
+ * "flat", and the general VM is a better choice.  Conservative: any
+ * malformed / non-literal branch yields true so we keep the trie path.
+ * ---------------------------------------------------------------------------
+ */
+static bool alt_literals_share_prefix(const uint8_t *bc, size_t bc_len,
+                                       size_t ip) {
+  uint8_t first_bytes[64];
+  size_t nl = 0;
+
+  size_t stack[64];
+  int sp = 0;
+  stack[sp++] = ip;
+
+  while (sp > 0) {
+    size_t p = stack[--sp];
+    if (p + 2 > bc_len)
+      return true;
+    uint8_t op = bc[p];
+    if (op == OP_LIT) {
+      if (p + 10 > bc_len)
+        return true;
+      uint32_t off = search_read_u32(bc, p + 1);
+      uint32_t len = search_read_u32(bc, p + 5);
+      if (off >= bc_len || off + len > bc_len)
+        return true;
+      if (len == 0)
+        return true; /* empty literal: conservative bushy */
+      if (nl < 64)
+        first_bytes[nl++] = bc[off];
+    } else if (op == OP_SPLIT) {
+      if (p + 9 > bc_len)
+        return true;
+      uint32_t a = search_read_u32(bc, p + 1);
+      uint32_t b = search_read_u32(bc, p + 5);
+      if (a >= bc_len || b >= bc_len)
+        return true;
+      if (sp + 2 > 64)
+        return true;
+      stack[sp++] = b;
+      stack[sp++] = a;
+    } else {
+      return true;
+    }
+  }
+
+  for (size_t i = 0; i < nl; i++)
+    for (size_t j = i + 1; j < nl; j++)
+      if (first_bytes[i] == first_bytes[j])
+        return true; /* shared leading byte -> bushy trie */
+  return false;
+}
+
+/* ---------------------------------------------------------------------------
  * Trie-based search for alternation-of-literals patterns.
  *
  * Walks the bytecode SPLIT tree to collect literals, builds a trie, then
@@ -193,9 +276,10 @@ static bool trie_match(const snobol_auto_trie_t *t, const char *subject,
  * ---------------------------------------------------------------------------
  */
 static bool search_alt_literals_try(VM *vm, const char *subject,
-                                    size_t subject_len, size_t start_offset,
-                                    snobol_search_result_t *out_result) {
-  /* ---- Build trie from bytecode SPLIT tree ---- */
+                                     size_t subject_len, size_t start_offset,
+                                     const snobol_search_meta_t *meta,
+                                     snobol_search_result_t *out_result) {
+  (void)vm;
   snobol_auto_trie_t trie;
   trie.node_count = 1; /* root node (index 0) */
   trie.edge_count = 0;
@@ -246,7 +330,20 @@ static bool search_alt_literals_try(VM *vm, const char *subject,
 
   /* ---- Scan subject from start_offset ---- */
   size_t offset = start_offset;
-  while (offset <= subject_len) {
+  size_t minlength = (meta && meta->minlength > 0) ? meta->minlength : 0;
+
+  while (offset + minlength <= subject_len) {
+    /* 1. Start-byte bitmap filter: skip candidate positions whose subject
+     *    byte cannot possibly begin any alternative. */
+    if (meta && meta->has_start_bitmap) {
+      uint8_t b = (uint8_t)subject[offset];
+      if (!(meta->start_bitmap[b >> 3] & (uint8_t)(1u << (b & 7)))) {
+        offset++;
+        continue;
+      }
+    }
+
+    /* 2. Trie match at this position */
     size_t match_len = 0;
     if (trie_match(&trie, subject, subject_len, offset, &match_len)) {
       out_result->success = true;
@@ -254,9 +351,17 @@ static bool search_alt_literals_try(VM *vm, const char *subject,
       out_result->match_end = offset + match_len;
       return true;
     }
-    if (offset >= subject_len)
-      break;
-    offset++;
+
+    /* 3. BMH-style skip after a failed match (only when a skip table is
+     *    available, e.g. for literal-leading alt patterns). */
+    if (meta && meta->has_bmh_skip &&
+        offset + meta->bmh_skip_len <= subject_len) {
+      size_t adv =
+          meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+      offset += adv > 0 ? adv : 1;
+    } else {
+      offset++;
+    }
   }
   return false;
 }
@@ -275,17 +380,13 @@ static inline void bitmap256_set(uint8_t bm[32], uint8_t b) {
 static inline void bitmap256_set_all(uint8_t bm[32]) {
   memset(bm, 0xFF, 32);
 }
-static inline void bitmap256_or(uint8_t dst[32], const uint8_t src[32]) {
-  for (int i = 0; i < 32; i++)
-    dst[i] |= src[i];
-}
 
 /**
- * Recursively compute start-byte bitmap for bytecode rooted at `ip`.
+ * Compute start-byte bitmap for bytecode rooted at `ip`.
  *
- * Walks forward through sequential ops; for SPLIT (alternation) recurses
- * into both branches and OR's their bitmaps.  Depth-limited to prevent
- * infinite loops from back-edges.
+ * Walks forward through sequential ops; for SPLIT (alternation) unions both
+ * branches' start bytes via an explicit work-stack (see compute_start_bitmap
+ * below).  Bounded by a step counter to prevent infinite loops from cycles.
  *
  * @param bc       Bytecode buffer
  * @param bc_len   Bytecode length
@@ -294,25 +395,44 @@ static inline void bitmap256_or(uint8_t dst[32], const uint8_t src[32]) {
  * @param depth    Recursion depth guard (pass 0)
  * @param tmp_vm   Temporary VM for charclass resolution (zeroed by caller)
  */
+/* Pop the next pending alternation branch, or finish the walk if none.
+ * NOTE: this must NOT use `continue` inside the do/while wrapper -- `continue`
+ * would bind to the (trivial) do/while loop, not the outer walk loop, and
+ * control would silently fall through to the next switch case.  Use a label
+ * jump (sbm_next) that re-enters the outer while loop instead. */
+#define SBM_DONE() do { \
+    if (sp > 0) { ip = (size_t)stack[--sp]; goto sbm_next; } return; \
+  } while (0)
+
 static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
-                                  uint8_t bm[32], int depth, VM *tmp_vm) {
-  if (depth > 12) { bitmap256_set_all(bm); return; }
+                                 uint8_t bm[32], int depth, VM *tmp_vm) {
+  (void)depth;
+  /* Explicit work-stack of pending branch targets.  OP_SPLIT's right branch
+   * is walked iteratively (instead of recursing depth+1), so stack depth is
+   * bounded by true nesting rather than the literal count.  This keeps the
+   * start bitmap precise for large flat alternations, which the old depth>12
+   * guard blanked to all-bits (defeating the Tier 8 bitmap skip). */
+  uint32_t stack[2048];
+  int sp = 0;
+  size_t steps = 0;
 
   while (ip < bc_len) {
+  sbm_next:
+    if (++steps > bc_len * 8 + 256) { bitmap256_set_all(bm); return; }
     uint8_t op = bc[ip]; /* ip points to opcode */
     switch (op) {
 
     /* ---- Terminal consuming ops: determine start bytes and stop ---- */
-    case OP_LIT: {
-      if (ip + 9 > bc_len) { bitmap256_set_all(bm); return; }
-      uint32_t lit_off = search_read_u32(bc, ip + 1);
-      if (lit_off >= bc_len) { bitmap256_set_all(bm); return; }
-      bitmap256_set(bm, bc[lit_off]);
-      return;
-    }
+     case OP_LIT: {
+       if (ip + 9 > bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
+       uint32_t lit_off = search_read_u32(bc, ip + 1);
+       if (lit_off >= bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
+       bitmap256_set(bm, bc[lit_off]);
+       SBM_DONE();
+     }
 
     case OP_ANY: {
-      if (ip + 3 > bc_len) { bitmap256_set_all(bm); return; }
+      if (ip + 3 > bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
       uint16_t set_id = search_read_u16(bc, ip + 1);
       uint16_t count = 0, ci = 0;
       const uint8_t *rng = get_ranges_ptr(tmp_vm, set_id, &count, &ci);
@@ -325,11 +445,11 @@ static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
       } else {
         bitmap256_set_all(bm);
       }
-      return;
+      SBM_DONE();
     }
 
     case OP_NOTANY: {
-      if (ip + 3 > bc_len) { bitmap256_set_all(bm); return; }
+      if (ip + 3 > bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
       uint16_t set_id = search_read_u16(bc, ip + 1);
       uint16_t count = 0, ci = 0;
       const uint8_t *rng = get_ranges_ptr(tmp_vm, set_id, &count, &ci);
@@ -342,11 +462,11 @@ static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
       } else {
         bitmap256_set_all(bm);
       }
-      return;
+      SBM_DONE();
     }
 
     case OP_SPAN: {
-      if (ip + 3 > bc_len) { bitmap256_set_all(bm); return; }
+      if (ip + 3 > bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
       uint16_t set_id = search_read_u16(bc, ip + 1);
       uint16_t count = 0, ci = 0;
       const uint8_t *rng = get_ranges_ptr(tmp_vm, set_id, &count, &ci);
@@ -359,7 +479,7 @@ static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
       } else {
         bitmap256_set_all(bm);
       }
-      return;
+      SBM_DONE();
     }
 
     case OP_BREAK:
@@ -367,7 +487,7 @@ static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
       /* BREAK can succeed at ANY position (zero-width at a delimiter or
        * at end-of-subject).  Conservatively allow all bytes. */
       bitmap256_set_all(bm);
-      return;
+      SBM_DONE();
 
     case OP_LEN:
     case OP_REM:
@@ -376,22 +496,18 @@ static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
        * REM: any byte (consumes remainder).
        * BAL: any byte (balanced pair can start with any char). */
       bitmap256_set_all(bm);
-      return;
+      SBM_DONE();
 
-    /* ---- Alternation: union of branch start bytes ---- */
+    /* ---- Alternation: union of branch start bytes (iterate, don't recurse) ---- */
     case OP_SPLIT: {
-      if (ip + 9 > bc_len) { bitmap256_set_all(bm); return; }
+      if (ip + 9 > bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
       uint32_t a = search_read_u32(bc, ip + 1);
       uint32_t b = search_read_u32(bc, ip + 5);
-      if (a >= bc_len || b >= bc_len) { bitmap256_set_all(bm); return; }
-      uint8_t ba[32], bb[32];
-      memset(ba, 0, sizeof(ba));
-      memset(bb, 0, sizeof(bb));
-      compute_start_bitmap(bc, bc_len, (size_t)a, ba, depth + 1, tmp_vm);
-      compute_start_bitmap(bc, bc_len, (size_t)b, bb, depth + 1, tmp_vm);
-      bitmap256_or(bm, ba);
-      bitmap256_or(bm, bb);
-      return;
+      if (a >= bc_len || b >= bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
+      if (sp < 2048) stack[sp++] = a; /* defer left branch */
+      else { bitmap256_set_all(bm); SBM_DONE(); }
+      ip = (size_t)b;                 /* walk right branch iteratively */
+      continue;
     }
 
     /* ---- Zero-width wrappers: skip to next instruction ---- */
@@ -407,7 +523,7 @@ static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
       ip += 2; /* opcode + type byte */
       continue;
     case OP_ASSIGN:
-      if (ip + 4 > bc_len) { bitmap256_set_all(bm); return; }
+      if (ip + 4 > bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
       ip += 4;
       continue;
 
@@ -415,15 +531,15 @@ static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
     case OP_RPOS:
     case OP_TAB:
     case OP_RTAB:
-      if (ip + 5 > bc_len) { bitmap256_set_all(bm); return; }
+      if (ip + 5 > bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
       ip += 5;
       continue;
 
     /* ---- Unconditional jump: follow target ---- */
     case OP_JMP: {
-      if (ip + 5 > bc_len) { bitmap256_set_all(bm); return; }
+      if (ip + 5 > bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
       uint32_t target = search_read_u32(bc, ip + 1);
-      if (target >= bc_len) { bitmap256_set_all(bm); return; }
+      if (target >= bc_len) { bitmap256_set_all(bm); SBM_DONE(); }
       ip = (size_t)target;
       continue;
     }
@@ -447,18 +563,18 @@ static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
     case OP_GOTO_F:
     case OP_LABEL:
       bitmap256_set_all(bm);
-      return;
+      SBM_DONE();
 
     /* ---- Terminals: no start bytes contributed ---- */
     case OP_ACCEPT:
     case OP_FAIL:
     case OP_ABORT:
     case OP_SUCCEED:
-      return;
+      SBM_DONE();
 
     default:
       bitmap256_set_all(bm);
-      return;
+      SBM_DONE();
     }
   }
 }
@@ -753,15 +869,23 @@ static bool check_alt_literals(const uint8_t *bc, size_t bc_len, size_t ip) {
   uint8_t op = bc[ip];
 
   if (op == OP_LIT) {
-    /* Leaf: must be LIT(off, len) followed by ACCEPT.
-     * Compiler always emits data inline after the 9-byte header,
-     * so ACCEPT lives at ip + 9 + len. */
+    /* Leaf: LIT(off, len) whose literal data is emitted inline, followed
+     * eventually by OP_ACCEPT.  The compiler emits the final alternative
+     * as `LIT ... ACCEPT`, but every other alternative is `LIT ... JMP`
+     * jumping to the shared ACCEPT.  Follow any trailing JMPs so both
+     * shapes are accepted. */
     if (ip + 10 > bc_len)
       return false;
     uint32_t lit_len = search_read_u32(bc, ip + 5);
-    if (ip + 9 + lit_len + 1 > bc_len)
+    if (ip + 9 + lit_len > bc_len)
       return false;
-    if (bc[ip + 9 + lit_len] != OP_ACCEPT)
+    size_t cur = ip + 9 + lit_len;
+    size_t guard = 0;
+    while (cur < bc_len && bc[cur] == OP_JMP) {
+      if (++guard > bc_len) return false; /* cycle guard */
+      cur = (size_t)search_read_u32(bc, cur + 1);
+    }
+    if (cur >= bc_len || bc[cur] != OP_ACCEPT)
       return false;
     return true;
   }
@@ -1176,6 +1300,12 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     size_t bc_remain = bc_len > 512 ? 512 : bc_len;
     out->is_alt_literals =
         check_alt_literals(bc, bc_remain, 0);
+    /* Flat vs bushy: flat alternatives share no prefix and gain nothing
+     * from the trie, so they are routed to TIER_GENERAL (which already has
+     * start-bitmap + BMH + minlength acceleration).  This eliminates the
+     * 125x regression on flat alternation patterns. */
+    if (out->is_alt_literals)
+      out->is_alt_literals_flat = !alt_literals_share_prefix(bc, bc_remain, 0);
   }
 
   /* ---- Automaton eligibility ---- */
@@ -1222,6 +1352,7 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   if (out->has_start_bitmap)      out->flags |= META_HAS_START_BITMAP;
   if (out->automaton_eligible)    out->flags |= META_AUTOMATON_ELIGIBLE;
   if (out->is_alt_literals)       out->flags |= META_IS_ALT_LITERALS;
+  if (out->is_alt_literals_flat)  out->flags |= META_IS_ALT_LITERALS_FLAT;
   if (out->has_bmh_skip)          out->flags |= META_HAS_BMH_SKIP;
   if (out->is_literal_only)       out->flags |= META_IS_LITERAL_ONLY;
   if (out->search_vm_eligible)    out->flags |= META_SEARCH_VM_ELIGIBLE;
@@ -1238,8 +1369,10 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     out->tier = TIER_PREFIX;
   else if (out->has_candidate_bitmap && out->is_single_char_alt)
     out->tier = TIER_BITMAP;
-  else if (out->is_alt_literals)
+  else if (out->is_alt_literals && !out->is_alt_literals_flat)
     out->tier = TIER_ALT_LIT;
+  else if (out->is_alt_literals) /* flat: fall through to general VM */
+    out->tier = TIER_GENERAL;
   else if (out->simd_eligible)
     out->tier = TIER_SIMD_NFA;
   else if (out->search_vm_eligible)
@@ -1424,7 +1557,22 @@ static bool search_literal_accelerated(VM *vm, const char *subject,
     if (meta->literal_prefix_len == 1) {
       /* Single-byte prefix: use memchr */
       found = (const char *)memchr(hay, meta->literal_prefix[0], haylen);
-    } else if (meta->literal_prefix_len > 1) {
+    } else if (meta->literal_prefix_len == 2) {
+      /* Two-byte prefix: paired memchr avoids memmem's setup overhead
+       * (~30ns), which dominates for such short needles. */
+      const char *p = (const char *)memchr(hay, meta->literal_prefix[0], haylen);
+      while (p) {
+        if (p + 1 < hay + haylen && (uint8_t)p[1] == meta->literal_prefix[1])
+          break;
+        size_t remain = (size_t)(hay + haylen - (p + 1));
+        if (remain == 0)
+          break;
+        const char *q =
+            (const char *)memchr(p + 1, meta->literal_prefix[0], remain);
+        p = q;
+      }
+      found = p;
+    } else if (meta->literal_prefix_len > 2) {
       /* Multi-byte prefix: use memmem */
       found = (const char *)memmem(hay, haylen, meta->literal_prefix,
                                    meta->literal_prefix_len);
@@ -3349,9 +3497,10 @@ static bool tier_alt_literals(VM *vm, const char *subject, size_t subject_len,
                               const snobol_dfa_t *dfa,
                               snobol_search_result_t *out_result,
                               snobol_search_diag_t *diag) {
-  (void)meta; (void)dfa;
+  (void)dfa;
   if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_NONE;
-  return search_alt_literals_try(vm, subject, subject_len, start_offset, out_result);
+  return search_alt_literals_try(vm, subject, subject_len, start_offset,
+                                 meta, out_result);
 }
 
 /* Tier 6: Search-VM for eligible patterns */
@@ -3564,7 +3713,7 @@ bool snobol_search_exec(VM *vm, const char *subject,
     * Pure SPAN/BREAK patterns (simd_eligible=true, any tier) skip the
     * automaton: the O(n) bitmap or SIMD NFA scan is faster and avoids
     * the O(n²) per-position automaton trial loop. */
-  if (dfa && meta->automaton_eligible &&
+  if (dfa && meta->automaton_eligible && !meta->is_alt_literals_flat &&
       (meta->has_bmh_skip ||
        (!meta->simd_eligible && meta->tier >= TIER_SEARCH_VM))) {
     return tier_table[TIER_AUTOMATON](vm, subject, subject_len, start_offset,

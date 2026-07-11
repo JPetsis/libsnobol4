@@ -84,14 +84,28 @@ void snobol_context_destroy(snobol_context_t *ctx) {
  * Core compilation helper: lex → parse → compile → allocate pattern.
  */
 static snobol_pattern_t *do_compile(const char *source, size_t len,
-                                     bool case_insensitive, char **error) {
+                                    bool case_insensitive, char **error) {
   if (error)
     *error = NULL;
 
   snobol_lexer_t *lexer = snobol_lexer_create(source, len);
   snobol_parser_t *parser = snobol_parser_create();
 
+  /* Bind a thread-local bump arena for AST node storage.  Node structs are
+   * bump-allocated for the duration of this compile and reclaimed via a
+   * single arena reset; owned sub-allocations (strings, concat arrays) still
+   * use the heap.  Falls back to calloc when the arena is exhausted. */
+  snobol_arena_t arena;
+  void *arena_buf = snobol_malloc(SNOBOL_ARENA_DEFAULT_CAPACITY);
+  if (arena_buf)
+    snobol_arena_init(&arena, arena_buf, SNOBOL_ARENA_DEFAULT_CAPACITY);
+  else
+    snobol_arena_init(&arena, NULL, 0);
+  snobol_ast_set_arena(&arena);
+
   ast_node_t *ast = snobol_parser_parse(parser, lexer);
+
+  snobol_pattern_t *result = NULL;
 
   if (!ast || snobol_parser_has_error(parser)) {
     const char *msg = snobol_parser_get_error(parser);
@@ -104,17 +118,13 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
         memcpy(*error, msg, mlen);
     }
     snobol_ast_free(ast);
-    snobol_parser_destroy(parser);
-    snobol_lexer_destroy(lexer);
-    return NULL;
+    goto cleanup;
   }
 
   uint8_t *bc = NULL;
   size_t bc_len = 0;
   int rc = compile_ast_to_bytecode_c(ast, case_insensitive, &bc, &bc_len);
   snobol_ast_free(ast);
-  snobol_parser_destroy(parser);
-  snobol_lexer_destroy(lexer);
 
   if (rc != 0) {
     if (error) {
@@ -124,7 +134,7 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
       if (*error)
         memcpy(*error, msg, mlen);
     }
-    return NULL;
+    goto cleanup;
   }
 
   snobol_pattern_t *pat =
@@ -136,7 +146,7 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
       if (*error)
         memcpy(*error, "out of memory", 14);
     }
-    return NULL;
+    goto cleanup;
   }
   memset(pat, 0, sizeof(snobol_pattern_t));
   pat->bc = bc;
@@ -148,7 +158,17 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
   pat->meta_initialized = true;
   snobol_build_range_meta(pat->bc, pat->bc_len,
                            &pat->range_meta, &pat->range_meta_count);
-  return pat;
+  result = pat;
+
+cleanup:
+  snobol_parser_destroy(parser);
+  snobol_lexer_destroy(lexer);
+  /* Reclaim all bump-allocated AST node storage in one shot.  Owned strings
+   * and concat part arrays were already freed by snobol_ast_free(). */
+  snobol_ast_clear_arena();
+  snobol_arena_reset(&arena);
+  snobol_free(arena_buf);
+  return result;
 }
 
 snobol_pattern_t *snobol_pattern_compile_ex(snobol_context_t *ctx,

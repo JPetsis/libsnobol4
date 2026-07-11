@@ -109,6 +109,7 @@ typedef enum {
 #define META_IS_LITERAL_ONLY      (1u << 14)
 #define META_SEARCH_VM_ELIGIBLE   (1u << 15)
 #define META_SIMD_ELIGIBLE        (1u << 16)
+#define META_IS_ALT_LITERALS_FLAT (1u << 17)
 
 /* ---------------------------------------------------------------------------
  * Automaton (DFA) types
@@ -209,6 +210,12 @@ typedef struct {
    * (Tier 3a) which replaces the general VM loop for these patterns. */
   bool is_alt_literals;
 
+  /* True when the alt-literals trie is "flat": the alternatives share no
+   * common prefix, so the trie provides no benefit over the general VM.
+   * Detected at derive_meta time; flat alt-literals are routed to
+   * TIER_GENERAL instead of TIER_ALT_LIT (fixes the 125x regression). */
+  bool is_alt_literals_flat;
+
   /* Boyer-Moore-Horspool skip table -------------------------------------- */
   /* When has_bmh_skip is true, bmh_skip[byte] gives the distance to advance
    * the search position after a VM failure at the current candidate.  The
@@ -267,6 +274,7 @@ typedef struct {
 #define snobol_meta_has_start_bitmap(m)    (!!((m)->flags & META_HAS_START_BITMAP))
 #define snobol_meta_automaton_eligible(m)  (!!((m)->flags & META_AUTOMATON_ELIGIBLE))
 #define snobol_meta_is_alt_literals(m)     (!!((m)->flags & META_IS_ALT_LITERALS))
+#define snobol_meta_alt_literals_flat(m)   (!!((m)->flags & META_IS_ALT_LITERALS_FLAT))
 #define snobol_meta_has_bmh_skip(m)        (!!((m)->flags & META_HAS_BMH_SKIP))
 #define snobol_meta_is_literal_only(m)     (!!((m)->flags & META_IS_LITERAL_ONLY))
 #define snobol_meta_search_vm_eligible(m)  (!!((m)->flags & META_SEARCH_VM_ELIGIBLE))

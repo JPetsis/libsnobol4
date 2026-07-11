@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "snobol/arena.h"
+
 /**
  * @file snobol_ast.h
  * @brief Abstract Syntax Tree representation for SNOBOL patterns
@@ -126,6 +128,15 @@ typedef struct ast_node ast_node_t;
  */
 struct ast_node {
   ast_type_t type;
+
+  /**
+   * True when this node's storage was bump-allocated from the thread-local
+   * AST arena (see snobol_ast_set_arena).  Such nodes must not be passed to
+   * free(); the owning arena is reset by the caller instead.  Sub-allocations
+   * owned by the node (strings, concat part arrays) are always heap-allocated
+   * and freed individually by snobol_ast_free().
+   */
+  bool arena_allocated;
 
   union {
     /* AST_LITERAL */
@@ -338,6 +349,29 @@ ast_node_t *snobol_ast_clone(const ast_node_t *node);
  * @param node Node to free (NULL is safe)
  */
 void snobol_ast_free(ast_node_t *node);
+
+/**
+ * Bind a bump arena that subsequent AST node allocations draw from.  Pass NULL
+ * to revert to the default heap (calloc) allocator.  The binding is
+ * thread-local so concurrent compiles on different threads use independent
+ * arenas.  When the arena is exhausted, allocations transparently fall back to
+ * calloc.  Owned sub-allocations (strings, concat part arrays) always use the
+ * heap.  The caller is responsible for resetting/freeing the arena after the
+ * tree has been consumed (e.g. via snobol_ast_free followed by
+ * snobol_arena_reset).
+ *
+ * @param arena Arena to use, or NULL for the default allocator.
+ */
+void snobol_ast_set_arena(snobol_arena_t *arena);
+
+/**
+ * Clear the thread-local AST arena binding and return the previously bound
+ * arena (or NULL if none).  Convenient for reclaiming node storage after the
+ * tree has been freed.
+ *
+ * @return The arena that was bound before this call (may be NULL).
+ */
+snobol_arena_t *snobol_ast_clear_arena(void);
 
 /**
  * Get a string representation of AST node type for debugging
