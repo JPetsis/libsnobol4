@@ -970,6 +970,7 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
 
     snobol_pattern_search_state_t *state =
         snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+    snobol_pattern_search_state_set_pattern(state, intern);
     if (!state) {
         zend_throw_exception(zend_ce_exception, "Out of memory", 0);
         RETURN_FALSE;
@@ -1021,6 +1022,7 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
 
     snobol_pattern_search_state_t *state =
         snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+    snobol_pattern_search_state_set_pattern(state, intern);
     if (!state) {
         zend_throw_exception(zend_ce_exception, "Out of memory", 0);
         RETURN_FALSE;
@@ -1088,6 +1090,7 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
     /* JIT-search-perf-baseline: use the stateful search API. */
     snobol_pattern_search_state_t *state =
         snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+    snobol_pattern_search_state_set_pattern(state, intern);
     if (!state) {
         zend_throw_exception(zend_ce_exception, "Out of memory", 0);
         RETURN_FALSE;

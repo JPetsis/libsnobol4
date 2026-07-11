@@ -27,6 +27,10 @@ extern void snobol_pattern_set_automaton(snobol_pattern_t *pattern,
                                           snobol_dfa_t *dfa);
 extern const snobol_search_meta_t *snobol_pattern_get_meta(
     const snobol_pattern_t *pattern);
+extern snobol_auto_trie_t *snobol_pattern_get_trie_cache(
+    const snobol_pattern_t *pattern);
+extern void snobol_pattern_set_trie_cache(snobol_pattern_t *pattern,
+                                          snobol_auto_trie_t *trie);
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -106,7 +110,7 @@ typedef struct {
 } snobol_auto_node_t;
 
 /** Pre-allocated trie storage (stack-friendly, ~7 KB). */
-typedef struct {
+typedef struct snobol_auto_trie_t {
   snobol_auto_node_t nodes[SNOBOL_AUTO_MAX_NODES];
   snobol_auto_edge_t edges[SNOBOL_AUTO_MAX_EDGES];
   uint16_t node_count;
@@ -208,6 +212,10 @@ static bool trie_is_flat(const snobol_auto_trie_t *trie) {
   return true;
 }
 
+void snobol_auto_trie_free(snobol_auto_trie_t *trie) {
+  snobol_free(trie);
+}
+
 /* ---------------------------------------------------------------------------
  * Bytecode-level alternation-of-literals shared-prefix detector.
  *
@@ -279,54 +287,74 @@ static bool search_alt_literals_try(VM *vm, const char *subject,
                                      size_t subject_len, size_t start_offset,
                                      const snobol_search_meta_t *meta,
                                      snobol_search_result_t *out_result) {
-  (void)vm;
-  snobol_auto_trie_t trie;
-  trie.node_count = 1; /* root node (index 0) */
-  trie.edge_count = 0;
-  trie.nodes[0].first_edge = SNOBOL_AUTO_NULL;
-  trie.nodes[0].is_end = false;
+  snobol_pattern_t *pat = vm->pattern;
+  const snobol_auto_trie_t *trie = NULL;
+  snobol_auto_trie_t local; /* built only on a cache miss */
 
-  /* Walk SPLIT tree and insert each LIT … ACCEPT branch */
-  /* We use a recursive helper on the C stack — depth is bounded by the
-   * bytecode length, typically < 10 for alternation patterns. */
-  bool build_ok = true;
-  size_t bc_len = vm->bc_len;
-  const uint8_t *bc = vm->bc;
+  /* Reuse the cached trie attached to the owning pattern on a cache hit.
+   * We read it directly by pointer: copying the full ~6 KB pool on every
+   * search would cost more than rebuilding the (tiny) trie, turning the
+   * cache into a net loss. */
+  if (pat)
+    trie = snobol_pattern_get_trie_cache(pat);
 
-  /* Inline lambda via nested helper (C23 / GCC extension).  For portability
-   * we use a local function pointer trampoline. */
-  bool all_ok = true;
-  size_t stack[64]; /* explicit stack to avoid recursion */
-  int sp = 0;
-  stack[sp++] = 0; /* start at ip=0 */
+  if (!trie) {
+    /* Build the trie fresh from the SPLIT/LIT tree. */
+    trie = &local;
+    local.node_count = 1; /* root node (index 0) */
+    local.edge_count = 0;
+    local.nodes[0].first_edge = SNOBOL_AUTO_NULL;
+    local.nodes[0].is_end = false;
 
-  while (sp > 0 && all_ok) {
-    size_t ip = stack[--sp];
-    if (ip + 2 > bc_len) { all_ok = false; break; }
-    uint8_t op = bc[ip];
-    if (op == OP_LIT) {
-      /* Leaf: insert literal into trie */
-      if (ip + 10 > bc_len) { all_ok = false; break; }
-      uint32_t off = search_read_u32(bc, ip + 1);
-      uint32_t len = search_read_u32(bc, ip + 5);
-      if (off >= bc_len || off + len > bc_len) { all_ok = false; break; }
-      if (!trie_insert(&trie, bc + off, len)) { all_ok = false; break; }
-    } else if (op == OP_SPLIT) {
-      if (ip + 9 > bc_len) { all_ok = false; break; }
-      uint32_t a = search_read_u32(bc, ip + 1);
-      uint32_t b = search_read_u32(bc, ip + 5);
-      if (a >= bc_len || b >= bc_len) { all_ok = false; break; }
-      if (sp + 2 > 64) { all_ok = false; break; }
-      stack[sp++] = b;
-      stack[sp++] = a;
-    } else {
-      all_ok = false;
-      break;
+    bool all_ok = true;
+    size_t bc_len = vm->bc_len;
+    const uint8_t *bc = vm->bc;
+
+    size_t stack[64]; /* explicit stack to avoid recursion */
+    int sp = 0;
+    stack[sp++] = 0; /* start at ip=0 */
+
+    while (sp > 0 && all_ok) {
+      size_t ip = stack[--sp];
+      if (ip + 2 > bc_len) { all_ok = false; break; }
+      uint8_t op = bc[ip];
+      if (op == OP_LIT) {
+        /* Leaf: insert literal into trie */
+        if (ip + 10 > bc_len) { all_ok = false; break; }
+        uint32_t off = search_read_u32(bc, ip + 1);
+        uint32_t len = search_read_u32(bc, ip + 5);
+        if (off >= bc_len || off + len > bc_len) { all_ok = false; break; }
+        if (!trie_insert(&local, bc + off, len)) { all_ok = false; break; }
+      } else if (op == OP_SPLIT) {
+        if (ip + 9 > bc_len) { all_ok = false; break; }
+        uint32_t a = search_read_u32(bc, ip + 1);
+        uint32_t b = search_read_u32(bc, ip + 5);
+        if (a >= bc_len || b >= bc_len) { all_ok = false; break; }
+        if (sp + 2 > 64) { all_ok = false; break; }
+        stack[sp++] = b;
+        stack[sp++] = a;
+      } else {
+        all_ok = false;
+        break;
+      }
+    }
+
+    if (!all_ok)
+      return false;
+
+    /* Cache the freshly built trie on the owning pattern so subsequent
+     * searches reuse it (by pointer — no per-call copy).  Skip flat tries
+     * (no shared prefix); they give no benefit over the general VM and
+     * route there instead. */
+    if (pat && !trie_is_flat(&local)) {
+      snobol_auto_trie_t *cache =
+          (snobol_auto_trie_t *)snobol_malloc(sizeof(snobol_auto_trie_t));
+      if (cache) {
+        memcpy(cache, &local, sizeof(*cache));
+        snobol_pattern_set_trie_cache(pat, cache);
+      }
     }
   }
-
-  if (!all_ok)
-    return false;
 
   /* ---- Scan subject from start_offset ---- */
   size_t offset = start_offset;
@@ -345,7 +373,7 @@ static bool search_alt_literals_try(VM *vm, const char *subject,
 
     /* 2. Trie match at this position */
     size_t match_len = 0;
-    if (trie_match(&trie, subject, subject_len, offset, &match_len)) {
+    if (trie_match(trie, subject, subject_len, offset, &match_len)) {
       out_result->success = true;
       out_result->match_start = offset;
       out_result->match_end = offset + match_len;

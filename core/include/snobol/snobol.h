@@ -355,6 +355,20 @@ snobol_pattern_search_state_t *
 snobol_pattern_search_state_create(const uint8_t *bc, size_t bc_len);
 
 /**
+ * @brief Associate an owning pattern with a search state.
+ *
+ * When set, repeated calls to snobol_pattern_search_ex() on the state reuse
+ * the pattern's cached Tier-5 alternation trie instead of rebuilding it each
+ * call. The pattern must outlive the state. Optional — callers that build a
+ * state directly from bytecode (without a pattern object) need not call this.
+ *
+ * @param[in] state   State created by snobol_pattern_search_state_create().
+ * @param[in] pattern Owning pattern (may be NULL to clear the association).
+ */
+void snobol_pattern_search_state_set_pattern(
+    snobol_pattern_search_state_t *state, snobol_pattern_t *pattern);
+
+/**
  * @brief Destroy a search state object. NULL-safe.
  *
  * Releases the cached VM, output buffer, match result, and the

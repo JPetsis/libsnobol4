@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct snobol_pattern; /* forward decl — only used as an opaque pointer below */
+
 /** @brief Enable dynamic pattern and table support */
 #define SNOBOL_DYNAMIC_PATTERN 1
 
@@ -342,6 +344,12 @@ struct choice {
 typedef struct {
   const uint8_t *bc; /**< Compiled bytecode pointer (not owned). */
   size_t bc_len;     /**< Bytecode length in bytes. */
+
+  /** @brief Optional owning pattern (NULL for stateless searches).
+   *  Used as the attachment point for the cached Tier-5 trie
+   *  (pattern->trie_cache) so repeated searches of the same pattern reuse
+   *  the prebuilt trie instead of rebuilding it each call. */
+  struct snobol_pattern *pattern;
 
   /** @brief Cached charclass range metadata (set_id -> range data).
    *  Built at compile time; index is set_id - 1. May be NULL if the

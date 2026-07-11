@@ -50,6 +50,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct snobol_pattern; /* forward decl — only used as an opaque pointer */
+
 /* ---------------------------------------------------------------------------
  * Search candidate metadata
  *
@@ -138,6 +140,24 @@ typedef struct {
   uint16_t start_state;   /**< Start DFA state index */
   uint32_t state_cap;     /**< Allocated capacity in states */
 } snobol_dfa_t;
+
+/**
+ * @brief Opaque pre-allocated trie used by the Tier-5 alternation matcher.
+ *
+ * The full definition lives in search.c (it is a ~7 KB fixed pool).  Callers
+ * (e.g. snobol_pattern_t) only ever hold a pointer, so the struct body is
+ * intentionally not exposed here.
+ */
+typedef struct snobol_auto_trie_t snobol_auto_trie_t;
+
+/** Free a cached trie previously built by the Tier-5 matcher. Safe on NULL. */
+void snobol_auto_trie_free(snobol_auto_trie_t *trie);
+
+/** @brief Return the pattern's cached Tier-5 alternation trie, or NULL if
+ *  it has not been built yet. Read-only accessor intended for diagnostics
+ *  and tests; the cache is populated lazily on the first Tier-5 search. */
+snobol_auto_trie_t *snobol_pattern_get_trie_cache(
+    const struct snobol_pattern *pattern);
 
 typedef struct {
   /* Packed flags and tier index ------------------------------------------ */

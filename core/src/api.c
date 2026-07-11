@@ -52,6 +52,12 @@ struct snobol_pattern {
   /* Cached DFA automaton (Tier 7). Constructed lazily on first
    * eligible search; freed in snobol_pattern_free(). */
   snobol_dfa_t *automaton;
+  /* Cached Tier-5 alternation trie (snobol_auto_trie_t).  Built lazily on
+   * the first Tier-5 search and reused for every subsequent search of this
+   * pattern.  NULL until built; freed in snobol_pattern_free().  Only set
+   * for bushy alternations (flat ones route to Tier 8 and never build one). */
+  snobol_auto_trie_t *trie_cache;
+  int trie_cache_refs; /* reserved for diagnostics; 0 when no cache present */
 };
 
 /* Maximum named variables returned from a match */
@@ -205,6 +211,21 @@ void snobol_pattern_set_automaton(snobol_pattern_t *pattern,
   if (pattern) pattern->automaton = dfa;
 }
 
+/* --- Tier-5 trie cache accessors (mirror the DFA cache pattern) --------- */
+
+snobol_auto_trie_t *snobol_pattern_get_trie_cache(
+    const snobol_pattern_t *pattern) {
+  return pattern ? pattern->trie_cache : NULL;
+}
+
+void snobol_pattern_set_trie_cache(snobol_pattern_t *pattern,
+                                   snobol_auto_trie_t *trie) {
+  if (pattern) {
+    pattern->trie_cache = trie;
+    pattern->trie_cache_refs = trie ? 1 : 0;
+  }
+}
+
 const snobol_search_meta_t *snobol_pattern_get_meta(
     const snobol_pattern_t *pattern) {
   return pattern ? &pattern->meta : NULL;
@@ -223,6 +244,8 @@ void snobol_pattern_free(snobol_pattern_t *pattern) {
     snobol_free(pattern->range_meta);
   if (pattern->automaton)
     snobol_dfa_free(pattern->automaton);
+  if (pattern->trie_cache)
+    snobol_auto_trie_free(pattern->trie_cache);
   if (pattern->meta.bmh_skip)
     snobol_free(pattern->meta.bmh_skip);
   snobol_free(pattern);
@@ -375,6 +398,7 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
   memset(&vm, 0, sizeof(VM));
   vm.bc = pattern->bc;
   vm.bc_len = pattern->bc_len;
+  vm.pattern = pattern;
   vm.range_meta = pattern->range_meta;
   vm.range_meta_count = pattern->range_meta_count;
   vm.s = subject;
@@ -566,6 +590,7 @@ bool snobol_pattern_search_reuse(snobol_pattern_t *pattern,
 struct snobol_pattern_search_state {
   const uint8_t *bc; /* borrowed, not owned */
   size_t bc_len;
+  snobol_pattern_t *pattern; /* optional owning pattern (for trie cache) */
   snobol_buf out_buf;        /* reused across calls */
   VM vm;                     /* reused, fields-only reset per call */
   snobol_match_t match;      /* overwritten on each call */
@@ -592,6 +617,12 @@ snobol_pattern_search_state_create(const uint8_t *bc, size_t bc_len) {
   snobol_build_range_meta(bc, bc_len,
                            &state->range_meta, &state->range_meta_count);
   return state;
+}
+
+void snobol_pattern_search_state_set_pattern(
+    snobol_pattern_search_state_t *state, snobol_pattern_t *pattern) {
+  if (state)
+    state->pattern = pattern;
 }
 
 void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
@@ -638,6 +669,7 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
     memset(&state->vm, 0, sizeof(VM));
     state->vm.bc = (uint8_t *)state->bc;
     state->vm.bc_len = state->bc_len;
+    state->vm.pattern = state->pattern;
     state->vm.range_meta = state->range_meta;
     state->vm.range_meta_count = state->range_meta_count;
     state->vm.out = &state->out_buf;

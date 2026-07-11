@@ -14,6 +14,7 @@ add_executable(snobol4_tests
     test_stress_backtracking.c
     test_catastrophic.c
     test_search_meta_cache.c
+    test_search.c
     test_search_ex_api.c
     test_lexer.c
     test_parser.c

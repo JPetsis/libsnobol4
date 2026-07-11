@@ -265,6 +265,7 @@ void test_control_flow_suite(void);
 void test_backtracking_suite(void);
 void test_catastrophic_suite(void);
 void test_search_meta_cache_suite(void);
+void test_search_suite(void);
 void test_search_ex_api_suite(void);
 void test_lexer_suite(void);
 void test_parser_suite(void);
@@ -331,6 +332,7 @@ int main(void) {
   RUN_SUITE("Catastrophic Backtracking", test_catastrophic_suite);
 
   RUN_SUITE("Search: cached metadata", test_search_meta_cache_suite);
+  RUN_SUITE("Search: tier caching", test_search_suite);
   RUN_SUITE("Search: stateful _ex API", test_search_ex_api_suite);
 
   /* Lexer / Parser / AST */
