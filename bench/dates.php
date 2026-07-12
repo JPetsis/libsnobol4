@@ -6,7 +6,7 @@
  * Compares SNOBOL VM vs PCRE performance.
  */
 
-require __DIR__.'/../vendor/autoload.php';
+require __DIR__.'/resolve_autoload.php';
 require __DIR__.'/Harness.php';
 
 use Bench\Harness;
@@ -165,7 +165,7 @@ $harness->bench(
     'match_any_dates',
     'pcre',
     function () use ($text) {
-        preg_match_all('/\d{2,4}[-\/\.]\d{2}[-\/\.]\d{2,4}/', $text, $matches);
+        preg_match_all('/\d{2,4}[-\/.]\d{2}[-\/.]\d{2,4}/', $text, $matches);
     },
     $warmup,
     $iterations,

@@ -8,7 +8,7 @@
 #   make help     - Show all targets
 
 .PHONY: all build test clean distclean install uninstall help \
-        build-debug build-release build-asan \
+        build-debug build-release build-asan build-pgo-gen build-pgo-use pgo-train \
         test-verbose test-valgrind test-valgrind-report test-asan bench bench-c docs format lint warnings \
         gen-unicode-fold
 
@@ -67,6 +67,55 @@ build-asan:
 		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 	@echo "==> Building with sanitizers..."
 	$(CMAKE) --build build-asan
+
+# Profile-Guided Optimization (Priority 6.9)
+# Workflow: build-pgo-gen -> pgo-train -> build-pgo-use
+PGO_DIR ?= build-pgo
+
+build-pgo-gen:
+	@echo "==> Configuring PGO instrumentation build (Release + -fprofile-generate)..."
+	$(CMAKE) -B build-pgo-gen \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_TESTS=ON \
+		-DBUILD_PHP=OFF \
+		-DBUILD_BENCH_C=ON \
+		-DSNOBOL_PGO_GEN=ON \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	@echo "==> Building PGO instrumented probe..."
+	$(CMAKE) --build build-pgo-gen --target snobol4_probe
+	@echo "==> PGO instrumentation build complete. Next: make pgo-train"
+
+pgo-train:
+	@echo "==> Training PGO profile (running snobol4_probe)..."
+	@test -f build-pgo-gen/bench/c/snobol4_probe || \
+		(echo "PGO instrumented binary not found. Run 'make build-pgo-gen' first." && exit 1)
+	@mkdir -p $(PGO_DIR)
+	cd build-pgo-gen && ./bench/c/snobol4_probe
+	@echo "==> Merging profile data with llvm-profdata..."
+	@if command -v llvm-profdata >/dev/null 2>&1; then \
+		llvm-profdata merge -output=$(PGO_DIR)/profdata build-pgo-gen/default_*.profraw 2>/dev/null || \
+		llvm-profdata merge -output=$(PGO_DIR)/profdata build-pgo-gen/**/default_*.profraw 2>/dev/null || true; \
+	elif command -v xcrun >/dev/null 2>&1; then \
+		xcrun llvm-profdata merge -output=$(PGO_DIR)/profdata build-pgo-gen/default_*.profraw 2>/dev/null || true; \
+	else \
+		echo "llvm-profdata not found; relying on GCC-style .gcda next to objects."; \
+	fi
+	@echo "==> Profile written to $(PGO_DIR)/profdata. Next: make build-pgo-use"
+
+build-pgo-use:
+	@test -f $(PGO_DIR)/profdata || \
+		(echo "Merged profile not found. Run 'make pgo-train' first." && exit 1)
+	@echo "==> Configuring PGO optimized build (-fprofile-use)..."
+	$(CMAKE) -B build-pgo-use \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_TESTS=ON \
+		-DBUILD_PHP=OFF \
+		-DSNOBOL_PGO_USE=ON \
+		-DSNOBOL_PGO_PROFILE=$(CURDIR)/$(PGO_DIR)/profdata \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	@echo "==> Building PGO optimized library..."
+	$(CMAKE) --build build-pgo-use
+	@echo "==> PGO optimized build complete!"
 
 # Run tests
 test:
@@ -300,6 +349,9 @@ help:
 	@echo "  build-debug    - Build with Debug configuration"
 	@echo "  build-release  - Build with Release configuration"
 	@echo "  build-asan     - Build with AddressSanitizer+UBSan (SNOBOL_SANITIZE=ON)"
+	@echo "  build-pgo-gen  - PGO instrumentation build (train with: make pgo-train)"
+	@echo "  pgo-train      - Run probe to generate PGO profile (build-pgo/profdata)"
+	@echo "  build-pgo-use  - PGO optimized build using the generated profile"
 	@echo "  build-php      - Build with PHP binding (requires PHP dev headers)"
 	@echo "  gen-unicode-fold - Regenerate BMP case-folding tables from UCD"
 	@echo ""

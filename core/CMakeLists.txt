@@ -70,6 +70,37 @@ else()
     )
 endif()
 
+# Priority 6.8: Release-only aggressive optimization.
+# Hidden visibility + no-semantic-interposition shrink the symbol table and let
+# the compiler inline across the hot search/VM paths; _FORTIFY_SOURCE=3 hardens
+# libc calls.  LTO (flto) is enabled project-wide for Release via
+# CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE in the top-level CMakeLists.
+if(NOT MSVC)
+  target_compile_options(snobol4 PRIVATE
+    $<$<CONFIG:Release>:-O3>
+    $<$<CONFIG:Release>:-fvisibility=hidden>
+    $<$<BOOL:${BUILD_SHARED_LIBS}>:-fno-semantic-interposition>
+  )
+  target_compile_definitions(snobol4 PRIVATE
+    $<$<CONFIG:Release>:_FORTIFY_SOURCE=3>
+  )
+endif()
+
+# Priority 6.9: Profile-Guided Optimization (off by default; see Makefile
+# build-pgo-gen / pgo-train / build-pgo-use).  Applied on top of Release.
+if(SNOBOL_PGO_GEN)
+  target_compile_options(snobol4 PRIVATE -fprofile-generate)
+  target_link_options(snobol4 PUBLIC -fprofile-generate)
+elseif(SNOBOL_PGO_USE)
+  if(SNOBOL_PGO_PROFILE)
+    target_compile_options(snobol4 PRIVATE -fprofile-use=${SNOBOL_PGO_PROFILE} -fprofile-correction)
+    target_link_options(snobol4 PUBLIC -fprofile-use=${SNOBOL_PGO_PROFILE} -fprofile-correction)
+  else()
+    target_compile_options(snobol4 PRIVATE -fprofile-use -fprofile-correction)
+    target_link_options(snobol4 PUBLIC -fprofile-use -fprofile-correction)
+  endif()
+endif()
+
 # SIMD compiler flags for accelerated search tiers (AVX2 on x86-64)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
   target_compile_options(snobol4 PRIVATE -mavx2)

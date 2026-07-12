@@ -6,6 +6,7 @@
 /* Forward declarations */
 BENCH_SUITE(literal);
 BENCH_SUITE(alternation);
+BENCH_SUITE(alt_flat);
 BENCH_SUITE(tokenization);
 BENCH_SUITE(substitution);
 BENCH_SUITE(complex_http);
@@ -40,6 +41,7 @@ int main(void) {
 
     run_one(bench_literal_suite);
     run_one(bench_alternation_suite);
+    run_one(bench_alt_flat_suite);
     run_one(bench_tokenization_suite);
     run_one(bench_substitution_suite);
     run_one(bench_complex_http_suite);

@@ -16,6 +16,7 @@
 
 #include "snobol/search.h"
 #include "snobol/snobol.h"
+#include "snobol/snobol_attrs.h"
 #include "snobol/snobol_internal.h"
 #include "snobol/simd.h"
 #include "snobol/vm.h"
@@ -167,8 +168,10 @@ static bool trie_insert(snobol_auto_trie_t *t, const uint8_t *s, size_t len) {
  * number of bytes consumed.
  * ---------------------------------------------------------------------------
  */
-static bool trie_match(const snobol_auto_trie_t *t, const char *subject,
-                       size_t subject_len, size_t offset, size_t *match_len) {
+static bool SNOBOL_HOT trie_match(const snobol_auto_trie_t * SNOBOL_RESTRICT t,
+                                  const char * SNOBOL_RESTRICT subject,
+                                  size_t subject_len, size_t offset,
+                                  size_t * SNOBOL_RESTRICT match_len) {
   size_t pos = offset;
   uint16_t n = 0; /* start at root */
   while (pos < subject_len) {
@@ -198,7 +201,7 @@ static bool trie_match(const snobol_auto_trie_t *t, const char *subject,
  * benefits from trie matching.
  * ---------------------------------------------------------------------------
  */
-static bool trie_is_flat(const snobol_auto_trie_t *trie) {
+static bool SNOBOL_PURE trie_is_flat(const snobol_auto_trie_t *trie) {
   for (uint16_t n = 1; n < trie->node_count; n++) {
     uint16_t e = trie->nodes[n].first_edge;
     int outgoing = 0;
@@ -283,7 +286,15 @@ static bool alt_literals_share_prefix(const uint8_t *bc, size_t bc_len,
  * the first match at or after start_offset.
  * ---------------------------------------------------------------------------
  */
-static bool search_alt_literals_try(VM *vm, const char *subject,
+
+/* 256-bit start-byte bitmap test (PCRE2-style start_bits acceleration). */
+static inline bool SNOBOL_ALWAYS_INLINE bitmap256_test(const uint8_t bm[32],
+                                                       uint8_t b) {
+  return (bm[b >> 3] & (uint8_t)(1u << (b & 7))) != 0;
+}
+
+static bool SNOBOL_HOT search_alt_literals_try(VM * SNOBOL_RESTRICT vm,
+                                               const char * SNOBOL_RESTRICT subject,
                                      size_t subject_len, size_t start_offset,
                                      const snobol_search_meta_t *meta,
                                      snobol_search_result_t *out_result) {
@@ -365,7 +376,7 @@ static bool search_alt_literals_try(VM *vm, const char *subject,
      *    byte cannot possibly begin any alternative. */
     if (meta && meta->has_start_bitmap) {
       uint8_t b = (uint8_t)subject[offset];
-      if (!(meta->start_bitmap[b >> 3] & (uint8_t)(1u << (b & 7)))) {
+      if (likely(!bitmap256_test(meta->start_bitmap, b))) {
         offset++;
         continue;
       }
@@ -620,7 +631,7 @@ static void compute_start_bitmap(const uint8_t *bc, size_t bc_len, size_t ip,
  * ---------------------------------------------------------------------------
  */
 
-static uint32_t compute_minlength(const uint8_t *bc, size_t bc_len,
+static uint32_t SNOBOL_PURE compute_minlength(const uint8_t *bc, size_t bc_len,
                                    size_t ip, int depth) {
   if (depth > 12)
     return 0;
@@ -891,7 +902,7 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
  * (Tier 3a) instead of calling vm_exec at each candidate position.
  * ---------------------------------------------------------------------------
  */
-static bool check_alt_literals(const uint8_t *bc, size_t bc_len, size_t ip) {
+static bool SNOBOL_PURE check_alt_literals(const uint8_t *bc, size_t bc_len, size_t ip) {
   if (ip + 2 > bc_len)
     return false;
   uint8_t op = bc[ip];
@@ -1129,7 +1140,7 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
  * The function is pure (read-only), fast, and language-agnostic.
  * ---------------------------------------------------------------------------
  */
-void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
+void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
                                snobol_search_meta_t *out) {
   /* Zero everything */
   memset(out, 0, sizeof(*out));
@@ -1567,7 +1578,9 @@ static bool search_span_accelerated(VM *vm, const char *subject,
  * literal is only a prefix and the pattern has additional constraints).
  * ---------------------------------------------------------------------------
  */
-static bool search_literal_accelerated(VM *vm, const char *subject,
+static bool SNOBOL_HOT SNOBOL_ALIGNED(64)
+search_literal_accelerated(VM * SNOBOL_RESTRICT vm,
+                           const char * SNOBOL_RESTRICT subject,
                                        size_t subject_len, size_t start_offset,
                                        const snobol_search_meta_t *meta,
                                        snobol_search_result_t *out_result,
@@ -1867,7 +1880,8 @@ static inline void search_vm_writeback_to_vm(const search_vm_t *svm, VM *vm) {
   vm->max_counter_used = svm->max_counter_used;
 }
 
-static bool search_vm_exec(search_vm_t *vm, const char *subject, size_t subject_len,
+static bool SNOBOL_HOT search_vm_exec(search_vm_t * SNOBOL_RESTRICT vm,
+                                  const char * SNOBOL_RESTRICT subject, size_t subject_len,
                            size_t offset, snobol_search_result_t *out_result) {
   (void)subject;
   (void)subject_len;
@@ -3582,7 +3596,7 @@ bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
      * candidate positions for constrained patterns. */
     if (meta->has_start_bitmap && offset < subject_len) {
       uint8_t b = (uint8_t)subject[offset];
-      if (!(meta->start_bitmap[b >> 3] & (uint8_t)(1u << (b & 7)))) {
+      if (likely(!bitmap256_test(meta->start_bitmap, b))) {
         if (diag)
           diag->candidates_skipped++;
         offset++;
@@ -3686,7 +3700,135 @@ static const tier_fn tier_table[TIER_COUNT] = {
   [TIER_SIMD_NFA]   = tier_simd_nfa,       /* SIMD-accelerated Thompson NFA */
 };
 
-bool snobol_search_exec(VM *vm, const char *subject,
+/* ---------------------------------------------------------------------------
+ * Cost-model tier selection (Priority 4)
+ *
+ * Per-invocation cost model: each eligible tier is scored as
+ *     cost_ns = setup_ns + (subject_len / per_byte_div)
+ * and the cheapest eligible tier is selected. The general VM (Tier 8) is
+ * always a fallback candidate. Break/SPAN (0-1) keep their fixed tier, and the
+ * automaton (Tier 7) is owned by the DFA override in snobol_search_exec(); this
+ * model chooses among the remaining tiers (2-8).
+ *
+ * Coefficients live in this single table as the recalibration point.
+ *
+ * NOTE: the TIER_ALT_LIT setup cost was recalibrated from the design's 40 ns to
+ * 12 ns AFTER the trie-cache optimization (Priority 2) removed the per-call
+ * ~7 KB trie rebuild — the cached trie is now a pointer copy, so its per-call
+ * cost is tiny. With the stale 40 ns, the model routed every bushy alt-literal
+ * to the automaton (which is correct but defeats the cache). At 12 ns the trie
+ * wins for typical (short/medium) subjects while the automaton still wins for
+ * long subjects (>= ~87 bytes when a DFA is provided).
+ * ------------------------------------------------------------------------- */
+typedef struct {
+  snobol_search_tier_t tier;
+  int32_t setup_ns;
+  int32_t per_byte_div; /* subject_len is divided by this */
+} tier_cost_coeff_t;
+
+static const tier_cost_coeff_t k_tier_cost[] = {
+    {TIER_BREAK_SCAN, 20, 8},
+    {TIER_SPAN_SCAN, 20, 8},
+    {TIER_LITERAL, 10, 16},
+    {TIER_PREFIX, 30, 32},
+    {TIER_BITMAP, 25, 12},
+    {TIER_ALT_LIT, 12, 20}, /* recalibrated post trie-cache (was 40) */
+    {TIER_SEARCH_VM, 50, 10},
+    {TIER_GENERAL, 100, 5},
+};
+
+/* Score every eligible tier and return the cheapest. `dfa_available` gates the
+ * automaton candidate: when no DFA is supplied the caller cannot run Tier 7, so
+ * it is excluded here (the DFA override in snobol_search_exec owns Tier 7). */
+static snobol_search_tier_t select_tier_by_cost(const snobol_search_meta_t *meta,
+                                                 size_t subject_len,
+                                                 bool dfa_available) {
+  (void)dfa_available; /* automaton owned by the DFA override; not scored here */
+  int best_tier = TIER_GENERAL;
+  int32_t best_cost = 2147483647;
+
+  for (size_t i = 0; i < sizeof(k_tier_cost) / sizeof(k_tier_cost[0]); i++) {
+    const tier_cost_coeff_t *c = &k_tier_cost[i];
+    bool eligible = false;
+    switch (c->tier) {
+    case TIER_BREAK_SCAN:
+      eligible = meta->is_break_family && meta->ascii_class_only;
+      break;
+    case TIER_SPAN_SCAN:
+      eligible = meta->is_span_family && meta->ascii_class_only;
+      break;
+    case TIER_LITERAL:
+      eligible = meta->is_literal_only;
+      break;
+    case TIER_PREFIX:
+      eligible = meta->has_literal_prefix && meta->literal_prefix_len > 0;
+      break;
+    case TIER_BITMAP:
+      eligible = meta->has_candidate_bitmap && meta->is_single_char_alt;
+      break;
+    case TIER_ALT_LIT:
+      /* Bushy alt-literals use the trie; flat ones fall through to GENERAL. */
+      eligible = meta->is_alt_literals && !meta->is_alt_literals_flat;
+      break;
+    case TIER_SEARCH_VM:
+      /* Alt-literals never use the search VM: flat -> GENERAL (D1),
+       * bushy -> ALT_LIT. Other search-VM-eligible patterns may use it. */
+      eligible = meta->search_vm_eligible && !meta->is_alt_literals;
+      break;
+    case TIER_GENERAL:
+      eligible = true; /* always available as fallback */
+      break;
+    default:
+      eligible = false;
+      break;
+    }
+    if (!eligible)
+      continue;
+
+    int32_t cost =
+        c->setup_ns + (int32_t)(subject_len / (size_t)c->per_byte_div);
+    if (cost < best_cost) {
+      best_cost = cost;
+      best_tier = (int)c->tier;
+    }
+  }
+  return (snobol_search_tier_t)best_tier;
+}
+
+/* ---------------------------------------------------------------------------
+ * Dump the authoritative cost-model coefficient table (k_tier_cost[]) to @p out
+ * (or stdout when @p out is NULL).  Used by the benchmark probe to compare the
+ * model's predicted setup cost against the measured per-scenario ns/iter and to
+ * suggest recalibration of the coefficients.
+ * ---------------------------------------------------------------------------
+ */
+void SNOBOL_COLD snobol_search_dump_cost_model(FILE *out) {
+  FILE *f = out ? out : stdout;
+  fprintf(f, "cost-model coefficients (cost_ns = setup_ns + subject_len / "
+             "per_byte_div):\n");
+  for (size_t i = 0; i < sizeof(k_tier_cost) / sizeof(k_tier_cost[0]); i++) {
+    const tier_cost_coeff_t *c = &k_tier_cost[i];
+    const char *name = "?";
+    switch (c->tier) {
+    case TIER_BREAK_SCAN: name = "BREAK_SCAN"; break;
+    case TIER_SPAN_SCAN: name = "SPAN_SCAN"; break;
+    case TIER_LITERAL: name = "LITERAL"; break;
+    case TIER_PREFIX: name = "PREFIX"; break;
+    case TIER_BITMAP: name = "BITMAP"; break;
+    case TIER_ALT_LIT: name = "ALT_LIT"; break;
+    case TIER_SEARCH_VM: name = "SEARCH_VM"; break;
+    case TIER_GENERAL: name = "GENERAL"; break;
+    default: break;
+    }
+    fprintf(f, "  tier=%-11s setup_ns=%-4d per_byte_div=%-4d\n", name,
+            c->setup_ns, c->per_byte_div);
+  }
+  fprintf(f, "note: TIER_ALT_LIT setup recalibrated to %d ns post trie-cache.\n",
+          k_tier_cost[5].setup_ns);
+}
+
+bool SNOBOL_HOT SNOBOL_ALIGNED(64) snobol_search_exec(VM * SNOBOL_RESTRICT vm,
+                                                 const char * SNOBOL_RESTRICT subject,
                         size_t subject_len,
                         size_t start_offset, const snobol_search_meta_t *meta,
                         const snobol_dfa_t *dfa,
@@ -3708,23 +3850,11 @@ bool snobol_search_exec(VM *vm, const char *subject,
     meta = &local_meta;
   }
 
-  /* Lazy VM initialization: zero only the fields needed by the selected tier.
-   * Tiers 0-5 bypass the VM entirely, so no initialization is needed.
-   * Tiers 6-7 use the lightweight search_vm_t and need minimal setup.
-   * Tier 8+ uses the full VM and relies on caller-provided bc/bc_len.
-   * Tier 9 (SIMD NFA) uses its own internal state from the bytecode;
-   * it needs only vm->bc and vm->bc_len which the caller has set. */
-  if (meta->tier <= TIER_ALT_LIT) {
-    /* Tiers 0-5: no VM fields needed */
-  } else if (meta->tier <= TIER_AUTOMATON) {
-    /* Tiers 6-7: minimal search_vm_t fields */
-    vm->ip = 0;
-    vm->pos = 0;
-    vm->var_count = 0;
-    vm->max_cap_used = 0;
-    vm->max_counter_used = 0;
-    vm->choices_top = 0;
-  }
+  /* Cost-model tier selection (Priority 4): refine the structural tier from
+   * derive_meta using subject length and per-tier cost. Break/SPAN keep their
+   * fixed tier; the automaton is handled by the DFA override below. */
+  snobol_search_tier_t dispatch_tier =
+      select_tier_by_cost(meta, subject_len, dfa != NULL);
 
   /* If caller provided a DFA, consider automaton acceleration.
     * The automaton's per-offset trial loop is O(n) per position — harmless
@@ -3743,9 +3873,8 @@ bool snobol_search_exec(VM *vm, const char *subject,
     * the O(n²) per-position automaton trial loop. */
   if (dfa && meta->automaton_eligible && !meta->is_alt_literals_flat &&
       (meta->has_bmh_skip ||
-       (!meta->simd_eligible && meta->tier >= TIER_SEARCH_VM))) {
-    return tier_table[TIER_AUTOMATON](vm, subject, subject_len, start_offset,
-                                       meta, dfa, out_result, diag);
+       (!meta->simd_eligible && dispatch_tier >= TIER_SEARCH_VM))) {
+    dispatch_tier = TIER_AUTOMATON;
   }
 
   /* NOTE: Runtime SIMD override (Tier 9) is not yet enabled. The SIMD NFA
@@ -3755,9 +3884,25 @@ bool snobol_search_exec(VM *vm, const char *subject,
    * BREAK/SPAN patterns.  Enable once tier_simd_nfa() supports true
    * multi-position SIMD scanning. */
 
-  /* Direct tier dispatch for remaining common tiers — use __builtin_expect
-   * to hint the hottest paths. The fast-path tiers above (0/1 overridden to 9)
-   * are handled by the dispatcher below when the subject is too short for SIMD. */
-  return tier_table[meta->tier](vm, subject, subject_len, start_offset,
-                                meta, dfa, out_result, diag);
+  /* Lazy VM initialization: zero only the fields needed by the selected tier.
+   * Tiers 0-5 bypass the VM entirely. Tiers 6-7 use the lightweight
+   * search_vm_t and need minimal setup. Tier 8+ uses the full VM and relies on
+   * caller-provided bc/bc_len. Initializing from dispatch_tier (not the
+   * structural meta->tier) is essential: the cost model may pick a VM tier
+   * whose structural tier differs. */
+  if (dispatch_tier <= TIER_ALT_LIT) {
+    /* Tiers 0-5: no VM fields needed */
+  } else if (dispatch_tier <= TIER_AUTOMATON) {
+    /* Tiers 6-7: minimal search_vm_t fields */
+    vm->ip = 0;
+    vm->pos = 0;
+    vm->var_count = 0;
+    vm->max_cap_used = 0;
+    vm->max_counter_used = 0;
+    vm->choices_top = 0;
+  }
+
+  /* Direct tier dispatch for the chosen tier. */
+  return tier_table[dispatch_tier](vm, subject, subject_len, start_offset,
+                                    meta, dfa, out_result, diag);
 }

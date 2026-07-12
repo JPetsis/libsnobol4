@@ -60,6 +60,7 @@ void bench_delimiter_suite(bench_results_t *out) {
             pcre2_ns = bench_ns() - start;
             pcre2_match_data_free(md);
             pcre2_code_free(re);
+            out->pcre2_ns = pcre2_ns;
         }
     }
 #else

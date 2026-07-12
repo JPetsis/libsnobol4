@@ -1,6 +1,7 @@
 #include "snobol/vm.h"
 #include "snobol/array.h"
 #include "snobol/dynamic_pattern.h"
+#include "snobol/snobol_attrs.h"
 #include "snobol/snobol_internal.h"
 #include "snobol/string_fn.h"
 #include "snobol/table.h"
@@ -2655,7 +2656,7 @@ fail_ret:
   return false;
 }
 
-bool vm_exec(VM *vm) {
+bool SNOBOL_HOT vm_exec(VM * SNOBOL_RESTRICT vm) {
   vm->ip = 0;
   vm->pos = 0;
   vm->max_cap_used = 0;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdio.h>
+
 /**
  * @file search.h
  * @brief Core search runtime API for libsnobol4
@@ -399,6 +401,18 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
  * @param meta  Metadata struct to clean up (NULL is safe).
  */
 void snobol_search_meta_free(snobol_search_meta_t *meta);
+
+/**
+ * @brief Print the cost-model tier coefficients used by select_tier_by_cost().
+ *
+ * Diagnostic aid for recalibrating the per-tier setup/throughput costs from
+ * bench_probe output. The authoritative values live in core/src/search.c
+ * (k_tier_cost); this prints them so the probe and other diagnostics share a
+ * single source of truth.
+ *
+ * @param out  Stream to write to (NULL is treated as stdout).
+ */
+void snobol_search_dump_cost_model(FILE *out);
 
 /**
  * Execute a single search over [subject, subject+subject_len) from

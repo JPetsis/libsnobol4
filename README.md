@@ -312,7 +312,7 @@ libsnobol4 is designed for high-performance string processing:
 
 - **Streaming Substitution**: Native C implementation minimizes data copying
 - **Pattern Caching**: Compiled patterns are cached for efficient reuse
-- **Multi-Tier Search Engine**: Auto-selects optimal strategy (literal memcmp, BMH skip, trie, DFA automaton, SIMD NFA) based on pattern analysis
+- **Multi-Tier Search Engine**: Cost-model-driven auto-selection of the optimal strategy (literal memcmp, BMH skip, cached trie for bushy alt-of-literals, DFA automaton, SIMD NFA). Flat alternations fall back to the general VM, avoiding a 125× regression on unshared-prefix alternations.
 - **Built-in C functions**: `Text::replace` matches PHP `str_replace` within 2%; `Text::upper/lower/trim` within 4-15%
   of native PHP built-ins
 - **BREAKX optimisation**: 8.3× fewer backtrack operations vs `ARB+NOTANY` for key extraction
@@ -428,7 +428,7 @@ libsnobol4 uses independent versioning for core and each binding:
 | **PHP Binding**        | v0.12.0 | v0.12.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
 | **Python (reference)** | —       | —           | Prototype only       | `examples/python-binding/`            |
 
-This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees. See [ROADMAP.md](ROADMAP.md) for the full plan toward v1.0.0.
+This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.
 
 ### Platform Support
 

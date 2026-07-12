@@ -940,6 +940,35 @@ int main(void) {
 
     print_table(results, n);
 
+    /* Priority 4.3: dump the cost-model coefficients used by
+     * select_tier_by_cost() and suggest recalibrations from the measured
+     * short-subject timings. Keep per_byte_div (throughput) fixed; only
+     * setup_ns is candidate for tuning. */
+    snobol_search_dump_cost_model(stdout);
+    printf("\nRecalibration suggestion (short-subject ns/iter -> candidate setup_ns):\n");
+    for (size_t i = 0; i < n; i++) {
+        int64_t ns = results[i].ns_per_iter;
+        if (ns <= 0)
+            continue;
+        const char *tier = NULL;
+        if (strcmp(results[i].name, "alt_literals") == 0)
+            tier = "ALT_LIT";
+        else if (strcmp(results[i].name, "literal_ok") == 0 ||
+                 strcmp(results[i].name, "literal_fail") == 0)
+            tier = "LITERAL";
+        else if (strcmp(results[i].name, "span_comma") == 0 ||
+                 strcmp(results[i].name, "span_search") == 0)
+            tier = "SPAN_SCAN";
+        else if (strcmp(results[i].name, "alternation") == 0 ||
+                 strcmp(results[i].name, "alt_search") == 0)
+            tier = "PREFIX/ALT_LIT";
+        if (tier)
+            printf("  %-16s measured=%" PRId64 " ns/iter -> suggest setup_ns ~= %d\n",
+                   results[i].name, ns, (int)ns);
+    }
+    printf("(Apply by editing k_tier_cost in core/src/search.c; the authoritative\n"
+           " table is printed above. Keep per_byte_div for per-byte throughput.)\n");
+
     /* Optional baseline regression guard. If a baseline file exists
      * at bench/results/search_perf_baseline.json and PROBE_BASELINE=1,
      * assert each scenario's ns_per_iter is within 10% of the baseline. */

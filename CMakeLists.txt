@@ -9,10 +9,24 @@ option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(SNOBOL_PROFILE "Enable VM profiling" OFF)
 option(SNOBOL_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(SNOBOL_FUZZ "Build libFuzzer fuzz harnesses (requires Clang)" OFF)
+option(SNOBOL_PGO_GEN "Build with PGO instrumentation (-fprofile-generate)" OFF)
+option(SNOBOL_PGO_USE "Build with PGO profile data (-fprofile-use)" OFF)
+set(SNOBOL_PGO_PROFILE "" CACHE FILEPATH "Path to merged PGO profile (profdata) for -fprofile-use")
 
 # Sanitizer guard: not supported on MSVC
 if(SNOBOL_SANITIZE AND MSVC)
     message(FATAL_ERROR "SNOBOL_SANITIZE=ON requires GCC or Clang. MSVC does not support -fsanitize=address,undefined.")
+endif()
+
+# PGO guard: instrumentation and use are mutually exclusive
+if(SNOBOL_PGO_GEN AND SNOBOL_PGO_USE)
+    message(FATAL_ERROR "SNOBOL_PGO_GEN and SNOBOL_PGO_USE are mutually exclusive")
+endif()
+
+# Priority 6.8: enable Link-Time Optimization for Release builds (canonical
+# -flto).  Disabled while PGO is active so the two pipelines don't conflict.
+if(NOT MSVC AND NOT SNOBOL_PGO_GEN AND NOT SNOBOL_PGO_USE)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 endif()
 
 # Core library (always built)

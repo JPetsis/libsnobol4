@@ -211,13 +211,25 @@ void snobol_pattern_set_automaton(snobol_pattern_t *pattern,
   if (pattern) pattern->automaton = dfa;
 }
 
-/* --- Tier-5 trie cache accessors (mirror the DFA cache pattern) --------- */
+/* ---------------------------------------------------------------------------
+ * Tier-5 alternation-trie cache accessors (mirror the DFA cache pattern).
+ * The cache is built lazily on the first Tier-5 search of a bushy alternation
+ * and reused for every subsequent search of that pattern; NULL for flat
+ * alternations (which route to Tier 8) or patterns without an alternation.
+ *
+ * Centralising mutation here lets any future bytecode-rewrite site invalidate
+ * the cache by calling snobol_pattern_set_trie_cache(pat, NULL).
+ * ---------------------------------------------------------------------------
+ */
 
+/* Return the cached Tier-5 trie, or NULL when none has been built yet. */
 snobol_auto_trie_t *snobol_pattern_get_trie_cache(
     const snobol_pattern_t *pattern) {
   return pattern ? pattern->trie_cache : NULL;
 }
 
+/* Store (or clear, with @p trie == NULL) the cached Tier-5 trie and update the
+ * reference count used by snobol_pattern_free() to decide whether to free it. */
 void snobol_pattern_set_trie_cache(snobol_pattern_t *pattern,
                                    snobol_auto_trie_t *trie) {
   if (pattern) {

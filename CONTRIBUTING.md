@@ -457,7 +457,7 @@ point for your own binding.
 1. **Community bindings live in their own repositories**, not in this monorepo (except the Python reference).
 2. Bindings must use a permissive open-source license (MIT, Apache 2.0, BSD-2, or similar).
 3. Bindings follow their language's standard packaging and distribution channels (PyPI, crates.io, etc.).
-4. The core maintainers will not break the C ABI without notice (see SemVer guarantees in ROADMAP.md).
+4. The core maintainers will not break the C ABI without notice (guaranteed by SemVer).
 5. The project README may list community binding repositories at the maintainers' discretion.
 
 ### Getting Started

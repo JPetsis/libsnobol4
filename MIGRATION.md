@@ -42,7 +42,7 @@ table (`tier_table[meta->tier]`). Pre-computed tier metadata is stored in
 | 2 | `LITERAL` | Pure literal (memcmp) |
 | 3 | `PREFIX` | Literal prefix (memmem + BMH skip) |
 | 4 | `BITMAP` | Single-char alternation (candidate bitmap) |
-| 5 | `ALT_LIT` | Alt-of-literals (trie) |
+| 5 | `ALT_LIT` | Alt-of-literals (trie; bushy only — flat alternatives fall back to Tier 8) |
 | 6 | `SEARCH_VM` | Lightweight backtracking NFA (~424 bytes) |
 | 7 | `AUTOMATON` | DFA via powerset construction |
 | 8 | `GENERAL` | Full SNOBOL4 VM fallback |

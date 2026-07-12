@@ -123,6 +123,19 @@
 #endif
 #endif
 
+/* ── SNOBOL_ALIGNED ─────────────────────────────────────────────────────── */
+/* Cache-line alignment hint for hot dispatch / scan-loop entry points so the
+ * function prologue and the innermost loop body land in the same cache line. */
+#ifndef SNOBOL_ALIGNED
+#if defined(__GNUC__) || defined(__clang__)
+#define SNOBOL_ALIGNED(n) __attribute__((aligned(n)))
+#elif defined(_MSC_VER)
+#define SNOBOL_ALIGNED(n) __declspec(align(n))
+#else
+#define SNOBOL_ALIGNED(n)
+#endif
+#endif
+
 /* ── SNOBOL_THREAD_LOCAL ─────────────────────────────────────────────────── */
 /* Thread-local storage qualifier.  MSVC (pre-C11 threads) uses __declspec;
  * C11+ (GCC/Clang, modern MSVC) uses _Thread_local. */

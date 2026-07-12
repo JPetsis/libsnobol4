@@ -66,6 +66,28 @@
         "BUILD_TESTS": "ON",
         "BUILD_PHP": "OFF"
       }
+    },
+    {
+      "name": "pgo-gen",
+      "displayName": "PGO Instrumentation",
+      "description": "Release build with PGO instrumentation (-fprofile-generate). Train with snobol4_probe, merge to build-pgo/profdata, then build pgo-use.",
+      "binaryDir": "${sourceDir}/build-pgo-gen",
+      "inherits": "release",
+      "cacheVariables": {
+        "BUILD_BENCH_C": "ON",
+        "SNOBOL_PGO_GEN": "ON"
+      }
+    },
+    {
+      "name": "pgo-use",
+      "displayName": "PGO Optimized",
+      "description": "Release build using PGO profile data (requires build-pgo/profdata produced by pgo-train).",
+      "binaryDir": "${sourceDir}/build-pgo-use",
+      "inherits": "release",
+      "cacheVariables": {
+        "SNOBOL_PGO_USE": "ON",
+        "SNOBOL_PGO_PROFILE": "${sourceDir}/build-pgo/profdata"
+      }
     }
   ],
   "buildPresets": [
@@ -80,6 +102,14 @@
     {
       "name": "asan",
       "configurePreset": "asan"
+    },
+    {
+      "name": "pgo-gen",
+      "configurePreset": "pgo-gen"
+    },
+    {
+      "name": "pgo-use",
+      "configurePreset": "pgo-use"
     }
   ],
   "testPresets": [
@@ -96,6 +126,16 @@
     {
       "name": "asan",
       "configurePreset": "asan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "pgo-gen",
+      "configurePreset": "pgo-gen",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "pgo-use",
+      "configurePreset": "pgo-use",
       "output": { "outputOnFailure": true }
     }
   ]

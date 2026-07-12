@@ -142,6 +142,7 @@ User Code (PHP)
 │   └──────────────────────┘  │
 └─────────────────────────────┘
 ```
+> **Tier 5 (`ALT_LIT`)** is used only for *bushy* alternations that share a prefix. Flat alternations with no shared prefix (e.g. `"abc"|"def"|"ghi"`) skip the trie and fall back to **tier 8 (general VM)**, which already applies the start-byte bitmap + BMH skip accelerators. Tier selection is cost-model-driven.
 
 ### Compilation Pipeline
 
@@ -704,7 +705,7 @@ $p = Pattern::fromString("'id:' SPAN('0-9')");          // Concatenation
 $p = Pattern::fromString("'foo' | 'bar'");              // Alternation
 ```
 
-See [Appendix: SNOBOL4 String Syntax](#17-appendix-snobol4-string-syntax) for the full SNOBOL4 pattern language.
+See [Appendix: SNOBOL4 String Syntax](#18-appendix-snobol4-string-syntax) for the full SNOBOL4 pattern language.
 
 ### From Builder AST
 

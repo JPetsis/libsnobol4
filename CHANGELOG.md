@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Search Engine Optimization
+
+#### Added
+
+- **Trie-shape classifier** (`core/src/search.c`): `trie_is_flat()` routes flat alternations (no shared prefix) to Tier 8 (general VM) instead of the unaccelerated Tier 5 trie, eliminating the 125× regression on flat alt-of-literals.
+- **Tier 5 scan-loop acceleration** (`core/src/search.c`): start-byte bitmap filter, BMH-style skip, and bounded loop (`offset + minlength <= subject_len`) now applied to the alt-literals scan loop (previously a bare `offset++`).
+- **Trie caching** (`core/src/api.c`): pointer-based cached trie on `snobol_pattern_t`; bushy alt-literals reuse the compiled trie across searches (flat patterns skip caching).
+- **Arena allocator** (`core/include/snobol/arena.h`): bump-allocated pool for AST nodes during compilation, eliminating per-node `malloc`.
+- **Cost-based tier selection** (`core/src/search.c`): `select_tier_by_cost()` replaces hardcoded structural thresholds; ALT_LIT setup recalibrated 40→12 ns to reflect the cached trie.
+- **2-byte memchr prefix fast-path** (`core/src/search.c`): paired `memchr` for `prefix_len == 2` in `search_literal_accelerated()` (avoids `memmem` setup overhead on short needles).
+- **Compiler hints & codegen** (`core/src/search.c`, `core/src/vm.c`): `SNOBOL_HOT`/`COLD`/`ALWAYS_INLINE`/`PURE`/`RESTRICT`/`ALIGNED(64)` + `likely()` branch hints; `bitmap256_test()` always-inlined helper. Release build gains `-O3`, `-fvisibility=hidden`, `_FORTIFY_SOURCE=3`, and project-wide LTO.
+- **PGO build targets**: `make build-pgo-gen` / `pgo-train` / `build-pgo-use` plus `pgo-gen` / `pgo-use` CMake presets (`-fprofile-generate` / `-fprofile-use -fprofile-correction`).
+- **Cost-model diagnostics** (`core/src/search.c`, `bench/c/bench_probe.c`): `snobol_search_dump_cost_model()` prints authoritative coefficients; probe emits per-scenario recalibration suggestions.
+
+#### Changed
+
+- **`bench_alternation.c`**: rewritten with real bushy (Tier 5) + flat (Tier 8) alt-literal scenarios — it was misnamed and previously only benchmarked `SPAN(',')`.
+- **`bench_delimiter.c`**: now records the PCRE2 timing (`out->pcre2_ns` was computed but never stored, showing `0/0`).
+
+#### Fixed
+
+- **Tier 5 worst case**: flat alternations no longer grind through the unaccelerated trie; worst case is now bounded by Tier 8 (general VM with bitmap + BMH + minlength pre-checks).
+
+#### Performance
+
+- Bushy alt-literals search-mode is **~3.28× faster** than the prior anchored-match path (regression fixed); trie caching adds a **~7%** win on repeated bushy-alt-literal searches.
+- Release+LTO and PGO builds both pass the full C suite (**2009 tests**); ASan+UBSan clean.
+- PGO on top of LTO yields only a **marginal** further gain (1–8% on literal paths, ~0% elsewhere) — the decisive speedups came from the structural changes (P1–P5) + LTO.
+- SNOBOL remains **1.3×–9.5× slower than PCRE2** on the synthetic probe scenarios (closest on SIMD scan at ~1.66×, widest on alternation/alt-literals at ~8–9.5×).
+
 ## [0.12.0] - 2026-07-08
 
 ### Engine Consolidation
@@ -291,8 +321,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Community bindings section** (`CONTRIBUTING.md`): explicit statement
   of core maintainer scope (C + PHP only) and contributor guidance for
   community-contributed language bindings (Python, Rust, Go, Java, etc.).
-- **ROADMAP.md** updated to reflect the v0.11.0 / v1.0.0 plan and the
-  official scope; current status table for testing & documentation.
 
 ### Changed
 

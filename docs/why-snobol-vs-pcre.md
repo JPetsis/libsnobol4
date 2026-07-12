@@ -185,4 +185,4 @@ Benchmark results from `snobol4_probe` (diagnostic probe, 100k iterations):
 
 **Where PCRE2 wins**: Pure matching is 5-9× faster due to JIT-compiled native code. PCRE2's per-byte dispatch cost (~1 ns) is lower than SNOBOL4's interpreter dispatch (~5-15 ns).
 
-**SNOBOL4 optimization**: Tier dispatch via function pointer table, `search_vm_t` lightweight VM state, metadata bitfield flags, and SIMD-accelerated Thompson NFA (Tier 9) reduce base overhead. SIMD accelerates SPAN, BREAK, ANY, and NOTANY patterns on subjects >16 bytes.
+**SNOBOL4 optimization**: Tier dispatch via function pointer table, `search_vm_t` lightweight VM state, metadata bitfield flags, cached trie for bushy alt-of-literals (with flat alternations falling back to the general VM), and SIMD-accelerated Thompson NFA (Tier 9) reduce base overhead. SIMD accelerates SPAN, BREAK, ANY, and NOTANY patterns on subjects >16 bytes.
