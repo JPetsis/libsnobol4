@@ -97,7 +97,9 @@
 /* Portable spelling of the C 'restrict' qualifier for pointer parameters of
  * hot functions whose pointers are provably non-aliasing. */
 #ifndef SNOBOL_RESTRICT
-#if defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER)
+#if defined(_MSC_VER)
+#define SNOBOL_RESTRICT __restrict
+#elif defined(__GNUC__) || defined(__clang__)
 #define SNOBOL_RESTRICT __restrict__
 #else
 #define SNOBOL_RESTRICT

@@ -1578,7 +1578,7 @@ static bool search_span_accelerated(VM *vm, const char *subject,
  * literal is only a prefix and the pattern has additional constraints).
  * ---------------------------------------------------------------------------
  */
-static bool SNOBOL_HOT SNOBOL_ALIGNED(64)
+static SNOBOL_ALIGNED(64) bool SNOBOL_HOT
 search_literal_accelerated(VM * SNOBOL_RESTRICT vm,
                            const char * SNOBOL_RESTRICT subject,
                                        size_t subject_len, size_t start_offset,
@@ -3553,19 +3553,27 @@ static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
                            snobol_search_diag_t *diag) {
   (void)dfa;
   size_t offset = start_offset;
+  search_vm_t svm;
   while (offset <= subject_len) {
     if (diag) {
       diag->candidates_tested++;
       diag->search_vm_tests++;
     }
     search_reset_vm(vm, subject, subject_len, offset);
-    search_vm_t svm;
     search_vm_init_from_vm(&svm, vm);
     svm.choices_top = 0;
     bool ok = search_vm_exec(&svm, subject, subject_len, offset, out_result);
     search_vm_writeback_to_vm(&svm, vm);
-    if (ok)
+    if (ok) {
+      /* search_vm_exec lazily allocated the choice stack into svm.choices
+       * (and wrote the pointer back to vm->choices).  Own it here and free
+       * it so direct snobol_search_exec callers don't leak it. */
+      if (svm.choices)
+        snobol_free(svm.choices);
+      svm.choices = NULL;
+      vm->choices = NULL;
       return true;
+    }
     if (offset >= subject_len)
       break;
     if (meta->has_bmh_skip &&
@@ -3577,6 +3585,10 @@ static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
       offset++;
     }
   }
+  if (svm.choices)
+    snobol_free(svm.choices);
+  svm.choices = NULL;
+  vm->choices = NULL;
   out_result->success = false;
   return false;
 }
@@ -3827,7 +3839,7 @@ void SNOBOL_COLD snobol_search_dump_cost_model(FILE *out) {
           k_tier_cost[5].setup_ns);
 }
 
-bool SNOBOL_HOT SNOBOL_ALIGNED(64) snobol_search_exec(VM * SNOBOL_RESTRICT vm,
+SNOBOL_ALIGNED(64) bool SNOBOL_HOT snobol_search_exec(VM * SNOBOL_RESTRICT vm,
                                                  const char * SNOBOL_RESTRICT subject,
                         size_t subject_len,
                         size_t start_offset, const snobol_search_meta_t *meta,
