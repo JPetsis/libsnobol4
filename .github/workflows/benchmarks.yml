@@ -11,10 +11,6 @@ on:
         description: 'Base branch/ref for comparison (optional)'
         required: false
         default: 'main'
-  schedule:
-    # Run benchmarks nightly at 02:00 UTC
-    #- cron: '0 2 * * *'
-
 jobs:
   benchmarks:
     name: Run Benchmarks (PHP ${{ github.event.inputs.php-version || '8.4' }})
