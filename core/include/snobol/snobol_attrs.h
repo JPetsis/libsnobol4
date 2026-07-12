@@ -127,12 +127,15 @@
 
 /* ── SNOBOL_ALIGNED ─────────────────────────────────────────────────────── */
 /* Cache-line alignment hint for hot dispatch / scan-loop entry points so the
- * function prologue and the innermost loop body land in the same cache line. */
+ * function prologue and the innermost loop body land in the same cache line.
+ * GCC/Clang support per-function alignment via __attribute__((aligned(n)));
+ * MSVC has no per-function alignment attribute (__declspec(align(n)) applies
+ * only to variables, struct members and tag types), so it is a no-op there. */
 #ifndef SNOBOL_ALIGNED
 #if defined(__GNUC__) || defined(__clang__)
 #define SNOBOL_ALIGNED(n) __attribute__((aligned(n)))
 #elif defined(_MSC_VER)
-#define SNOBOL_ALIGNED(n) __declspec(align(n))
+#define SNOBOL_ALIGNED(n)
 #else
 #define SNOBOL_ALIGNED(n)
 #endif
