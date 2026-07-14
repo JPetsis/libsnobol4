@@ -573,6 +573,22 @@ static ast_node_t *parse_function_call(snobol_parser_t *parser,
     return snobol_ast_create_any(arg.data.string.text, arg.data.string.len);
   }
 
+  if (strncmp(name, "NOTANY", name_len) == 0) {
+    token_t arg = peek(lexer);
+    if (arg.type != TOKEN_LIT && arg.type != TOKEN_CHARCLASS) {
+      set_error(parser, "NOTANY expects string argument",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    advance(lexer);
+
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      return nullptr;
+    }
+
+    return snobol_ast_create_notany(arg.data.string.text, arg.data.string.len);
+  }
+
   if (strncmp(name, "LEN", name_len) == 0) {
     /* Parse LEN(n) - argument is peeked but not used yet */
     (void)peek(

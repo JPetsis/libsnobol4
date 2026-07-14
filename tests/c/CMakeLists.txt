@@ -1,5 +1,10 @@
 # C test suite for libsnobol4 core
 
+# Pike scan feature flag (must match core build)
+if(ENABLE_PIKE_SCAN)
+    add_compile_definitions(SNOBOL_PIKE_SCAN=1)
+endif()
+
 # Test executable
 add_executable(snobol4_tests
     test_runner.c
@@ -17,6 +22,7 @@ add_executable(snobol4_tests
     test_search.c
     test_search_ex_api.c
     test_search_vm_capture.c
+    test_pike_scan.c
     test_lexer.c
     test_parser.c
     test_ast.c

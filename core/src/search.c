@@ -21,6 +21,14 @@
 #include "snobol/simd.h"
 #include "snobol/vm.h"
 
+/* ---- Feature flags ---- */
+/* Pike single-pass scan: replace per-offset restart loop with a single
+ * left-to-right pass maintaining a set of NFA threads.  Default OFF;
+ * enable with -DSNOBOL_PIKE_SCAN or cmake -DENABLE_PIKE_SCAN=ON. */
+#ifndef SNOBOL_PIKE_SCAN
+/* #define SNOBOL_PIKE_SCAN */
+#endif
+
 /* ---- Internal pattern accessors (implemented in api.c) ---- */
 extern snobol_dfa_t *snobol_pattern_get_automaton(
     const snobol_pattern_t *pattern);
@@ -3722,12 +3730,269 @@ static bool tier_alt_literals(VM *vm, const char *subject, size_t subject_len,
 }
 
 /* Tier 6: Search-VM for eligible patterns */
+
+/* ---------------------------------------------------------------------------
+ * Pike single-pass scan (W1c)
+ *
+ * A single left-to-right pass over the subject that maintains a set of live
+ * NFA threads.  On OP_SPLIT the driver spawns a new thread for branch B
+ * (greedy: first branch is tried first) instead of pushing a choice point.
+ * On OP_FAIL a thread dies instead of popping a choice.  This eliminates the
+ * O(n) restart overhead of the per-offset loop and yields O(n) matching for
+ * patterns without deep backtracking.
+ *
+ * Gated behind SNOBOL_PIKE_SCAN; falls back to the restart loop when the
+ * thread buffer overflows or the feature is disabled.
+ * ---------------------------------------------------------------------------
+ */
+
+/* ---------------------------------------------------------------------------
+ * Pike single-pass scan (W1c)
+ *
+ * A single left-to-right pass over the subject that maintains a set of live
+ * NFA threads.  On OP_SPLIT the driver spawns a new thread for branch B
+ * (greedy: first branch is tried first) instead of pushing a choice point.
+ * On OP_FAIL a thread dies instead of popping a choice.  This eliminates the
+ * O(n) restart overhead of the per-offset loop and yields O(n) matching for
+ * patterns without deep backtracking.
+ *
+ * The key challenge is consuming opcodes (SPAN, BREAK, BREAKX) that advance
+ * threads past the current position.  These threads are deferred into a queue
+ * and merged into the buffer when the driver reaches their position.
+ * ---------------------------------------------------------------------------
+ */
+/* ---------------------------------------------------------------------------
+ * Pike single-pass scan (W1c)
+ * ---------------------------------------------------------------------------
+ */
+#ifdef SNOBOL_PIKE_SCAN
+#define PIKE_THREAD_BUF 512
+#define PIKE_DEFER_BUF  256
+typedef struct {
+  size_t ip;
+  size_t pos;
+  size_t match_start;
+  size_t cap_start[MAX_CAPS];
+  size_t cap_end[MAX_CAPS];
+  uint8_t max_cap_used;
+  size_t var_start[MAX_VARS];
+  size_t var_end[MAX_VARS];
+  size_t var_count;
+  uint32_t counters[MAX_LOOPS];
+  size_t loop_last_pos[MAX_LOOPS];
+  uint8_t max_counter_used;
+} pike_thread_t;
+
+bool pike_scan(const uint8_t *bc, size_t bc_len,
+                      const char *subject, size_t subject_len,
+                      const snobol_search_meta_t *meta,
+                      const snobol_range_meta_t *range_meta,
+                      size_t range_meta_count,
+                      VM *vm,
+                      snobol_search_result_t *out_result) {
+  pike_thread_t threads[PIKE_THREAD_BUF];
+  size_t thread_n = 0;
+  pike_thread_t defer[PIKE_DEFER_BUF];
+  size_t defer_n = 0;
+  bool found = false;
+  size_t m_start = 0, m_end = 0;
+
+  /* Don't seed upfront — spawn dynamically as we scan */
+  thread_n = 0;
+
+  for (size_t pos = 0; pos <= subject_len; ++pos) {
+    defer_n = 0;
+
+    /* Partition the incoming thread set: threads whose scan position equals
+     * `pos` are worked on this pass; threads still in the future are carried
+     * forward unchanged.  (Threads cannot have pos < pos.) */
+    pike_thread_t carry[PIKE_THREAD_BUF];
+    size_t carry_n = 0;
+    pike_thread_t work[PIKE_THREAD_BUF];
+    size_t work_n = 0;
+    for (size_t t = 0; t < thread_n; ++t) {
+      if (threads[t].pos == pos) {
+        if (work_n < PIKE_THREAD_BUF) work[work_n++] = threads[t];
+      } else if (threads[t].pos > pos) {
+        if (carry_n < PIKE_THREAD_BUF) carry[carry_n++] = threads[t];
+      }
+    }
+    /* Spawn a fresh thread at this start position. */
+    if (work_n < PIKE_THREAD_BUF) {
+      pike_thread_t fr;
+      memset(&fr, 0, sizeof(fr));
+      fr.pos = pos;
+      fr.match_start = pos;
+      work[work_n++] = fr;
+    }
+
+    for (size_t wt = 0; wt < work_n; ++wt) {
+      pike_thread_t th = work[wt];
+      size_t ip = th.ip;
+      size_t tp = pos;
+
+      /* zero-width / control ops inline — all of these resume the SAME thread
+       * at the next instruction, so their `continue` re-enters this loop. */
+      while (ip < bc_len) {
+        uint8_t op = bc[ip];
+        if (op == OP_NOP || op == OP_FENCE) { ip++; continue; }
+        if (op == OP_ANCHOR) {
+          uint8_t at = bc[ip + 1];
+          if ((at == 0 && tp != 0) || (at == 1 && tp != subject_len)) goto pike_die;
+          ip += 2; continue;
+        }
+        if (op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB) { ip += 5; continue; }
+        if (op == OP_CAP_START) {
+          uint8_t r = bc[ip + 1];
+          if (r < MAX_CAPS) { th.cap_start[r] = tp; if (r >= th.max_cap_used) th.max_cap_used = r + 1; }
+          ip += 2; continue;
+        }
+        if (op == OP_CAP_END) {
+          uint8_t r = bc[ip + 1];
+          if (r < MAX_CAPS) {
+            th.cap_end[r] = tp;
+            if (r >= th.max_cap_used) th.max_cap_used = r + 1;
+            if (r < MAX_VARS) { th.var_start[r] = th.cap_start[r]; th.var_end[r] = th.cap_end[r]; if ((size_t)r+1 > th.var_count) th.var_count = (size_t)r+1; }
+          }
+          ip += 2; continue;
+        }
+        if (op == OP_ASSIGN) {
+          uint16_t v = (uint16_t)((bc[ip+1]<<8)|bc[ip+2]); uint8_t r = bc[ip+3];
+          if (v < MAX_VARS && r < MAX_CAPS) { if (v >= th.var_count) th.var_count = (size_t)v+1; th.var_start[v] = th.cap_start[r]; th.var_end[v] = th.cap_end[r]; }
+          ip += 4; continue;
+        }
+        if (op == OP_JMP) { uint32_t tgt = ((uint32_t)bc[ip+1]<<24)|((uint32_t)bc[ip+2]<<16)|((uint32_t)bc[ip+3]<<8)|(uint32_t)bc[ip+4]; ip = (size_t)tgt; continue; }
+        if (op == OP_LEN) {
+          uint32_t n = ((uint32_t)bc[ip+1]<<24)|((uint32_t)bc[ip+2]<<16)|((uint32_t)bc[ip+3]<<8)|(uint32_t)bc[ip+4]; ip += 5;
+          for (uint32_t i = 0; i < n; i++) { if (tp >= subject_len) goto pike_die; uint32_t cp; int by; if (!utf8_peek_next(subject, subject_len, tp, &cp, &by)) goto pike_die; tp += by; }
+          continue;
+        }
+        if (op == OP_SPLIT) {
+          uint32_t aa = ((uint32_t)bc[ip+1]<<24)|((uint32_t)bc[ip+2]<<16)|((uint32_t)bc[ip+3]<<8)|(uint32_t)bc[ip+4];
+          uint32_t bb = ((uint32_t)bc[ip+5]<<24)|((uint32_t)bc[ip+6]<<16)|((uint32_t)bc[ip+7]<<8)|(uint32_t)bc[ip+8];
+          ip = (size_t)aa;
+          /* Branch B runs at the same scan position (SPLIT is zero-width);
+           * append it to the work queue so it is tried after branch A. */
+          if (work_n < PIKE_THREAD_BUF) { pike_thread_t nt = th; nt.ip = (size_t)bb; nt.pos = tp; work[work_n++] = nt; }
+          continue;
+        }
+        if (op == OP_REPEAT_INIT) { uint8_t lid = bc[ip+1]; if (lid < MAX_LOOPS) { th.counters[lid] = 0; th.loop_last_pos[lid] = 0; } ip += 13; continue; }
+        if (op == OP_REPEAT_STEP) {
+          uint8_t lid = bc[ip+1]; uint32_t tgt = ((uint32_t)bc[ip+2]<<24)|((uint32_t)bc[ip+3]<<16)|((uint32_t)bc[ip+4]<<8)|(uint32_t)bc[ip+5];
+          if (lid < MAX_LOOPS) { th.counters[lid]++; th.loop_last_pos[lid] = tp; ip = (size_t)tgt; } else { ip += 6; }
+          continue;
+        }
+        break;
+      }
+      if (ip >= bc_len) {
+        goto pike_die;
+      }
+      uint8_t op = bc[ip++];
+
+      if (op == OP_ACCEPT || op == OP_SUCCEED) {
+        if (!found || th.match_start < m_start || (th.match_start == m_start && tp > m_end)) {
+          found = true; m_start = th.match_start; m_end = tp;
+          /* Write captures back to the VM so unanchored capture search stays
+           * consistent with the full VM (mirrors search_vm_writeback_to_vm). */
+          if (vm) {
+            memcpy(vm->cap_start, th.cap_start, sizeof(th.cap_start));
+            memcpy(vm->cap_end, th.cap_end, sizeof(th.cap_end));
+            vm->max_cap_used = th.max_cap_used;
+          }
+        }
+        goto pike_die;
+      }
+      if (op == OP_FAIL || op == OP_ABORT) goto pike_die;
+
+      if (tp >= subject_len) goto pike_die;
+      if (op == OP_LIT) {
+        uint32_t off = ((uint32_t)bc[ip]<<24)|((uint32_t)bc[ip+1]<<16)|((uint32_t)bc[ip+2]<<8)|(uint32_t)bc[ip+3];
+        uint32_t alen = ((uint32_t)bc[ip+4]<<24)|((uint32_t)bc[ip+5]<<16)|((uint32_t)bc[ip+6]<<8)|(uint32_t)bc[ip+7]; ip += 8;
+        if (off == ip) ip += alen; /* literal data stored inline; skip past it */
+        if (tp+alen > subject_len || memcmp(subject+tp, bc+off, alen) != 0) goto pike_die;
+        tp += alen; th.ip = ip; th.pos = tp;
+        if (tp > pos && defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        goto pike_next;
+      }
+      if (op == OP_ANY) { ip += 2; tp++; th.ip = ip; th.pos = tp;
+        if (tp > pos && defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        goto pike_next;
+      }
+      if (op == OP_NOTANY) {
+        uint16_t sid = (uint16_t)((bc[ip]<<8)|bc[ip+1]); ip += 2;
+        uint16_t cnt = 0;
+        const uint8_t *rp = (sid > 0 && (size_t)(sid-1) < range_meta_count) ? range_meta[sid-1].ranges_ptr : NULL;
+        cnt = rp ? range_meta[sid-1].count : 0;
+        if (rp) { uint32_t cp; int by; if (utf8_peek_next(subject, subject_len, tp, &cp, &by) && range_contains(rp, cnt, cp)) goto pike_die; tp += by; }
+        else { tp++; }
+        th.ip = ip; th.pos = tp;
+        if (tp > pos && defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        goto pike_next;
+      }
+      if (op == OP_SPAN) {
+        uint16_t sid = (uint16_t)((bc[ip]<<8)|bc[ip+1]); ip += 2;
+        uint16_t cnt = 0;
+        const uint8_t *rp = (sid > 0 && (size_t)(sid-1) < range_meta_count) ? range_meta[sid-1].ranges_ptr : NULL;
+        cnt = rp ? range_meta[sid-1].count : 0;
+        size_t sp = tp;
+        if (rp) { while (sp < subject_len) { uint32_t cp; int by; if (!utf8_peek_next(subject, subject_len, sp, &cp, &by)) break; if (!range_contains(rp, cnt, cp)) break; sp += by; } }
+        else { sp = subject_len; }
+        if (sp == tp) goto pike_die;
+        if (sp >= subject_len) goto pike_die;
+        th.ip = ip; th.pos = sp;
+        if (defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        goto pike_next;
+      }
+      if (op == OP_BREAK || op == OP_BREAKX) {
+        uint16_t sid = (uint16_t)((bc[ip]<<8)|bc[ip+1]); ip += 2;
+        uint16_t cnt = 0;
+        const uint8_t *rp = (sid > 0 && (size_t)(sid-1) < range_meta_count) ? range_meta[sid-1].ranges_ptr : NULL;
+        cnt = rp ? range_meta[sid-1].count : 0;
+        size_t sp = tp;
+        if (rp) { while (sp < subject_len) { uint32_t cp; int by; if (!utf8_peek_next(subject, subject_len, sp, &cp, &by)) break; if (range_contains(rp, cnt, cp)) break; sp += by; } }
+        else { sp = subject_len; }
+        if (sp >= subject_len) goto pike_die;
+        if (op == OP_BREAKX) { uint32_t bx_cp; int bx_by = 1; utf8_peek_next(subject, subject_len, sp, &bx_cp, &bx_by); if (defer_n < PIKE_DEFER_BUF) { pike_thread_t rt = th; rt.ip = ip-2; rt.pos = sp+(size_t)bx_by; defer[defer_n++] = rt; } }
+        th.ip = ip; th.pos = sp;
+        if (defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        goto pike_next;
+      }
+      goto pike_die;
+pike_die:
+      /* Thread failed/ended: discard it. */
+      continue;
+pike_next:
+      /* Thread advanced and was stored in defer[] above. */
+      ;
+    }
+
+    /* Rebuild the thread set: carried threads (future positions) first, then
+     * threads that advanced past `pos` during this pass. */
+    thread_n = 0;
+    for (size_t c = 0; c < carry_n && thread_n < PIKE_THREAD_BUF; ++c)
+      threads[thread_n++] = carry[c];
+    for (size_t d = 0; d < defer_n && thread_n < PIKE_THREAD_BUF; ++d)
+      threads[thread_n++] = defer[d];
+  }
+  out_result->success = found;
+  if (found) { out_result->match_start = m_start; out_result->match_end = m_end; }
+  return found;
+}
+#endif /* SNOBOL_PIKE_SCAN */
+/* Tier 6: Search-VM for eligible patterns */
 static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
                            size_t start_offset, const snobol_search_meta_t *meta,
                            const snobol_dfa_t *dfa,
                            snobol_search_result_t *out_result,
                            snobol_search_diag_t *diag) {
   (void)dfa;
+#ifdef SNOBOL_PIKE_SCAN
+  if (start_offset == 0) {
+    if (diag) diag->search_vm_tests++;
+    return pike_scan(vm->bc, vm->bc_len, subject, subject_len, meta,
+                     vm->range_meta, vm->range_meta_count, vm, out_result);
+  }
+#endif
   size_t offset = start_offset;
   search_vm_t svm;
   while (offset <= subject_len) {

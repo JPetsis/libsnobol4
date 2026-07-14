@@ -268,6 +268,9 @@ void test_search_meta_cache_suite(void);
 void test_search_suite(void);
 void test_search_ex_api_suite(void);
 void test_search_vm_capture_suite(void);
+#ifdef SNOBOL_PIKE_SCAN
+void test_pike_scan_suite(void);
+#endif
 void test_lexer_suite(void);
 void test_parser_suite(void);
 void test_ast_suite(void);
@@ -336,6 +339,9 @@ int main(void) {
   RUN_SUITE("Search: tier caching", test_search_suite);
   RUN_SUITE("Search: stateful _ex API", test_search_ex_api_suite);
   RUN_SUITE("Search: VM captures", test_search_vm_capture_suite);
+#ifdef SNOBOL_PIKE_SCAN
+  RUN_SUITE("Search: Pike Scan", test_pike_scan_suite);
+#endif
 
   /* Lexer / Parser / AST */
   RUN_SUITE("Lexer", test_lexer_suite);

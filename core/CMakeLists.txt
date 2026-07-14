@@ -114,6 +114,11 @@ if(SNOBOL_PROFILE)
     target_compile_definitions(snobol4 PRIVATE SNOBOL_PROFILE=1)
 endif()
 
+option(ENABLE_PIKE_SCAN "Enable Pike single-pass scan (W1c)" OFF)
+if(ENABLE_PIKE_SCAN)
+    target_compile_definitions(snobol4 PRIVATE SNOBOL_PIKE_SCAN=1)
+endif()
+
 # Optional: apply sanitizer flags
 if(SNOBOL_SANITIZE)
     target_compile_options(snobol4 PRIVATE
