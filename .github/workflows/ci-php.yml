@@ -268,9 +268,12 @@ jobs:
           $bisonUrl = "https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip"
           Invoke-WebRequest -Uri $bisonUrl -OutFile winflexbison.zip
           Expand-Archive winflexbison.zip -DestinationPath winflexbison
-          $bisonDir = (Resolve-Path "winflexbison").Path
+          # The zip extracts into a nested subdirectory — find bison.exe recursively
+          $bisonExe = (Get-ChildItem winflexbison -Recurse -Filter bison.exe | Select-Object -First 1).FullName
+          if (-not $bisonExe) { throw "bison.exe not found after extraction" }
+          $bisonDir = Split-Path $bisonExe
           echo "$bisonDir" >> $env:GITHUB_PATH
-          & "$bisonDir\bison.exe" --version
+          & $bisonExe --version
 
       - name: Build extension (phpize + nmake)
         shell: cmd
