@@ -85,15 +85,22 @@ static void assert_captures_match(const char *pattern_str,
 
   /* ---- Run via snobol_search_exec (Tier 6 for eligible patterns) ---- */
   VM svm = make_vm(bc, bc_len, subject);
+  size_t svm_rmc;
+  svm.range_meta = snobol_pattern_get_range_meta(pat, &svm_rmc);
+  svm.range_meta_count = svm_rmc;
   snobol_search_result_t result;
   bool ok_svm = snobol_search_exec(&svm, subject, strlen(subject), 0, meta,
-                                   NULL, &result, NULL);
+                                    NULL, &result, NULL);
 
   /* ---- Run via vm_run (Tier 8, full VM) ---- */
   VM fvm = make_vm(bc, bc_len, subject);
+  size_t fvm_rmc;
+  fvm.range_meta = snobol_pattern_get_range_meta(pat, &fvm_rmc);
+  fvm.range_meta_count = fvm_rmc;
   bool ok_vm = vm_run(&fvm);
 
   test_assert(ok_svm == ok_vm, "search-VM and full VM agree on success");
+
 
   if (ok_svm && ok_vm) {
     /* Compare capture registers — the core correctness property */
@@ -168,6 +175,15 @@ static void test_sequential_captures(void) {
   assert_captures_match("@r1('abc') @r1('def')", "abcdef", NULL, "def");
 }
 
+/* Test 8: Capture of a SPAN in search mode.
+ * Guards against the regression where a captured pattern (CAP_START SPAN
+ * CAP_END) was misrouted to the non-capturing span-scan tier (Tier 1), which
+ * silently dropped the capture. The dispatcher must route it to the
+ * capture-aware Tier 6 (search-VM) and record the capture. */
+static void test_capture_span_search_mode(void) {
+  assert_captures_match("@r1(SPAN('0-9'))", "1234567890", NULL, "1234567890");
+}
+
 /* ── Suite entry point ────────────────────────────────────────────────── */
 
 void test_search_vm_capture_suite(void) {
@@ -178,4 +194,5 @@ void test_search_vm_capture_suite(void) {
   test_capture_in_alternation();
   test_capture_after_failed_alt();
   test_sequential_captures();
+  test_capture_span_search_mode();
 }

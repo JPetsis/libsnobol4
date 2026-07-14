@@ -1027,14 +1027,94 @@ static bool check_literal_only(const uint8_t *bc, size_t bc_len) {
  * supported by the lightweight search-VM.  This includes all pattern-match
  * primitives (LIT, LEN, ANY, NOTANY, SPAN, BREAK, POS, RPOS, TAB, RTAB,
  * ANCHOR, FENCE, NOP), control flow (JMP, SPLIT, REPEAT_INIT, REPEAT_STEP,
- * ACCEPT, FAIL, ABORT, SUCCEED), but EXCLUDES side-effect ops (EVAL, ASSIGN,
- * CAP_START, CAP_END, EMIT_*), dynamic ops (DYNAMIC, DYNAMIC_DEF), table/array
- * ops, GOTO/GOTO_F/LABEL, BAL, REM, and BREAKX.
+   * ACCEPT, FAIL, ABORT, SUCCEED), plus captures (OP_CAP_START / OP_CAP_END,
+   * supported capture-aware since W1a).  It EXCLUDES side-effect ops (EVAL,
+   * ASSIGN, EMIT_*), dynamic ops (DYNAMIC, DYNAMIC_DEF), table/array ops,
+   * GOTO/GOTO_F/LABEL, BAL, REM, and BREAKX.
  *
  * Patterns that pass are eligible for the lightweight search-VM path
  * (Tier 6) which drops output buffer, capture tracking, and var tracking.
  * ---------------------------------------------------------------------------
  */
+/* ---------------------------------------------------------------------------
+ * bc_has_capture
+ *
+ * Walk the bytecode and report whether it contains any capture op
+ * (OP_CAP_START / OP_CAP_END / OP_EMIT_CAPTURE).  Only TIER_SEARCH_VM (6) and
+ * TIER_GENERAL (8) record captures, so this gates every non-capturing tier.
+ *
+ * Advances past each op's operands using fixed arity for the safe-set opcodes
+ * (the only ones that can reach a fast tier).  Variable-length or non-safe ops
+ * terminate the walk: such patterns are not fast-tier eligible and fall to
+ * TIER_GENERAL (which already preserves captures), so a capture appearing past
+ * an unknown op can never be misrouted to a capture-dropping tier.
+ * ---------------------------------------------------------------------------
+ */
+static bool bc_has_capture(const uint8_t *bc, size_t bc_len) {
+  size_t ip = 0;
+  while (ip < bc_len) {
+    uint8_t op = bc[ip];
+    switch (op) {
+    case OP_CAP_START:
+    case OP_CAP_END:
+    case OP_EMIT_CAPTURE:
+      return true;
+    case OP_ACCEPT:
+    case OP_SUCCEED:
+    case OP_ABORT:
+      /* Program terminator — stop before any trailing class/label data so we
+       * don't misinterpret tail bytes as capture opcodes.  Reaching a
+       * terminator means no capture was seen on this path. */
+      return false;
+    case OP_FAIL:
+    case OP_NOP:
+    case OP_FENCE:
+    case OP_REM:
+    case OP_DYNAMIC:
+      ip += 1;
+      break;
+    case OP_JMP:
+    case OP_SPLIT:
+    case OP_LIT:
+    case OP_EMIT_LITERAL:
+      ip += 9; /* op + u32 + u32 */
+      break;
+    case OP_ANY:
+    case OP_NOTANY:
+    case OP_SPAN:
+    case OP_BREAK:
+    case OP_BREAKX:
+      ip += 3; /* op + u16 */
+      break;
+    case OP_ASSIGN:
+    case OP_EVAL:
+      ip += 4; /* op + u16 + u8 */
+      break;
+    case OP_LEN:
+    case OP_POS:
+    case OP_RPOS:
+    case OP_TAB:
+    case OP_RTAB:
+      ip += 5; /* op + u32 */
+      break;
+    case OP_ANCHOR:
+      ip += 2; /* op + u8 */
+      break;
+    case OP_REPEAT_INIT:
+      ip += 14; /* op + u8 + u32 + u32 + u32 */
+      break;
+    case OP_REPEAT_STEP:
+      ip += 6; /* op + u8 + u32 */
+      break;
+    default:
+      /* Variable-length / non-safe op: stop. Pattern is not fast-tier
+       * eligible, so TIER_GENERAL handles it (captures preserved). */
+      return false;
+    }
+  }
+  return false;
+}
+
 static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
   if (!bc || bc_len < 2)
     return false;
@@ -1042,8 +1122,10 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
   while (ip < bc_len) {
     uint8_t op = bc[ip++];
     switch (op) {
-    /* Side-effect / complex ops — disqualify */
-    case OP_EVAL:
+  /* Side-effect / complex ops — disqualify.  Note: OP_CAP_START / OP_CAP_END
+   * ARE supported by the search-VM (capture-aware since W1a), so they are not
+   * listed here.  OP_EMIT_CAPTURE is a side effect and is excluded. */
+  case OP_EVAL:
     case OP_EMIT_LITERAL:
     case OP_EMIT_CAPTURE:
     case OP_EMIT_EXPR:
@@ -1173,8 +1255,6 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     if (peek == OP_POS || peek == OP_RPOS) { ip += 5; continue; } /* op + target:u32 */
     if (peek == OP_TAB || peek == OP_RTAB) { ip += 5; continue; } /* op + target:u32 */
     if (peek == OP_NOP || peek == OP_FENCE) { ip++; continue; }
-    if (peek == OP_CAP_START || peek == OP_CAP_END) { ip += 2; continue; } /* op + reg:u8 */
-    if (peek == OP_ASSIGN) { ip += 4; continue; }       /* op + var:u16 + reg:u8 */
     break; /* first consuming opcode */
   }
   /* We peek at the first "real" consuming opcode to classify root behavior. */
@@ -1423,6 +1503,29 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   if (out->is_literal_only)       out->flags |= META_IS_LITERAL_ONLY;
   if (out->search_vm_eligible)    out->flags |= META_SEARCH_VM_ELIGIBLE;
   if (out->simd_eligible)         out->flags |= META_SIMD_ELIGIBLE;
+
+  /* ---- Capture-aware tier gating ----
+   * Only TIER_SEARCH_VM (6) and TIER_GENERAL (8) record captures.  Every other
+   * tier (break/span scans, prefix, bitmap, alt-literal trie, automaton, SIMD
+   * NFA) silently drops them, so a captured pattern must never be routed to
+   * one.  check_simd_eligible already rejects captures (it inspects bc[0]),
+   * but the structural family/alt/prefix/automaton flags below do not: without
+   * this gate, e.g. CAP_START SPAN would be misclassified as a pure span scan
+   * and its capture would be lost in search mode. */
+  out->has_capture = bc_has_capture(bc, bc_len);
+  if (out->has_capture) {
+    out->is_span_family = false;
+    out->is_break_family = false;
+    out->is_breakx = false;
+    out->has_literal_prefix = false;
+    out->has_first_byte = false;
+    out->has_candidate_bitmap = false;
+    out->is_single_char_alt = false;
+    out->is_alt_literals = false;
+    out->is_alt_literals_flat = false;
+    out->automaton_eligible = false;
+    out->simd_eligible = false;
+  }
 
   /* ---- Compute tier index from flags ---- */
   if (out->is_break_family && out->ascii_class_only)
@@ -1858,8 +1961,16 @@ typedef struct {
 } search_choice_t;
 
 static inline bool search_vm_push_choice(search_vm_t *vm, size_t ip, size_t pos) {
-  if (!vm->choices)
-    return false;
+  if (!vm->choices) {
+    /* Lazily allocate the choice stack on first push so linear (non-
+     * backtracking) patterns never pay for it. Room for two frames so the
+     * common shallow-backtracking case needs no immediate realloc. */
+    size_t initial_cap = 2 * sizeof(search_choice_t);
+    vm->choices = snobol_malloc(initial_cap);
+    if (!vm->choices)
+      return false;
+    vm->choices_cap = initial_cap;
+  }
   if (vm->choices_top + sizeof(search_choice_t) >= vm->choices_cap) {
     size_t new_cap = vm->choices_cap ? vm->choices_cap * 2
                                      : 16 * sizeof(search_choice_t);
@@ -1927,13 +2038,36 @@ static inline void search_vm_init_from_vm(search_vm_t *svm, const VM *vm) {
   memcpy(svm->loop_max, vm->loop_max, sizeof(svm->loop_max));
   memcpy(svm->loop_last_pos, vm->loop_last_pos, sizeof(svm->loop_last_pos));
   svm->max_counter_used = vm->max_counter_used;
-  /* Seed capture and variable registers from full VM */
-  memcpy(svm->cap_start, vm->cap_start, sizeof(svm->cap_start));
-  memcpy(svm->cap_end, vm->cap_end, sizeof(svm->cap_end));
-  svm->max_cap_used = vm->max_cap_used;
-  memcpy(svm->var_start, vm->var_start, sizeof(svm->var_start));
-  memcpy(svm->var_end, vm->var_end, sizeof(svm->var_end));
-  svm->var_count = vm->var_count;
+  /* Seed capture and variable registers from full VM. Copy only the registers
+   * currently in use; the remainder are always written before they are read,
+   * so a full 2 KiB copy per call is pure waste. */
+  {
+    size_t cap_copy = vm->max_cap_used * sizeof(size_t);
+    size_t var_copy = vm->var_count * sizeof(size_t);
+    memcpy(svm->cap_start, vm->cap_start, cap_copy);
+    memcpy(svm->cap_end, vm->cap_end, cap_copy);
+    svm->max_cap_used = vm->max_cap_used;
+    memcpy(svm->var_start, vm->var_start, var_copy);
+    memcpy(svm->var_end, vm->var_end, var_copy);
+    svm->var_count = vm->var_count;
+  }
+}
+
+/* Resolve a charclass set_id to its range data, mirroring the full VM's
+ * get_ranges_ptr().  This is the bytecode-embedded fallback used when the
+ * caller did not populate vm->range_meta, so the search-VM never silently
+ * fails to match a SPAN/BREAK pattern. */
+static const uint8_t *search_vm_resolve_range(const search_vm_t *svm,
+                                               uint16_t set_id,
+                                               uint16_t *out_count,
+                                               uint16_t *out_case) {
+  VM tmp;
+  memset(&tmp, 0, sizeof(tmp));
+  tmp.bc = svm->bc;
+  tmp.bc_len = svm->bc_len;
+  tmp.range_meta = svm->range_meta;
+  tmp.range_meta_count = svm->range_meta_count;
+  return get_ranges_ptr(&tmp, set_id, out_count, out_case);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1951,13 +2085,18 @@ static inline void search_vm_writeback_to_vm(const search_vm_t *svm, VM *vm) {
   memcpy(vm->counters, svm->counters, sizeof(vm->counters));
   memcpy(vm->loop_last_pos, svm->loop_last_pos, sizeof(vm->loop_last_pos));
   vm->max_counter_used = svm->max_counter_used;
-  /* Write back capture and variable registers to full VM */
-  memcpy(vm->cap_start, svm->cap_start, sizeof(vm->cap_start));
-  memcpy(vm->cap_end, svm->cap_end, sizeof(vm->cap_end));
-  vm->max_cap_used = svm->max_cap_used;
-  memcpy(vm->var_start, svm->var_start, sizeof(vm->var_start));
-  memcpy(vm->var_end, svm->var_end, sizeof(vm->var_end));
-  vm->var_count = svm->var_count;
+  /* Write back capture and variable registers to full VM. Copy only the
+   * registers actually used during this search. */
+  {
+    size_t cap_copy = svm->max_cap_used * sizeof(size_t);
+    size_t var_copy = svm->var_count * sizeof(size_t);
+    memcpy(vm->cap_start, svm->cap_start, cap_copy);
+    memcpy(vm->cap_end, svm->cap_end, cap_copy);
+    vm->max_cap_used = svm->max_cap_used;
+    memcpy(vm->var_start, svm->var_start, var_copy);
+    memcpy(vm->var_end, svm->var_end, var_copy);
+    vm->var_count = svm->var_count;
+  }
 }
 
 static bool SNOBOL_HOT search_vm_exec(search_vm_t * SNOBOL_RESTRICT vm,
@@ -1992,17 +2131,10 @@ static bool SNOBOL_HOT search_vm_exec(search_vm_t * SNOBOL_RESTRICT vm,
     }
   }
 
-  /* ---- Prepare choice stack if not already initialised ---- */
-  if (!vm->choices) {
-    /* One search_choice_t is ~2 KiB; allocate room for two frames so the
-     * common (shallow backtracking) case needs no realloc. The grow-to-fit
-     * loop in search_vm_push_choice enlarges the buffer for deeper stacks. */
-    size_t initial_cap = sizeof(search_choice_t) * 2;
-    vm->choices = snobol_malloc(initial_cap);
-    if (!vm->choices)
-      return false;
-    vm->choices_cap = initial_cap;
-  }
+  /* ---- Choice stack is allocated lazily on the first push
+   * (search_vm_push_choice). Linear (non-backtracking) patterns therefore pay
+   * zero allocation, and the buffer is reused across candidates within a
+   * single search — mirroring the full VM's vm_run() strategy. ---- */
   vm->use_compact_choice = true;
   vm->choices_top = 0;
   /* Don't touch compact-choice write log — we don't track captures */
@@ -2198,6 +2330,9 @@ svm_breakx:
       if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
         rp = srange[set_id - 1].ranges_ptr;
         cnt = srange[set_id - 1].count;
+      } else if (set_id > 0 && vm->bc) {
+        uint16_t cflag;
+        rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
       }
       /* Advance past non-break characters (like OP_BREAK) */
       while (pos < len) {
@@ -2409,6 +2544,12 @@ svm_span:
       if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
         rp = srange[set_id - 1].ranges_ptr;
         cnt = srange[set_id - 1].count;
+      } else if (set_id > 0 && vm->bc) {
+        /* Fallback to bytecode-embedded ranges (mirrors the full VM's
+         * get_ranges_ptr).  Keeps the search-VM correct even when the
+         * caller did not populate vm->range_meta. */
+        uint16_t cflag;
+        rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
       }
       size_t start = pos;
       while (pos < len) {
@@ -2459,6 +2600,9 @@ svm_break:
       if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
         rp = srange[set_id - 1].ranges_ptr;
         cnt = srange[set_id - 1].count;
+      } else if (set_id > 0 && vm->bc) {
+        uint16_t cflag;
+        rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
       }
       while (pos < len) {
         bool in_class = false;
@@ -4342,7 +4486,7 @@ dispatch_search_impl(VM * SNOBOL_RESTRICT vm,
    * anchored, scanning tiers (BREAK/SPAN/PREFIX) are excluded by
    * select_tier_by_cost. */
   snobol_search_tier_t dispatch_tier =
-      select_tier_by_cost(meta, subject_len, dfa != NULL, anchored);
+       select_tier_by_cost(meta, subject_len, dfa != NULL, anchored);
 
   /* If caller provided a DFA, consider automaton acceleration.
     * The automaton's per-offset trial loop is O(n) per position — harmless

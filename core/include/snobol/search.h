@@ -268,6 +268,14 @@ typedef struct {
    * NOT eligible. */
   bool search_vm_eligible;
 
+  /* Capture presence ------------------------------------------------------- */
+  /* True when the bytecode contains any OP_CAP_START / OP_CAP_END (or
+   * OP_EMIT_CAPTURE).  Only TIER_SEARCH_VM (6) and TIER_GENERAL (8) can record
+   * captures; all other tiers silently drop them.  derive_meta uses this to
+   * gate the non-capturing eligibility flags off so captured patterns are
+   * never routed to a tier that would lose the capture. */
+  bool has_capture;
+
   /* SIMD NFA eligibility -------------------------------------------------- */
   /* True when the pattern is eligible for the SIMD-accelerated NFA path:
    * ASCII-only character-class operations (SPAN, BREAK, ANY, NOTANY) with

@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cost-model diagnostics** (`core/src/search.c`, `bench/c/bench_probe.c`): `snobol_search_dump_cost_model()` prints authoritative coefficients; probe emits per-scenario recalibration suggestions.
 - **Capture-aware Tier-6 search-VM** (`core/src/search.c`): `OP_CAP_START`/`OP_CAP_END`, bounded `REPEAT_INIT`/`REPEAT_STEP`, and positional ops (`POS`/`TAB`/`RPOS`/`RTAB`/`REM`/`ANCHOR`/`FENCE`) are now executed by `search_vm_exec`. Recognizing-and-capturing patterns (e.g. `lit("id:") + cap(span("0-9"))`) leave the full VM (Tier 8) and run on Tier 6, which is materially faster than the general-VM fallback.
 - **Anchored dispatch entry** (`core/src/search.c`, `bindings/php/src/snobol_pattern.c`): added `snobol_search_exec_anchored()` and routed `Pattern::match()` through the tier dispatcher (runs the selected tier once at offset 0) instead of `vm_exec()` directly. Anchored matches no longer pay the per-offset full-VM restart cost.
+- **C `snobol_pattern_match` routed through the dispatcher** (`core/src/api.c`): anchored matching now uses `snobol_search_exec_anchored()` (cost-model tier selection, DFA reuse) instead of `vm_run()` directly — closing the gap with `Pattern::match()` and the search path.
 - **Stronger start-byte bitmap / BMH eligibility** (`core/src/search.c`): `derive_meta` walks past zero-width prefixes (ANCHOR, POS, NOP, literal prefix) and derives skip-ahead from the first consuming opcode.
 
 #### Changed
@@ -34,11 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tier 5 worst case**: flat alternations no longer grind through the unaccelerated trie; worst case is now bounded by Tier 8 (general VM with bitmap + BMH + minlength pre-checks).
 - **Search-VM choice-stack overflow** (`core/src/search.c`): `search_vm_exec` allocated the choice stack at 256 B even though each `search_choice_t` is ~2 KiB (embeds full capture/var register arrays). The realloc now grows-to-fit, eliminating a silent heap-corruption bug that surfaced as `malloc(): unaligned tcache chunk detected` during PHP test runs.
 - **Bounded-repetition semantics in the search-VM** (`core/src/search.c`): `REPEAT_INIT`/`REPEAT_STEP` diverged from the full VM — `REPEAT_INIT` always pushed a 0-iteration skip (yielding zero-length "matches" for `min > 0`) and `REPEAT_STEP` pushed the continue-loop branch as the backtrack choice instead of the exit (so a satisfied minimum with no further match failed instead of accepting). Rewritten to mirror `vm.c:1300`.
+- **Capture patterns silently dropped in search mode** (`core/src/search.c`): `derive_meta` skipped `OP_CAP_START`/`OP_CAP_END` as zero-width prefixes, so a captured pattern (e.g. `@r(span("0-9"))`) was misclassified as `is_span_family` and routed to the **non-capturing** Tier 1 span-scan, which discarded the capture. A new `has_capture` gate in `snobol_search_meta_t` clears the span/break/literal/alt/automaton/simd accelerators for capturing patterns so they route to the capture-aware Tier 6 (or Tier 8). Added `test_capture_span_search_mode` regression test.
+- **`bc_has_capture` over-ran trailing class data** (`core/src/search.c`): the capture scan walked past `OP_ACCEPT`/`OP_SUCCEED`/`OP_ABORT` into the appended charclass/label tail and misread tail bytes as capture opcodes (e.g. breaking `is_span_family` for plain `SPAN` patterns). The walk now stops at program terminators.
+- **Search-VM SPAN/BREAK matched nothing without `range_meta`** (`core/src/search.c`): `svm_span`/`svm_break`/`svm_breakx` resolved charclasses solely from `vm->range_meta` and had no fallback, so any caller that did not populate `range_meta` (notably the capture unit tests, and defensive safety) produced a silent no-match. They now fall back to the bytecode-embedded ranges via `get_ranges_ptr()`, mirroring the full VM.
 
 #### Performance
 
 - Bushy alt-literals search-mode is **~3.28× faster** than the prior anchored-match path (regression fixed); trie caching adds a **~7%** win on repeated bushy-alt-literal searches.
-- Release+LTO and PGO builds both pass the full C suite (**2009 tests**); ASan+UBSan clean.
+- Captured patterns (`@r(span("0-9"))`) on the search-VM (Tier 6) are **~24% faster** than the general-VM fallback (Tier 8) on the `cap_search` probe scenario (303 ns vs 399 ns at 2M iters), now that they route to Tier 6 instead of being silently dropped.
+- Release+LTO and PGO builds both pass the full C suite (**2166 tests**); ASan+UBSan clean.
 - PGO on top of LTO yields only a **marginal** further gain (1–8% on literal paths, ~0% elsewhere) — the decisive speedups came from the structural changes (P1–P5) + LTO.
 - SNOBOL remains **1.3×–9.5× slower than PCRE2** on the synthetic probe scenarios (closest on SIMD scan at ~1.66×, widest on alternation/alt-literals at ~8–9.5×).
 

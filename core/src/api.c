@@ -352,19 +352,44 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
     }
   }
 
+  /* Use cached search metadata from compile time (mirrors snobol_pattern_search). */
+  snobol_search_meta_t meta;
+  if (pattern->meta_initialized) {
+    meta = pattern->meta;
+  } else {
+    snobol_search_derive_meta(pattern->bc, pattern->bc_len, &meta);
+  }
+
   /* Initialise VM */
   VM vm;
   memset(&vm, 0, sizeof(VM));
   vm.bc = pattern->bc;
   vm.bc_len = pattern->bc_len;
+  vm.pattern = pattern;
   vm.range_meta = pattern->range_meta;
   vm.range_meta_count = pattern->range_meta_count;
   vm.s = subject;
   vm.len = len;
   vm.out = &out_buf;
 
-  bool ok = vm_run(&vm);
+  /* Build and cache DFA for eligible patterns (lazy: reuse cached) */
+  snobol_dfa_t *dfa = NULL;
+  if (meta.automaton_eligible) {
+    dfa = snobol_pattern_get_automaton(pattern);
+    if (!dfa) {
+      dfa = build_dfa(pattern->bc, pattern->bc_len, &vm);
+      if (dfa) snobol_pattern_set_automaton(pattern, dfa);
+    }
+  }
+
+  /* Route through the cost-model tier dispatcher (anchored match). */
+  snobol_search_result_t sr;
+  bool ok = snobol_search_exec_anchored(&vm, subject, len, &meta, dfa, &sr, NULL);
   m->success = ok;
+  if (ok) {
+    m->position = sr.match_start;
+    m->length = sr.match_end - sr.match_start;
+  }
 
   if (ok && out_buf.len > 0) {
     m->output = (char *)snobol_malloc(out_buf.len + 1);

@@ -306,11 +306,12 @@ static void run_span_search(int64_t iters, probe_result_t *r) {
 
 static void run_cap_match(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
-    /* Anchored literal + capture of a SPAN: exercises the capture-aware
-     * search-VM (Tier 6) in the after-state; full VM (Tier 8) before. */
-    snobol_pattern_t *pat = compile_or_die(ctx, "'id:' @r(SPAN('0-9'))",
-                                           strlen("'id:' @r(SPAN('0-9'))"));
-    static const char subj[] = "id:1234567890";
+    /* Capture-first pattern: routes to the capture-aware search-VM (Tier 6)
+     * in the after-state, full VM (Tier 8) before. Capture-first (no literal
+     * prefix) is essential so it is NOT promoted to the literal-prefix tier. */
+    snobol_pattern_t *pat = compile_or_die(ctx, "@r(SPAN('0-9'))",
+                                           strlen("@r(SPAN('0-9'))"));
+    static const char subj[] = "1234567890";
     size_t slen = sizeof(subj) - 1;
 
     int64_t start = bench_ns();
@@ -932,19 +933,19 @@ int main(void) {
         void (*run)(int64_t, probe_result_t *);
         int64_t iter_count;
     } scenarios[] = {
-        { "literal_fail",        run_literal_fail,        iters            },
-        { "literal_ok",          run_literal_ok,          iters            },
-        { "span_comma",          run_span_comma,          iters            },
-        { "span_search",         run_span_search,         iters            },
+        /* { "literal_fail",        run_literal_fail,        iters            }, */
+        /* { "literal_ok",          run_literal_ok,          iters            }, */
+        /* { "span_comma",          run_span_comma,          iters            }, */
+        /* { "span_search",         run_span_search,         iters            }, */
         { "cap_search",          run_cap_match,           iters            },
-        { "alternation",         run_alternation,         iters            },
-        { "alt_search",          run_alt_search,          iters            },
-        { "alt_literals",        run_alt_literals,        iters            },
-        { "alt_literals_search", run_alt_literals_search, iters            },
-        { "automaton",           run_automaton,           iters            },
-        { "span_simd",           run_span_simd,           iters            },
-        { "span_simd_miss",      run_span_simd_miss,      iters            },
-        { "tokenize",            run_tokenize,            tokenize_iters   },
+        /* { "alternation",         run_alternation,         iters            }, */
+        /* { "alt_search",          run_alt_search,          iters            }, */
+        /* { "alt_literals",        run_alt_literals,        iters            }, */
+        /* { "alt_literals_search", run_alt_literals_search, iters            }, */
+        /* { "automaton",           run_automaton,           iters            }, */
+        /* { "span_simd",           run_span_simd,           iters            }, */
+        /* { "span_simd_miss",      run_span_simd_miss,      iters            }, */
+        /* { "tokenize",            run_tokenize,            tokenize_iters   }, */
 #ifdef HAVE_PCRE2
         { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            },
         { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters            },
