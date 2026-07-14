@@ -267,15 +267,28 @@ jobs:
           # winflexbison package ships 2.7, so fetch v2.5.25 from GitHub
           # (bundles bison 3.8.2).
           $bisonUrl = "https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip"
-          Invoke-WebRequest -Uri $bisonUrl -OutFile winflexbison.zip
-          Expand-Archive winflexbison.zip -DestinationPath winflexbison -Force
-          # Find bison.exe anywhere inside the extracted tree
-          $found = Get-ChildItem winflexbison -Recurse -Filter bison.exe | Select-Object -First 1
-          if (-not $found) { throw "bison.exe not found after extracting winflexbison" }
+          Invoke-WebRequest -Uri $bisonUrl -OutFile winflexbison.zip -MaximumRedirection 5
+          # 7z is pre-installed on windows-latest and more reliable than Expand-Archive
+          & 7z x winflexbison.zip -owinflexbison -y | Out-Null
+          # Dump extracted contents for debugging
+          echo "=== Extracted contents ==="
+          Get-ChildItem winflexbison -Recurse | Select-Object FullName | Format-Table -AutoSize
+          # Search for bison.exe or win_bison.exe
+          $found = Get-ChildItem winflexbison -Recurse -Filter bison.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            $found = Get-ChildItem winflexbison -Recurse -Filter win_bison.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $found) { throw "bison.exe / win_bison.exe not found after extracting winflexbison" }
           $toolsDir = $found.DirectoryName
-          echo "Found bison.exe at: $toolsDir"
+          echo "Found bison at: $($found.FullName)"
+          # Create a bison.exe shim if only win_bison.exe exists
+          $bisonPath = Join-Path $toolsDir "bison.exe"
+          if (-not (Test-Path $bisonPath)) {
+            Copy-Item $found.FullName $bisonPath
+            echo "Created bison.exe shim from $($found.Name)"
+          }
           echo $toolsDir >> $env:GITHUB_PATH
-          & "$toolsDir\bison.exe" --version
+          & $bisonPath --version
 
       - name: Build extension (phpize + nmake)
         shell: cmd
@@ -290,6 +303,8 @@ jobs:
           call "%VCVARS%"
           if errorlevel 1 exit /b 1
           set "PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PATH%"
+          where bison
+          bison --version
           cd /d %GITHUB_WORKSPACE%\bindings\php
           call phpize.bat
           if errorlevel 1 exit /b 1
