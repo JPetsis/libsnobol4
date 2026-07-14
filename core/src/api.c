@@ -243,6 +243,13 @@ const snobol_search_meta_t *snobol_pattern_get_meta(
   return pattern ? &pattern->meta : NULL;
 }
 
+const snobol_range_meta_t *snobol_pattern_get_range_meta(
+    const snobol_pattern_t *pattern, size_t *count) {
+  if (count)
+    *count = pattern ? pattern->range_meta_count : 0;
+  return pattern ? pattern->range_meta : NULL;
+}
+
 bool snobol_pattern_automaton_available(const snobol_pattern_t *pattern) {
   return pattern && pattern->automaton &&
          pattern->automaton->num_states < SNOBOL_DFA_MAX_STATES;

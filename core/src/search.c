@@ -1163,6 +1163,19 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
 
   /* ---- Skip any leading cap/anchor ops that don't consume input ---- */
   size_t ip = 0;
+  /* Walk past zero-width prefixes to find the first consuming opcode.
+   * This allows patterns like ANCHOR(0) SPAN('0-9') or CAP_START(0) LIT("x")
+   * to get BMH skip and literal-prefix classification. */
+  while (ip < bc_len) {
+    uint8_t peek = bc[ip];
+    if (peek == OP_ANCHOR) { ip += 2; continue; }       /* op + type:u8 */
+    if (peek == OP_POS || peek == OP_RPOS) { ip += 5; continue; } /* op + target:u32 */
+    if (peek == OP_TAB || peek == OP_RTAB) { ip += 5; continue; } /* op + target:u32 */
+    if (peek == OP_NOP || peek == OP_FENCE) { ip++; continue; }
+    if (peek == OP_CAP_START || peek == OP_CAP_END) { ip += 2; continue; } /* op + reg:u8 */
+    if (peek == OP_ASSIGN) { ip += 4; continue; }       /* op + var:u16 + reg:u8 */
+    break; /* first consuming opcode */
+  }
   /* We peek at the first "real" consuming opcode to classify root behavior. */
 
   /* -----------------------------------------------------------------------

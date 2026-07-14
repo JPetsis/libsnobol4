@@ -1241,6 +1241,122 @@ static void test_dispatch_order(void) {
 }
 
 /* ---------------------------------------------------------------------------
+ * W1b: Stronger start-bitmap / BMH eligibility
+ *
+ * Patterns with zero-width prefixes (ANCHOR, CAP_START) followed by a
+ * consuming opcode should derive BMH skip and start-bitmap from the first
+ * consuming opcode, not the root.
+ * ---------------------------------------------------------------------------
+ */
+static void test_w1b_start_bitmap_after_zero_width(void) {
+  snobol_context_t *ctx = snobol_context_create();
+
+  /* Test 1: ^SPAN('0-9') — ANCHOR then SPAN.
+   * SPAN is the first consuming op; should get start-bitmap from SPAN's
+   * character class. BMH skip is NOT set for SPAN (no literal prefix). */
+  {
+    char *err = NULL;
+    snobol_pattern_t *pat =
+        snobol_pattern_compile(ctx, "^SPAN('0-9')", 12, &err);
+    test_assert(pat != NULL, "w1b: ^SPAN compiled");
+    if (pat) {
+      const uint8_t *bc = snobol_pattern_get_bc(pat);
+      size_t bc_len = snobol_pattern_get_bc_len(pat);
+      const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+      test_assert(meta->has_start_bitmap, "w1b: ^SPAN has start_bitmap");
+      test_assert(meta->is_span_family, "w1b: ^SPAN is_span_family");
+      test_assert(!meta->has_bmh_skip, "w1b: ^SPAN no bmh_skip (no literal)");
+
+      /* Run with diagnostics — should skip non-digit positions.
+       * Pattern is anchored at start; 'a' is not a digit so match fails,
+       * but the bitmap still rejects candidate positions. */
+      VM vm;
+      memset(&vm, 0, sizeof(vm));
+      snobol_search_result_t result;
+      snobol_search_diag_t diag;
+      bool ok = snobol_search_exec(&vm, "abc123", 6, 0, meta, NULL, &result,
+                                   &diag);
+      test_assert(!ok, "w1b: ^SPAN does not match 'abc123' (anchored, 'a' not digit)");
+      test_assert(diag.candidates_skipped > 0,
+                  "w1b: ^SPAN skips non-digit positions via bitmap");
+      snobol_pattern_free(pat);
+    }
+  }
+
+  /* Test 2: 'id:' SPAN('0-9') — LIT then SPAN.
+   * LIT is the first consuming op; should get literal prefix classification. */
+  {
+    char *err = NULL;
+    snobol_pattern_t *pat =
+        snobol_pattern_compile(ctx, "'id:' SPAN('0-9')", 17, &err);
+    test_assert(pat != NULL, "w1b: 'id:' SPAN compiled");
+    if (pat) {
+      const uint8_t *bc = snobol_pattern_get_bc(pat);
+      size_t bc_len = snobol_pattern_get_bc_len(pat);
+      const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+      test_assert(meta->has_literal_prefix, "w1b: 'id:' SPAN has literal_prefix");
+      test_assert(meta->literal_prefix_len >= 3,
+                  "w1b: 'id:' SPAN literal_prefix_len >= 3");
+
+      /* Run search via the C API (snobol_pattern_search) */
+      snobol_match_t *m = snobol_pattern_search(pat, "xxid:123xx", 10);
+      test_assert(m != NULL, "w1b: 'id:' SPAN search returns result");
+      if (m) {
+        bool success = snobol_match_success(m);
+        test_assert(success, "w1b: 'id:' SPAN match succeeds");
+        if (success) {
+          size_t pos = snobol_match_get_position(m);
+          size_t len = snobol_match_get_length(m);
+          test_assert(pos == 2, "w1b: 'id:' SPAN match position == 2");
+          test_assert(len == 4, "w1b: 'id:' SPAN match length == 4 (id:123)");
+        }
+        snobol_match_free(m);
+      }
+
+      /* Verify skip-ahead via diagnostics (direct search_exec with range_meta) */
+      size_t range_count = 0;
+      const snobol_range_meta_t *rm = snobol_pattern_get_range_meta(pat, &range_count);
+      VM vm;
+      memset(&vm, 0, sizeof(VM));
+      vm.bc = snobol_pattern_get_bc(pat);
+      vm.bc_len = snobol_pattern_get_bc_len(pat);
+      vm.range_meta = rm;
+      vm.range_meta_count = range_count;
+      snobol_search_result_t result;
+      snobol_search_diag_t diag;
+      bool ok = snobol_search_exec(&vm, "xxid:123xx", 10, 0, meta, NULL,
+                                   &result, &diag);
+      test_assert(ok, "w1b: 'id:' SPAN matches via search_exec");
+      test_assert(result.match_start == 2,
+                  "w1b: 'id:' SPAN search_exec match_start == 2");
+      test_assert(diag.candidates_skipped > 0,
+                  "w1b: 'id:' SPAN skips via literal prefix");
+      snobol_pattern_free(pat);
+    }
+  }
+
+  /* Test 3: ^'id:' SPAN('0-9') — ANCHOR then LIT then SPAN.
+   * LIT is the first consuming op after ANCHOR; should get literal prefix. */
+  {
+    char *err = NULL;
+    snobol_pattern_t *pat =
+        snobol_pattern_compile(ctx, "^'id:' SPAN('0-9')", 18, &err);
+    test_assert(pat != NULL, "w1b: ^'id:' SPAN compiled");
+    if (pat) {
+      const uint8_t *bc = snobol_pattern_get_bc(pat);
+      size_t bc_len = snobol_pattern_get_bc_len(pat);
+      const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+      test_assert(meta->has_literal_prefix,
+                  "w1b: ^'id:' SPAN has literal_prefix");
+
+      snobol_pattern_free(pat);
+    }
+  }
+
+  snobol_context_destroy(ctx);
+}
+
+/* ---------------------------------------------------------------------------
  * Public suite entry point
  * ---------------------------------------------------------------------------
  */
@@ -1312,4 +1428,7 @@ void test_search_runtime_suite(void) {
   test_tier_index_matches_if_branches();
   test_search_vm_reset_fields();
   test_bmh_table_alloc_free();
+
+  /* W1b: Stronger start-bitmap / BMH eligibility after zero-width prefixes */
+  test_w1b_start_bitmap_after_zero_width();
 }

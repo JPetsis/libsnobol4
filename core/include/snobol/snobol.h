@@ -259,6 +259,21 @@ const snobol_search_meta_t *snobol_pattern_get_meta(
     const snobol_pattern_t *pattern);
 
 /**
+ * @brief Retrieve cached charclass range metadata from a compiled pattern.
+ *
+ * The range metadata is built once at compile time and used by SPAN/BREAK/BREAKX
+ * opcodes to resolve character-class set IDs.  Callers that invoke
+ * snobol_search_exec() directly (bypassing snobol_pattern_search()) must
+ * copy this into the VM's range_meta / range_meta_count fields.
+ *
+ * @param[in] pattern  Compiled pattern (NULL returns NULL/0).
+ * @param[out] count   Number of entries in the returned array (may be NULL).
+ * @return Read-only pointer to range metadata array, or NULL.
+ */
+const snobol_range_meta_t *snobol_pattern_get_range_meta(
+    const snobol_pattern_t *pattern, size_t *count);
+
+/**
  * @brief Free a compiled pattern.
  *
  * @param[in] pattern Pattern to free.  NULL is safe.
