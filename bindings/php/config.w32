@@ -1,0 +1,33 @@
+// config.w32 for libsnobol4 PHP extension
+//
+// Mirrors config.m4.  The whole engine (C core + PHP binding) is linked into a
+// single shared module via core_amalgam.c, exactly like the phpize/autotools
+// path on Linux/macOS.  Build with the PHP SDK:
+//   phpize.bat && configure.bat --enable-snobol=shared && nmake
+
+ARG_ENABLE("snobol", "enable snobol support", "no");
+
+if (PHP_SNOBOL != "no") {
+    var sources = "src/php_snobol.c \
+        src/snobol_pattern.c \
+        src/snobol_table_php.c \
+        src/snobol_array_php.c \
+        src/snobol_dynamic_pattern_php.c \
+        src/snobol_builder_php.c \
+        src/snobol_pattern_cache_php.c \
+        src/snobol_pattern_helper_php.c \
+        core_amalgam.c";
+
+    // MSVC accepts forward slashes in /I arguments.
+    var cflags = "/I" + configure_module_dirname + "/src"
+               + " /I" + configure_module_dirname + "/../../core/include"
+               + " /DSNOBOL_DYNAMIC_PATTERN=1"
+               + " /DCOMPILE_DL_SNOBOL";
+
+    AC_DEFINE("SNOBOL_DYNAMIC_PATTERN", 1, "Enable dynamic patterns and tables");
+    AC_DEFINE("COMPILE_DL_SNOBOL", 1, "Build snobol as a dynamically-loaded module");
+
+    // C23 for nullptr / constexpr variables / [[attributes]] (matches config.m4).
+    // MSVC 17.10+ (shipped with VS2022 on windows-latest) understands /std:c23.
+    EXTENSION("snobol", sources, null, "/std:c23 " + cflags);
+}

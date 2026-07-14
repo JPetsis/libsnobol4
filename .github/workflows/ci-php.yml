@@ -187,6 +187,10 @@ jobs:
       matrix:
         php-version: [ '8.3', '8.4', '8.5' ]
 
+    env:
+      # Where the PHP SDK binary tools (phpize / buildconf / configure / nmake) live.
+      PHP_SDK_BINARY_TOOLS_PATH: ${{ github.workspace }}\php-sdk
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -197,14 +201,89 @@ jobs:
           php-version: ${{ matrix.php-version }}
           tools: composer
           coverage: none
-
-      - name: Install CMake
-        run: choco install cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+          # The PHP SDK needs the MSVC toolchain to drive nmake.
+          compiler: vs2022
 
       - name: Install Composer dependencies
         working-directory: bindings/php
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      # Windows PHP extension building is complex - skip for now
-      - name: Skip Windows build (needs PHP SDK)
-        run: echo "Windows PHP extension build requires PHP SDK - skipped for now"
+      - name: Download PHP SDK and dev pack
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # PHP SDK binary tools — provides phpsdk, phpize.bat, buildconf,
+          # configure.bat and nmake wrappers.
+          $sdkUrl = "https://github.com/php/php-sdk-binary-tools/archive/refs/heads/master.zip"
+          Invoke-WebRequest -Uri $sdkUrl -OutFile sdk.zip
+          Expand-Archive sdk.zip -DestinationPath .
+          Rename-Item php-sdk-binary-tools-master php-sdk
+
+          # Exact PHP version that setup-php installed (e.g. 8.3.12).  The dev
+          # pack must match it for ABI compatibility.
+          $phpVer = (php -r "echo PHP_VERSION;")
+          echo "Building against PHP $phpVer"
+          $base = $phpVer
+
+          $develUrl = "https://windows.php.net/downloads/releases/php-$base-devel-vs16-x64.zip"
+          try {
+            Invoke-WebRequest -Uri $develUrl -OutFile devel.zip -ErrorAction Stop
+          } catch {
+            # Fall back to the latest devel pack for this minor series.
+            $minor = ($phpVer -split '\.')[0..1] -join '.'
+            $develUrl = "https://windows.php.net/downloads/releases/php-$minor-latest-devel-vs16-x64.zip"
+            echo "Exact devel pack missing; falling back to $develUrl"
+            Invoke-WebRequest -Uri $develUrl -OutFile devel.zip -ErrorAction Stop
+          }
+          Expand-Archive devel.zip -DestinationPath php-dev
+          echo "PHP_DEV=$pwd\php-dev" >> $env:GITHUB_ENV
+
+      - name: Build extension (phpize + nmake)
+        shell: cmd
+        run: |
+          call "%PHP_SDK_BINARY_TOOLS_PATH%\phpsdk\phpsdk_setvars.bat"
+          REM phpsdk_setvars can reset PATH; re-add the dev pack (phpize.bat /
+          REM configure.bat live there) afterwards so they stay reachable.
+          set PATH=%PHP_DEV%;%PATH%
+          cd bindings\php
+          phpize.bat
+          configure.bat --enable-snobol=shared
+          nmake
+          dir *.dll
+
+      - name: Install and enable extension
+        shell: cmd
+        run: |
+          set PATH=%PHP_DEV%;%PATH%
+          cd bindings\php
+          set "DLL=%CD%\php_snobol.dll"
+          if not exist "%DLL%" (
+            echo ERROR: php_snobol.dll was not built
+            exit /b 1
+          )
+          for /f "usebackq delims=" %%i in (`php -r "echo ini_get('extension_dir');"`) do set "EXT_DIR=%%i"
+          echo "PHP extension_dir: %EXT_DIR%"
+          copy /Y "%DLL%" "%EXT_DIR%\"
+
+          REM Enable via the php.ini scan dir (setup-php sets PHP_INI_SCAN_DIR).
+          if defined PHP_INI_SCAN_DIR (
+            if not exist "%PHP_INI_SCAN_DIR%" mkdir "%PHP_INI_SCAN_DIR%"
+            echo extension=snobol > "%PHP_INI_SCAN_DIR%\99-snobol.ini"
+          ) else (
+            php -r "file_put_contents(php_ini_loaded_file(), PHP_EOL . 'extension=snobol', FILE_APPEND);"
+          )
+          php -m | findstr /i snobol && echo "snobol extension loaded"
+
+      - name: Run PHP tests
+        working-directory: bindings/php
+        shell: bash
+        run: |
+          php -r "echo 'PHP: ' . PHP_VERSION . PHP_EOL;"
+          php -r "if (extension_loaded('snobol')) { echo 'snobol extension loaded' . PHP_EOL; } else { echo 'snobol NOT loaded' . PHP_EOL; exit(1); }"
+          FAILED=0
+          for f in $(find tests/php -name '*Test.php' | sort); do
+            echo "====== Running: $f ======"
+            php vendor/bin/phpunit "$f" --testdox 2>&1 || FAILED=$?
+          done
+          exit $FAILED
