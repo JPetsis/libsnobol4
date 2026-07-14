@@ -192,10 +192,10 @@ jobs:
             os: windows-2019
             vs-version: '16'
           - php-version: '8.4'
-            os: windows-latest
+            os: windows-2022
             vs-version: '17'
           - php-version: '8.5'
-            os: windows-latest
+            os: windows-2022
             vs-version: '17'
 
     steps:
