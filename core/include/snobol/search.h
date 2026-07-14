@@ -325,10 +325,12 @@ static inline void snobol_meta_set_flag(snobol_search_meta_t *m, uint32_t flag) 
  */
 typedef struct {
   bool success;
+  bool aborted;       /**< Set true when an OP_ABORT terminated the match,
+                          signalling the caller to stop searching entirely. */
   size_t match_start; /**< Byte offset of match start within the original
-                         subject */
+                          subject */
   size_t match_end;   /**< Byte offset just past the match end in the original
-                         subject */
+                          subject */
 } snobol_search_result_t;
 
 /* ---------------------------------------------------------------------------
@@ -448,6 +450,32 @@ SNOBOL_NODISCARD bool snobol_search_exec(VM *vm, const char *subject,
                                          snobol_search_diag_t *diag);
 
 /**
+ * Anchored (SNOBOL-style) match entry point used by Pattern::match().
+ *
+ * Equivalent to snobol_search_exec() with start_offset = 0 and the anchored
+ * flag set: the match must begin exactly at offset 0.  The cost-model tier
+ * selection excludes scanning tiers (BREAK/SPAN/PREFIX) and any match that
+ * does not start at the anchor is rejected.  This routes anchored matching
+ * through the cheaper cost-model tiers instead of forcing the full VM.
+ *
+ * @param vm      Partially-initialised VM (bc/bc_len + callbacks set)
+ * @param subject Full subject string pointer
+ * @param subject_len Subject length in bytes
+ * @param meta    Optional pre-derived metadata (NULL = derive inline)
+ * @param dfa     Optional DFA for automaton acceleration (NULL = none)
+ * @param out_result Output: match position (always written; success=false on
+ * no match)
+ * @param diag    Optional diagnostics output (may be NULL)
+ * @return true if a match was found starting at offset 0; false otherwise
+ */
+SNOBOL_NODISCARD bool snobol_search_exec_anchored(VM *vm, const char *subject,
+                                                  size_t subject_len,
+                                                  const snobol_search_meta_t *meta,
+                                                  const snobol_dfa_t *dfa,
+                                                  snobol_search_result_t *out_result,
+                                                  snobol_search_diag_t *diag);
+
+/**
  * Build a DFA from search-VM-eligible bytecode via powerset construction.
  * Returns NULL on allocation failure or state explosion (>4096 states).
  * The caller owns the returned DFA (free with snobol_dfa_free()).
@@ -488,10 +516,10 @@ bool check_simd_eligible(const uint8_t *bc, size_t bc_len);
  * @return true when a match is found
  */
 bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
-                   size_t start_offset, const snobol_search_meta_t *meta,
-                   const snobol_dfa_t *dfa,
-                   snobol_search_result_t *out_result,
-                   snobol_search_diag_t *diag);
+                    size_t start_offset, const snobol_search_meta_t *meta,
+                    const snobol_dfa_t *dfa,
+                    snobol_search_result_t *out_result,
+                    snobol_search_diag_t *diag, bool anchored);
 
 /**
  * Free a DFA allocated by build_dfa().

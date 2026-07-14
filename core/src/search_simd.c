@@ -34,7 +34,7 @@ bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
                            size_t start_offset, const snobol_search_meta_t *meta,
                            const snobol_dfa_t *dfa,
                            snobol_search_result_t *out_result,
-                           snobol_search_diag_t *diag);
+                           snobol_search_diag_t *diag, bool anchored);
 
 /* ---------------------------------------------------------------------------
  * NFA state bitmask representation
@@ -633,10 +633,10 @@ static bool simd_nfa_exec_neon(const simd_nfa_t *nfa, const char *subject,
  * ---------------------------------------------------------------------------
  */
 bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
-                   size_t start_offset, const snobol_search_meta_t *meta,
-                   const snobol_dfa_t *dfa,
-                   snobol_search_result_t *out_result,
-                   snobol_search_diag_t *diag) {
+                    size_t start_offset, const snobol_search_meta_t *meta,
+                    const snobol_dfa_t *dfa,
+                    snobol_search_result_t *out_result,
+                    snobol_search_diag_t *diag, bool anchored) {
   (void)diag;
 
   /* Build NFA masks from pattern bytecode */
@@ -644,7 +644,7 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
   if (!build_nfa_masks(&nfa, vm->bc, vm->bc_len, vm)) {
     /* Fall back to general VM if NFA build fails */
     return tier_general_fallback(vm, subject, subject_len, start_offset,
-                                  meta, dfa, out_result, diag);
+                                  meta, dfa, out_result, diag, anchored);
   }
 
   /* Scan through subject positions using the anchored NFA exec.
@@ -674,6 +674,8 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
     }
 
     if (offset >= subject_len)
+      break;
+    if (anchored)
       break;
     offset++;
   }

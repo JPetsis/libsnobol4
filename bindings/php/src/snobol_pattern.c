@@ -414,9 +414,21 @@ PHP_METHOD(Snobol_Pattern, match) {
     }
 #endif
 
-    bool ok = vm_exec(&vm);
+    /* Anchored match entry (Group 4): route through the tiered offload so
+     * anchored matching uses the lightweight tiers (search-VM, literal,
+     * bitmap, automaton, ...) instead of always the full VM.  Captures,
+     * _output and _metrics are written back into the VM exactly as vm_exec
+     * does, and the result is anchored to offset 0. */
+    snobol_search_result_t match_result;
+    memset(&match_result, 0, sizeof(match_result));
+    bool ok = snobol_search_exec_anchored(&vm, ZSTR_VAL(input), ZSTR_LEN(input),
+                                          &intern->meta, NULL, &match_result,
+                                          NULL);
 
-    SNOBOL_LOG("Snobol_Pattern::match: VM returned %d, pos=%zu, var_count=%zu", (int)ok, vm.pos, vm.var_count);
+    SNOBOL_LOG("Snobol_Pattern::match: anchored returned %d, match_start=%zu, "
+               "match_end=%zu, var_count=%zu",
+               (int)ok, match_result.match_start, match_result.match_end,
+               vm.var_count);
 
     if (!ok) {
         if (eb.buf) efree(eb.buf);
@@ -448,7 +460,8 @@ PHP_METHOD(Snobol_Pattern, match) {
             add_assoc_null(return_value, key);
         }
     }
-    add_assoc_long(return_value, "_match_len", (zend_long)vm.pos);
+    add_assoc_long(return_value, "_match_len",
+                   (zend_long)(match_result.match_end - match_result.match_start));
 
     if (eb.buf) {
         add_assoc_stringl(return_value, "_output", eb.buf, eb.len);

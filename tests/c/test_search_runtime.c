@@ -647,7 +647,9 @@ static void test_literal_only_meta(void) {
   test_assert(m.search_vm_eligible,
               "literal-only: also search-vm eligible");
 
-  /* LIT + ACCEPT with zero-width prefix (POS) */
+  /* LIT + ACCEPT with a zero-width prefix (POS) is NOT literal-only: POS is a
+   * position constraint (only satisfied at absolute offset 0), so the pattern
+   * must not be matched by the unanchored memcmp tier. */
   {
     size_t ip = 0;
     bc[ip++] = OP_POS;
@@ -660,8 +662,8 @@ static void test_literal_only_meta(void) {
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
   snobol_search_meta_free(&m);
-    test_assert(m.is_literal_only,
-                "literal-only: POS LIT ACCEPT detected");
+    test_assert(!m.is_literal_only,
+                "literal-only: POS LIT ACCEPT NOT literal-only (position constraint)");
   }
 
   /* SPLIT pattern — NOT literal-only */
