@@ -290,6 +290,22 @@ jobs:
           echo $toolsDir >> $env:GITHUB_PATH
           & $bisonPath --version
 
+      - name: Install re2c (required by configure.bat)
+        shell: pwsh
+        run: |
+          # PHP's configure.bat requires re2c.  For extension builds the
+          # generated lexer files are already present in the dev pack, but
+          # configure checks for it unconditionally.
+          $re2cUrl = "https://github.com/skvadrik/re2c/releases/download/3.1/re2c-3.1-windows.zip"
+          Invoke-WebRequest -Uri $re2cUrl -OutFile re2c.zip -MaximumRedirection 5
+          & 7z x re2c.zip -ore2c -y | Out-Null
+          $found = Get-ChildItem re2c -Recurse -Filter re2c.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) { throw "re2c.exe not found after extracting re2c" }
+          $toolsDir = $found.DirectoryName
+          echo "Found re2c at: $($found.FullName)"
+          echo $toolsDir >> $env:GITHUB_PATH
+          & $found.FullName --version
+
       - name: Build extension (phpize + nmake)
         shell: cmd
         run: |
