@@ -264,10 +264,15 @@ jobs:
         shell: pwsh
         run: |
           choco install winflexbison -y --no-progress
-          # choco puts binaries in C:\ProgramData\chocolatey\bin; persist
-          # across steps via GITHUB_PATH so the build step can find it.
+          # winflexbison ships win_bison.exe, but PHP's configure.bat
+          # looks for "bison".  Create a symlink so both names resolve.
           $chocoBin = Join-Path $env:ChocolateyInstall 'bin'
-          if (Test-Path $chocoBin) { echo $chocoBin >> $env:GITHUB_PATH }
+          $bisonSrc = Join-Path $chocoBin 'win_bison.exe'
+          $bisonDst = Join-Path $chocoBin 'bison.exe'
+          if ((Test-Path $bisonSrc) -and -not (Test-Path $bisonDst)) {
+            Copy-Item $bisonSrc $bisonDst
+          }
+          echo $chocoBin >> $env:GITHUB_PATH
           & bison --version
 
       - name: Build extension (phpize + nmake)
