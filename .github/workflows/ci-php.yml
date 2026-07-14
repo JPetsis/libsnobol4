@@ -208,44 +208,32 @@ jobs:
         working-directory: bindings/php
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      - name: Download PHP SDK and dev pack
+      - name: Download PHP SDK
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          # PHP SDK binary tools — provides phpsdk, phpize.bat, buildconf,
-          # configure.bat and nmake wrappers.
+          # PHP SDK binary tools — provides phpsdk, phpsdk_setvars.bat,
+          # buildconf and the MSVC/nmake environment used to drive the build.
+          # The PHP headers, import lib (dev/php.lib) and phpize.bat/configure.bat
+          # already ship inside the Windows PHP that setup-php installed above,
+          # so no separate "devel pack" download is required.
           $sdkUrl = "https://github.com/php/php-sdk-binary-tools/archive/refs/heads/master.zip"
           Invoke-WebRequest -Uri $sdkUrl -OutFile sdk.zip
           Expand-Archive sdk.zip -DestinationPath .
           Rename-Item php-sdk-binary-tools-master php-sdk
 
-          # Exact PHP version that setup-php installed (e.g. 8.3.12).  The dev
-          # pack must match it for ABI compatibility.
           $phpVer = (php -r "echo PHP_VERSION;")
           echo "Building against PHP $phpVer"
-          $base = $phpVer
-
-          $develUrl = "https://windows.php.net/downloads/releases/php-$base-devel-vs16-x64.zip"
-          try {
-            Invoke-WebRequest -Uri $develUrl -OutFile devel.zip -ErrorAction Stop
-          } catch {
-            # Fall back to the latest devel pack for this minor series.
-            $minor = ($phpVer -split '\.')[0..1] -join '.'
-            $develUrl = "https://windows.php.net/downloads/releases/php-$minor-latest-devel-vs16-x64.zip"
-            echo "Exact devel pack missing; falling back to $develUrl"
-            Invoke-WebRequest -Uri $develUrl -OutFile devel.zip -ErrorAction Stop
-          }
-          Expand-Archive devel.zip -DestinationPath php-dev
-          echo "PHP_DEV=$pwd\php-dev" >> $env:GITHUB_ENV
+          echo "phpize present: $(Test-Path (Get-Command phpize.bat -ErrorAction SilentlyContinue).Source)"
+          echo "configure present: $(Test-Path (Get-Command configure.bat -ErrorAction SilentlyContinue).Source)"
+          echo "include/php.h present: $(Test-Path (Join-Path (Split-Path (Get-Command php.exe).Source) include/php.h))"
+          echo "dev/php.lib present: $(Test-Path (Join-Path (Split-Path (Get-Command php.exe).Source) dev/php.lib))"
 
       - name: Build extension (phpize + nmake)
         shell: cmd
         run: |
           call "%PHP_SDK_BINARY_TOOLS_PATH%\phpsdk\phpsdk_setvars.bat"
-          REM phpsdk_setvars can reset PATH; re-add the dev pack (phpize.bat /
-          REM configure.bat live there) afterwards so they stay reachable.
-          set PATH=%PHP_DEV%;%PATH%
           cd bindings\php
           phpize.bat
           configure.bat --enable-snobol=shared
@@ -255,7 +243,6 @@ jobs:
       - name: Install and enable extension
         shell: cmd
         run: |
-          set PATH=%PHP_DEV%;%PATH%
           cd bindings\php
           set "DLL=%CD%\php_snobol.dll"
           if not exist "%DLL%" (
