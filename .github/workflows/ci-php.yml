@@ -187,10 +187,6 @@ jobs:
       matrix:
         php-version: [ '8.3', '8.4', '8.5' ]
 
-    env:
-      # Where the PHP SDK binary tools (phpize / buildconf / configure / nmake) live.
-      PHP_SDK_BINARY_TOOLS_PATH: ${{ github.workspace }}\php-sdk
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -201,24 +197,15 @@ jobs:
           php-version: ${{ matrix.php-version }}
           tools: composer
           coverage: none
-          # The PHP SDK needs the MSVC toolchain to drive nmake.
-          compiler: vs2022
 
       - name: Install Composer dependencies
         working-directory: bindings/php
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      - name: Download PHP SDK and dev pack
+      - name: Download PHP dev pack and locate MSVC
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
-          # PHP SDK binary tools — provides phpsdk, phpsdk_setvars.bat,
-          # buildconf and the MSVC/nmake environment used to drive the build.
-          $sdkUrl = "https://github.com/php/php-sdk-binary-tools/archive/refs/heads/master.zip"
-          Invoke-WebRequest -Uri $sdkUrl -OutFile sdk.zip
-          Expand-Archive sdk.zip -DestinationPath .
-          Rename-Item php-sdk-binary-tools-master php-sdk
 
           # Dev pack: headers, import lib (dev/php.lib), phpize.bat/configure.bat.
           # It MUST match the exact PHP version + ts/nts + VS toolset + arch of
@@ -247,9 +234,6 @@ jobs:
           $phpDev = Split-Path $phpize
           echo "PHP_DEV=$phpDev" >> $env:GITHUB_ENV
 
-          # Build toolset: always vs17 (VS2022), present on windows-latest.
-          echo "VS=vs17" >> $env:GITHUB_ENV
-
           # Capture the setup-php PHP install dir so 'php' is the correct
           # version when the devel pack's phpize.bat invokes it.
           $phpBin = Split-Path (Get-Command php.exe).Source
@@ -257,28 +241,38 @@ jobs:
           echo "phpize.bat at: $phpize"
           echo "php.exe at:    $phpBin"
 
+          # Locate the Visual Studio 2022 (vs17) build environment directly with
+          # Microsoft's own vswhere (always present on the hosted runner). The
+          # C core requires the VS2022 toolset (/std:c23), so require the VC
+          # tools and export the path to vcvars64.bat for the build step. This
+          # replaces the php-sdk starter (phpsdk-vs17-x64.bat), whose VS auto
+          # detection was failing on the runner ("Could not determine 'vs17'
+          # directory").
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $vsPath = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath -format value
+          if (-not $vsPath) { throw "Visual Studio with VC tools (x86.x64) not found" }
+          $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found at $vcvars" }
+          echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
+          echo "Visual Studio at: $vsPath"
+          echo "vcvars64.bat at:  $vcvars"
+
       - name: Build extension (phpize + nmake)
         shell: cmd
         run: |
           @echo on
-          REM Set up VS2022 build environment directly via vcvarsall.
-          REM This bypasses the PHP SDK starter (phpsdk-vs17-x64.bat) which
-          REM has unreliable VS detection on CI runners.
-          set "VCVARSALL=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat"
-          if not exist "%VCVARSALL%" (
-            echo ERROR: vcvarsall.bat not found at %VCVARSALL%
-            exit /b 1
-          )
-          call "%VCVARSALL%" amd64
-          if errorlevel 1 (
-            echo ERROR: vcvarsall.bat failed
-            exit /b 1
-          )
-
-          REM Add PHP devel pack, PHP bin, and SDK tools to PATH
-          set "PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PHP_SDK_BINARY_TOOLS_PATH%\bin;%PATH%"
-
-          REM Build the extension
+          REM Enter the VS2022 (vs17) x64 developer environment located in the
+          REM previous step, then drive the standard dev-pack build directly:
+          REM   phpize.bat -> configure.bat -> nmake
+          REM No php-sdk starter / task-file indirection is needed; phpize.bat
+          REM only runs a cscript and the build just needs the MSVC toolchain
+          REM plus php.exe on PATH.
+          call "%VCVARS%"
+          if errorlevel 1 exit /b 1
+          set "PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PATH%"
           cd /d %GITHUB_WORKSPACE%\bindings\php
           call phpize.bat
           if errorlevel 1 exit /b 1
@@ -286,26 +280,19 @@ jobs:
           if errorlevel 1 exit /b 1
           nmake
           if errorlevel 1 exit /b 1
-
-          REM nmake may place the DLL in a subdirectory — copy to project root
-          dir /s /b php_snobol.dll
-          if not exist php_snobol.dll (
-            for /r %%f in (php_snobol.dll) do @if exist "%%f" copy /Y "%%f" .
-          )
+          REM DLL may be in a subdirectory (x64\Release_NTS, Release_NTS, etc.)
+          for /r %%d in (php_snobol.dll) do @if exist "%%d" copy /Y "%%d" .
           dir *.dll
-          if not exist php_snobol.dll (
-            echo ERROR: php_snobol.dll not found after build
-            exit /b 1
-          )
+          if not exist php_snobol.dll exit /b 1
 
       - name: Install and enable extension
         shell: cmd
         run: |
           set PATH=%PHP_BIN_DIR%;%PATH%
           cd bindings\php
-          REM nmake may place the DLL in a subdirectory — copy to project root
+          REM DLL may be in a subdirectory (x64/Release_NTS, Release_NTS, etc.)
           if not exist php_snobol.dll (
-            for /r %%f in (php_snobol.dll) do @if exist "%%f" copy /Y "%%f" .
+            for /r %%d in (php_snobol.dll) do @if exist "%%d" copy /Y "%%d" .
           )
           set "DLL=%CD%\php_snobol.dll"
           if not exist "%DLL%" (
