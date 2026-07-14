@@ -337,7 +337,7 @@ jobs:
           REM linker response file, but the compiler places .obj files flat in the
           REM build directory (via /Fo<dir>).  Patch the response file to remove the
           REM src\ prefix so the linker can find the .obj files.
-          powershell -Command "(Get-Content 'x64\Release\resp\SNOBOL_GLOBAL_OBJS.txt') -replace 'src\\', '' | Set-Content 'x64\Release\resp\SNOBOL_GLOBAL_OBJS.txt'"
+          powershell -Command "$f='x64\Release\resp\SNOBOL_GLOBAL_OBJS.txt'; $c=Get-Content $f -Raw; $c=$c.Replace('\Release\\src/','\Release\\'); $c=$c.Replace('\Release\\src\','\Release\\'); Set-Content $f $c -NoNewline"
           type x64\Release\resp\SNOBOL_GLOBAL_OBJS.txt
           nmake
           if errorlevel 1 exit /b 1
