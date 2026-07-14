@@ -32,11 +32,11 @@
  *
  * ## search_vm_t
  *
- * Lightweight VM state (~424 bytes) for Tier 1-7 execution. Contains only
- * the fields needed by the search-VM and specialized accelerators: bytecode
+ * Lightweight VM state (~1.6 KB) for Tier 6-7 execution. Contains bytecode
  * pointer, subject pointer, instruction/position pointers, range metadata,
- * choice stack, and loop counters. Excludes capture registers, variable
- * registers, output buffer, and callback fields used by the full VM.
+ * choice stack, loop counters, and (for Tier 6 capture-aware) capture and
+ * variable registers. Lower tiers use only bc/ip/pos; the extra fields
+ * are ignored.
  *
  * ## Metadata Bitfield Flags
  *

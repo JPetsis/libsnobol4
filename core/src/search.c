@@ -1043,9 +1043,6 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
     switch (op) {
     /* Side-effect / complex ops — disqualify */
     case OP_EVAL:
-    case OP_ASSIGN:
-    case OP_CAP_START:
-    case OP_CAP_END:
     case OP_EMIT_LITERAL:
     case OP_EMIT_CAPTURE:
     case OP_EMIT_EXPR:
@@ -1060,7 +1057,6 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
     case OP_GOTO:
     case OP_GOTO_F:
     case OP_LABEL:
-    case OP_BREAKX:
     case OP_BAL:
     case OP_REM:
       return false;
@@ -1118,6 +1114,23 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
       if (ip + 5 > bc_len)
         return false;
       ip += 5;
+      break;
+    /* Capture-aware ops now supported by search-VM */
+    case OP_CAP_START:
+    case OP_CAP_END:
+      if (ip + 1 > bc_len)
+        return false;
+      ip += 1; /* uint8 register index */
+      break;
+    case OP_ASSIGN:
+      if (ip + 3 > bc_len)
+        return false;
+      ip += 3; /* uint16 var index + uint8 cap register */
+      break;
+    case OP_BREAKX:
+      if (ip + 2 > bc_len)
+        return false;
+      ip += 2; /* uint16 set_id */
       break;
     default:
       return false;
@@ -1800,14 +1813,21 @@ fallback:
 /* ---------------------------------------------------------------------------
  * Simplified choice stack for search_vm_t (Tier 6 search-VM)
  *
- * The search-VM never tracks captures, variables, or loop counters.
- * These simplified push/pop functions only save/restore ip and pos,
- * avoiding the overhead of the full vm_push_choice/vm_pop_choice.
+ * The capture-aware search-VM saves/restores capture registers, variable
+ * registers, and max_cap_used alongside ip/pos so captures survive backtrack.
  * ---------------------------------------------------------------------------
  */
 typedef struct {
   size_t ip;
   size_t pos;
+  /* Capture registers (saved/restored on backtrack) */
+  size_t cap_start[MAX_CAPS];
+  size_t cap_end[MAX_CAPS];
+  uint8_t max_cap_used;
+  /* Variable registers (saved/restored on backtrack) */
+  size_t var_start[MAX_VARS];
+  size_t var_end[MAX_VARS];
+  size_t var_count;
 } search_choice_t;
 
 static inline bool search_vm_push_choice(search_vm_t *vm, size_t ip, size_t pos) {
@@ -1824,6 +1844,14 @@ static inline bool search_vm_push_choice(search_vm_t *vm, size_t ip, size_t pos)
   search_choice_t *c = (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top);
   c->ip = ip;
   c->pos = pos;
+  /* Save capture registers */
+  memcpy(c->cap_start, vm->cap_start, sizeof(c->cap_start));
+  memcpy(c->cap_end, vm->cap_end, sizeof(c->cap_end));
+  c->max_cap_used = vm->max_cap_used;
+  /* Save variable registers */
+  memcpy(c->var_start, vm->var_start, sizeof(c->var_start));
+  memcpy(c->var_end, vm->var_end, sizeof(c->var_end));
+  c->var_count = vm->var_count;
   vm->choices_top += sizeof(search_choice_t);
   return true;
 }
@@ -1835,6 +1863,14 @@ static inline bool search_vm_pop_choice(search_vm_t *vm) {
   search_choice_t *c = (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top);
   vm->ip = c->ip;
   vm->pos = c->pos;
+  /* Restore capture registers */
+  memcpy(vm->cap_start, c->cap_start, sizeof(vm->cap_start));
+  memcpy(vm->cap_end, c->cap_end, sizeof(vm->cap_end));
+  vm->max_cap_used = c->max_cap_used;
+  /* Restore variable registers */
+  memcpy(vm->var_start, c->var_start, sizeof(vm->var_start));
+  memcpy(vm->var_end, c->var_end, sizeof(vm->var_end));
+  vm->var_count = c->var_count;
   return true;
 }
 
@@ -1861,6 +1897,13 @@ static inline void search_vm_init_from_vm(search_vm_t *svm, const VM *vm) {
   memcpy(svm->loop_max, vm->loop_max, sizeof(svm->loop_max));
   memcpy(svm->loop_last_pos, vm->loop_last_pos, sizeof(svm->loop_last_pos));
   svm->max_counter_used = vm->max_counter_used;
+  /* Seed capture and variable registers from full VM */
+  memcpy(svm->cap_start, vm->cap_start, sizeof(svm->cap_start));
+  memcpy(svm->cap_end, vm->cap_end, sizeof(svm->cap_end));
+  svm->max_cap_used = vm->max_cap_used;
+  memcpy(svm->var_start, vm->var_start, sizeof(svm->var_start));
+  memcpy(svm->var_end, vm->var_end, sizeof(svm->var_end));
+  svm->var_count = vm->var_count;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1875,9 +1918,16 @@ static inline void search_vm_writeback_to_vm(const search_vm_t *svm, VM *vm) {
   vm->choices_cap = svm->choices_cap;
   vm->choices_top = svm->choices_top;
   vm->use_compact_choice = svm->use_compact_choice;
-  memcpy(vm->counters, svm->counters, sizeof(svm->counters));
+  memcpy(vm->counters, svm->counters, sizeof(vm->counters));
   memcpy(vm->loop_last_pos, svm->loop_last_pos, sizeof(vm->loop_last_pos));
   vm->max_counter_used = svm->max_counter_used;
+  /* Write back capture and variable registers to full VM */
+  memcpy(vm->cap_start, svm->cap_start, sizeof(vm->cap_start));
+  memcpy(vm->cap_end, svm->cap_end, sizeof(vm->cap_end));
+  vm->max_cap_used = svm->max_cap_used;
+  memcpy(vm->var_start, svm->var_start, sizeof(vm->var_start));
+  memcpy(vm->var_end, svm->var_end, sizeof(vm->var_end));
+  vm->var_count = svm->var_count;
 }
 
 static bool SNOBOL_HOT search_vm_exec(search_vm_t * SNOBOL_RESTRICT vm,
@@ -1936,6 +1986,7 @@ static bool SNOBOL_HOT search_vm_exec(search_vm_t * SNOBOL_RESTRICT vm,
       [OP_NOTANY] = &&svm_notany,
       [OP_SPAN] = &&svm_span,
       [OP_BREAK] = &&svm_break,
+      [OP_BREAKX] = &&svm_breakx,
       [OP_LEN] = &&svm_len,
       [OP_ANCHOR] = &&svm_anchor,
       [OP_REPEAT_INIT] = &&svm_repeat_init,
@@ -1948,6 +1999,9 @@ static bool SNOBOL_HOT search_vm_exec(search_vm_t * SNOBOL_RESTRICT vm,
       [OP_ABORT] = &&svm_abort,
       [OP_SUCCEED] = &&svm_succeed,
       [OP_NOP] = &&svm_nop,
+      [OP_CAP_START] = &&svm_cap_start,
+      [OP_CAP_END] = &&svm_cap_end,
+      [OP_ASSIGN] = &&svm_assign,
   };
 #endif
 
@@ -2036,6 +2090,115 @@ svm_succeed:
       out_result->match_start = offset;
       out_result->match_end = offset + pos;
       return true;
+
+/* ---- Capture-aware ops (Tier 6 search-VM) ---- */
+#ifndef _MSC_VER
+svm_cap_start:
+#endif
+#ifdef _MSC_VER
+    case OP_CAP_START:
+#endif
+    {
+      uint8_t r = read_u8(bc, bc_len, &ip);
+      if (r < MAX_CAPS) {
+        vm->cap_start[r] = pos;
+        if (r >= vm->max_cap_used)
+          vm->max_cap_used = r + 1;
+      }
+      continue;
+    }
+
+#ifndef _MSC_VER
+svm_cap_end:
+#endif
+#ifdef _MSC_VER
+    case OP_CAP_END:
+#endif
+    {
+      uint8_t r = read_u8(bc, bc_len, &ip);
+      if (r < MAX_CAPS) {
+        vm->cap_end[r] = pos;
+        if (r >= vm->max_cap_used)
+          vm->max_cap_used = r + 1;
+        /* Also expose capture register as variable v<r> */
+        if (r < MAX_VARS) {
+          vm->var_start[r] = vm->cap_start[r];
+          vm->var_end[r] = vm->cap_end[r];
+          if ((size_t)r + 1 > vm->var_count)
+            vm->var_count = (size_t)r + 1;
+        }
+      }
+      continue;
+    }
+
+#ifndef _MSC_VER
+svm_assign:
+#endif
+#ifdef _MSC_VER
+    case OP_ASSIGN:
+#endif
+    {
+      uint16_t var = read_u16(bc, bc_len, &ip);
+      uint8_t r = read_u8(bc, bc_len, &ip);
+      if (var < MAX_VARS && r < MAX_CAPS) {
+        if (var >= vm->var_count)
+          vm->var_count = (size_t)var + 1;
+        vm->var_start[var] = vm->cap_start[r];
+        vm->var_end[var] = vm->cap_end[r];
+      }
+      continue;
+    }
+
+#ifndef _MSC_VER
+svm_breakx:
+#endif
+#ifdef _MSC_VER
+    case OP_BREAKX:
+#endif
+    {
+      /* BREAKX: like BREAK but pushes a retry choice point.
+       * When the choice is popped, pos advances past the break char. */
+      size_t breakx_ip = ip - 1; /* points to OP_BREAKX opcode */
+      uint16_t set_id = read_u16(bc, bc_len, &ip);
+      const uint8_t *rp = nullptr;
+      uint16_t cnt = 0;
+      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+        rp = srange[set_id - 1].ranges_ptr;
+        cnt = srange[set_id - 1].count;
+      }
+      /* Advance past non-break characters (like OP_BREAK) */
+      while (pos < len) {
+        bool in_class = false;
+        if (rp) {
+          uint8_t c = (uint8_t)s[pos];
+          uint64_t map[2];
+          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+              bitmap_test(map, c)) {
+            in_class = true;
+          } else {
+            uint32_t cp;
+            int bytes;
+            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+                range_contains(rp, cnt, cp)) {
+              in_class = true;
+            }
+          }
+        }
+        if (in_class)
+          break; /* found break char */
+        pos++;
+      }
+      /* If we stopped at a break char, push a retry choice that
+       * re-executes BREAKX from the position AFTER the break char */
+      if (pos < len) {
+        uint32_t bx_cp2;
+        int bx_skip = 1;
+        if (utf8_peek_next(s, len, pos, &bx_cp2, &bx_skip))
+          ; /* bx_skip now holds byte count of break char */
+        search_vm_push_choice(vm, breakx_ip, pos + (size_t)bx_skip);
+      }
+      continue;
+    }
 
 #ifndef _MSC_VER
 svm_fail:

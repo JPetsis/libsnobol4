@@ -701,8 +701,8 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
   snobol_search_meta_free(&m);
-    test_assert(!m.search_vm_eligible,
-                "search-vm eligible: CAP_START not eligible");
+    test_assert(m.search_vm_eligible,
+                "search-vm eligible: CAP_START is eligible");
   }
 
   /* Pattern with EVAL — NOT eligible */
@@ -759,8 +759,8 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
   snobol_search_meta_free(&m);
-    test_assert(!m.search_vm_eligible,
-                "search-vm eligible: ASSIGN not eligible");
+    test_assert(m.search_vm_eligible,
+                "search-vm eligible: ASSIGN is eligible");
   }
 
   /* Pattern with OP_DYNAMIC — NOT eligible */
@@ -1247,13 +1247,13 @@ static void test_dispatch_order(void) {
 
 void test_search_runtime_suite(void) {
   /* ---- Size assertions for optimization targets ---- */
-  /* search_vm_t includes loop counters for REPEAT_INIT/STEP, so it's
-   * larger than the original 96-byte target but still much smaller than
-   * the full VM (~2500 bytes). */
+  /* search_vm_t now includes capture and variable registers for the
+   * capture-aware search-VM (Tier 6).  It's comparable in size to the
+   * full VM but avoids the choice-stack overhead of vm_push_choice. */
   test_assert(sizeof(search_vm_t) < sizeof(VM),
               "search_vm_t is smaller than full VM");
-  test_assert(sizeof(search_vm_t) <= 512,
-              "search_vm_t is ≤512 bytes");
+  test_assert(sizeof(search_vm_t) <= 2500,
+              "search_vm_t is ≤2500 bytes (capture-aware)");
   /* snobol_search_meta_t size check: the struct without variable-length data
    * (bmh_skip is now a pointer, alt_bytes is still inline but small).
    * We check that the fixed portion is reasonable. */

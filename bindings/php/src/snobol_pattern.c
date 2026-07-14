@@ -54,6 +54,10 @@ static void php_snobol_pattern_dtor(zend_object *object) {
         snobol_free(intern->meta.bmh_skip);
         intern->meta.bmh_skip = NULL;
     }
+    if (intern->range_meta) {
+        snobol_free(intern->range_meta);
+        intern->range_meta = NULL;
+    }
 
     zend_object_std_dtor(object);
     SNOBOL_LOG("php_snobol_pattern_dtor: done");
@@ -157,6 +161,8 @@ PHP_METHOD(Snobol_Pattern, compileFromAst) {
     /* Cache search metadata at compile time */
     snobol_search_derive_meta(bc, bc_len, &intern->meta);
     intern->meta_initialized = true;
+    /* Build range metadata for SPAN/BREAK/BREAKX charclass resolution */
+    snobol_build_range_meta(bc, bc_len, &intern->range_meta, &intern->range_meta_count);
 
     SNOBOL_LOG("Snobol_Pattern::compileFromAst: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
 }
@@ -256,6 +262,8 @@ PHP_METHOD(Snobol_Pattern, fromString) {
     /* Cache search metadata at compile time */
     snobol_search_derive_meta(bc, bc_len, &intern->meta);
     intern->meta_initialized = true;
+    /* Build range metadata for SPAN/BREAK/BREAKX charclass resolution */
+    snobol_build_range_meta(bc, bc_len, &intern->range_meta, &intern->range_meta_count);
 
     SNOBOL_LOG("Snobol_Pattern::fromString: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
 }
@@ -359,6 +367,8 @@ PHP_METHOD(Snobol_Pattern, match) {
     memset(&vm, 0, sizeof(VM));
     vm.bc = intern->bc;
     vm.bc_len = intern->bc_len;
+    vm.range_meta       = intern->range_meta;
+    vm.range_meta_count = intern->range_meta_count;
     vm.s = ZSTR_VAL(input);
     vm.len = ZSTR_LEN(input);
     vm.emit_fn = php_snobol_emit_cb;
@@ -558,6 +568,8 @@ PHP_METHOD(Snobol_Pattern, subst) {
         memset(&vm, 0, sizeof(VM));
         vm.bc     = intern->bc;
         vm.bc_len = intern->bc_len;
+        vm.range_meta       = intern->range_meta;
+        vm.range_meta_count = intern->range_meta_count;
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
         dynamic_pattern_cache_t dyn_cache;
@@ -678,6 +690,9 @@ static void php_snobol_init_vm_for_search(VM *vm,
     memset(vm, 0, sizeof(VM));
     vm->bc     = intern->bc;
     vm->bc_len = intern->bc_len;
+    /* Copy range metadata so SPAN/BREAK/BREAKX can resolve charclass sets */
+    vm->range_meta       = intern->range_meta;
+    vm->range_meta_count = intern->range_meta_count;
     if (eb) {
         vm->emit_fn    = php_snobol_emit_cb;
         vm->emit_udata = eb;

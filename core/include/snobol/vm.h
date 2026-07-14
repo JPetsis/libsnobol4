@@ -458,11 +458,11 @@ typedef struct {
  * @brief Lightweight VM state for search-mode execution (Tier 1-7).
  *
  * Contains only the fields needed by the search-VM, DFA, and specialized
- * accelerator tiers.  Excludes capture registers, variable registers,
- * loop counters, output buffer, and callback fields used only by the
- * full VM (Tier 8).
+ * accelerator tiers.  Tier 6 (capture-aware search-VM) uses capture,
+ * variable, and choice-stack fields; lower tiers use only bc/ip/pos.
  *
- * Size target: ≤96 bytes (vs ~2500 bytes for full VM).
+ * Size target: ≤1.6 KB (vs ~2.5 KB for full VM) after adding capture
+ * and variable registers.
  */
 typedef struct {
   const uint8_t *bc; /**< Compiled bytecode pointer (not owned). */
@@ -490,6 +490,16 @@ typedef struct {
   uint32_t loop_max[MAX_LOOPS];
   size_t loop_last_pos[MAX_LOOPS];
   uint8_t max_counter_used;
+
+  /* Capture registers for CAP_START/CAP_END (Tier 6 capture-aware search-VM). */
+  size_t cap_start[MAX_CAPS];
+  size_t cap_end[MAX_CAPS];
+  uint8_t max_cap_used;
+
+  /* Variable registers for ASSIGN (Tier 6 capture-aware search-VM). */
+  size_t var_start[MAX_VARS];
+  size_t var_end[MAX_VARS];
+  size_t var_count;
 } search_vm_t;
 
 /**
