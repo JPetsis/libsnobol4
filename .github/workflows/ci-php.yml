@@ -290,21 +290,19 @@ jobs:
           echo $toolsDir >> $env:GITHUB_PATH
           & $bisonPath --version
 
-      - name: Install re2c (required by configure.bat)
+      - name: Create re2c stub source
         shell: pwsh
         run: |
-          # PHP's configure.bat requires re2c.  For extension builds the
-          # generated lexer files are already present in the dev pack, but
-          # configure checks for it unconditionally.
-          $re2cUrl = "https://github.com/skvadrik/re2c/releases/download/3.1/re2c-3.1-windows.zip"
-          Invoke-WebRequest -Uri $re2cUrl -OutFile re2c.zip -MaximumRedirection 5
-          & 7z x re2c.zip -ore2c -y | Out-Null
-          $found = Get-ChildItem re2c -Recurse -Filter re2c.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $found) { throw "re2c.exe not found after extracting re2c" }
-          $toolsDir = $found.DirectoryName
-          echo "Found re2c at: $($found.FullName)"
-          echo $toolsDir >> $env:GITHUB_PATH
-          & $found.FullName --version
+          # PHP's configure.bat requires re2c on PATH but never invokes it
+          # for extension builds.  Create a minimal stub to satisfy the check.
+          @'
+          #include <stdio.h>
+          int main(int argc, char *argv[]) {
+              printf("re2c 3.1\n");
+              return 0;
+          }
+          '@ | Set-Content -Path re2c_stub.c -NoNewline
+          Get-Content re2c_stub.c
 
       - name: Build extension (phpize + nmake)
         shell: cmd
@@ -321,6 +319,13 @@ jobs:
           set "PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PATH%"
           where bison
           bison --version
+          REM PHP's configure.bat requires re2c on PATH.  For extension
+          REM builds the generated lexer files are already in the dev pack
+          REM and re2c is never actually invoked, so compile a minimal stub.
+          cl.exe /nologo /Fe:re2c.exe re2c_stub.c /link /SUBSYSTEM:CONSOLE
+          if errorlevel 1 exit /b 1
+          re2c.exe --version
+          set "PATH=%GITHUB_WORKSPACE%;%PATH%"
           cd /d %GITHUB_WORKSPACE%\bindings\php
           call phpize.bat
           if errorlevel 1 exit /b 1
