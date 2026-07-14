@@ -188,9 +188,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - php-version: '8.3'
-            os: windows-2019
-            vs-version: '16'
+          # PHP 8.3 (EOL Nov 2025) requires VS2019 (v16) but windows-2019
+          # has been removed from GitHub Actions.  Skip on Windows.
           - php-version: '8.4'
             os: windows-2022
             vs-version: '17'
