@@ -277,6 +277,8 @@ jobs:
             echo if errorlevel 1 exit /b 1
             echo nmake
             echo if errorlevel 1 exit /b 1
+            echo REM DLL may be in a subdirectory (x64/Release_NTS, Release_NTS, etc.)
+            echo for /r %%d in (php_snobol.dll) do @if exist "%%d" copy /Y "%%d" .
             echo dir *.dll
             echo if not exist php_snobol.dll exit /b 1
           ) > build_task.bat
@@ -288,9 +290,15 @@ jobs:
         run: |
           set PATH=%PHP_BIN_DIR%;%PATH%
           cd bindings\php
+          REM DLL may be in a subdirectory (x64/Release_NTS, Release_NTS, etc.)
+          if not exist php_snobol.dll (
+            for /r %%d in (php_snobol.dll) do @if exist "%%d" copy /Y "%%d" .
+          )
           set "DLL=%CD%\php_snobol.dll"
           if not exist "%DLL%" (
             echo ERROR: php_snobol.dll was not built
+            echo Searching for any DLL output:
+            dir /s /b *.dll 2>nul || echo No DLLs found
             exit /b 1
           )
           for /f "usebackq delims=" %%i in (`php -r "echo ini_get('extension_dir');"`) do set "EXT_DIR=%%i"
