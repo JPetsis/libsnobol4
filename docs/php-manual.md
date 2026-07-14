@@ -761,6 +761,8 @@ Caputred text **preserves original subject case** (not folded).
 
 ### `Pattern::match()` — Anchored Match
 
+`match()` is the **anchored** entry point: it runs the *selected* tier once at offset 0 (via `snobol_search_exec_anchored`) rather than restarting the full VM from every position. Because of the tier dispatcher (§14), a recognizing-and-capturing pattern such as `lit("id:") + cap(span("0-9"))` is executed by the lightweight Tier-6 search-VM, not the full VM — so `match()` is typically far faster than an equivalent `^…$` PCRE match.
+
 ```php
 $p = Pattern::fromString("'hello'");
 $res = $p->match("hello world");
@@ -1195,7 +1197,7 @@ PatternHelper::clearCache();
 
 ## 14. Tier Dispatch System
 
-libsnobol4's search engine automatically selects the optimal matching strategy based on pattern analysis. This happens **once at compile time** during metadata derivation.
+libsnobol4's search engine automatically selects the optimal matching strategy based on pattern analysis. This happens **once at compile time** during metadata derivation, and is used by both `searchAll()` (unanchored, scans every offset) and `match()` (anchored, runs the selected tier once at offset 0).
 
 ### Tier Summary
 
@@ -1207,10 +1209,10 @@ libsnobol4's search engine automatically selects the optimal matching strategy b
 | 3    | `PREFIX`     | ★★★★★ | Literal prefix pattern            | memmem + BMH skip                     |
 | 4    | `BITMAP`     | ★★★★☆ | Single-char alternation           | 128-bit candidate bitmap              |
 | 5    | `ALT_LIT`    | ★★★★☆ | Flat literal alternation          | Trie-based matching                   |
-| 6    | `SEARCH_VM`  | ★★★☆☆ | Search-VM eligible patterns       | Lightweight VM (~424 bytes)           |
-| 7    | `AUTOMATON`  | ★★★★☆ | ASCII charclass + no side effects | DFA via powerset construction         |
+| 6    | `SEARCH_VM`  | ★★★★☆ | Charclass + positional + captures + bounded repeat | Lightweight VM (~424 bytes)           |
+| 7    | `AUTOMATON`  | ★★★★☆ | Tier 6 set, ASCII-only, no captures | DFA via powerset construction         |
 | 8    | `GENERAL`    | ★★☆☆☆ | Any pattern                       | Full VM (~2.5 KB) + start-byte bitmap |
-| 9    | `SIMD_NFA`   | ★★★★☆ | ASCII charclass + SIMD available  | AVX2/NEON byte-parallel NFA           |
+| 9    | `SIMD_NFA`   | ★★★★☆ | Tier 6 set, ASCII-only, no captures, SIMD available | AVX2/NEON byte-parallel NFA |
 
 ### What Triggers Each Tier
 
@@ -1220,10 +1222,10 @@ libsnobol4's search engine automatically selects the optimal matching strategy b
 - **Tier 3** — Pattern with a literal prefix (starts with one or more `OP_LIT`)
 - **Tier 4** — Pattern whose root is `OP_SPLIT` with all branches being single-character match and no captures
 - **Tier 5** — Pattern whose root is flat alternation of literal strings
-- **Tier 6** — Patterns eligible for search-VM (charclass-only, no captures, no side effects)
-- **Tier 7** — Same as Tier 6 + DFA powerset construction succeeds (< 4096 states)
+- **Tier 6** — Patterns eligible for the lightweight search-VM: charclass ops (`SPAN`/`BREAK`/`BREAKX`/`ANY`/`NOTANY`), positional ops (`POS`/`TAB`/`RPOS`/`RTAB`/`REM`/`ANCHOR`/`FENCE`), **captures** (`CAP_START`/`CAP_END`), bounded repeats (`REPEAT_INIT`/`REPEAT_STEP`), and `ARB`/`ARBNO` — i.e. the NFA-compatible subset **with captures**, provided no stateful/side-effect op (`EVAL`, `DYNAMIC`, `TABLE_*`, `ARRAY_*`, `EMIT_*`, `GOTO`/`LABEL`, `BAL`) is present.
+- **Tier 7** — Tier 6-eligible pattern that is ASCII-only charclass and **capture-free**, and DFA powerset construction succeeds (< 4096 states)
 - **Tier 8** — Everything else (fallback through full VM)
-- **Tier 9** — Same as Tier 6 + `check_simd_eligible()` returns true + platform has AVX2/NEON
+- **Tier 9** — Tier 6-eligible pattern that is ASCII-only charclass and **capture-free**, plus `check_simd_eligible()` returns true and the platform has AVX2/NEON
 
 ### Performance Impact
 

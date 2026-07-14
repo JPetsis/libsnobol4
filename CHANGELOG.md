@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Compiler hints & codegen** (`core/src/search.c`, `core/src/vm.c`): `SNOBOL_HOT`/`COLD`/`ALWAYS_INLINE`/`PURE`/`RESTRICT`/`ALIGNED(64)` + `likely()` branch hints; `bitmap256_test()` always-inlined helper. Release build gains `-O3`, `-fvisibility=hidden`, `_FORTIFY_SOURCE=3`, and project-wide LTO.
 - **PGO build targets**: `make build-pgo-gen` / `pgo-train` / `build-pgo-use` plus `pgo-gen` / `pgo-use` CMake presets (`-fprofile-generate` / `-fprofile-use -fprofile-correction`).
 - **Cost-model diagnostics** (`core/src/search.c`, `bench/c/bench_probe.c`): `snobol_search_dump_cost_model()` prints authoritative coefficients; probe emits per-scenario recalibration suggestions.
+- **Capture-aware Tier-6 search-VM** (`core/src/search.c`): `OP_CAP_START`/`OP_CAP_END`, bounded `REPEAT_INIT`/`REPEAT_STEP`, and positional ops (`POS`/`TAB`/`RPOS`/`RTAB`/`REM`/`ANCHOR`/`FENCE`) are now executed by `search_vm_exec`. Recognizing-and-capturing patterns (e.g. `lit("id:") + cap(span("0-9"))`) leave the full VM (Tier 8) and run on Tier 6, which is materially faster than the general-VM fallback.
+- **Anchored dispatch entry** (`core/src/search.c`, `bindings/php/src/snobol_pattern.c`): added `snobol_search_exec_anchored()` and routed `Pattern::match()` through the tier dispatcher (runs the selected tier once at offset 0) instead of `vm_exec()` directly. Anchored matches no longer pay the per-offset full-VM restart cost.
+- **Stronger start-byte bitmap / BMH eligibility** (`core/src/search.c`): `derive_meta` walks past zero-width prefixes (ANCHOR, POS, NOP, literal prefix) and derives skip-ahead from the first consuming opcode.
 
 #### Changed
 
@@ -29,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Fixed
 
 - **Tier 5 worst case**: flat alternations no longer grind through the unaccelerated trie; worst case is now bounded by Tier 8 (general VM with bitmap + BMH + minlength pre-checks).
+- **Search-VM choice-stack overflow** (`core/src/search.c`): `search_vm_exec` allocated the choice stack at 256 B even though each `search_choice_t` is ~2 KiB (embeds full capture/var register arrays). The realloc now grows-to-fit, eliminating a silent heap-corruption bug that surfaced as `malloc(): unaligned tcache chunk detected` during PHP test runs.
+- **Bounded-repetition semantics in the search-VM** (`core/src/search.c`): `REPEAT_INIT`/`REPEAT_STEP` diverged from the full VM — `REPEAT_INIT` always pushed a 0-iteration skip (yielding zero-length "matches" for `min > 0`) and `REPEAT_STEP` pushed the continue-loop branch as the backtrack choice instead of the exit (so a satisfied minimum with no further match failed instead of accepting). Rewritten to mirror `vm.c:1300`.
 
 #### Performance
 

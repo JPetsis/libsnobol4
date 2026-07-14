@@ -304,6 +304,30 @@ static void run_span_search(int64_t iters, probe_result_t *r) {
     snobol_context_destroy(ctx);
 }
 
+static void run_cap_match(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    /* Anchored literal + capture of a SPAN: exercises the capture-aware
+     * search-VM (Tier 6) in the after-state; full VM (Tier 8) before. */
+    snobol_pattern_t *pat = compile_or_die(ctx, "'id:' @r(SPAN('0-9'))",
+                                           strlen("'id:' @r(SPAN('0-9'))"));
+    static const char subj[] = "id:1234567890";
+    size_t slen = sizeof(subj) - 1;
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, subj, slen);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
 static void run_alternation(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     /* Fused by SPLIT→ANY into one OP_ANY with {a,b,c} charclass */
@@ -912,6 +936,7 @@ int main(void) {
         { "literal_ok",          run_literal_ok,          iters            },
         { "span_comma",          run_span_comma,          iters            },
         { "span_search",         run_span_search,         iters            },
+        { "cap_search",          run_cap_match,           iters            },
         { "alternation",         run_alternation,         iters            },
         { "alt_search",          run_alt_search,          iters            },
         { "alt_literals",        run_alt_literals,        iters            },
