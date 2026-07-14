@@ -263,17 +263,12 @@ jobs:
       - name: Install bison (required by configure.bat)
         shell: pwsh
         run: |
-          # PHP's configure.bat requires bison.exe to build extensions.
-          # WinFlexBison is a portable pre-built bundle — no choco needed.
-          $bisonUrl = "https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip"
-          Invoke-WebRequest -Uri $bisonUrl -OutFile winflexbison.zip
-          Expand-Archive winflexbison.zip -DestinationPath winflexbison
-          # The zip extracts into a nested subdirectory — find bison.exe recursively
-          $bisonExe = (Get-ChildItem winflexbison -Recurse -Filter bison.exe | Select-Object -First 1).FullName
-          if (-not $bisonExe) { throw "bison.exe not found after extraction" }
-          $bisonDir = Split-Path $bisonExe
-          echo "$bisonDir" >> $env:GITHUB_PATH
-          & $bisonExe --version
+          choco install win_bison -y --no-progress
+          # choco puts binaries in C:\ProgramData\chocolatey\bin; persist
+          # across steps via GITHUB_PATH so the build step can find it.
+          $chocoBin = Join-Path $env:ChocolateyInstall 'bin'
+          if (Test-Path $chocoBin) { echo $chocoBin >> $env:GITHUB_PATH }
+          & bison --version
 
       - name: Build extension (phpize + nmake)
         shell: cmd
