@@ -223,16 +223,19 @@ jobs:
           # Dev pack: headers, import lib (dev/php.lib), phpize.bat/configure.bat.
           # It MUST match the exact PHP version + ts/nts + VS toolset + arch of
           # the PHP that setup-php installed, otherwise the built .dll will not
-          # load (ABI mismatch).
+          # load (ABI mismatch). The "-vsXX" segment in the dev pack name only
+          # records which VS built that PHP release; the headers/lib themselves
+          # are toolset-agnostic, so we always BUILD with vs17 (the VS2022
+          # toolset that is guaranteed present on windows-latest).
           $phpVer = (php -r "echo PHP_VERSION;")
           $ts = (php -r "echo ZEND_THREAD_SAFE ? '' : 'nts-';")
           $mm = ($phpVer -split '\.')[0..1] -join '.'
-          $vs = @{'8.0'='vs16';'8.1'='vs16';'8.2'='vs16';'8.3'='vs16';'8.4'='vs17';'8.5'='vs17'}[$mm]
-          if (-not $vs) { $vs = 'vs16' }
+          $vsPack = @{'8.0'='vs16';'8.1'='vs16';'8.2'='vs16';'8.3'='vs16';'8.4'='vs17';'8.5'='vs17'}[$mm]
+          if (-not $vsPack) { $vsPack = 'vs16' }
 
-          $develName = "php-devel-pack-$phpVer-$($ts)Win32-$vs-x64.zip"
+          $develName = "php-devel-pack-$phpVer-$($ts)Win32-$vsPack-x64.zip"
           $develUrl = "https://windows.php.net/downloads/releases/$develName"
-          echo "Building against PHP $phpVer (ts flag: '$ts', toolset: $vs)"
+          echo "Building against PHP $phpVer (ts flag: '$ts', devel pack toolset: $vsPack)"
           echo "Downloading dev pack: $develUrl"
           Invoke-WebRequest -Uri $develUrl -OutFile devel.zip
           Expand-Archive devel.zip -DestinationPath php-dev
@@ -244,8 +247,11 @@ jobs:
           $phpDev = Split-Path $phpize
           echo "PHP_DEV=$phpDev" >> $env:GITHUB_ENV
 
-          # Capture the setup-php PHP install dir so 'php' stays reachable after
-          # phpsdk_setvars resets PATH in the build step.
+          # Build toolset: always vs17 (VS2022), present on windows-latest.
+          echo "VS=vs17" >> $env:GITHUB_ENV
+
+          # Capture the setup-php PHP install dir so 'php' is the correct
+          # version when the devel pack's phpize.bat invokes it.
           $phpBin = Split-Path (Get-Command php.exe).Source
           echo "PHP_BIN_DIR=$phpBin" >> $env:GITHUB_ENV
           echo "phpize.bat at: $phpize"
@@ -254,16 +260,28 @@ jobs:
       - name: Build extension (phpize + nmake)
         shell: cmd
         run: |
-          call "%PHP_SDK_BINARY_TOOLS_PATH%\phpsdk\phpsdk_setvars.bat"
-          REM phpsdk_setvars resets PATH; re-add the devel pack (phpize.bat /
-          REM configure.bat) and the setup-php PHP (php.exe) afterwards so they
-          REM stay reachable.
-          set PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PATH%
-          cd bindings\php
-          phpize.bat
-          configure.bat --enable-snobol=shared
-          nmake
-          dir *.dll
+          @echo on
+          REM The PHP SDK starter (phpsdk-<toolset>-x64.bat) sets up the VS +
+          REM SDK build environment and, with -t, runs the given task inside
+          REM that environment and then exits. Without -t it opens an
+          REM interactive shell, which would hang CI.
+          REM
+          REM Write the build task to a .bat, then hand it to the starter.
+          (
+            echo @echo on
+            echo set "PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PHP_SDK_BINARY_TOOLS_PATH%\bin;%%PATH%%"
+            echo cd /d %GITHUB_WORKSPACE%\bindings\php
+            echo call phpize.bat
+            echo if errorlevel 1 exit /b 1
+            echo call configure.bat --enable-snobol=shared
+            echo if errorlevel 1 exit /b 1
+            echo nmake
+            echo if errorlevel 1 exit /b 1
+            echo dir *.dll
+            echo if not exist php_snobol.dll exit /b 1
+          ) > build_task.bat
+
+          call "%PHP_SDK_BINARY_TOOLS_PATH%\phpsdk-%VS%-x64.bat" -t build_task.bat
 
       - name: Install and enable extension
         shell: cmd
