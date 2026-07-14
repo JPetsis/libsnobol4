@@ -263,17 +263,20 @@ jobs:
       - name: Install bison (required by configure.bat)
         shell: pwsh
         run: |
-          choco install winflexbison -y --no-progress
-          # winflexbison ships win_bison.exe, but PHP's configure.bat
-          # looks for "bison".  Create a symlink so both names resolve.
-          $chocoBin = Join-Path $env:ChocolateyInstall 'bin'
-          $bisonSrc = Join-Path $chocoBin 'win_bison.exe'
-          $bisonDst = Join-Path $chocoBin 'bison.exe'
-          if ((Test-Path $bisonSrc) -and -not (Test-Path $bisonDst)) {
-            Copy-Item $bisonSrc $bisonDst
+          # PHP's configure.bat requires bison >= 3.0.  The Chocolatey
+          # winflexbison package ships 2.7, so fetch 3.8.2 from GitHub.
+          $bisonUrl = "https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip"
+          Invoke-WebRequest -Uri $bisonUrl -OutFile winflexbison.zip
+          Expand-Archive winflexbison.zip -DestinationPath winflexbison -Force
+          $toolsDir = Join-Path (Resolve-Path winflexbison).Path "win_flex_bison-2.5.25"
+          if (-not (Test-Path $toolsDir)) {
+            # Fallback: search for bison.exe recursively
+            $found = Get-ChildItem winflexbison -Recurse -Filter bison.exe | Select-Object -First 1
+            if ($found) { $toolsDir = $found.DirectoryName } else { throw "bison.exe not found" }
           }
-          echo $chocoBin >> $env:GITHUB_PATH
-          & bison --version
+          # Add to PATH for this and subsequent steps
+          echo $toolsDir >> $env:GITHUB_PATH
+          & "$toolsDir\bison.exe" --version
 
       - name: Build extension (phpize + nmake)
         shell: cmd
