@@ -261,38 +261,51 @@ jobs:
         shell: cmd
         run: |
           @echo on
-          REM The PHP SDK starter (phpsdk-<toolset>-x64.bat) sets up the VS +
-          REM SDK build environment and, with -t, runs the given task inside
-          REM that environment and then exits. Without -t it opens an
-          REM interactive shell, which would hang CI.
-          REM
-          REM Write the build task to a .bat, then hand it to the starter.
-          (
-            echo @echo on
-            echo set "PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PHP_SDK_BINARY_TOOLS_PATH%\bin;%%PATH%%"
-            echo cd /d %GITHUB_WORKSPACE%\bindings\php
-            echo call phpize.bat
-            echo if errorlevel 1 exit /b 1
-            echo call configure.bat --enable-snobol=shared
-            echo if errorlevel 1 exit /b 1
-            echo nmake
-            echo if errorlevel 1 exit /b 1
-            echo REM DLL may be in a subdirectory (x64/Release_NTS, Release_NTS, etc.)
-            echo for /r %%d in (php_snobol.dll) do @if exist "%%d" copy /Y "%%d" .
-            echo dir *.dll
-            echo if not exist php_snobol.dll exit /b 1
-          ) > build_task.bat
+          REM Set up VS2022 build environment directly via vcvarsall.
+          REM This bypasses the PHP SDK starter (phpsdk-vs17-x64.bat) which
+          REM has unreliable VS detection on CI runners.
+          set "VCVARSALL=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat"
+          if not exist "%VCVARSALL%" (
+            echo ERROR: vcvarsall.bat not found at %VCVARSALL%
+            exit /b 1
+          )
+          call "%VCVARSALL%" amd64
+          if errorlevel 1 (
+            echo ERROR: vcvarsall.bat failed
+            exit /b 1
+          )
 
-          call "%PHP_SDK_BINARY_TOOLS_PATH%\phpsdk-%VS%-x64.bat" -t build_task.bat
+          REM Add PHP devel pack, PHP bin, and SDK tools to PATH
+          set "PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PHP_SDK_BINARY_TOOLS_PATH%\bin;%PATH%"
+
+          REM Build the extension
+          cd /d %GITHUB_WORKSPACE%\bindings\php
+          call phpize.bat
+          if errorlevel 1 exit /b 1
+          call configure.bat --enable-snobol=shared
+          if errorlevel 1 exit /b 1
+          nmake
+          if errorlevel 1 exit /b 1
+
+          REM nmake may place the DLL in a subdirectory — copy to project root
+          dir /s /b php_snobol.dll
+          if not exist php_snobol.dll (
+            for /r %%f in (php_snobol.dll) do @if exist "%%f" copy /Y "%%f" .
+          )
+          dir *.dll
+          if not exist php_snobol.dll (
+            echo ERROR: php_snobol.dll not found after build
+            exit /b 1
+          )
 
       - name: Install and enable extension
         shell: cmd
         run: |
           set PATH=%PHP_BIN_DIR%;%PATH%
           cd bindings\php
-          REM DLL may be in a subdirectory (x64/Release_NTS, Release_NTS, etc.)
+          REM nmake may place the DLL in a subdirectory — copy to project root
           if not exist php_snobol.dll (
-            for /r %%d in (php_snobol.dll) do @if exist "%%d" copy /Y "%%d" .
+            for /r %%f in (php_snobol.dll) do @if exist "%%f" copy /Y "%%f" .
           )
           set "DLL=%CD%\php_snobol.dll"
           if not exist "%DLL%" (
