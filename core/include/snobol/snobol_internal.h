@@ -15,6 +15,12 @@
 #endif
 #endif
 
+/* C11 _Alignof: MSVC in default mode (without /std:c11+) does not recognise
+ * _Alignof; use the MSVC-specific __alignof extension instead. */
+#if defined(_MSC_VER) && !defined(_Alignof)
+#define _Alignof __alignof
+#endif
+
 /* Default to standalone build unless PHP_BUILD is explicitly defined */
 #ifndef PHP_BUILD
 #define STANDALONE_BUILD 1

@@ -320,8 +320,8 @@ typedef struct {
  */
 /* Verify tier field is within the first cache line (64 bytes)
  * so that dispatch decisions don't pull in the full metadata struct. */
-_Static_assert(offsetof(snobol_search_meta_t, tier) < 64,
-               "tier field must be within first 64 bytes of snobol_search_meta_t");
+static_assert(offsetof(snobol_search_meta_t, tier) < 64,
+              "tier field must be within first 64 bytes of snobol_search_meta_t");
 
 static inline void snobol_meta_set_flag(snobol_search_meta_t *m, uint32_t flag) {
   m->flags |= flag;

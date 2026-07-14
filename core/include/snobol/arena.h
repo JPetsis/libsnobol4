@@ -6,6 +6,11 @@
 
 #include "snobol/snobol_attrs.h"
 
+/* C11 _Alignof: MSVC in default mode does not recognise _Alignof. */
+#if defined(_MSC_VER) && !defined(_Alignof)
+#define _Alignof __alignof
+#endif
+
 /**
  * @file arena.h
  * @brief Bump-allocated arena pool for short-lived scratch allocations
