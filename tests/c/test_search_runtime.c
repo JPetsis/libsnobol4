@@ -1306,14 +1306,16 @@ static void test_w1b_start_bitmap_after_zero_width(void) {
         test_assert(success, "w1b: 'id:' SPAN match succeeds");
         if (success) {
           size_t pos = snobol_match_get_position(m);
-          size_t len = snobol_match_get_length(m);
+          size_t mlen = snobol_match_get_length(m);
           test_assert(pos == 2, "w1b: 'id:' SPAN match position == 2");
-          test_assert(len == 4, "w1b: 'id:' SPAN match length == 4 (id:123)");
+          test_assert(mlen == 4, "w1b: 'id:' SPAN match length == 4 (id:123)");
         }
         snobol_match_free(m);
       }
 
-      /* Verify skip-ahead via diagnostics (direct search_exec with range_meta) */
+      /* Cross-check: snobol_search_exec directly must agree with snobol_pattern_search.
+       * Both call the same tier handler internally; this verifies the VM setup
+       * (range_meta, emit callback) produces identical results. */
       size_t range_count = 0;
       const snobol_range_meta_t *rm = snobol_pattern_get_range_meta(pat, &range_count);
       VM vm;
@@ -1329,6 +1331,8 @@ static void test_w1b_start_bitmap_after_zero_width(void) {
       test_assert(ok, "w1b: 'id:' SPAN matches via search_exec");
       test_assert(result.match_start == 2,
                   "w1b: 'id:' SPAN search_exec match_start == 2");
+      test_assert(result.match_end == 8,
+                  "w1b: 'id:' SPAN search_exec match_end == 8");
       test_assert(diag.candidates_skipped > 0,
                   "w1b: 'id:' SPAN skips via literal prefix");
       snobol_pattern_free(pat);
