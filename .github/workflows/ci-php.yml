@@ -182,12 +182,21 @@ jobs:
 
   php-windows:
     name: PHP ${{ matrix.php-version }} (Windows)
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        php-version: [ '8.3', '8.4', '8.5' ]
+        include:
+          - php-version: '8.3'
+            os: windows-2019
+            vs-version: '16'
+          - php-version: '8.4'
+            os: windows-latest
+            vs-version: '17'
+          - php-version: '8.5'
+            os: windows-latest
+            vs-version: '17'
 
     steps:
       - name: Checkout code
@@ -212,10 +221,9 @@ jobs:
           # Dev pack: headers, import lib (dev/php.lib), phpize.bat/configure.bat.
           # It MUST match the exact PHP version + ts/nts + VS toolset + arch of
           # the PHP that setup-php installed, otherwise the built .dll will not
-          # load (ABI mismatch). The "-vsXX" segment in the dev pack name only
-          # records which VS built that PHP release; the headers/lib themselves
-          # are toolset-agnostic, so we always BUILD with vs17 (the VS2022
-          # toolset that is guaranteed present on windows-latest).
+          # load (ABI mismatch).  The "-vsXX" segment in the dev pack name
+          # records which VS built that PHP release.  We must BUILD with the
+          # same VS toolset (the MSVC CRT must match for DLL loading).
           $phpVer = (php -r "echo PHP_VERSION;")
           $ts = (php -r "echo ZEND_THREAD_SAFE ? '' : 'nts-';")
           $mm = ($phpVer -split '\.')[0..1] -join '.'
@@ -243,19 +251,19 @@ jobs:
           echo "phpize.bat at: $phpize"
           echo "php.exe at:    $phpBin"
 
-          # Locate the Visual Studio 2022 (vs17) build environment directly with
-          # Microsoft's own vswhere (always present on the hosted runner). The
-          # C core requires the VS2022 toolset (/std:c23), so require the VC
-          # tools and export the path to vcvars64.bat for the build step. This
-          # replaces the php-sdk starter (phpsdk-vs17-x64.bat), whose VS auto
-          # detection was failing on the runner ("Could not determine 'vs17'
-          # directory").
+          # Locate the correct Visual Studio build environment with Microsoft's
+          # vswhere.  We MUST use the same VS toolset that built the PHP binary
+          # (the MSVC CRT must match for the DLL to load).
+          # PHP 8.3 binary → vs16 (VS2019), PHP 8.4/8.5 → vs17 (VS2022).
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
-          $vsPath = & $vswhere -latest -products * `
+          $vsVer = '${{ matrix.vs-version }}'
+          $vsRange = "[$($vsVer).0,$([int]$vsVer + 1).0)"
+          echo "Looking for Visual Studio $vsVer.x (range: $vsRange)"
+          $vsPath = & $vswhere -version $vsRange -products * `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
             -property installationPath -format value
-          if (-not $vsPath) { throw "Visual Studio with VC tools (x86.x64) not found" }
+          if (-not $vsPath) { throw "Visual Studio $vsVer.x with VC tools (x86.x64) not found" }
           $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
           if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found at $vcvars" }
           echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
@@ -310,7 +318,7 @@ jobs:
         shell: cmd
         run: |
           @echo on
-          REM Enter the VS2022 (vs17) x64 developer environment located in the
+          REM Enter the Visual Studio x64 developer environment located in the
           REM previous step, then drive the standard dev-pack build directly:
           REM   phpize.bat -> configure.bat -> nmake
           REM No php-sdk starter / task-file indirection is needed; phpize.bat
