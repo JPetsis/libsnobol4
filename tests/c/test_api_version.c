@@ -18,9 +18,9 @@ void test_api_version_suite(void) {
 
   uint32_t ver = snobol_get_api_version();
 
-  /* For v0.11.0: (0 << 16) | (11 << 8) | 0 == 0x00000B00 */
-  test_assert(ver == 0x00000B00u,
-              "snobol_get_api_version() == 0x00000B00u (v0.11.0)");
+  /* For v0.12.0: (0 << 16) | (12 << 8) | 0 == 0x00000C00 */
+  test_assert(ver == 0x00000C00u,
+              "snobol_get_api_version() == 0x00000C00u (v0.12.0)");
 
   /* Major version extraction */
   uint32_t major = ver >> 16;

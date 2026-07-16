@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 # Core libsnobol4 C library
 # This builds the language-agnostic C pattern matching engine
 
-project(libsnobol4_core VERSION 0.11.0 LANGUAGES C)
+project(libsnobol4_core VERSION 0.12.0 LANGUAGES C)
 
 # Core source files
 set(_core_sources
@@ -27,6 +27,21 @@ set(_core_sources
 
 add_library(snobol4 STATIC ${_core_sources})
 
+# Single source of version truth (see T5): generate version.h from the
+# project() VERSION in the top-level CMakeLists.txt so the public header
+# never hard-codes version literals.  The generated header is written into a
+# build-local copy of the include tree (include/snobol/version.h) and added
+# ahead of the source include dir, then installed alongside the rest.
+set(SNOBOL_VERSION_MAJOR ${SNOBOL4_VERSION_MAJOR})
+set(SNOBOL_VERSION_MINOR ${SNOBOL4_VERSION_MINOR})
+set(SNOBOL_VERSION_PATCH ${SNOBOL4_VERSION_PATCH})
+set(SNOBOL_VERSION_STRING "${SNOBOL4_VERSION_STRING}")
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/include/snobol/version.h
+    @ONLY
+)
+
 # Set C23 standard (MSVC uses /std:c17 set below in the warning-flags block)
 if(NOT MSVC)
     target_compile_features(snobol4 PUBLIC c_std_23)
@@ -35,6 +50,7 @@ endif()
 # Set up include directories
 target_include_directories(snobol4
     PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
 )
@@ -133,7 +149,11 @@ endif()
 # Installation rules
 include(GNUInstallDirs)
 
-# Install headers to include/snobol/
+# Install headers to include/snobol/ (generated version.h installed explicitly
+# since it lives in the build tree, not the source include tree)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/snobol/version.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/snobol
+)
 install(DIRECTORY include/snobol/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/snobol
     FILES_MATCHING PATTERN "*.h"

@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(libsnobol4 VERSION 0.8.0 LANGUAGES C)
+project(libsnobol4 VERSION 0.12.0 LANGUAGES C)
+
+# Single source of version truth: expose the resolved components to every
+# subdirectory (the core subproject calls its own project(), which would
+# otherwise reset PROJECT_VERSION).  Consumed by core/cmake/version.h.in.
+set(SNOBOL4_VERSION_MAJOR ${PROJECT_VERSION_MAJOR} CACHE INTERNAL "libsnobol4 major version")
+set(SNOBOL4_VERSION_MINOR ${PROJECT_VERSION_MINOR} CACHE INTERNAL "libsnobol4 minor version")
+set(SNOBOL4_VERSION_PATCH ${PROJECT_VERSION_PATCH} CACHE INTERNAL "libsnobol4 patch version")
+set(SNOBOL4_VERSION_STRING "${PROJECT_VERSION}" CACHE INTERNAL "libsnobol4 version string")
 
 # Options
 option(BUILD_TESTS "Build C test suite" ON)
