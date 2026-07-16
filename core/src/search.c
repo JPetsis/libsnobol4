@@ -2868,27 +2868,6 @@ svm_fail_ret:
  * Captures are populated in the VM state on success.
  * ---------------------------------------------------------------------------
  */
-static bool search_automaton_try(VM *vm, const char *subject,
-                                 size_t subject_len, size_t offset,
-                                 snobol_search_result_t *out_result) {
-  /* Reuse the general vm_exec for now; the automaton_eligible flag acts
-   * as a routing hint for future optimisation.  The VM is correct for
-   * all eligible patterns.  The eligibility classification ensures we
-   * never route EVAL/DYNAMIC/table ops through this path.
-   *
-   * Future: replace with a dedicated NFA or backtracking-free interpreter. */
-  search_reset_vm(vm, subject, subject_len, offset);
-  bool ok = vm_exec(vm);
-  if (ok) {
-    out_result->success = true;
-    out_result->match_start = offset;
-    out_result->match_end = offset + vm->pos;
-  } else {
-    out_result->success = false;
-  }
-  return ok;
-}
-
 /* ---------------------------------------------------------------------------
  * Automaton (DFA) — NFA-to-DFA construction
  *
@@ -2953,9 +2932,6 @@ static inline bool nfa_set_eq(const nfa_set_t *a, const nfa_set_t *b) {
  * Get the bytecode opcode at the given offset.  Returns OP_NOP for out-of-range.
  * The offset is treated as an absolute bytecode position.
  */
-static inline uint8_t dfab_op(const uint8_t *bc, size_t bc_len, uint16_t off) {
-  return (off < bc_len) ? bc[off] : OP_ACCEPT;
-}
 
 /**
  * Compute epsilon-closure: all NFA states reachable from `start` via
@@ -3223,13 +3199,6 @@ static bool get_op_bytes(const uint8_t *bc, size_t bc_len, uint16_t off,
   default:
     return false; /* Not a consuming op */
   }
-}
-
-/* ---- Byte-class comparison: two byte sets are equivalent iff the set of
- * bytes that trigger a transition is identical.  We use a simple 256-bit
- * bitmap comparison. */
-static inline bool byte_set_eq(const uint64_t a[4], const uint64_t b[4]) {
-  return a[0] == b[0] && a[1] == b[1] && a[2] == b[2] && a[3] == b[3];
 }
 
 /*

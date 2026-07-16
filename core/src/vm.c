@@ -48,18 +48,6 @@ typedef struct {
   size_t len;
 } VmCodeBuf;
 
-static void vm_cb_init(VmCodeBuf *c) {
-  c->cap = 4096;
-  c->buf = snobol_malloc(c->cap);
-  c->len = 0;
-}
-static void vm_cb_free(VmCodeBuf *c) {
-  if (c->buf) {
-    snobol_free(c->buf);
-    c->buf = nullptr;
-  }
-  c->cap = c->len = 0;
-}
 static void vm_cb_ensure(VmCodeBuf *c, size_t need) {
   if (c->len + need <= c->cap)
     return;
@@ -86,16 +74,6 @@ static void vm_cb_emit_bytes(VmCodeBuf *c, const uint8_t *b, size_t n) {
   vm_cb_ensure(c, n);
   memcpy(c->buf + c->len, b, n);
   c->len += n;
-}
-
-/* Emit literal inline for VM-compiled patterns */
-static int vm_emit_lit_bytes(VmCodeBuf *c, const char *s, size_t len) {
-  size_t off_of_payload = c->len + 1 + 4 + 4;
-  vm_cb_emit_u8(c, OP_LIT);
-  vm_cb_emit_u32(c, (uint32_t)off_of_payload);
-  vm_cb_emit_u32(c, (uint32_t)len);
-  vm_cb_emit_bytes(c, (const uint8_t *)s, len);
-  return 0;
 }
 
 /* Magic that compiler appends after the label table (last 4 bytes of new-format

@@ -36,14 +36,6 @@ static void pb_init(PbCodeBuf *c) {
   c->len = 0;
 }
 
-static void pb_free(PbCodeBuf *c) {
-  if (c->buf) {
-    snobol_free(c->buf);
-    c->buf = nullptr;
-  }
-  c->cap = c->len = 0;
-}
-
 static void pb_ensure(PbCodeBuf *c, size_t need) {
   if (c->len + need <= c->cap)
     return;
@@ -57,11 +49,6 @@ static void pb_ensure(PbCodeBuf *c, size_t need) {
 static void pb_emit_u8(PbCodeBuf *c, uint8_t v) {
   pb_ensure(c, 1);
   c->buf[c->len++] = v;
-}
-static void pb_emit_u16(PbCodeBuf *c, uint16_t v) {
-  pb_ensure(c, 2);
-  c->buf[c->len++] = (v >> 8) & 0xff;
-  c->buf[c->len++] = v & 0xff;
 }
 static void pb_emit_u32(PbCodeBuf *c, uint32_t v) {
   pb_ensure(c, 4);

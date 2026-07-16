@@ -76,11 +76,6 @@ typedef struct {
  * ---------------------------------------------------------------------------
  */
 
-static inline uint32_t simd_read_u32(const uint8_t *bc, size_t ip) {
-  return ((uint32_t)bc[ip] << 24) | ((uint32_t)bc[ip + 1] << 16) |
-         ((uint32_t)bc[ip + 2] << 8) | (uint32_t)bc[ip + 3];
-}
-
 static inline uint16_t simd_read_u16(const uint8_t *bc, size_t ip) {
   return ((uint16_t)bc[ip] << 8) | (uint16_t)bc[ip + 1];
 }
