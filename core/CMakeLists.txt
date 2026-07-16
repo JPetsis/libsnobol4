@@ -11,6 +11,8 @@ set(_core_sources
     src/parser.c
     src/ast.c
     src/compiler.c
+    src/compiler_analysis.c
+    src/compiler_codegen.c
     src/vm.c
     src/table.c
     src/array.c
