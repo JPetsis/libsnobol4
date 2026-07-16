@@ -35,6 +35,17 @@ echo "🔨 Building libsnobol4 PHP extension..."
 echo "   core dir: $CORE_DIR"
 echo "   project dir: $PROJECT_DIR"
 
+# --- Step 0: Generate the version header (single source = top-level CMakeLists.txt) ---
+# The core headers include a CMake-generated snobol/version.h; the amalgam build
+# does not run CMake over the core, so generate it directly here.
+VERSION_GEN="${PROJECT_DIR}/dev/generate_version_header.sh"
+if [ -x "$VERSION_GEN" ]; then
+    echo "🔄 Generating version header..."
+    bash "$VERSION_GEN"
+else
+    echo "⚠️  generate_version_header.sh not found at $VERSION_GEN — skipping"
+fi
+
 # --- Step 1: Regenerate amalgam ---
 # Always regenerate so a freshly added/removed core .c file is never missed.
 AMALGAM_GEN="${PROJECT_DIR}/dev/generate_amalgam.sh"

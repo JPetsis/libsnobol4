@@ -13,6 +13,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Ensure the generated version.h exists (it is needed by the core headers the
+# amalgam includes). Single source of truth stays the top-level CMakeLists.txt.
+if [ -x "$SCRIPT_DIR/generate_version_header.sh" ]; then
+  bash "$SCRIPT_DIR/generate_version_header.sh" >&2 || true
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 CORE_SRC="$PROJECT_ROOT/core/src"
 DEPS_SLJIT="$PROJECT_ROOT/deps/sljit"
@@ -25,7 +33,11 @@ CORE_FILES=(
     "parser.c"
     "ast.c"
     "compiler.c"
-    "vm.c"
+    "compiler_analysis.c"
+    "compiler_codegen.c"
+    "vm_choice.c"
+    "vm_capture.c"
+    "vm_exec.c"
     "table.c"
     "array.c"
     "dynamic_pattern.c"
@@ -34,7 +46,8 @@ CORE_FILES=(
     "string_fn.c"
     "type_fn.c"
     "pattern_build.c"
-    "search.c"
+    "search_meta.c"
+    "search_tiers.c"
     "search_simd.c"
     "api.c"
 )
