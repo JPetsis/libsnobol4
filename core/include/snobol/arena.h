@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -84,3 +89,7 @@ static inline void snobol_arena_reset(snobol_arena_t *arena) {
 /** Convenience: allocate an object of type @p t from arena @p a. */
 #define ARENA_ALLOC(a, t)                                                      \
   (t *)snobol_arena_alloc((a), sizeof(t), _Alignof(t))
+
+#ifdef __cplusplus
+}
+#endif

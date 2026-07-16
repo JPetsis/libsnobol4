@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -131,3 +136,7 @@ void snobol_lexer_destroy(snobol_lexer_t *lexer);
  * @return Static string (do not free)
  */
 const char *snobol_token_name(token_type_t type);
+
+#ifdef __cplusplus
+}
+#endif

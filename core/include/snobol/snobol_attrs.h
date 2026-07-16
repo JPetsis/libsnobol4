@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 /**
  * @file snobol_attrs.h
  * @brief Portable function-attribute macros for SNOBOL4
@@ -150,4 +155,8 @@
 #else
 #define SNOBOL_THREAD_LOCAL _Thread_local
 #endif
+#endif
+
+#ifdef __cplusplus
+}
 #endif

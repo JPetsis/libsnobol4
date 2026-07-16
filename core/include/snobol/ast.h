@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -476,3 +481,7 @@ ast_node_t *snobol_ast_create_fail(void);
 
 /** Create AST_SUCCEED node (no args) */
 ast_node_t *snobol_ast_create_succeed(void);
+
+#ifdef __cplusplus
+}
+#endif

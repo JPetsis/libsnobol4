@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 /**
  * @file unicode_fold.h
  * @brief Unicode case-folding lookup tables for libsnobol4
@@ -40,3 +45,7 @@ void snobol_to_upper_cp(uint32_t cp, uint32_t *out, int *out_len);
  * @return    Lowercase codepoint, or cp itself if no mapping is found.
  */
 uint32_t snobol_to_lower_cp(uint32_t cp);
+
+#ifdef __cplusplus
+}
+#endif

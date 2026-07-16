@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -218,3 +223,7 @@ void dynamic_pattern_cache_stats(const dynamic_pattern_cache_t *cache,
  * @return 32-bit hash value
  */
 uint32_t dynamic_pattern_hash_source(const char *source, size_t len);
+
+#ifdef __cplusplus
+}
+#endif

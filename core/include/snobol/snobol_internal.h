@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 /* C23 keyword compatibility for pre-C23 compilers (MSVC, GCC/Clang < C23).
  * __STDC_VERSION__ == 202311L for C23; anything lower (or undefined) means the
  * compiler does not recognise 'nullptr' or 'constexpr' as keywords in C mode.
@@ -91,4 +96,8 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt,
   snobol_log_impl(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
 #else
 #define SNOBOL_LOG(fmt, ...) ((void)0)
+#endif
+
+#ifdef __cplusplus
+}
 #endif

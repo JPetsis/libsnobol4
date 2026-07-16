@@ -120,11 +120,68 @@ jobs:
           if [ "${{ steps.asan_run.outcome }}" = "success" ]; then
             echo "✅ **No sanitizer errors detected.**" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Sanitizer errors detected — see uploaded \`asan-report.txt\`.**" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Sanitizer errors detected — see uploaded \`asan-report.txt\`." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             grep -E "ERROR:|WARNING:|SUMMARY:|runtime error:" asan-report.txt | head -30 >> $GITHUB_STEP_SUMMARY || true
             echo '```' >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
+
+  header-cxx:
+    name: Public headers compile as C++ (extern "C" gate)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential g++ clang
+
+      - name: Configure CMake (generates version.h)
+        run: cmake -B build -DBUILD_TESTS=OFF -DBUILD_PHP=OFF
+
+      - name: Compile every public header as C++ with g++ and clang++
+        run: |
+          set -e
+          SRC=core/include
+          GEN=build/core/include   # holds the generated snobol/version.h
+          fail=0
+          for h in "$SRC"/snobol/*.h; do
+            name=$(basename "$h")
+            [ "$name" = "version.h" ] && continue
+            for CC in g++ clang++; do
+              if ! "$CC" -fsyntax-only -x c++ -std=c++17 -I"$SRC" -I"$GEN" "$h" 2>"cpp-err.txt"; then
+                echo "::error::C++ compile of $name failed with $CC"
+                cat cpp-err.txt
+                fail=1
+              fi
+            done
+          done
+          rm -f cpp-err.txt
+          exit $fail
+
+      - name: Build library (for C++ link smoke test)
+        run: cmake --build build
+
+      - name: Link a trivial C++ TU against the built library
+        run: |
+          set -e
+          cat > cpp_smoke.cpp <<'EOF'
+          #include "snobol/snobol.h"
+          #include <cstdio>
+          int main() {
+            int m=0,n=0,p=0;
+            snobol_version(&m,&n,&p);
+            std::printf("libsnobol4 %s (api 0x%08x)\n",
+                        SNOBOL_VERSION_STRING, snobol_get_api_version());
+            snobol_pattern_match_literal(nullptr, nullptr, 0);
+            return (m==SNOBOL_VERSION_MAJOR && n==SNOBOL_VERSION_MINOR && p==SNOBOL_VERSION_PATCH) ? 0 : 1;
+          }
+          EOF
+          g++ cpp_smoke.cpp -Icore/include -Ibuild/core/include build/core/libsnobol4.a -o cpp_smoke
+          ./cpp_smoke
+          rm -f cpp_smoke cpp_smoke.cpp
 

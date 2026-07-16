@@ -13,6 +13,11 @@
 
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -181,3 +186,7 @@ SNOBOL_NODISCARD bool snobol_upper(const char *str, size_t str_len,
  */
 SNOBOL_NODISCARD bool snobol_lower(const char *str, size_t str_len,
                                    snobol_buf *out);
+
+#ifdef __cplusplus
+}
+#endif

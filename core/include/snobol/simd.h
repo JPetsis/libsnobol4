@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 /**
  * @file simd.h
  * @brief SIMD capability detection and platform abstraction macros
@@ -80,4 +85,8 @@ typedef uint8x16_t simd_reg_t;
 /* Scalar fallback: use uint64_t[4] (256 bits) */
 typedef uint64_t simd_reg_t[4];
 #define SNOBOL_SIMD_NFA_MAX_STATES 256
+#endif
+
+#ifdef __cplusplus
+}
 #endif

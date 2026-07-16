@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include <stdio.h>
 
 /**
@@ -541,3 +546,7 @@ void snobol_dfa_free(snobol_dfa_t *dfa);
  * SNOBOL_DFA_MAX_STATES cap (i.e. construction did not abort).
  */
 bool snobol_pattern_automaton_available(const struct snobol_pattern *pattern);
+
+#ifdef __cplusplus
+}
+#endif

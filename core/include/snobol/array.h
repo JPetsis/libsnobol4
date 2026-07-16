@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 /**
  * @file array.h
  * @brief Runtime-owned sparse array objects for SNOBOL4
@@ -129,3 +134,7 @@ int32_t *snobol_array_keys(const snobol_array_t *array, size_t *out_count);
  * @return Malloc'd array of value strings (caller must free), or NULL on error.
  */
 char **snobol_array_values(const snobol_array_t *array, size_t *out_count);
+
+#ifdef __cplusplus
+}
+#endif

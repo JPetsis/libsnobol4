@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -68,3 +73,7 @@ void compiler_free(uint8_t *bc);
  */
 int snobol_template_bind_tables(uint8_t *bc, size_t bc_len, const char **names,
                                 const uint16_t *ids, size_t n);
+
+#ifdef __cplusplus
+}
+#endif

@@ -11,6 +11,11 @@
 
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -168,3 +173,7 @@ bool snobol_real(const char *str, size_t len);
  * @return     true if string represents any numeric value
  */
 bool snobol_numeric(const char *str, size_t len);
+
+#ifdef __cplusplus
+}
+#endif

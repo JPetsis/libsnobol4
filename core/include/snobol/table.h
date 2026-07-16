@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include "snobol/snobol_attrs.h"
 #include <stdbool.h>
 #include <stddef.h>
@@ -131,3 +136,7 @@ const char *table_name(const snobol_table_t *table);
  * @return 32-bit hash value
  */
 uint32_t table_hash_string(const char *str);
+
+#ifdef __cplusplus
+}
+#endif

@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 /**
  * @file snobol.h
  * @brief Main API entry point for libsnobol4
@@ -720,3 +725,7 @@ ast_node_t *snobol_pattern_build_succeed(snobol_pattern_build_t *build);
  */
 ast_node_t *snobol_pattern_build_emit(snobol_pattern_build_t *build,
                                       ast_node_t *root);
+
+#ifdef __cplusplus
+}
+#endif

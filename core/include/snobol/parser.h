@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #include "snobol/ast.h"
 #include "snobol/lexer.h"
 #include <stdbool.h>
@@ -81,3 +86,7 @@ void snobol_parser_clear_error(snobol_parser_t *parser);
  * @param parser Parser to destroy (NULL is safe)
  */
 void snobol_parser_destroy(snobol_parser_t *parser);
+
+#ifdef __cplusplus
+}
+#endif

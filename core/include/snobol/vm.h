@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 /**
  * @file vm.h
  * @brief Virtual machine types, opcodes, and execution API for libsnobol4
@@ -677,3 +682,7 @@ size_t vm_choice_stack_memory_usage(VM *vm);
 size_t vm_choice_record_average_size(VM *vm);
 /** @brief Return the current number of live choice points on the stack. */
 size_t vm_choice_stack_depth(VM *vm);
+
+#ifdef __cplusplus
+}
+#endif
