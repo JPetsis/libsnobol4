@@ -47,6 +47,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PGO on top of LTO yields only a **marginal** further gain (1–8% on literal paths, ~0% elsewhere) — the decisive speedups came from the structural changes (P1–P5) + LTO.
 - SNOBOL remains **1.3×–9.5× slower than PCRE2** on the synthetic probe scenarios (closest on SIMD scan at ~1.66×, widest on alternation/alt-literals at ~8–9.5×).
 
+### OSS Readiness (library-grade hygiene)
+
+#### Added
+
+- **C++ interop**: all 18 public headers (`core/include/snobol/*.h`) are now wrapped in `extern "C"` guards and are individually self-contained. A new `header-cxx` CI job (`.github/workflows/ci-core.yml`) compiles every public header as C++ with `g++` and `clang++` and links a trivial C++ TU against `libsnobol4.a`.
+- **Single version source**: the top-level `project(libsnobol4 VERSION X.Y.Z)` is now the single source of version truth; `SNOBOL_VERSION_*` / `SNOBOL_VERSION_STRING` are generated into `<snobol/version.h>` via `core/cmake/version.h.in` at configure time. Version bumped to **0.12.0** (the real current version); header literals removed.
+- **Governance docs**: added `SECURITY.md` (private vuln-report path + supported-versions policy), `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `.github/ISSUE_TEMPLATE/` (bug + feature forms), and `.github/PULL_REQUEST_TEMPLATE.md` referencing the test/lint/warnings gate, the changelog rule, and the C/PHP coupling guard.
+- **Changelog discipline** (`dev-hygiene` spec): every merged change must now append a `CHANGELOG.md` entry in Keep a Changelog format.
+
+#### Changed
+
+- **Translation-unit modularization** (behavior-preserving, file-membership only — no public API signature changes):
+  - `search.c` → `search_meta.c` (derive_meta / eligibility / tier selection) + `search_tiers.c` (tier handlers / search-VM / NFA-DFA / dispatch), with shared readers + trie structs in `search_internal.h`; `select_tier_by_cost` promoted to external linkage.
+  - `vm.c` → `vm_choice.c` (choice stack) + `vm_capture.c` (capture write-log) + `vm_exec.c` (executor + range/buffer/registry).
+  - `compiler.c` → `compiler_analysis.c` (CodeBuf / charclass / SPLIT-ANY fusion) + `compiler_codegen.c` (C-AST codegen + label table), with shared infra in `compiler_internal.h`.
+- Updated `README.md`, `CONTRIBUTING.md`, and `PROJECT_STUDY_GUIDE.md` for C++ usage, the single-source version scheme, the changelog rule, and the new TU layout.
+
+#### Removed
+
+- Nine confirmed-unused static helpers: `byte_set_eq`, `dfab_op`, `search_automaton_try` (search); `simd_read_u32` (search_simd); `vm_cb_init`, `vm_cb_free`, `vm_emit_lit_bytes` (vm); `pb_free`, `pb_emit_u16` (pattern_build).
+
 ## [0.12.0] - 2026-07-08
 
 ### Engine Consolidation

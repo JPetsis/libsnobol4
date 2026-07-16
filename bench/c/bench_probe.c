@@ -992,7 +992,7 @@ int main(void) {
             printf("  %-16s measured=%" PRId64 " ns/iter -> suggest setup_ns ~= %d\n",
                    results[i].name, ns, (int)ns);
     }
-    printf("(Apply by editing k_tier_cost in core/src/search.c; the authoritative\n"
+    printf("(Apply by editing k_tier_cost in core/src/search_meta.c; the authoritative\n"
            " table is printed above. Keep per_byte_div for per-byte throughput.)\n");
 
     /* Optional baseline regression guard. If a baseline file exists

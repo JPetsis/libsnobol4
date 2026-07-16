@@ -205,6 +205,28 @@ int main(void) {
 }
 ```
 
+#### Using from C++
+
+All public headers are wrapped in `extern "C"` guards, so libsnobol4 can be
+consumed directly from C++ with no shim. Include `<snobol/snobol.h>` and link
+against the static or shared library as usual:
+
+```cpp
+#include <snobol/snobol.h>
+
+int main() {
+    snobol_context_t* ctx = snobol_context_create();
+    snobol_pattern_t* pat = snobol_pattern_compile(ctx, "'hello'", 7, nullptr);
+    // ... use the C API from C++ ...
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+```
+
+Every public header also compiles standalone (each pulls in its own
+dependencies), and a CI job compiles the full header set as C++ with both
+`g++` and `clang++` to keep the interop guarantee green.
+
 ### Using the PHP Binding
 
 ```bash
@@ -429,6 +451,20 @@ libsnobol4 uses independent versioning for core and each binding:
 | **Python (reference)** | —       | —           | Prototype only       | `examples/python-binding/`            |
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.
+
+The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The **single source of version truth** is the top-level
+`project(libsnobol4 VERSION X.Y.Z)` declaration in `CMakeLists.txt`; the
+`SNOBOL_VERSION_*` / `SNOBOL_VERSION_STRING` macros in `<snobol/version.h>`
+are generated from it at configure time — never edit the version literals in a
+header directly.
+
+Every merged change **must** add an entry to
+[`CHANGELOG.md`](CHANGELOG.md) under `[Unreleased]`, using
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/) categorization
+(Added / Changed / Fixed / Removed). See [CONTRIBUTING.md](CONTRIBUTING.md),
+[SECURITY.md](SECURITY.md), and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for
+the full contribution, security-reporting, and conduct policies.
 
 ### Platform Support
 

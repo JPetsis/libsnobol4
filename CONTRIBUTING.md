@@ -169,7 +169,16 @@ make test
 cd bindings/php && vendor/bin/phpunit tests/php
 ```
 
-### 4. Commit Changes
+### 4. Update the Changelog
+
+**Every change must add an entry to [`CHANGELOG.md`](CHANGELOG.md)** under the
+`[Unreleased]` section, using
+[Keep a Changelog](https://keepachangelog.com/en/1.0.0/) categorization
+(Added / Changed / Fixed / Removed). Describe the change, the affected
+tiers/surfaces, and any migration notes. PRs without a changelog entry will
+not be merged.
+
+### 5. Commit Changes
 
 Write clear, descriptive commit messages:
 
@@ -181,10 +190,10 @@ git commit -m "feat: add bounded repetition support
 - Update documentation"
 ```
 
-### 5. Submit a Pull Request
+### 6. Submit a Pull Request
 
 - Push to your fork
-- Open a PR against the `main` branch
+- Open a PR against the `main` branch (the PR template lists the required gate)
 - Include a description of changes
 - Reference any related issues
 
@@ -199,6 +208,10 @@ git commit -m "feat: add bounded repetition support
   - Functions: `snake_case` (e.g., `snobol_ast_create`)
   - Macros: `SCREAMING_SNAKE_CASE` (e.g., `SNOBOL_AST_VERSION`)
 - **Documentation**: Add file-level and function-level comments
+- **C++ interop**: Public headers must stay C++-consumable. Wrap any new
+  public header in `extern "C"` guards and keep it self-contained (it must
+  compile standalone). The `header-cxx` CI job compiles the header set as C++
+  with `g++` and `clang++` — a C-ism that breaks that build will fail CI.
 
 ### PHP Code (Bindings)
 
@@ -267,19 +280,28 @@ The C core libsnobol4 makes the following stability guarantees around allocation
 
 ### Versioning
 
-libsnobol4 uses independent versioning for core and bindings:
+libsnobol4 uses independent versioning for core and bindings and follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 
-- **Core**: `v<major>.<minor>.<patch>` (e.g., `v0.11.0`)
-- **PHP Binding**: `v<major>.<minor>.<patch>` (e.g., `v0.11.0`)
+- **Core**: `v<major>.<minor>.<patch>` (e.g., `v0.12.0`)
+- **PHP Binding**: `v<major>.<minor>.<patch>` (e.g., `v0.12.0`)
+
+The core version has a **single source of truth**: the
+`project(libsnobol4 VERSION X.Y.Z)` declaration in the top-level
+`CMakeLists.txt`. The `SNOBOL_VERSION_*` macros in `<snobol/version.h>` are
+generated from it at configure time via `core/cmake/version.h.in` — do **not**
+hand-edit version literals in any header.
 
 ### Creating a Release
 
-1. Update version constants in code
-2. Update CHANGELOG.md
+1. Bump `project(libsnobol4 VERSION X.Y.Z)` in the top-level `CMakeLists.txt`
+   (and reconfigure); the version header regenerates automatically.
+2. Move the `[Unreleased]` changelog entries under a new version heading in
+   `CHANGELOG.md`.
 3. Create git tags:
    ```bash
-   git tag core/v0.11.0
-   git tag php/v0.11.0
+   git tag core/v0.12.0
+   git tag php/v0.12.0
    git push origin --tags
    ```
 4. Create GitHub release with changelog
