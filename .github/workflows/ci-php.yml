@@ -83,6 +83,13 @@ jobs:
         run: |
           ./dev/generate_amalgam.sh verify
 
+      - name: Generate core version header
+        # The PHP extension build does not run CMake over the core, so the
+        # generated snobol/version.h must be produced explicitly from the
+        # single version source in CMakeLists.txt.
+        run: |
+          ./dev/generate_version_header.sh
+
       - name: Build PHP extension with phpize
         working-directory: bindings/php
         run: |
@@ -312,6 +319,14 @@ jobs:
           }
           '@ | Set-Content -Path re2c_stub.c -NoNewline
           Get-Content re2c_stub.c
+
+      - name: Generate core version header
+        shell: bash
+        run: |
+          # The Windows phpize build does not run CMake over the core, so the
+          # generated snobol/version.h must be produced explicitly from the
+          # single version source in CMakeLists.txt.
+          ./dev/generate_version_header.sh
 
       - name: Build extension (phpize + nmake)
         shell: cmd
