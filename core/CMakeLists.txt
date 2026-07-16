@@ -13,7 +13,9 @@ set(_core_sources
     src/compiler.c
     src/compiler_analysis.c
     src/compiler_codegen.c
-    src/vm.c
+    src/vm_choice.c
+    src/vm_capture.c
+    src/vm_exec.c
     src/table.c
     src/array.c
     src/dynamic_pattern.c
