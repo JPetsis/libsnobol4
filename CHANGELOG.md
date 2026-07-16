@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nine confirmed-unused static helpers: `byte_set_eq`, `dfab_op`, `search_automaton_try` (search); `simd_read_u32` (search_simd); `vm_cb_init`, `vm_cb_free`, `vm_emit_lit_bytes` (vm); `pb_free`, `pb_emit_u16` (pattern_build).
 
+#### Verified
+
+- Core C suite: **2166 tests** pass (Release and ASan+UBSan); PHP binding suite: **315 PHPUnit tests** pass (incl. the C/PHP coupling probe). Both gated green after the TU modularization.
+
 ## [0.12.0] - 2026-07-08
 
 ### Engine Consolidation

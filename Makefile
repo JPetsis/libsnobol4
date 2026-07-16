@@ -176,6 +176,8 @@ test-asan:
 clean:
 	@echo "==> Cleaning all build directories..."
 	rm -rf build*/ cmake-build-*/
+	@echo "==> Cleaning generated version header..."
+	rm -f core/include/snobol/version.h
 	@echo "==> Cleaning benchmark results..."
 	rm -f bench/BENCHMARKS.md
 	find bench -maxdepth 1 -type f -name 'results_*.json' ! -name 'results_example.json' ! -name 'results_builtin.json' ! -name 'results_layered_search.json' -delete 2>/dev/null || true
