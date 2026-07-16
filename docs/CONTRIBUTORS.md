@@ -141,9 +141,14 @@ if (!snobol_ast_version_check(1, 0)) {
 - Use `snobol_ast_create_*()` functions to create nodes
 - `snobol_ast_create_label()` makes a copy of the label name (handles string literals safely)
 
-### 4. Compiler (`snobol_compiler.c`)
+### 4. Compiler (`compiler.c`, `compiler_analysis.c`, `compiler_codegen.c`)
 
-**Purpose:** Compile AST into VM bytecode.
+**Purpose:** Compile AST into VM bytecode. The compiler is split into three
+translation units sharing `compiler_internal.h`:
+
+- `compiler.c` — PHP/zval emission, template binding, pattern bind/free
+- `compiler_analysis.c` — code buffer, character-class analysis, fusion
+- `compiler_codegen.c` — C-AST label table and bytecode emission
 
 **Key Function:**
 
@@ -162,9 +167,11 @@ int compile_ast_to_bytecode_c(
 - Character class tables appended at end
 - See `snobol_vm.h` for opcode definitions
 
-### 5. VM (`snobol_vm.c`)
+### 5. VM (`vm_exec.c`, `vm_choice.c`, `vm_capture.c`)
 
-**Purpose:** Execute bytecode with backtracking support.
+**Purpose:** Execute bytecode with backtracking support. The VM is split into
+three translation units: `vm_exec.c` (main dispatch loop), `vm_choice.c`
+(backtracking choice stack), and `vm_capture.c` (capture registers).
 
 **Key Features:**
 
