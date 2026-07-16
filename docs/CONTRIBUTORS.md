@@ -171,7 +171,6 @@ int compile_ast_to_bytecode_c(
 - Backtracking with choice points
 - Catastrophic backtracking protection
 - Capture registers
-- Optional JIT compilation
 
 ### 6. Grammar (`grammar/snobol.ebnf`)
 
@@ -463,15 +462,6 @@ fprintf(stderr, "PARSE: %s\n", __func__);
 - Patterns are cached by source text in `DynamicPatternCache`
 - Cache key is computed from source hash
 - Cache eviction is LRU-based
-
-### Method JIT (SLJIT)
-
-- The method JIT compiles entire patterns to a single native function using the **SLJIT** architecture-neutral backend
-- JIT is enabled by default; toggle via `Pattern::setJit(true/false)` or `SnobolJitConfig.method_enabled`
-- Compilation happens on the first match with JIT enabled; the compiled function is cached keyed by bytecode hash
-- Patterns containing opcodes the SLJIT backend does not handle (SPAN, BREAK, SPLIT, ASSIGN, etc.) fall back to the VM interpreter transparently
-- JIT stats are accessible via `snobol_get_jit_stats()` and `snobol_reset_jit_stats()`
-- See `core/src/jit_backend_sljit.c` for the SLJIT lowering implementation
 
 ## Testing
 

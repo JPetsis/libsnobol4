@@ -262,7 +262,7 @@ The v0.11.0 public surface (declared in `core/include/snobol/snobol.h`) was audi
 - Match accessors: `snobol_match_success`, `snobol_match_get_output`, `snobol_match_get_variable`, `snobol_match_get_position`, `snobol_match_get_length` — stable.
 - One-shot API: `snobol_match`, `snobol_match_result_free` — stable.
 - Builder API: `snobol_pattern_build_*` family — stable shape; returns `NULL` on allocation failure (without setting an error channel — the caller should check the return value).
-- Flag constants: `SNOBOL_FLAG_CASE_INSENSITIVE`, `SNOBOL_FLAG_SEARCH_MODE` — values stable (any new flags must use previously free bits).
+- Flag constants: `SNOBOL_FLAG_CASE_INSENSITIVE` — value stable (any new flags must use previously free bits).
 - Version macros: `SNOBOL_VERSION_MAJOR/MINOR/PATCH/STRING`, `SNOBOL_ABI_VERSION` — stable shape.
 
 No functions were deprecated or marked for removal in v0.11.0. The next minor bump (v0.12) MAY deprecate a function (with `SNOBOL_DEPRECATED`) — that deprecation will appear in `CHANGELOG.md` for that release.

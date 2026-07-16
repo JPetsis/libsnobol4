@@ -87,7 +87,7 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
 
 | Binding                       | Status   | Version  |
 |-------------------------------|----------|----------|
-| [PHP](bindings/php/README.md) | ✅ Stable | v0.11.0  |
+| [PHP](bindings/php/README.md) | ✅ Stable | v0.12.0  |
 
 ## Project Structure
 

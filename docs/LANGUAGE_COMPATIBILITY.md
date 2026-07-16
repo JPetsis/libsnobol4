@@ -30,45 +30,22 @@ The engine now supports full SNOBOL language compatibility including:
 | Helper API: `PatternHelper::evalPattern()`    | ✅ Complete | Routes through core runtime with caching      |
 | Helper API: `PatternHelper::tableSubst()`     | ✅ Complete | Table-backed substitution helper              |
 | Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                     |
-| Helper API: `DynamicPatternCache`             | ✅ Complete | Truthful runtime-backed cache interface       |
+| Helper API: `DynamicPatternCache`            | ✅ Complete | Truthful runtime-backed cache interface       |
 | Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)    |
-| Test coverage                                 | ✅ Complete | 228 PHP tests, 1,615 C tests                  |
+| Test coverage                                 | ✅ Complete | 315 PHP tests, 2166 C tests                   |
 
 ### ⚠️ Known Limitations
 
-| Feature            | Limitation                                                                            | Workaround                                    | Future                                   |
-|--------------------|---------------------------------------------------------------------------------------|-----------------------------------------------|------------------------------------------|
-| Table registration | Placeholder `table_id=0`                                                              | Runtime resolves by name                      | Explicit registration API                |
-| Recursive EVAL     | `EVAL(EVAL(...))` parsed but not optimized                                            | Avoid deep nesting                            | Optimize recursive evaluation            |
-| JIT coverage       | Full — all opcodes jit-compiled or call-out (v0.9.0)                                  | Full — no interpreter fallback for any opcode | Full JIT support ✅                       |
-| JIT architecture   | Two-phase IR pipeline (v0.10.0): VM bytecode → architecture-neutral IR → machine code | Set `SNOBOL_JIT_DUMP_IR=1` to inspect IR      | Backend vtable allows additional targets |
+| Feature            | Limitation                                                     | Workaround                       | Future                    |
+|--------------------|----------------------------------------------------------------|----------------------------------|---------------------------|
+| Table registration | Placeholder `table_id=0`                                       | Runtime resolves by name         | Explicit registration API |
+| Recursive EVAL     | `EVAL(EVAL(...))` parsed but not optimized                     | Avoid deep nesting               | Optimize recursive evaluation |
 
-## JIT Pipeline Architecture (v0.10.0+)
-
-The JIT subsystem uses a two-phase compilation pipeline:
-
-```
-VM bytecodes → [Lifter] → jit_ir_region_t → [DCE + Copy-prop] → [SLJIT lowerer] → machine code
-```
-
-1. **Lifter** (`jit_ir_lift_region`): Translates VM bytecode to a flat, linear IR
-   (`jit_ir_instr_t` array).  All operands are pre-decoded; the backend reads only IR fields.
-2. **Optimiser passes**: Dead-code elimination (DCE) removes pure instructions with zero-use
-   output registers; copy-propagation folds copy chains before DCE runs.
-3. **SLJIT lowerer** (`jit_backend_sljit.c`): Single backend covering all architectures
-   (x86-64, AArch64, ARMv7, RISC-V 64). The 4 architecture-specific backends have been
-   retired; `SNOBOL_JIT_BACKEND` defaults to `sljit` and no other backend is available.
-
-In addition to the per-IP hot-trace JIT, a **method JIT** compiles entire patterns ahead
-of execution. The compiled function (`jit_trace_fn`) is cached by bytecode identity and
-reused across calls. Enable via `SnobolJitConfig.method_enabled` (default: on). Patterns
-containing `EVAL` / `DYNAMIC` / `BAL` fall back to the interpreter.
-
-### Debug tools
-
-| Environment variable   | Effect                                                |
-|------------------------|-------------------------------------------------------|
-| `SNOBOL_JIT_DUMP_IR=1` | Dump human-readable IR to `stderr` before lowering    |
+> **Note:** The SLJIT method-JIT and tracing-JIT subsystems described in older
+> revisions of this document were **retired in v0.12.0**. The engine now executes
+> all patterns through the SNOBOL4 VM and the search-tier accelerators described in
+> `AGENTS.md` (Tiers 0–9). No `SNOBOL_JIT_*` configuration or `snobol_get_jit_stats()`
+> API exists.
 
 ## Parser Extensions
 
@@ -403,46 +380,13 @@ All runtime objects (tables, dynamic patterns) use reference counting:
 - Invalid labels cause controlled failure via backtracking
 - Dynamic pattern compilation failures fail gracefully
 
-## JIT Availability
-
-The JIT subsystem uses **SLJIT** as the single backend covering all supported architectures. SLJIT is the default and only valid `SNOBOL_JIT_BACKEND`; the previous four architecture-specific backends (ARM64, ARM32, RISC-V 64, x86-64) have been retired.
-
-| Backend | Target Architectures                        | OS                     | CI Status        |
-|---------|---------------------------------------------|------------------------|------------------|
-| `sljit` | AArch64, ARMv7, RISC-V 64, x86-64, and more | macOS, Linux, Windows  | ✅ Native + QEMU |
-
-**CI coverage notes:**
-- QEMU-based CI (`jit-qemu-smoke` with `matrix.platform: [ linux/arm64, linux/arm/v7, linux/riscv64 ]`) validates JIT compilation and match results across architectures.
-- Native runners (`jit-backend-tests` matrix) run benchmarks on real hardware (macOS ARM64, Linux x86-64, Windows x86-64).
-- SLJIT handles register allocation, W^X memory management, and icache flush internally.
-
-## JIT Compatibility Notes
-
-As of the SLJIT method-JIT change, opcodes fall into three categories:
-
-| Category | Opcodes | Behavior |
-|----------|---------|----------|
-| **Compilable** | LIT, ANY, NOTANY, LEN, ANCHOR, POS, RPOS, TAB, RTAB, REM, FAIL, FENCE, SUCCEED, ACCEPT, CAP_START, CAP_END, EMIT_LITERAL, EMIT_CAPTURE, BAL, EVAL, GOTO, GOTO_F, LABEL, NOP | Compiled to native SLJIT code. C call-outs (ANY, NOTANY, EMIT_LITERAL, EMIT_CAPTURE, BAL, EVAL) save/restore `VM.pos` and invoke helpers. |
-| **Non-compilable** (→ VM fallback) | SPAN, BREAK, BREAKX, SPLIT, ASSIGN, REPEAT_INIT, REPEAT_STEP, EMIT_EXPR, EMIT_FORMAT, EMIT_TABLE, TABLE_GET, TABLE_SET, DYNAMIC | The IR lifter marks the region `non_compilable`; `snobol_jit_method_compile()` returns NULL. The VM interpreter handles these opcodes. |
-| **Pseudo** | PHI, COPY, DYNAMIC_DEF | Architecture-neutral IR artefacts; no code emitted. |
-
-Patterns containing any **Non-compilable** opcode fall back to the VM interpreter
-at all times — no partial JIT compilation is attempted.
-
-**Observability counters** (`jit_method_attempts_total`, `jit_method_successes_total`,
-`jit_method_fallbacks_total`, `jit_method_evictions_total`)
-are exposed via `snobol_get_jit_stats()` / `snobol_reset_jit_stats()`.
-
 ## Test Coverage
 
-| Suite         | Tests | Assertions | Status   |
-|---------------|-------|------------|----------|
-| C Tests       | 1,928 | -          | ✅ Pass   |
-| PHP Tests     | 349   | 680        | ✅ Pass   |
-| Compatibility | 26    | -          | ✅ Pass   |
-| Skipped       | 4     | -          | Expected |
-
-**Total:** 2,303 tests passing
+| Suite         | Tests | Status   |
+|---------------|-------|----------|
+| C Tests       | 2166  | ✅ Pass   |
+| PHP Tests     | 315   | ✅ Pass   |
+| Compatibility | 26    | ✅ Pass   |
 
 ## Case-Insensitive Matching
 

@@ -9,6 +9,23 @@ pattern matching capabilities.
 - CMake 3.16+
 - C compiler (GCC, Clang, or MSVC)
 
+## Language & Compiler Compatibility
+
+The PHP binding wraps the language-agnostic C core (`core/`). The core's own
+compatibility matrix is documented in the [main README](../../README.md):
+
+- **C**: Core requires a C23 compiler (GCC/Clang); MSVC builds use
+  `/std:c17` with `nullptr`/`constexpr` fallbacks. Headers are plain C (no
+  C++), so any C23-capable toolchain can consume the static/shared library.
+- **C++**: All 18 public headers (`core/include/snobol/*.h`) are wrapped in
+  `extern "C"` guards and are self-contained, so the core builds and links
+  cleanly from C++ (g++/clang++). A CI job (`header-cxx`) compiles the full
+  header set as C++ to keep this guarantee green.
+- **PHP**: PHP 8.0+ (8.5 tested). The extension is built with `phpize` (DDEV
+  path) or the CMake `BUILD_PHP=ON` path; on macOS the linker uses
+  `-undefined dynamic_lookup` so PHP runtime symbols resolve when the
+  extension loads.
+
 ## Quick Start with DDEV (Recommended)
 
 The easiest way to get started is using [DDEV](https://ddev.com/):
@@ -45,17 +62,31 @@ ddev exec php -m | grep snobol
 - CMake 3.16+
 - C compiler
 
-### Build Steps
+### Build Steps (phpize)
 
 ```bash
-# From project root
+# From the bindings directory
 cd bindings/php
 
-# Configure with CMake
-cmake -B build -DBUILD_PHP=ON
+# Generate the configure script and build the extension
+phpize
+./configure --enable-snobol
+make -j"$(nproc)"
 
-# Build
+# The compiled module is ./modules/snobol.so
+```
+
+### Build Steps (CMake, alternative)
+
+The core also exposes a CMake `BUILD_PHP=ON` option that links the extension
+against the built `snobol4` static library. Run it from the **repository
+root** (the option lives in the top-level `CMakeLists.txt`):
+
+```bash
+# From the repository root
+cmake -B build -DBUILD_PHP=ON
 cmake --build build
+```
 
 # Install (may require sudo)
 cmake --install build
@@ -419,7 +450,7 @@ returns `FAILURE`. You can query the version from PHP:
 ```php
 $v = snobol_get_api_version();
 $major = ($v >> 16) & 0xFF;  // 0
-$minor = ($v >> 8) & 0xFF;   // 7
+$minor = ($v >> 8) & 0xFF;   // 12
 $patch = $v & 0xFF;          // 0
 ```
 
