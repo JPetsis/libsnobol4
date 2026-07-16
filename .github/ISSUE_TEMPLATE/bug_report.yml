@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a defect in the C core or PHP binding
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please do **not** use
+        this form to report security vulnerabilities — see
+        [SECURITY.md](../../SECURITY.md) for private reporting.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of libsnobol4 is affected?
+      options:
+        - C core (core/)
+        - PHP binding (bindings/php/)
+        - Build system / CMake
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Release tag (e.g. core/v0.12.0) or git commit SHA.
+      placeholder: "core/v0.12.0 or abc1234"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Provide a minimal reproducer — ideally the pattern, the subject
+        string, and the code (C snippet, PHP snippet, or a failing test case).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, compiler + version, CMake version, and (if relevant) PHP version.
+      placeholder: |
+        - OS: macOS 14.5 (arm64)
+        - Compiler: clang 17.0.0
+        - CMake: 3.29
+        - PHP: 8.4 (if PHP binding)
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true

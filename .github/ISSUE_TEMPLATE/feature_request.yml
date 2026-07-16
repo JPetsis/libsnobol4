@@ -1,0 +1,52 @@
+name: Feature request
+description: Suggest a new capability or improvement
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. Note that per the project's
+        constraints, new functionality **must be implemented in the C core
+        first**; PHP-only features are out of scope.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - C core (core/)
+        - PHP binding (bindings/php/)
+        - Build system / CMake
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or API you would like. Include examples if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I understand new functionality must land in the C core first.
+          required: true

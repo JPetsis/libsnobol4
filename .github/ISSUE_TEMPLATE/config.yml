@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/JPetsis/libsnobol4/security/advisories/new
+    about: Please report security vulnerabilities privately, not as public issues. See SECURITY.md.
+  - name: Question / discussion
+    url: https://github.com/JPetsis/libsnobol4/discussions
+    about: Ask usage questions or discuss ideas here instead of opening an issue.
