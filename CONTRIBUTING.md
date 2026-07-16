@@ -308,110 +308,13 @@ hand-edit version literals in any header.
 
 ## Getting Help
 
-- **Documentation**: See `README.md` and `bindings/php/README.md`
-- **Issues**: Open an issue on GitHub
-- **Discussions**: Use GitHub Discussions for questions
-
-## SLJIT JIT Backend
-
-The JIT compiler uses **SLJIT** as the single backend covering all supported
-architectures (x86-64, AArch64, ARMv7, RISC-V 64). SLJIT is the default and
-only supported `SNOBOL_JIT_BACKEND`; no architecture-specific CMake option is
-needed.
-
-```bash
-cmake -B build -DBUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
-### JIT Configuration
-
-The JIT has two tiers:
-
-- **Per-IP hot-trace JIT** (always on when `SNOBOL_JIT=1`): compiles frequently
-  executed bytecode regions into native code at runtime. Hotness and budget
-  thresholds can be tuned via `SnobolJitConfig`.
-- **Method JIT** (on by default via `SnobolJitConfig.method_enabled`):
-  compiles entire patterns ahead of execution. The compiled function is
-  cached and reused across calls. Toggle via:
-
-```c
-SnobolJitConfig config = snobol_jit_get_config();
-config.method_enabled = 1;   // enable (default)
-config.max_compiled_patterns = 128;
-snobol_jit_set_config(&config);
-```
-
-### W^X Policy
-
-The JIT uses a **write-then-execute** (W^X) model on all platforms:
-
-1. Pages are allocated writable, not executable.
-2. After code emission, pages are switched to executable, not writable.
-3. Pages are never simultaneously writable and executable.
-
-On Linux this uses `mmap(PROT_READ|PROT_WRITE)` → `mprotect(PROT_READ|PROT_EXEC)`;
-on macOS `mmap` with `MAP_JIT`; on Windows `VirtualAlloc` → `VirtualProtect`.
-
-### QEMU Multi-Architecture Testing
-
-The CI matrix uses QEMU user-mode emulation via `docker/setup-qemu-action`
-to validate correctness on non-native architectures. To reproduce locally:
-
-```bash
-# Enable QEMU binfmt support (one-time)
-docker run --privileged --rm tonistiigi/binfmt --install all
-
-# Build multi-platform Docker image (single Dockerfile for all archs)
-docker build -t jit-qemu -f ci/Dockerfile.jit-qemu .
-
-# Run with platform emulation
-docker run --rm --platform linux/arm64 jit-qemu
-docker run --rm --platform linux/arm/v7 jit-qemu
-docker run --rm --platform linux/riscv64 jit-qemu
-```
-
-CI jobs in `.github/workflows/ci-core.yml`:
-- `jit-qemu-smoke`: consolidated job with `matrix.platform: [ linux/arm64, linux/arm/v7, linux/riscv64 ]`
-
-## `SNOBOL_JIT_DUMP_IR` Debugging Workflow
-
-Set the `SNOBOL_JIT_DUMP_IR` environment variable to `1` to dump the architecture-neutral
-IR to `stderr` before the backend lowerer runs:
-
-```bash
-# Enable IR dumping
-SNOBOL_JIT_DUMP_IR=1 ctest --test-dir build --output-on-failure
-
-# Or with a specific test
-SNOBOL_JIT_DUMP_IR=1 ctest --test-dir build -R test_jit --verbose
-```
-
-**What you will see:**
-
-```
-=== IR dump (region @ bc[0..47], 12 instrs) ===
-   0: COPY            v1, v0
-   1: LIT_IMM         v2, 104        # 'h'
-   2: LIT_IMM         v3, 101        # 'e'
-   3: COPY            v4, v2
-   ...
-  11: ACCEPT          v0
-=== end IR dump ===
-```
-
-**Workflow:**
-1. Run a specific pattern test with `SNOBOL_JIT_DUMP_IR=1`
-2. Inspect the IR dump to verify the lifter produced correct IR
-3. If a backend miscompiles, compare IR dumps across backends to isolate whether the issue is in the lifter (shared) or the lowerer (backend-specific)
-4. For backend-specific debugging, add `fprintf(stderr, ...)` in the lowerer function (`jit_backend_*.c`)
-
-**Note**: `SNOBOL_JIT_DUMP_IR` is an environment variable, not a CMake option. No rebuild is needed to toggle it.
+ - **Documentation**: See `README.md` and `bindings/php/README.md`
+ - **Issues**: Open an issue on GitHub
+ - **Discussions**: Use GitHub Discussions for questions
 
 ---
 
-**Quick start:**
+**Windows / cross-compiler quick start:**
 
 ```bash
 # Visual Studio 2022
