@@ -21,7 +21,8 @@ set(_core_sources
     src/string_fn.c
     src/type_fn.c
     src/pattern_build.c
-    src/search.c
+    src/search_meta.c
+    src/search_tiers.c
     src/search_simd.c
     src/unicode_fold.c
     src/api.c
