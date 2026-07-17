@@ -378,7 +378,7 @@ static void test_non_eligible_fallback(void) {
   VM vm = make_vm(bc, bc_len);
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, "a,b,c", 5, 0, &meta, NULL, &result, NULL);
-   test_assert(ok, "BREAKX matches via accelerated BREAK path (Tier 1a)");
+   test_assert(ok, "BREAKX matches via accelerated BREAK path");
    /* BREAKX(',') on "a,b,c" matches the leading non-delimiter run "a":
     * start 0, end 1 (exclusive of the following ','). */
    test_assert(result.match_start == 0, "BREAKX match_start == 0 ('a')");

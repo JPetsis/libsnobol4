@@ -421,27 +421,39 @@ int main(void) {
   }
 
   /* ── Summary table ───────────────────────────────────────────────────── */
+  /* Compute the widest suite name so long names stay aligned. */
+  int name_w = 12; /* "TOTAL" + margin */
+  for (int i = 0; i < suite_count; i++) {
+    int len = (int)strlen(suite_results[i].name);
+    if (len > name_w)
+      name_w = len;
+  }
+  name_w += 2;
+
   printf("\n");
   print_rule('=');
-  printf("  %-*s  %7s  %7s  %9s\n", NAME_WIDTH, "Suite", "Passed", "Failed",
-         "Time(ms)");
+  printf("  %-*s  %7s  %7s  %7s  %9s\n", name_w, "Suite", "Tests", "Passed",
+          "Failed", "Time(ms)");
   print_rule('-');
 
   double total_ms = 0.0;
+  int total_tests = 0;
   for (int i = 0; i < suite_count; i++) {
     SuiteResult *r = &suite_results[i];
+    int tests = r->passed + r->failed;
+    total_tests += tests;
     if (r->failed > 0)
-      printf("  \033[31m✗\033[0m %-*s  %7d  \033[31m%7d\033[0m  %9.2f\n",
-             NAME_WIDTH - 2, r->name, r->passed, r->failed, r->time_ms);
+      printf("  \033[31m✗\033[0m %-*s  %7d  %7d  \033[31m%7d\033[0m  %9.2f\n",
+             name_w - 2, r->name, tests, r->passed, r->failed, r->time_ms);
     else
-      printf("  ✓ %-*s  %7d  %7d  %9.2f\n", NAME_WIDTH - 2, r->name, r->passed,
-             r->failed, r->time_ms);
+      printf("  ✓ %-*s  %7d  %7d  %7d  %9.2f\n", name_w - 2, r->name, tests,
+             r->passed, r->failed, r->time_ms);
     total_ms += r->time_ms;
   }
 
   print_rule('-');
-  printf("  %-*s  %7d  %7d  %9.2f\n", NAME_WIDTH, "TOTAL", test_ctx.passed,
-         test_ctx.failed, total_ms);
+  printf("  %-*s  %7d  %7d  %7d  %9.2f\n", name_w, "TOTAL", total_tests,
+         test_ctx.passed, test_ctx.failed, total_ms);
   print_rule('=');
 
   if (test_ctx.failed == 0)
