@@ -703,6 +703,8 @@ $p = Pattern::fromString("'hello'");                    // Literal
 $p = Pattern::fromString("SPAN('0-9')");                // Digit span
 $p = Pattern::fromString("'id:' SPAN('0-9')");          // Concatenation
 $p = Pattern::fromString("'foo' | 'bar'");              // Alternation
+$p = Pattern::fromString("BREAK(',')");                 // Consume until comma (Tier 0)
+$p = Pattern::fromString("BREAKX(',')");                // BREAK with backtrack retry
 ```
 
 See [Appendix: SNOBOL4 String Syntax](#18-appendix-snobol4-string-syntax) for the full SNOBOL4 pattern language.
@@ -944,6 +946,10 @@ $p = Builder::lit("old");
 $result = PatternHelper::replace($p, "new", "old text with old words");
 // Returns "new text with new words"
 ```
+
+### Reusable search state (performance)
+
+`Pattern::searchSplit`, `searchSplitOffsets`, `searchAll`, and `searchReplace` reuse a single search state across every match within a call — the state is created once and reset (not re-`malloc`'d or re-derived) between matches. This makes repeated searching over a fixed subject materially cheaper than calling `Pattern::match` in a loop: in the diagnostic probe the reuse path runs **~40–45% faster** per search call than the one-shot convenience path (`tokenize_reuse` ≈ 198–204 ns vs `tokenize_conv` ≈ 320–360 ns). For tight tokenization loops, prefer the `search*` family over repeated `match` calls; the zero-length-allocation `searchSplitOffsets` variant is the cheapest when you only need positions.
 
 **PHP equivalent:** `str_replace("old", "new", "old text with old words")`
 
