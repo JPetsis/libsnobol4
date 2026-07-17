@@ -714,97 +714,75 @@ static void php_snobol_init_vm_for_search(VM *vm,
 
 /* Core search loop shared by Pattern::searchAll and PatternHelper::matchAll.
  * Returns an array of match-result arrays (each with _match_len, _match_start, _output, _metrics).
- * The caller must pass a valid compiled pattern internals. */
+ * The caller must pass a valid compiled pattern internals.
+ *
+ * P1 (search-perf-measured-wins): uses the stateful snobol_pattern_search_ex()
+ * API so the VM, output buffer, and cached DFA are reused across iterations
+ * instead of re-derived/re-allocated on every call. Captures are read lazily
+ * via snobol_match_get_variable(); the per-call choice-stack metrics are no
+ * longer available through the reuse path and are reported as 0. */
 void php_snobol_do_search_all(snobol_pattern_t *intern,
-                               const char *subject_val, size_t subject_len,
-                               zval *result) {
-    /* Use cached metadata from compile time */
-    const snobol_search_meta_t *meta = &intern->meta;
-
+                                const char *subject_val, size_t subject_len,
+                                zval *result) {
     array_init(result);
     size_t search_offset = 0;
 
-    VM vm;
-    EmitBuf eb = {NULL, 0, 0};
-    php_snobol_init_vm_for_search(&vm, intern, &eb);
-    vm.keep_choices = true;
-
-#ifdef SNOBOL_DYNAMIC_PATTERN
-    dynamic_pattern_cache_t dyn_cache;
-    if (dynamic_pattern_cache_init(&dyn_cache, 64)) vm.dyn_cache = &dyn_cache;
-#endif
-
-#define MAX_CHOICE_BYTES (1024 * 1024)
+    snobol_pattern_search_state_t *state =
+        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+    snobol_pattern_search_state_set_pattern(state, intern);
+    if (!state) {
+        return;
+    }
 
     while (search_offset <= subject_len) {
-#ifdef SNOBOL_DYNAMIC_PATTERN
-        vm.dyn_pending_source = NULL; vm.dyn_pending_source_len = 0;
-        vm.dyn_pending_bc     = NULL; vm.dyn_pending_bc_len = 0;
-#endif
+        snobol_match_t *m = snobol_pattern_search_ex(state, subject_val,
+                                                     subject_len, search_offset);
+        if (!m || !snobol_match_success(m)) {
+            break;
+        }
 
-        snobol_search_result_t match;
-        bool found = snobol_search_exec(&vm, subject_val, subject_len,
-                                         search_offset, meta, NULL,
-                                         &match, NULL);
-
-#ifdef SNOBOL_DYNAMIC_PATTERN
-        if (vm.dyn_pending_source) { efree(vm.dyn_pending_source); vm.dyn_pending_source = NULL; }
-        if (vm.dyn_pending_bc)     { efree(vm.dyn_pending_bc);     vm.dyn_pending_bc     = NULL; }
-#endif
-
-        if (!found) break;
+        size_t match_start = snobol_match_get_position(m);
+        size_t match_end = match_start + snobol_match_get_length(m);
 
         zval match_arr;
         array_init(&match_arr);
-        for (size_t i = 0; i < vm.var_count; ++i) {
-            size_t a = vm.var_start[i];
-            size_t b = vm.var_end[i];
+        for (size_t i = 0; i < m->var_count; ++i) {
             char key[32];
             snprintf(key, sizeof(key), "v%u", (unsigned)i);
-            if (b >= a && b <= vm.len + match.match_start) {
-                add_assoc_stringl(&match_arr, key,
-                    subject_val + match.match_start + a, b - a);
+            size_t vlen = 0;
+            const char *vval = snobol_match_get_variable(m, key, &vlen);
+            if (vval && vlen > 0) {
+                add_assoc_stringl(&match_arr, key, vval, vlen);
             } else {
                 add_assoc_null(&match_arr, key);
             }
         }
-        add_assoc_long(&match_arr, "_match_len", (zend_long)match.match_end);
-        add_assoc_long(&match_arr, "_match_start", (zend_long)match.match_start);
-        if (eb.buf && eb.len > 0) {
-            add_assoc_stringl(&match_arr, "_output", eb.buf, eb.len);
-            eb.len = 0;
+        add_assoc_long(&match_arr, "_match_len", (zend_long)match_end);
+        add_assoc_long(&match_arr, "_match_start", (zend_long)match_start);
+        if (m->output && m->output_len > 0) {
+            add_assoc_stringl(&match_arr, "_output", m->output, m->output_len);
         } else {
             add_assoc_string(&match_arr, "_output", "");
         }
 
         zval metrics;
         array_init(&metrics);
-        add_assoc_long(&metrics, "choice_push_count", (zend_long)vm.choice_push_count);
-        add_assoc_long(&metrics, "choice_allocated", (zend_long)vm.choice_allocated);
-        add_assoc_long(&metrics, "choice_peak_depth", (zend_long)vm.choice_peak_depth);
-        add_assoc_long(&metrics, "choice_peak_memory", (zend_long)vm.choice_peak_memory);
+        /* Choice-stack metrics are not exposed by the reuse path; report 0. */
+        add_assoc_long(&metrics, "choice_push_count", 0);
+        add_assoc_long(&metrics, "choice_allocated", 0);
+        add_assoc_long(&metrics, "choice_peak_depth", 0);
+        add_assoc_long(&metrics, "choice_peak_memory", 0);
         snobol_assoc_zval(&match_arr, "_metrics", 8, &metrics);
         zval_ptr_dtor(&metrics);
 
         add_next_index_zval(result, &match_arr);
 
-        if (vm.choice_allocated > MAX_CHOICE_BYTES) {
-            snobol_free(vm.choices); vm.choices = NULL;
-            if (vm.write_log) { snobol_free(vm.write_log); vm.write_log = NULL; vm.write_log_cap = 0; }
-        }
-
-        size_t match_len = match.match_end - match.match_start;
+        size_t match_len = match_end - match_start;
         if (match_len == 0) match_len = 1;
-        search_offset = match.match_start + match_len;
+        search_offset = match_start + match_len;
     }
 
-    if (eb.buf) efree(eb.buf);
-#ifdef SNOBOL_DYNAMIC_PATTERN
-    if (vm.dyn_cache) dynamic_pattern_cache_destroy(vm.dyn_cache);
-#endif
-    vm.keep_choices = false;
-    if (vm.choices) { snobol_free(vm.choices); vm.choices = NULL; }
-    if (vm.write_log && vm.use_compact_choice) { vm_write_log_free(&vm); }
+    snobol_pattern_search_state_destroy(state);
 }
 
 /**
