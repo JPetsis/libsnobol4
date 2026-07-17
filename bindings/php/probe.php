@@ -270,6 +270,19 @@ function run_span_comma(int $iters): array
 }
 
 /** @return array{iters:int,total_ns:int} */
+function run_break(int $iters): array
+{
+    // Exercises the TIER_BREAK_SCAN path (T0) through the binding.
+    $p = PatternHelper::fromString("BREAK(',')");
+    for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_CSV']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($GLOBALS['SUBJECT_CSV']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+/** @return array{iters:int,total_ns:int} */
 function run_alternation(int $iters): array
 {
     $p = PatternHelper::fromString("'a' | 'b' | 'c'");
@@ -376,6 +389,7 @@ $scenarios = [
     ['name' => 'literal_fail',        'run' => 'run_literal_fail',        'iter' => $iters],
     ['name' => 'literal_ok',          'run' => 'run_literal_ok',          'iter' => $iters],
     ['name' => 'span_comma',          'run' => 'run_span_comma',          'iter' => $iters],
+    ['name' => 'break_comma',         'run' => 'run_break',               'iter' => $iters],
     ['name' => 'alternation',         'run' => 'run_alternation',         'iter' => $iters],
     ['name' => 'alt_literals',        'run' => 'run_alt_literals',        'iter' => $iters],
     ['name' => 'alt_literals_search', 'run' => 'run_alt_literals_search', 'iter' => $iters],
