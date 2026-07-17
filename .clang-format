@@ -1,0 +1,58 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# Indentation (2-space indent throughout)
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+IndentCaseLabels: true
+IndentPPDirectives: None
+NamespaceIndentation: None
+
+# Braces — K&R style (opening brace on same line for everything)
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+
+# Line length
+ColumnLimit: 80
+
+# Alignment
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignEscapedNewlines: Left
+AlignOperands: Align
+AlignTrailingComments: true
+
+# Pointer/reference alignment — attach to variable name
+PointerAlignment: Right
+ReferenceAlignment: Right
+DerivePointerAlignment: false
+
+# Spaces
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyBlock: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# Includes
+SortIncludes: false
+IncludeBlocks: Preserve
+
+# Other
+ReflowComments: false
+BinPackArguments: true
+BinPackParameters: true
+AllowAllParametersOfDeclarationOnNextLine: true
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+Cpp11BracedListStyle: true
+FixNamespaceComments: false
+MaxEmptyLinesToKeep: 2
+...
