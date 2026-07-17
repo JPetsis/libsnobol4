@@ -88,6 +88,90 @@ static bool alt_literals_share_prefix(const uint8_t *bc, size_t bc_len,
 }
 
 /* ---------------------------------------------------------------------------
+ * Alternation-of-literals shared-prefix extractor (P5).
+ *
+ * Walks the SPLIT/LIT tree (same shape check_alt_literals accepts) collecting
+ * every leaf literal's byte string, then returns the longest common leading
+ * prefix across all alternatives.  Caller uses this as a Boyer–Moore–Horspool
+ * skip window: a match can only begin where the subject equals the shared
+ * prefix, so failing positions advance by more than one byte.
+ *
+ * Returns the shared-prefix length (0 if none / not an alt-literal tree).
+ * `prefix` must point to a buffer of at least SNOBOL_SEARCH_MAX_PREFIX bytes.
+ * --------------------------------------------------------------------------- */
+static size_t alt_literals_shared_prefix(const uint8_t *bc, size_t bc_len,
+                                         uint8_t *prefix) {
+  const uint8_t *lits[64];
+  size_t lit_lens[64];
+  size_t nl = 0;
+
+  size_t stack[64];
+  int sp = 0;
+  stack[sp++] = 0;
+
+  while (sp > 0) {
+    size_t p = stack[--sp];
+    if (p + 2 > bc_len)
+      return 0;
+    uint8_t op = bc[p];
+    if (op == OP_LIT) {
+      if (p + 10 > bc_len)
+        return 0;
+      uint32_t off = search_read_u32(bc, p + 1);
+      uint32_t len = search_read_u32(bc, p + 5);
+      if (off >= bc_len || off + len > bc_len)
+        return 0;
+      if (len == 0)
+        return 0; /* empty alternative: no useful prefix */
+      if (nl < 64) {
+        lits[nl] = bc + off;
+        lit_lens[nl] = len;
+        nl++;
+      }
+    } else if (op == OP_SPLIT) {
+      if (p + 9 > bc_len)
+        return 0;
+      uint32_t a = search_read_u32(bc, p + 1);
+      uint32_t b = search_read_u32(bc, p + 5);
+      if (a >= bc_len || b >= bc_len)
+        return 0;
+      if (sp + 2 > 64)
+        return 0;
+      stack[sp++] = b;
+      stack[sp++] = a;
+    } else {
+      return 0;
+    }
+  }
+
+  if (nl < 2)
+    return 0; /* need at least two alternatives to be an alternation */
+
+  /* Longest common prefix across all collected literals. */
+  size_t max_len =
+      lit_lens[0] < SNOBOL_SEARCH_MAX_PREFIX
+          ? lit_lens[0]
+          : SNOBOL_SEARCH_MAX_PREFIX;
+  size_t shared = 0;
+  for (size_t i = 0; i < max_len; i++) {
+    uint8_t b = lits[0][i];
+    bool all_same = true;
+    for (size_t j = 1; j < nl; j++) {
+      if (i >= lit_lens[j] || lits[j][i] != b) {
+        all_same = false;
+        break;
+      }
+    }
+    if (!all_same)
+      break;
+    prefix[shared++] = b;
+  }
+  return shared;
+}
+
+
+
+/* ---------------------------------------------------------------------------
  * Start-byte bitmap helpers
  *
  * A 256-bit bitmap: bit i set → pattern CAN match starting with byte i.
@@ -1121,6 +1205,26 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
      * 125x regression on flat alternation patterns. */
     if (out->is_alt_literals)
       out->is_alt_literals_flat = !alt_literals_share_prefix(bc, bc_remain, 0);
+
+    /* P5: a shared leading prefix across the alternatives lets the per-offset
+     * trial loop (TIER_GENERAL / TIER_AUTOMATON) skip failing positions by more
+     * than one byte via a Boyer–Moore–Horspool window.  Populate the BMH
+     * skip from the shared prefix.  We deliberately do NOT set
+     * has_literal_prefix (which would misroute to TIER_PREFIX) — the shared
+     * prefix is only used to build the skip table below. */
+    if (out->is_alt_literals) {
+      uint8_t sprefix[SNOBOL_SEARCH_MAX_PREFIX];
+      size_t sp_len = alt_literals_shared_prefix(bc, bc_remain, sprefix);
+      if (sp_len >= 1) {
+        size_t plen = sp_len < SNOBOL_SEARCH_MAX_PREFIX
+                          ? sp_len
+                          : SNOBOL_SEARCH_MAX_PREFIX;
+        memcpy(out->literal_prefix, sprefix, plen);
+        out->literal_prefix_len = plen;
+        out->has_bmh_skip = true;
+        out->bmh_skip_len = plen;
+      }
+    }
   }
 
   /* ---- Automaton eligibility ---- */
@@ -1225,8 +1329,13 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     out->bmh_skip = (uint8_t *)snobol_malloc(256);
     if (out->bmh_skip) {
       memset(out->bmh_skip, (int)out->bmh_skip_len, 256);
-      /* Repopulate from literal prefix if available */
-      if (out->has_literal_prefix) {
+      /* Repopulate from literal prefix if available.  For a single literal
+       * prefix this is gated on has_literal_prefix; for an alternation-of-
+       * literals shared prefix (P5) has_literal_prefix stays false but the
+       * shared prefix bytes were stored in literal_prefix for exactly this
+       * purpose.  In both cases the prefix is valid BMH skip data. */
+      if (out->has_literal_prefix ||
+          (out->has_bmh_skip && out->literal_prefix_len > 0)) {
         size_t plen = out->literal_prefix_len < SNOBOL_SEARCH_MAX_PREFIX
                           ? out->literal_prefix_len
                           : SNOBOL_SEARCH_MAX_PREFIX;

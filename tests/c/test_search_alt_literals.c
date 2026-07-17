@@ -248,9 +248,64 @@ void test_2byte_prefix_memchr(void) {
   snobol_context_destroy(ctx);
 }
 
+/* P5: shared-prefix alternation-of-literals enables BMH skip in the
+ * per-offset trial loop (TIER_GENERAL / TIER_AUTOMATON).  The shared prefix
+ * 'ab' of 'abc'|'abd' must populate the BMH skip window; flat alternatives
+ * ('foo'|'bar') share no prefix and must NOT set has_bmh_skip. */
+void test_alt_literals_bmh_skip(void) {
+  test_suite("Alt-literals: P5 BMH skip from shared prefix");
+
+  /* Bushy: 'abc' | 'abd'  (shared prefix "ab") */
+  uint8_t bc_bushy[256];
+  size_t len_bushy = build_split_lit_lit(bc_bushy, "abc", 3, "abd", 3);
+  snobol_search_meta_t meta_b;
+  snobol_search_derive_meta(bc_bushy, len_bushy, &meta_b);
+
+  test_assert(meta_b.is_alt_literals, "detected as alt-literals");
+  test_assert(!meta_b.is_alt_literals_flat, "classified bushy (shared prefix)");
+  test_assert(meta_b.has_bmh_skip, "has_bmh_skip set for shared prefix");
+  test_assert(meta_b.bmh_skip_len == 2, "bmh_skip_len == 2 (shared 'ab')");
+  test_assert(meta_b.literal_prefix_len == 2, "literal_prefix_len == 2");
+  test_assert(meta_b.literal_prefix[0] == 'a' && meta_b.literal_prefix[1] == 'b',
+              "shared prefix bytes are 'ab'");
+  test_assert(!meta_b.has_literal_prefix,
+              "has_literal_prefix stays false (no TIER_PREFIX misroute)");
+  /* BMH table: prefix[0]='a' gets skip 1 (plen-1-0), other bytes skip 2. */
+  test_assert(meta_b.bmh_skip[(uint8_t)'a'] == 1,
+              "BMH skip for prefix[0] is 1 (plen-1-0)");
+  test_assert(meta_b.bmh_skip[(uint8_t)'z'] == 2,
+              "BMH skip for non-prefix byte is 2");
+
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  vm.bc = bc_bushy;
+  vm.bc_len = len_bushy;
+  snobol_search_result_t r;
+  bool ok = snobol_search_exec(&vm, "xxabcyy", 7, 0, &meta_b, NULL, &r, NULL);
+  test_assert(ok && r.match_start == 2, "'abc' matches at offset 2");
+  ok = snobol_search_exec(&vm, "xxabdyy", 7, 0, &meta_b, NULL, &r, NULL);
+  test_assert(ok && r.match_start == 2, "'abd' matches at offset 2");
+  ok = snobol_search_exec(&vm, "zzzzzzz", 7, 0, &meta_b, NULL, &r, NULL);
+  test_assert(!ok, "no match when no shared-prefix start");
+  snobol_search_meta_free(&meta_b);
+
+  /* Flat: 'foo' | 'bar'  (no shared prefix) */
+  uint8_t bc_flat[256];
+  size_t len_flat = build_split_lit_lit(bc_flat, "foo", 3, "bar", 3);
+  snobol_search_meta_t meta_f;
+  snobol_search_derive_meta(bc_flat, len_flat, &meta_f);
+
+  test_assert(meta_f.is_alt_literals, "flat detected as alt-literals");
+  test_assert(meta_f.is_alt_literals_flat, "classified flat");
+  test_assert(!meta_f.has_bmh_skip,
+              "has_bmh_skip NOT set for flat (no shared prefix)");
+  snobol_search_meta_free(&meta_f);
+}
+
 void test_search_alt_literals_suite(void) {
   test_alt_literals_flat_fallback();
   test_alt_literals_bushy_trie();
   test_tier5_start_bitmap_skip();
   test_2byte_prefix_memchr();
+  test_alt_literals_bmh_skip();
 }

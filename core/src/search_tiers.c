@@ -3086,7 +3086,11 @@ dispatch_search_impl(VM * SNOBOL_RESTRICT vm,
     * Pure SPAN/BREAK patterns (simd_eligible=true, any tier) skip the
     * automaton: the O(n) bitmap or SIMD NFA scan is faster and avoids
     * the O(n²) per-position automaton trial loop. */
-  if (dfa && meta->automaton_eligible && !meta->is_alt_literals_flat &&
+  /* P5 note: has_bmh_skip is now also set for bushy alternation-of-literals
+   * (shared prefix).  Those must stay on the trie path (TIER_ALT_LIT), so the
+   * automaton reroute excludes all alt-literals; only flat alternations
+   * (which have no shared prefix and thus no BMH skip) can reach the DFA. */
+  if (dfa && meta->automaton_eligible && !meta->is_alt_literals &&
       (meta->has_bmh_skip ||
        (!meta->simd_eligible && dispatch_tier >= TIER_SEARCH_VM))) {
     dispatch_tier = TIER_AUTOMATON;
