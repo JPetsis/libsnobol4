@@ -151,8 +151,11 @@ class CPhpCouplingTest extends TestCase
     private function resolvePhpProbe(): ?string
     {
         $candidates = [
+            __DIR__ . '/../../../bindings/php/probe.php', // actual PHP probe (repo)
             __DIR__ . '/../../../bench/php/probe.php',
-            '/var/www/bench/php/probe.php', // ddev
+            '/var/www/html/probe.php',                    // ddev (web root is bindings/php)
+            '/var/www/bindings/php/probe.php',            // ddev (alt)
+            '/var/www/bench/php/probe.php',               // ddev (legacy)
         ];
         foreach ($candidates as $p) {
             if (is_file($p)) return $p;

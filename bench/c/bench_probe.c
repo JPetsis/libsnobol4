@@ -1013,8 +1013,8 @@ int main(void) {
         /* { "cap_search",          run_cap_match,           iters            }, */
         /* { "alternation",         run_alternation,         iters            }, */
         /* { "alt_search",          run_alt_search,          iters            }, */
-        /* { "alt_literals",        run_alt_literals,        iters            }, */
-        /* { "alt_literals_search", run_alt_literals_search, iters            }, */
+        { "alt_literals",        run_alt_literals,        iters            },
+        { "alt_literals_search", run_alt_literals_search, iters            },
         /* { "automaton",           run_automaton,           iters            }, */
         /* { "span_simd",           run_span_simd,           iters            }, */
         /* { "span_simd_miss",      run_span_simd_miss,      iters            }, */
