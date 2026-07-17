@@ -742,10 +742,25 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
     state->out_buf.data[0] = '\0';
   }
 
-  /* Use the search metadata derived at state creation time. */
+  /* Use the search metadata derived at state creation time.
+   * Reuse the cached DFA (built once and attached to the owning pattern) so
+   * automaton-eligible patterns route to the fast Tier 7 path on every call —
+   * the previous dfa=NULL argument disabled automaton acceleration in the
+   * reuse path, forcing the slower SEARCH_VM/GENERAL tiers and destroying the
+   * reuse API's whole reason to exist. */
+  snobol_dfa_t *dfa = NULL;
+  if (state->meta.automaton_eligible && state->pattern) {
+    dfa = snobol_pattern_get_automaton(state->pattern);
+    if (!dfa) {
+      dfa = build_dfa(state->bc, state->bc_len, &state->vm);
+      if (dfa)
+        snobol_pattern_set_automaton(state->pattern, dfa);
+    }
+  }
+
   snobol_search_result_t sr;
   bool ok = snobol_search_exec(&state->vm, subject, subject_len, start_offset,
-                               &state->meta, NULL, &sr, NULL);
+                               &state->meta, dfa, &sr, NULL);
   state->match.success = ok;
   /* sr.match_start is already an absolute position in the subject
    * (not relative to start_offset). Do NOT add start_offset again. */
