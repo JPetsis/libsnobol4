@@ -1715,6 +1715,22 @@ static void epsilon_closure(const uint8_t *bc, size_t bc_len, uint16_t start,
         }
         break;
 
+      case OP_LIT: {
+        /* A zero-length literal matches the empty string, consuming no input,
+         * so it is an epsilon transition to the instruction that follows it.
+         * Without this, patterns such as '' never mark their start state as
+         * accepting and the automaton reports no match. */
+        if (ip + 9 <= bc_len) {
+          uint32_t lit_len = search_read_u32(bc, ip + 5);
+          if (lit_len == 0 &&
+              !nfa_set_contains(out, (uint16_t)(off + 9))) {
+            nfa_set_add(out, (uint16_t)(off + 9));
+            changed = true;
+          }
+        }
+        break;
+      }
+
       case OP_ANCHOR:
         if (ip + 2 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 2))) {
           nfa_set_add(out, (uint16_t)(off + 2));
@@ -2367,6 +2383,19 @@ static bool search_automaton_exec(const snobol_dfa_t *dfa,
     uint16_t state = start_state;
     size_t match_start = pos;
     size_t start_pos = pos;
+
+    /* Zero-length match: the start state itself is accepting, so the empty
+     * string matches at this position before any byte is consumed.  This must
+     * be checked up front — the byte-driven loop below only inspects states
+     * reached after consuming input, so without this check patterns that can
+     * match the empty string (e.g. '') would never report a match at interior
+     * positions. */
+    if (accepting[start_state / 8] & (uint8_t)(1u << (start_state % 8))) {
+      out_result->success = true;
+      out_result->match_start = match_start;
+      out_result->match_end = match_start;
+      return true;
+    }
 
     while (pos < subject_len) {
       uint8_t byte = (uint8_t)subject[pos];

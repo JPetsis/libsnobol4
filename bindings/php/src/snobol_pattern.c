@@ -446,6 +446,9 @@ PHP_METHOD(Snobol_Pattern, match) {
     }
 
     array_init(return_value);
+    /* The engine stores capture register r at var_start[r], with var_count =
+     * max_r + 1.  Emit the "v<r>" key (e.g. capture 0 -> "v0") to match the
+     * search/match paths and the C accessor's accepted name forms. */
     for (size_t i = 0; i < vm.var_count; ++i) {
         size_t a = vm.var_start[i];
         size_t b = vm.var_end[i];

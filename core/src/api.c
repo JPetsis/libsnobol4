@@ -211,7 +211,7 @@ snobol_dfa_t *snobol_pattern_get_automaton(const snobol_pattern_t *pattern) {
 }
 
 void snobol_pattern_set_automaton(snobol_pattern_t *pattern,
-                                   snobol_dfa_t *dfa) {
+                                    snobol_dfa_t *dfa) {
   if (pattern) pattern->automaton = dfa;
 }
 
@@ -621,6 +621,7 @@ struct snobol_pattern_search_state {
   snobol_search_meta_t meta; /* derived once at create time */
   snobol_range_meta_t *range_meta;  /* owned — derived once at create time */
   size_t range_meta_count;
+  snobol_dfa_t *dfa;         /* cached automaton (Tier 7), built once per state */
   bool vm_inited;            /* true after first search call sets it up */
   bool buf_inited;           /* true after first out_buf_init */
 };
@@ -653,6 +654,8 @@ void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
   if (!state)
     return;
   snobol_search_meta_free(&state->meta);
+  if (state->dfa)
+    snobol_dfa_free(state->dfa);
   if (state->buf_inited) {
     snobol_buf_free(&state->out_buf);
   }
@@ -729,12 +732,17 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
    * reuse path, forcing the slower SEARCH_VM/GENERAL tiers and destroying the
    * reuse API's whole reason to exist. */
   snobol_dfa_t *dfa = NULL;
-  if (state->meta.automaton_eligible && state->pattern) {
-    dfa = snobol_pattern_get_automaton(state->pattern);
+  if (state->meta.automaton_eligible) {
+    /* Cache the DFA on the search state (not on the pattern): the PHP-side
+     * pattern struct layout differs from the core snobol_pattern_t and has no
+     * automaton slot, so caching there read uninitialised memory.  The DFA is
+     * derived solely from state->bc/state->bc_len, which are stable for the
+     * state's lifetime, so caching on the state is both correct and safe. */
+    dfa = state->dfa;
     if (!dfa) {
       dfa = build_dfa(state->bc, state->bc_len, &state->vm);
       if (dfa)
-        snobol_pattern_set_automaton(state->pattern, dfa);
+        state->dfa = dfa;
     }
   }
 
@@ -760,10 +768,17 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
   if (n > API_MAX_VARS)
     n = API_MAX_VARS;
   state->match.var_count = n;
+  /* The VM computes capture offsets relative to start_offset (the window
+   * base), but the caller passes the full subject.  Anchor var_subject to
+   * the window base and bound against the window length so materialization
+   * reads the correct absolute span on every reuse call. */
+  const char *win_subject = subject + start_offset;
+  size_t win_len = (start_offset <= subject_len) ? subject_len - start_offset
+                                                 : 0;
   for (int i = 0; i < n; i++) {
     size_t vs = state->vm.var_start[i];
     size_t ve = state->vm.var_end[i];
-    match_store_capture(&state->match, subject, i, vs, ve, subject_len);
+    match_store_capture(&state->match, win_subject, i, vs, ve, win_len);
   }
 
   return &state->match;
@@ -808,15 +823,22 @@ const char *snobol_match_get_variable(snobol_match_t *match, const char *name,
       *len = 0;
     return NULL;
   }
-  /* Variable names are 1-based decimal integers: "1" → index 0 */
+  /* Variable name is the capture register number, either as a bare decimal
+   * integer ("0", "1", …) or with a "v" prefix ("v0", "v1", …) to match the
+   * PHP binding's capture-array keys.  The engine stores capture r at
+   * var_start[r], so the (optionally v-prefixed) number maps directly to the
+   * array index. */
+  const char *p = name;
+  if (p[0] == 'v')
+    p++;
   char *end;
-  long idx = strtol(name, &end, 10);
-  if (end == name || idx < 1 || idx > API_MAX_VARS) {
+  long idx = strtol(p, &end, 10);
+  if (end == p || idx < 0 || idx > API_MAX_VARS) {
     if (len)
       *len = 0;
     return NULL;
   }
-  int i = (int)(idx - 1);
+  int i = (int)idx;
   if (i >= match->var_count) {
     if (len)
       *len = 0;

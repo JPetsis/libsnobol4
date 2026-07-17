@@ -322,11 +322,26 @@ void test_arena_suite(void);
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
-int main(void) {
-  print_rule('=');
-  printf("  SNOBOL4 C Core Test Suite\n");
-  print_rule('=');
+/* Width of the summary table rules + top/bottom banners, so all
+ * divider lines share one width and match the data rows exactly.
+ * Row formats (HEADER/DATA/TOTAL) are all exactly name_w + 31 glyphs:
+ *   "  ✓ <name>  <Passed>  <Failed>  <Time>"
+ *   = 2 + 1(✓) + 1 + name_w(name field) + 2 + 7 + 2 + 7 + 2 + 9
+ * The ✓ is 3 bytes but 1 glyph, so the byte widths differ from the rule's
+ * ASCII width by 2 bytes — invisible on screen.  Return name_w + 31 so the
+ * rule matches the content rows glyph-for-glyph. */
+static int summary_rule_w(void) {
+  int name_w = 12; /* "TOTAL" + margin */
+  for (int i = 0; i < suite_count; i++) {
+    int len = (int)strlen(suite_results[i].name);
+    if (len > name_w)
+      name_w = len;
+  }
+  name_w += 2;
+  return name_w + 31;
+}
 
+int main(void) {
   signal(SIGILL, signal_handler);
   signal(SIGSEGV, signal_handler);
 #ifdef SIGBUS
@@ -430,18 +445,14 @@ int main(void) {
           (SuiteResult){"Stress: Backtracking", _sp, _sf, _ms};
   }
 
-  /* ── Summary table ───────────────────────────────────────────────────── */
-  /* Compute the widest suite name so long names stay aligned. */
-  int name_w = 12; /* "TOTAL" + margin */
-  for (int i = 0; i < suite_count; i++) {
-    int len = (int)strlen(suite_results[i].name);
-    if (len > name_w)
-      name_w = len;
-  }
-  name_w += 2;
 
   printf("\n");
-  int rule_w = name_w + 7 + 2 + 7 + 2 + 9;
+  int rule_w = summary_rule_w();
+  int name_w = rule_w - 31;
+  print_rule_w('=', rule_w);
+  printf("  SNOBOL4 C Core Test Suite\n");
+  print_rule_w('=', rule_w);
+  printf("\n");
   print_rule_w('=', rule_w);
   printf("  %-*s  %7s  %7s  %9s\n", name_w, "Suite", "Passed",
           "Failed", "Time(ms)");
