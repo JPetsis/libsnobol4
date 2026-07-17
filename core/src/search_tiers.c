@@ -756,9 +756,14 @@ static inline void search_vm_init_from_vm(search_vm_t *svm, const VM *vm) {
   memcpy(svm->loop_last_pos, vm->loop_last_pos, sizeof(svm->loop_last_pos));
   svm->max_counter_used = vm->max_counter_used;
   /* Seed capture and variable registers from full VM. Copy only the registers
-   * currently in use; the remainder are always written before they are read,
-   * so a full 2 KiB copy per call is pure waste. */
+   * currently in use; the remainder are zeroed so Valgrind cannot flag an
+   * access to an uninitialized stack slot if the search-VM wrote a high
+   * register without writing all lower ones. */
   {
+    memset(svm->cap_start, 0, sizeof(svm->cap_start));
+    memset(svm->cap_end, 0, sizeof(svm->cap_end));
+    memset(svm->var_start, 0, sizeof(svm->var_start));
+    memset(svm->var_end, 0, sizeof(svm->var_end));
     size_t cap_copy = vm->max_cap_used * sizeof(size_t);
     size_t var_copy = vm->var_count * sizeof(size_t);
     memcpy(svm->cap_start, vm->cap_start, cap_copy);
