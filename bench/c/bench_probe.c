@@ -24,7 +24,29 @@ typedef struct {
     int64_t iters;          /* iterations executed */
     int64_t total_ns;       /* wall time for the loop */
     int64_t ns_per_iter;    /* total_ns / iters */
+    int    tier;           /* structural meta->tier (pattern shape) */
+    int    exec_tier;      /* executed dispatch tier (may differ from tier) */
 } probe_result_t;
+
+/* Capture both the structural tier and the executed dispatch tier for a
+ * pattern over a subject of the given length. The structural tier is the
+ * shape-derived tier (meta->tier); the executed tier is what
+ * dispatch_search_impl actually selects (cost model + DFA override). They
+ * differ whenever the cost model promotes a pattern to a faster tier (e.g.
+ * a structurally SEARCH_VM pattern executed as AUTOMATON). */
+static void capture_tiers(snobol_pattern_t *pat, size_t subject_len,
+                          probe_result_t *r) {
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+    if (!meta) {
+        r->tier = -1;
+        r->exec_tier = -1;
+        return;
+    }
+    r->tier = (int)meta->tier;
+    bool dfa = snobol_pattern_automaton_available(pat);
+    r->exec_tier = (int)snobol_search_executed_tier(meta, dfa,
+                                                    subject_len, false);
+}
 
 /* Comma subject (matches bench_alternation.c) */
 static const char *SUBJECT_CSV =
@@ -325,6 +347,8 @@ static void run_cap_match(int64_t iters, probe_result_t *r) {
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
 
+    capture_tiers(pat, slen, r);
+
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
 }
@@ -346,6 +370,8 @@ static void run_alternation(int64_t iters, probe_result_t *r) {
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
 
+    capture_tiers(pat, slen, r);
+
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
 }
@@ -365,6 +391,8 @@ static void run_alt_search(int64_t iters, probe_result_t *r) {
     r->iters = iters;
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    capture_tiers(pat, slen, r);
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -404,6 +432,8 @@ static void run_tokenize(int64_t iters, probe_result_t *r) {
     r->total_ns = end - start;
     r->ns_per_iter = (total_search_calls > 0) ? (r->total_ns / total_search_calls) : 0;
 
+    capture_tiers(pat, slen, r);
+
     snobol_pattern_search_state_destroy(state);
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -425,6 +455,8 @@ static void run_alt_literals(int64_t iters, probe_result_t *r) {
     r->iters = iters;
     r->total_ns = end - start;
     r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    capture_tiers(pat, slen, r);
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
@@ -734,22 +766,26 @@ static void print_header(void) {
 }
 
 static void print_table(const probe_result_t *results, size_t n) {
-    printf("%-16s %10s %8s\n",
-           "scenario", "ns/iter", "iters");
-    printf("%-16s %10s %8s\n",
-           "-------", "-------", "-----");
+    printf("%-16s %10s %8s %4s %4s\n",
+            "scenario", "ns/iter", "iters", "tier", "exec");
+    printf("%-16s %10s %8s %4s %4s\n",
+            "-------", "-------", "-----", "----", "----");
 
     for (size_t i = 0; i < n; i++) {
         const probe_result_t *r = &results[i];
-        printf("%-16s %10" PRId64 " %8" PRId64 "\n",
-               r->name,
-               r->ns_per_iter,
-               r->iters);
+        printf("%-16s %10" PRId64 " %8" PRId64 " %4d %4d\n",
+                r->name,
+                r->ns_per_iter,
+                r->iters,
+                r->tier,
+                r->exec_tier);
     }
     printf("\n");
     printf("Legend:\n");
     printf("  ns/iter  : wall time per match attempt (lower = faster)\n");
     printf("  iters    : match attempts executed in the scenario\n");
+    printf("  tier     : structural tier (meta->tier, pattern shape)\n");
+    printf("  exec     : executed dispatch tier (cost model + DFA override)\n");
     printf("\n");
 }
 

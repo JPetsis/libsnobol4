@@ -482,11 +482,34 @@ SNOBOL_NODISCARD bool snobol_search_exec(VM *vm, const char *subject,
  * @return true if a match was found starting at offset 0; false otherwise
  */
 SNOBOL_NODISCARD bool snobol_search_exec_anchored(VM *vm, const char *subject,
-                                                  size_t subject_len,
-                                                  const snobol_search_meta_t *meta,
-                                                  const snobol_dfa_t *dfa,
-                                                  snobol_search_result_t *out_result,
-                                                  snobol_search_diag_t *diag);
+                                                   size_t subject_len,
+                                                   const snobol_search_meta_t *meta,
+                                                   const snobol_dfa_t *dfa,
+                                                   snobol_search_result_t *out_result,
+                                                   snobol_search_diag_t *diag);
+
+/**
+ * Diagnostic readout: return the *executed* dispatch tier that
+ * dispatch_search_impl() would select for the given metadata and subject,
+ * distinct from the structural tier reported by snobol_pattern_get_meta() ->
+ * meta.tier.
+ *
+ * The cost model (select_tier_by_cost) may promote a structurally SEARCH_VM
+ * pattern to the AUTOMATON tier when a DFA is available, so benchmarks that
+ * label scenarios by meta->tier mislabel the real path. This function lets the
+ * probe (and external callers) measure the tier actually executed.
+ *
+ * @param meta           Pre-derived search metadata (e.g. from
+ *                       snobol_pattern_get_meta()).
+ * @param dfa_available True when the caller would supply a DFA (enables the
+ *                       Tier-7 automaton override); false otherwise.
+ * @param subject_len    Subject length in bytes.
+ * @param anchored      True for anchored (Pattern::match) matching.
+ * @return The snobol_search_tier_t that would be dispatched.
+ */
+snobol_search_tier_t snobol_search_executed_tier(
+    const snobol_search_meta_t *meta, bool dfa_available, size_t subject_len,
+    bool anchored);
 
 /**
  * Build a DFA from search-VM-eligible bytecode via powerset construction.
