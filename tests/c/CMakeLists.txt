@@ -48,6 +48,7 @@ add_executable(snobol4_tests
     test_search_automaton.c
     test_search_simd.c
     test_search_alt_literals.c
+    test_automaton_skip.c
     test_arena.c
     # New: Unicode fold, case-insensitive patterns, API version
     test_unicode_fold.c

@@ -317,6 +317,7 @@ void test_property_based_suite(void);
 void test_search_automaton_suite(void);
 void test_search_simd_suite(void);
 void test_search_alt_literals_suite(void);
+void test_automaton_skip_suite(void);
 void test_arena_suite(void);
 
 /* ── main ────────────────────────────────────────────────────────────────── */
@@ -387,6 +388,7 @@ int main(void) {
   RUN_SUITE("Search: Automaton", test_search_automaton_suite);
   RUN_SUITE("Search: SIMD NFA", test_search_simd_suite);
   RUN_SUITE("Search: Alt-literals & small-prefix", test_search_alt_literals_suite);
+  RUN_SUITE("Automaton: BMH-skip", test_automaton_skip_suite);
   RUN_SUITE("Arena Allocator", test_arena_suite);
   /* Unicode / API */
   RUN_SUITE("Unicode Fold Table", test_unicode_fold_suite);
@@ -439,31 +441,27 @@ int main(void) {
   name_w += 2;
 
   printf("\n");
-  int rule_w = name_w + 7 + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 9;
+  int rule_w = name_w + 7 + 2 + 7 + 2 + 9;
   print_rule_w('=', rule_w);
-  printf("  %-*s  %7s  %7s  %7s  %7s  %9s\n", name_w, "Suite", "Cases",
-          "Tests", "Passed", "Failed", "Time(ms)");
+  printf("  %-*s  %7s  %7s  %9s\n", name_w, "Suite", "Passed",
+          "Failed", "Time(ms)");
   print_rule_w('-', rule_w);
 
   double total_ms = 0.0;
-  int total_tests = 0;
   for (int i = 0; i < suite_count; i++) {
     SuiteResult *r = &suite_results[i];
-    int tests = r->passed + r->failed;
-    total_tests += tests;
     if (r->failed > 0)
-      printf("  \033[31m✗\033[0m %-*s  %7d  %7d  %7d  \033[31m%7d\033[0m  %9.2f\n",
-             name_w - 2, r->name, 1, tests, r->passed, r->failed, r->time_ms);
+      printf("  \033[31m✗\033[0m %-*s  %7d  \033[31m%7d\033[0m  %9.2f\n",
+             name_w - 2, r->name, r->passed, r->failed, r->time_ms);
     else
-      printf("  ✓ %-*s  %7d  %7d  %7d  %7d  %9.2f\n", name_w - 2, r->name,
-             1, tests, r->passed, r->failed, r->time_ms);
+      printf("  ✓ %-*s  %7d  %7d  %9.2f\n", name_w - 2, r->name,
+             r->passed, r->failed, r->time_ms);
     total_ms += r->time_ms;
   }
 
   print_rule_w('-', rule_w);
-  printf("  %-*s  %7d  %7d  %7d  %7d  %9.2f\n", name_w, "TOTAL",
-         test_ctx.case_count, total_tests, test_ctx.passed, test_ctx.failed,
-         total_ms);
+  printf("  %-*s  %7d  %7d  %9.2f\n", name_w, "TOTAL", test_ctx.passed,
+         test_ctx.failed, total_ms);
   print_rule_w('=', rule_w);
 
   if (test_ctx.failed == 0)
