@@ -343,18 +343,22 @@ static bool search_break_accelerated(VM *vm, const char *subject,
       diag->candidates_skipped += (scan - offset);
     }
 
-    /* Try the VM from `scan` (where BREAK would produce a 0-length match
-     * consuming 0 bytes up to the delimiter).  For BREAKX the VM needs to
-     * confirm the retry semantics. */
-    search_reset_vm(vm, subject, subject_len, scan);
+    /* Run the VM from `offset` (the start of the candidate field). BREAK
+     * consumes the run of non-delimiter bytes up to `scan`, so match_end =
+     * offset + (scan - offset) = scan — i.e. the field "up to, not including,
+     * the delimiter". The previous code placed the cursor at `scan` (the
+     * delimiter itself), which made BREAK match an empty string at the comma.
+     * BREAKX needs the same start; its retry semantics are handled inside the
+     * VM. */
+    search_reset_vm(vm, subject, subject_len, offset);
     if (diag)
       diag->candidates_tested++;
 
     bool ok = vm_exec(vm);
     if (ok) {
       out_result->success = true;
-      out_result->match_start = scan;
-      out_result->match_end = scan + vm->pos;
+      out_result->match_start = offset;
+      out_result->match_end = offset + vm->pos;
       return true;
     }
 
@@ -3093,14 +3097,34 @@ dispatch_search_impl(VM * SNOBOL_RESTRICT vm,
 
 SNOBOL_ALIGNED(64) bool SNOBOL_HOT snobol_search_exec(VM * SNOBOL_RESTRICT vm,
                                                   const char * SNOBOL_RESTRICT subject,
-                         size_t subject_len,
-                         size_t start_offset,
-                         const snobol_search_meta_t *meta,
-                         const snobol_dfa_t *dfa,
-                         snobol_search_result_t *out_result,
-                         snobol_search_diag_t *diag) {
+                          size_t subject_len,
+                          size_t start_offset,
+                          const snobol_search_meta_t *meta,
+                          const snobol_dfa_t *dfa,
+                          snobol_search_result_t *out_result,
+                          snobol_search_diag_t *diag) {
   return dispatch_search_impl(vm, subject, subject_len, start_offset, meta, dfa,
                               out_result, diag, false);
+}
+
+snobol_search_tier_t snobol_search_executed_tier(
+    const snobol_search_meta_t *meta, bool dfa_available, size_t subject_len,
+    bool anchored) {
+  if (!meta)
+    return TIER_GENERAL;
+
+  /* Mirror the tier-selection logic in dispatch_search_impl(): cost-model
+   * selection, then the DFA override. */
+  snobol_search_tier_t dispatch_tier =
+      select_tier_by_cost(meta, subject_len, dfa_available, anchored);
+
+  if (dfa_available && meta->automaton_eligible && !meta->is_alt_literals_flat &&
+      (meta->has_bmh_skip ||
+       (!meta->simd_eligible && dispatch_tier >= TIER_SEARCH_VM))) {
+    dispatch_tier = TIER_AUTOMATON;
+  }
+
+  return dispatch_tier;
 }
 
 SNOBOL_ALIGNED(64) bool SNOBOL_HOT

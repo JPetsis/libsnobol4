@@ -362,9 +362,10 @@ static void test_simd_break(void) {
     memset(&d, 0, sizeof(d));
     bool ok = snobol_search_exec(&vm, "hello,world", 11, 0, &m, NULL, &r, &d);
     test_assert(ok, "BREAK(',') matches in 'hello,world'");
-    /* BREAK(',') scans to delimiter ',' at position 5; VM matches empty at that position */
-    test_assert(r.match_start == 5, "BREAK match_start == delimiter position");
-    test_assert(r.match_end == 5, "BREAK match_end == delimiter position");
+    /* BREAK(',') matches the run of non-delimiter bytes up to the comma:
+     * "hello" starting at 0, ending at 5 (exclusive of the delimiter). */
+    test_assert(r.match_start == 0, "BREAK match_start == 0");
+    test_assert(r.match_end == 5, "BREAK match_end == 5 ('hello')");
   }
 
   /* BREAK(',') on "abc": no comma, should match at end */

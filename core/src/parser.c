@@ -551,6 +551,38 @@ static ast_node_t *parse_function_call(snobol_parser_t *parser,
     return snobol_ast_create_span(arg.data.string.text, arg.data.string.len);
   }
 
+  if (strncmp(name, "BREAK", name_len) == 0) {
+    token_t arg = peek(lexer);
+    if (arg.type != TOKEN_LIT && arg.type != TOKEN_CHARCLASS) {
+      set_error(parser, "BREAK expects string argument",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    advance(lexer);
+
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      return nullptr;
+    }
+
+    return snobol_ast_create_break(arg.data.string.text, arg.data.string.len);
+  }
+
+  if (strncmp(name, "BREAKX", name_len) == 0) {
+    token_t arg = peek(lexer);
+    if (arg.type != TOKEN_LIT && arg.type != TOKEN_CHARCLASS) {
+      set_error(parser, "BREAKX expects string argument",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    advance(lexer);
+
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      return nullptr;
+    }
+
+    return snobol_ast_create_breakx(arg.data.string.text, arg.data.string.len);
+  }
+
   if (strncmp(name, "ANY", name_len) == 0) {
     token_t arg = peek(lexer);
     if (arg.type == TOKEN_RPAREN) {
