@@ -389,6 +389,52 @@ static void test_choice_statistics_api(void) {
               "Average size matches compact header-only record");
 }
 
+/* ── Env-var caching regression (P2.1): getenv is NOT re-read per match ──
+ *
+ * The SNOBOL_LEGACY_CHOICE toggle is resolved once per process and cached on
+ * the VM. This guards that a later change to the environment does NOT flip the
+ * choice mode for subsequently created VMs — i.e. the per-match getenv() hot
+ * path was removed. */
+
+static void test_env_var_cached_once(void) {
+  test_suite("Env-var choice mode cached at first VM init (P2.1)");
+
+  Bc b;
+  bc_init(&b);
+  bc_emit_lit1(&b, 'b');
+  bc_emit_u8(&b, OP_ACCEPT);
+
+  /* The SNOBOL_LEGACY_CHOICE toggle is resolved ONCE per process (static
+   * cache in vm_legacy_choice_mode). The first VM created anywhere in this
+   * process fixes the mode for all later VMs. We therefore cannot assert an
+   * absolute mode here (an earlier suite may have already resolved the cache);
+   * what we CAN and MUST guard is that the mode is NOT re-read from the
+   * environment on subsequent VM creation — i.e. the per-match getenv() hot
+   * path was removed (P2.1). */
+
+  /* Observe the currently-resolved mode via the first VM. */
+  VM vm_first = make_vm(b.bc, b.lit_pool, "b");
+  bool ok_first = vm_run(&vm_first);
+  bool first_compact = vm_first.use_compact_choice;
+  test_assert(ok_first, "first VM match succeeds");
+
+  /* Flip the environment. A cached implementation keeps the mode from first
+   * init; the old per-match getenv would flip it to the new value here. */
+  if (first_compact)
+    setenv("SNOBOL_LEGACY_CHOICE", "1", 1);
+  else
+    unsetenv("SNOBOL_LEGACY_CHOICE");
+  VM vm_second = make_vm(b.bc, b.lit_pool, "b");
+  bool ok_second = vm_run(&vm_second);
+  bool second_compact = vm_second.use_compact_choice;
+  test_assert(ok_second, "second VM match succeeds");
+  test_assert(second_compact == first_compact,
+              "mode is NOT re-read from env after first init (P2.1 cache)");
+
+  /* Leave the env clean so later suites default to compact mode. */
+  unsetenv("SNOBOL_LEGACY_CHOICE");
+}
+
 /* ── Suite entry point ───────────────────────────────────────────────────── */
 
 void test_compact_choice_suite(void) {
@@ -399,4 +445,5 @@ void test_compact_choice_suite(void) {
   test_mode_consistency_capture_restore();
   test_memory_reduction_with_many_choices();
   test_choice_statistics_api();
+  test_env_var_cached_once();
 }
