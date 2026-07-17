@@ -398,6 +398,43 @@ static void run_alt_search(int64_t iters, probe_result_t *r) {
     snobol_context_destroy(ctx);
 }
 
+/* Convenience-path baseline for P1.7: same tokenize loop as run_tokenize but
+ * using the one-shot snobol_pattern_search (re-derives state per call) instead
+ * of the reusable search state.  This is the "before" number the reuse API is
+ * measured against. */
+static void run_tokenize_convenience(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "' '", 3);
+    size_t slen = strlen(SUBJECT_WHITESPACE);
+
+    int64_t total_search_calls = 0;
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters && total_search_calls < (int64_t)1e9; i++) {
+        size_t pos = 0;
+        while (pos < slen) {
+            /* Convenience API has no start offset: search the remaining suffix
+             * of the subject. This is the "before" the reuse state avoids. */
+            snobol_match_t *m =
+                snobol_pattern_search(pat, SUBJECT_WHITESPACE + pos, slen - pos);
+            total_search_calls++;
+            if (!snobol_match_success(m)) {
+                snobol_match_free(m);
+                break;
+            }
+            pos += snobol_match_get_position(m) + snobol_match_get_length(m);
+            snobol_match_free(m);
+        }
+    }
+    int64_t end = bench_ns();
+
+    r->iters = total_search_calls;
+    r->total_ns = end - start;
+    r->ns_per_iter = (total_search_calls > 0) ? (r->total_ns / total_search_calls) : 0;
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
 /* Mimics what Pattern::searchSplit does: loop snobol_pattern_search at
  * advancing offsets, advance by match length. Counts inner iterations
  * (search calls) as `iters` (one per token boundary). */
@@ -973,7 +1010,7 @@ int main(void) {
         /* { "literal_ok",          run_literal_ok,          iters            }, */
         /* { "span_comma",          run_span_comma,          iters            }, */
         /* { "span_search",         run_span_search,         iters            }, */
-        { "cap_search",          run_cap_match,           iters            },
+        /* { "cap_search",          run_cap_match,           iters            }, */
         /* { "alternation",         run_alternation,         iters            }, */
         /* { "alt_search",          run_alt_search,          iters            }, */
         /* { "alt_literals",        run_alt_literals,        iters            }, */
@@ -981,16 +1018,17 @@ int main(void) {
         /* { "automaton",           run_automaton,           iters            }, */
         /* { "span_simd",           run_span_simd,           iters            }, */
         /* { "span_simd_miss",      run_span_simd_miss,      iters            }, */
-        /* { "tokenize",            run_tokenize,            tokenize_iters   }, */
+        { "tokenize_conv",        run_tokenize_convenience, tokenize_iters   },
+        { "tokenize_reuse",       run_tokenize,             tokenize_iters   },
 #ifdef HAVE_PCRE2
-        { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            },
-        { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters            },
-        { "pcre2_span_comma",    run_pcre2_span_comma,    iters            },
-        { "pcre2_alternation",   run_pcre2_alternation,   iters            },
-        { "pcre2_alt_literals",  run_pcre2_alt_literals,  iters            },
-        { "pcre2_span_simd",     run_pcre2_span_simd,     iters            },
-        { "pcre2_span_simd_miss",run_pcre2_span_simd_miss, iters           },
-        { "pcre2_tokenize",      run_pcre2_tokenize,      tokenize_iters   },
+        /* { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            }, */
+        /* { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters            }, */
+        /* { "pcre2_span_comma",    run_pcre2_span_comma,    iters            }, */
+        /* { "pcre2_alternation",   run_pcre2_alternation,   iters            }, */
+        /* { "pcre2_alt_literals",  run_pcre2_alt_literals,  iters            }, */
+        /* { "pcre2_span_simd",     run_pcre2_span_simd,     iters            }, */
+        /* { "pcre2_span_simd_miss",run_pcre2_span_simd_miss, iters           }, */
+        /* { "pcre2_tokenize",      run_pcre2_tokenize,      tokenize_iters   }, */
 #endif
     };
     size_t n = sizeof(scenarios) / sizeof(scenarios[0]);
