@@ -346,6 +346,28 @@ void snobol_buf_free(snobol_buf *b) {
   b->len = b->cap = 0;
 }
 
+/**
+ * Resolve the SNOBOL_LEGACY_CHOICE env var ONCE per process and cache it.
+ *
+ * The legacy choice-mode toggle is a static deployment setting, not expected
+ * to change mid-process. Reading it per match (the previous behaviour) put a
+ * getenv()/__findenv_locked() call on the hot path of every anchored match,
+ * which the search-perf investigation showed as a measurable cost. We read it
+ * a single time and reuse the cached value thereafter.
+ *
+ * Thread-safety: the first call races are benign — all writers store the same
+ * value derived from the (never-changing) environment at process start.
+ */
+static bool vm_legacy_choice_mode(void) {
+  static int resolved = 0;
+  static bool legacy = false;
+  if (!resolved) {
+    legacy = (getenv("SNOBOL_LEGACY_CHOICE") != nullptr);
+    resolved = 1;
+  }
+  return legacy;
+}
+
 bool vm_run(VM *vm) {
   size_t initial_cap = 4096;
   if (!vm->choices) {
@@ -355,7 +377,8 @@ bool vm_run(VM *vm) {
     vm->choices_cap = initial_cap;
   }
   vm->choices_top = 0;
-  vm->use_compact_choice = (getenv("SNOBOL_LEGACY_CHOICE") == nullptr);
+  /* Cache the choice-mode flag once per process instead of getenv() per match. */
+  vm->use_compact_choice = !vm_legacy_choice_mode();
   if (vm->use_compact_choice) {
     if (!vm->write_log) {
       vm_write_log_init(vm);
