@@ -16,12 +16,39 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach/mach_time.h>
+#include <mach/mach_time.h>
+#else
 #include <time.h>
+#endif
 
 #include "snobol/snobol.h"
 
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
+
+static int64_t now_ns(void) {
+#if defined(_WIN32)
+  LARGE_INTEGER freq, cnt;
+  QueryPerformanceFrequency(&freq);
+  QueryPerformanceCounter(&cnt);
+  return (int64_t)(cnt.QuadPart * 1000000000LL / freq.QuadPart);
+#elif defined(__APPLE__)
+  static mach_timebase_info_data_t info = {0};
+  if (info.denom == 0) mach_timebase_info(&info);
+  uint64_t raw = mach_absolute_time();
+  return (int64_t)(raw * info.numer / info.denom);
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000000L + (int64_t)ts.tv_nsec;
+#endif
+}
 
 static snobol_match_t *search(const char *pat, const char *subject) {
   snobol_context_t *ctx = snobol_context_create();
@@ -84,13 +111,11 @@ static void test_linear_time(void) {
   if (!subj)
     return;
 
-  struct timespec t0, t1;
-  clock_gettime(CLOCK_MONOTONIC, &t0);
+  int64_t t0 = now_ns();
   snobol_match_t *m = search("('foo' | 'fop' | 'fox')", subj);
-  clock_gettime(CLOCK_MONOTONIC, &t1);
+  int64_t t1 = now_ns();
 
-  double ms = (t1.tv_sec - t0.tv_sec) * 1000.0 +
-              (t1.tv_nsec - t0.tv_nsec) / 1.0e6;
+  double ms = (double)(t1 - t0) / 1.0e6;
   test_assert(m != NULL && !snobol_match_success(m), "no match on long 'a' run");
   /* Linear scan of 2 MB should finish in well under a second. */
   test_assert(ms < 1000.0, "long failing subject scanned in < 1s (linear)");
