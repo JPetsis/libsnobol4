@@ -47,6 +47,7 @@ typedef struct {
   int passed;
   int failed;
   const char *current_suite;
+  int case_count; /* number of test_suite() calls (test cases) */
 } TestContext;
 
 #define MAX_SUITES 64
@@ -72,10 +73,14 @@ static double elapsed_ms(struct timespec t0, struct timespec t1) {
   return (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1.0e6;
 }
 
-static void print_rule(char ch) {
-  for (int i = 0; i < RULE_WIDTH; i++)
+static void print_rule_w(char ch, int width) {
+  for (int i = 0; i < width; i++)
     putchar(ch);
   putchar('\n');
+}
+
+static void print_rule(char ch) {
+  print_rule_w(ch, RULE_WIDTH);
 }
 
 static void signal_handler(int sig) {
@@ -203,6 +208,7 @@ static void watchdog_stop(void) {
 /* Called multiple times within a suite to label sub-groups */
 void test_suite(const char *name) {
   test_ctx.current_suite = name;
+  test_ctx.case_count++;
   printf("  -- %s\n", name);
 }
 
@@ -433,10 +439,11 @@ int main(void) {
   name_w += 2;
 
   printf("\n");
-  print_rule('=');
-  printf("  %-*s  %7s  %7s  %7s  %9s\n", name_w, "Suite", "Tests", "Passed",
-          "Failed", "Time(ms)");
-  print_rule('-');
+  int rule_w = name_w + 7 + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 9;
+  print_rule_w('=', rule_w);
+  printf("  %-*s  %7s  %7s  %7s  %7s  %9s\n", name_w, "Suite", "Cases",
+          "Tests", "Passed", "Failed", "Time(ms)");
+  print_rule_w('-', rule_w);
 
   double total_ms = 0.0;
   int total_tests = 0;
@@ -445,26 +452,29 @@ int main(void) {
     int tests = r->passed + r->failed;
     total_tests += tests;
     if (r->failed > 0)
-      printf("  \033[31m✗\033[0m %-*s  %7d  %7d  \033[31m%7d\033[0m  %9.2f\n",
-             name_w - 2, r->name, tests, r->passed, r->failed, r->time_ms);
+      printf("  \033[31m✗\033[0m %-*s  %7d  %7d  %7d  \033[31m%7d\033[0m  %9.2f\n",
+             name_w - 2, r->name, 1, tests, r->passed, r->failed, r->time_ms);
     else
-      printf("  ✓ %-*s  %7d  %7d  %7d  %9.2f\n", name_w - 2, r->name, tests,
-             r->passed, r->failed, r->time_ms);
+      printf("  ✓ %-*s  %7d  %7d  %7d  %7d  %9.2f\n", name_w - 2, r->name,
+             1, tests, r->passed, r->failed, r->time_ms);
     total_ms += r->time_ms;
   }
 
-  print_rule('-');
-  printf("  %-*s  %7d  %7d  %7d  %9.2f\n", name_w, "TOTAL", total_tests,
-         test_ctx.passed, test_ctx.failed, total_ms);
-  print_rule('=');
+  print_rule_w('-', rule_w);
+  printf("  %-*s  %7d  %7d  %7d  %7d  %9.2f\n", name_w, "TOTAL",
+         test_ctx.case_count, total_tests, test_ctx.passed, test_ctx.failed,
+         total_ms);
+  print_rule_w('=', rule_w);
 
   if (test_ctx.failed == 0)
-    printf("  \033[32m✓  All %d tests passed\033[0m\n", test_ctx.passed);
+    printf("  \033[32m✓  All %d cases / %d assertions passed\033[0m\n",
+           test_ctx.case_count, test_ctx.passed);
   else
-    printf("  \033[31m✗  %d of %d tests FAILED\033[0m\n", test_ctx.failed,
-           test_ctx.passed + test_ctx.failed);
+    printf("  \033[31m✗  %d of %d assertions FAILED (%d cases)\033[0m\n",
+           test_ctx.failed, test_ctx.passed + test_ctx.failed,
+           test_ctx.case_count);
 
-  print_rule('=');
+  print_rule_w('=', rule_w);
 
   return test_ctx.failed > 0 ? 1 : 0;
 }
