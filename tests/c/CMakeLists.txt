@@ -22,6 +22,7 @@ add_executable(snobol4_tests
     test_search.c
     test_search_ex_api.c
     test_search_vm_capture.c
+    test_capture_registers.c
     test_search_anchored.c
     test_pike_scan.c
     test_lexer.c

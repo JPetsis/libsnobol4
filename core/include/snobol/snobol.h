@@ -145,10 +145,20 @@ typedef struct snobol_match {
   char *output;
   size_t output_len;
 
-  /* Named capture variables: var_values[i] points into subject or is a
-   * NUL-terminated copy; var_lens[i] is the byte length.
-   * Variable names are stored as decimal strings "1", "2", …, "64".
+  /* Named capture variables.
+   *
+   * Captures are stored register-style as (offset, length) pairs relative to
+   * `var_subject` (var_off[i], var_len[i]).  The NUL-terminated byte copy in
+   * var_values[i] is materialized lazily on the first snobol_match_get_variable
+   * call and cached there; a NULL var_values[i] with var_len[i] > 0 means the
+   * capture is present but not yet copied.  This avoids a per-match malloc +
+   * memcpy for every variable when the caller only reads a subset (or none).
+   *
+   * Variable names are decimal strings "1", "2", …, "64".
    * Index 0 corresponds to variable name "1" (1-based). */
+  const char *var_subject;
+  size_t var_off[SNOBOL_API_MAX_VARS];
+  size_t var_len[SNOBOL_API_MAX_VARS];
   char *var_values[SNOBOL_API_MAX_VARS];
   size_t var_lens[SNOBOL_API_MAX_VARS];
   int var_count;

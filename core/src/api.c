@@ -63,6 +63,10 @@ struct snobol_pattern {
 /* Maximum named variables returned from a match */
 #define API_MAX_VARS SNOBOL_API_MAX_VARS
 
+/* Forward declaration — defined just above the convenience match API. */
+static void match_store_capture(snobol_match_t *m, const char *subject,
+                                int i, size_t vs, size_t ve, size_t subject_len);
+
 /* ---------------------------------------------------------------------------
  * Context lifecycle
  * ---------------------------------------------------------------------------
@@ -408,15 +412,7 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
   for (int i = 0; i < n; i++) {
     size_t vs = vm.var_start[i];
     size_t ve = vm.var_end[i];
-    if (ve > vs && ve <= len) {
-      size_t vlen = ve - vs;
-      m->var_values[i] = (char *)snobol_malloc(vlen + 1);
-      if (m->var_values[i]) {
-        memcpy(m->var_values[i], subject + vs, vlen);
-        m->var_values[i][vlen] = '\0';
-        m->var_lens[i] = vlen;
-      }
-    }
+    match_store_capture(m, subject, i, vs, ve, len);
   }
 
   snobol_buf_free(&out_buf);
@@ -493,15 +489,7 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
   for (int i = 0; i < n; i++) {
     size_t vs = vm.var_start[i];
     size_t ve = vm.var_end[i];
-    if (ve > vs && ve <= len) {
-      size_t vlen = ve - vs;
-      m->var_values[i] = (char *)snobol_malloc(vlen + 1);
-      if (m->var_values[i]) {
-        memcpy(m->var_values[i], subject + vs, vlen);
-        m->var_values[i][vlen] = '\0';
-        m->var_lens[i] = vlen;
-      }
-    }
+    match_store_capture(m, subject, i, vs, ve, len);
   }
 
   snobol_buf_free(&out_buf);
@@ -597,15 +585,7 @@ bool snobol_pattern_search_reuse(snobol_pattern_t *pattern,
   for (int i = 0; i < n; i++) {
     size_t vs = vm.var_start[i];
     size_t ve = vm.var_end[i];
-    if (ve > vs && ve <= len) {
-      size_t vlen = ve - vs;
-      match_out->var_values[i] = (char *)snobol_malloc(vlen + 1);
-      if (match_out->var_values[i]) {
-        memcpy(match_out->var_values[i], subject + vs, vlen);
-        match_out->var_values[i][vlen] = '\0';
-        match_out->var_lens[i] = vlen;
-      }
-    }
+    match_store_capture(match_out, subject, i, vs, ve, len);
   }
 
   snobol_buf_free(&out_buf);
@@ -783,15 +763,7 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
   for (int i = 0; i < n; i++) {
     size_t vs = state->vm.var_start[i];
     size_t ve = state->vm.var_end[i];
-    if (ve > vs && ve <= subject_len) {
-      size_t vlen = ve - vs;
-      state->match.var_values[i] = (char *)snobol_malloc(vlen + 1);
-      if (state->match.var_values[i]) {
-        memcpy(state->match.var_values[i], subject + vs, vlen);
-        state->match.var_values[i][vlen] = '\0';
-        state->match.var_lens[i] = vlen;
-      }
-    }
+    match_store_capture(&state->match, subject, i, vs, ve, subject_len);
   }
 
   return &state->match;
@@ -845,7 +817,27 @@ const char *snobol_match_get_variable(snobol_match_t *match, const char *name,
     return NULL;
   }
   int i = (int)(idx - 1);
-  if (i >= match->var_count || !match->var_values[i]) {
+  if (i >= match->var_count) {
+    if (len)
+      *len = 0;
+    return NULL;
+  }
+  /* Materialize lazily on first access: copy the (offset, length) register
+   * into an owned NUL-terminated string.  An unmaterialized register has
+   * var_values[i] == NULL; the (offset, length) is still valid for both
+   * non-empty and zero-width (empty) captures, so materialize either way. */
+  if (!match->var_values[i] && match->var_subject) {
+    size_t vlen = match->var_len[i];
+    char *buf = (char *)snobol_malloc(vlen + 1);
+    if (buf) {
+      if (vlen > 0)
+        memcpy(buf, match->var_subject + match->var_off[i], vlen);
+      buf[vlen] = '\0';
+      match->var_values[i] = buf;
+      match->var_lens[i] = vlen;
+    }
+  }
+  if (!match->var_values[i]) {
     if (len)
       *len = 0;
     return NULL;
@@ -859,6 +851,20 @@ const char *snobol_match_get_variable(snobol_match_t *match, const char *name,
  * One-shot convenience match API
  * ---------------------------------------------------------------------------
  */
+
+/* Store capture `i` register-style: keep (subject, offset, length) and defer
+ * the owned-byte copy until snobol_match_get_variable() is called.  A NULL
+ * var_values[i] with var_len[i] > 0 signals "present, not yet materialized". */
+static void match_store_capture(snobol_match_t *m, const char *subject,
+                                int i, size_t vs, size_t ve, size_t subject_len) {
+  if (ve <= vs || ve > subject_len)
+    return;
+  m->var_subject = subject;
+  m->var_off[i] = vs;
+  m->var_len[i] = ve - vs;
+  m->var_values[i] = NULL; /* materialize on demand */
+  m->var_lens[i] = 0;
+}
 
 #define MATCH_MAX_CAPTURES 64
 
