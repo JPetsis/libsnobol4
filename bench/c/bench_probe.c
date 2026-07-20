@@ -45,7 +45,7 @@ static void capture_tiers(snobol_pattern_t *pat, size_t subject_len,
     r->tier = (int)meta->tier;
     bool dfa = snobol_pattern_automaton_available(pat);
     r->exec_tier = (int)snobol_search_executed_tier(meta, dfa,
-                                                    subject_len, false);
+                                                     subject_len, false);
 }
 
 /* Comma subject (matches bench_alternation.c) */
@@ -630,6 +630,8 @@ static void run_span_simd(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "SPAN('0-9')", 11);
 
+    capture_tiers(pat, 1024, r);
+
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
         snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_SIMD_SPAN, 1024);
@@ -650,13 +652,39 @@ static void run_span_simd_miss(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "SPAN('0-9')", 11);
 
-    fprintf(stderr, "[DBG bench] run_span_simd_miss: bc_len=%zu SUBJECT_NO_PQR[0]='%c'\n",
-            snobol_pattern_get_bc_len(pat),
-            SUBJECT_NO_PQR[0]);
+    capture_tiers(pat, 1024, r);
 
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
         snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_NO_PQR, 1024);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+/* NOTANY('0') on 1KB of '0': every byte is in the NOTANY excluded class,
+ * so the pattern must fail at each position → O(n) missing match path. */
+static void run_notany_simd_miss(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "NOTANY('0')", 11);
+
+    capture_tiers(pat, 1024, r);
+
+    /* All-digit 1KB subject */
+    char subj[1025];
+    memset(subj, '0', 1024);
+    subj[1024] = '\0';
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, subj, 1024);
         snobol_match_free(m);
     }
     int64_t end = bench_ns();
@@ -1137,8 +1165,9 @@ int main(void) {
         { "alt_literals",        run_alt_literals,        iters            },
         { "alt_literals_search", run_alt_literals_search, iters            },
         /* { "automaton",           run_automaton,           iters            }, */
-        /* { "span_simd",           run_span_simd,           iters            }, */
-        /* { "span_simd_miss",      run_span_simd_miss,      iters            }, */
+        { "span_simd",           run_span_simd,           iters            },
+        { "span_simd_miss",      run_span_simd_miss,      iters            },
+        { "notany_simd_miss",    run_notany_simd_miss,    iters            },
         { "tokenize_conv",        run_tokenize_convenience, tokenize_iters   },
         { "tokenize_reuse",        run_tokenize,             tokenize_iters   },
         { "residue_repeat",        run_residue_repeat,       iters            },

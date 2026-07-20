@@ -3086,7 +3086,7 @@ dispatch_search_impl(VM * SNOBOL_RESTRICT vm,
   snobol_search_tier_t dispatch_tier =
        select_tier_by_cost(meta, subject_len, dfa != NULL, anchored);
 
-  /* If caller provided a DFA, consider automaton acceleration.
+/* If caller provided a DFA, consider automaton acceleration.
     * The automaton's per-offset trial loop is O(n) per position — harmless
     * when BMH skip is available (advances several bytes per try), but O(n^2)
     * when every byte is tried individually for patterns with NO literal
@@ -3102,21 +3102,21 @@ dispatch_search_impl(VM * SNOBOL_RESTRICT vm,
     * automaton: the O(n) bitmap or SIMD NFA scan is faster and avoids
     * the O(n²) per-position automaton trial loop. */
   /* P5 note: has_bmh_skip is now also set for bushy alternation-of-literals
-   * (shared prefix).  Those must stay on the trie path (TIER_ALT_LIT), so the
-   * automaton reroute excludes all alt-literals; only flat alternations
-   * (which have no shared prefix and thus no BMH skip) can reach the DFA. */
+    * (shared prefix).  Those must stay on the trie path (TIER_ALT_LIT), so the
+    * automaton reroute excludes all alt-literals; only flat alternations
+    * (which have no shared prefix and thus no BMH skip) can reach the DFA. */
   if (dfa && meta->automaton_eligible && !meta->is_alt_literals &&
       (meta->has_bmh_skip ||
        (!meta->simd_eligible && dispatch_tier >= TIER_SEARCH_VM))) {
     dispatch_tier = TIER_AUTOMATON;
   }
 
-  /* NOTE: Runtime SIMD override (Tier 9) is not yet enabled. The SIMD NFA
-   * infrastructure exists in search_simd.c (build_nfa_masks + NEON/AVX2/scalar
-   * exec) but the anchored per-position loop in tier_simd_nfa() makes it
-   * O(n^2) for failing matches — slower than the O(n) bitmap scan for
-   * BREAK/SPAN patterns.  Enable once tier_simd_nfa() supports true
-   * multi-position SIMD scanning. */
+  /* Tier 9 (SIMD NFA) is now selected by select_tier_by_cost for every
+    * simd_eligible charclass pattern (SPAN/BREAK/ANY/NOTANY with no side
+    * effects).  tier_simd_nfa performs an O(n) bitmap-skip scan over the
+    * subject with O(1) scalar NFA verification at candidate positions (see
+    * search_simd.c).  No additional override is needed here — the cost
+    * model handles dispatch directly. */
 
   /* Lazy VM initialization: zero only the fields needed by the selected tier.
    * Tiers 0-5 bypass the VM entirely. Tiers 6-7 use the lightweight
@@ -3136,11 +3136,11 @@ dispatch_search_impl(VM * SNOBOL_RESTRICT vm,
     vm->choices_top = 0;
   }
 
-  /* Direct tier dispatch for the chosen tier.  For anchored matching each
+/* Direct tier dispatch for the chosen tier.  For anchored matching each
    * tier handler bounds its attempt to a single position (start_offset), so a
    * successful match always begins at the anchor — no post-filter needed. */
   return tier_table[dispatch_tier](vm, subject, subject_len, start_offset,
-                                    meta, dfa, out_result, diag, anchored);
+                                     meta, dfa, out_result, diag, anchored);
 }
 
 SNOBOL_ALIGNED(64) bool SNOBOL_HOT snobol_search_exec(VM * SNOBOL_RESTRICT vm,

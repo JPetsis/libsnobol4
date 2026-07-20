@@ -1090,6 +1090,11 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
    * Build the candidate bitmap directly from the charclass ranges so that
    * snobol_search_exec() can route to the fast bitmap-accelerated Tier 3
    * path instead of calling vm_exec at every position (Tier 4/5).
+   *
+   * Also records `ascii_class_only` so the SIMD NFA tier (Tier 9) can decide
+   * eligibility: ANY has codepoint semantics in the full VM but byte semantics
+   * in the SIMD NFA, so non-ASCII charclasses (e.g. 'α' :i emitting an ANY
+   * over UTF-8 byte sequences) must NOT route through the SIMD engine.
    */
   else if (op0 == OP_ANY && ip + 3 <= bc_len) {
     uint16_t set_id = search_read_u16(bc, ip + 1);
@@ -1103,6 +1108,7 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
       /* Build 4×u64 ASCII bitmap from the charclass ranges */
       bool ascii_only =
           ranges_to_ascii_bitmap(ranges, count, out->candidate_bitmap);
+      out->ascii_class_only = ascii_only;
       if (ascii_only) {
         out->has_candidate_bitmap = true;
         out->is_single_char_alt = true; /* route to bitmap_accelerated */
@@ -1110,6 +1116,30 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
         out->may_match_empty = false;
       }
     }
+  }
+
+  /* OP_NOTANY: complement of OP_ANY.  The SIMD NFA inverts the class bitmap
+   * in build_nfa_masks, so it shares the same ASCII-only eligibility gate:
+   * for codepoint-wise NOTANY over non-ASCII charclasses (UTF-8 byte
+   * sequences with codepoint > 255) we must keep the full VM path; for
+   * ASCII classes the SIMD tier is correct.  Unlike OP_ANY we don't build
+   * a candidate bitmap (TIER_BITMAP matches class bytes, not their
+   * complement). */
+  else if (op0 == OP_NOTANY && ip + 3 <= bc_len) {
+    uint16_t set_id = search_read_u16(bc, ip + 1);
+    VM tmp_vm;
+    memset(&tmp_vm, 0, sizeof(tmp_vm));
+    tmp_vm.bc = bc;
+    tmp_vm.bc_len = bc_len;
+    uint16_t count = 0, ci = 0;
+    const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+    if (ranges && count > 0) {
+      uint64_t tmp[4];
+      out->ascii_class_only =
+          ranges_to_ascii_bitmap(ranges, count, tmp);
+    }
+    out->always_consumes = true;
+    out->may_match_empty = false;
   }
 
   /* OP_SPLIT: try to detect single-char alternation
@@ -1243,6 +1273,23 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
 
   /* ---- SIMD NFA eligibility ---- */
   out->simd_eligible = check_simd_eligible(bc, bc_len);
+  /* The SIMD NFA engine (search_simd.c) is byte-wise — its 256-bit char_mask
+   * tests single bytes.  SPAN and BREAK are byte-wise in the full VM as well,
+   * so the SIMD engine can run them for any byte-level charclass (including
+   * non-ASCII byte ranges like [0xC0-0xDF]).  ANY and NOTANY are CODEPOINT-wise
+   * in the full VM: a non-ASCII ANY('α') class stores UTF-8 codepoint ranges
+   * (>255) and matches the whole multi-byte sequence; the SIMD engine would
+   * match only the first byte.
+   *
+   * We DO NOT clamp simd_eligible here — the cost-model tier selector
+   * (select_tier_by_cost) is the single source of truth for dispatch and
+   * gates TIER_SIMD_NFA on (is_span_family || is_break_family ||
+   * ascii_class_only).  Keeping simd_eligible structurally true preserves the
+   * baseline automaton-override condition `(!meta->simd_eligible && ...)`
+   * unchanged: with simd_eligible=true on a non-ASCII ANY pattern, the
+   * DFA override stays off and the full VM (Tier 6/8) handles the codepoint
+   * semantics — exactly the baseline behavior, which all 17 of the
+   * Pattern: Case-Insensitive assertions exercise. */
 
   /* ---- Start-byte bitmap & minimum match length ---- */
   {
@@ -1392,6 +1439,14 @@ static const tier_cost_coeff_t k_tier_cost[] = {
     {TIER_ALT_LIT, 12, 20}, /* recalibrated post trie-cache (was 40) */
     {TIER_SEARCH_VM, 50, 10},
     {TIER_GENERAL, 100, 5},
+    /* SIMD NFA: one bitmap-skip pass + O(1) scalar verify at candidates.
+     * The coefficient is calibrated to win the cost race for simd_eligible
+     * charclass patterns (SPAN/ANY/NOTANY) against the SEARCH_VM/GENERAL
+     * tiers and the dedicated SPAN/BREAK bitmap scanners.  ascii_class_only
+     * SPAN/BREAK still also match TIER_SPAN_SCAN/TIER_BREAK_SCAN; SIMD wins
+     * because per-byte work is identical (one bit-test) and the NFA path
+     * covers ANY/NOTANY too. */
+    {TIER_SIMD_NFA, 15, 16},
 };
 
 /* Score every eligible tier and return the cheapest. `dfa_available` gates the
@@ -1435,6 +1490,23 @@ snobol_search_tier_t select_tier_by_cost(const snobol_search_meta_t *meta,
       /* Alt-literals never use the search VM: flat and bushy -> ALT_LIT. */
       eligible = meta->search_vm_eligible && !meta->is_alt_literals;
       break;
+    case TIER_SIMD_NFA:
+      /* SIMD Thompson NFA (Tier 9): charclass patterns (SPAN/BREAK/ANY/
+       * NOTANY) with no side effects, captures, or control flow.  Eligible
+       * for both anchored and unanchored matches — tier_simd_nfa handles
+       * the anchored contract directly (verifies at start_offset only).
+       *
+       * The SIMD engine is byte-wise; ANY/NOTANY are codepoint-wise in the
+       * full VM.  Gate on ascii_class_only for ANY/NOTANY so non-ASCII code-
+       * point classes (e.g. 'α' :i compiled to ANY over a UTF-8 codepoint
+       * range > 255) are NOT routed through SIMD — they would only match the
+       * first byte of the multi-byte sequence there.  SPAN/BREAK are byte-
+       * wise in both engines, so they are eligible regardless of class
+       * contents (including non-ASCII byte ranges like [0xC0-0xDF]). */
+      eligible = meta->simd_eligible &&
+                 (meta->is_span_family || meta->is_break_family ||
+                  meta->ascii_class_only);
+      break;
     case TIER_GENERAL:
       eligible = true; /* always available as fallback */
       break;
@@ -1477,6 +1549,7 @@ void SNOBOL_COLD snobol_search_dump_cost_model(FILE *out) {
     case TIER_BITMAP: name = "BITMAP"; break;
     case TIER_ALT_LIT: name = "ALT_LIT"; break;
     case TIER_SEARCH_VM: name = "SEARCH_VM"; break;
+    case TIER_SIMD_NFA: name = "SIMD_NFA"; break;
     case TIER_GENERAL: name = "GENERAL"; break;
     default: break;
     }

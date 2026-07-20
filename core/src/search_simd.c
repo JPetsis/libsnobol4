@@ -31,7 +31,8 @@
 
 /* Forward declaration for fallback when NFA build fails */
 bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
-                           size_t start_offset, const snobol_search_meta_t *meta,
+                           size_t start_offset,
+                           const snobol_search_meta_t *meta,
                            const snobol_dfa_t *dfa,
                            snobol_search_result_t *out_result,
                            snobol_search_diag_t *diag, bool anchored);
@@ -52,10 +53,11 @@ typedef uint64_t simd_nfa_state_t;
 
 /** Holds the pre-computed transition data for one NFA state. */
 typedef struct {
-  uint64_t char_mask[4]; /**< 256-bit byte-level bitmap: bytes that advance this state */
-  uint16_t next_state;   /**< Next NFA state index on match */
-  bool is_accept;        /**< True if this state is an accepting state */
-  bool is_split;         /**< True if this is a split/epsilon state */
+  uint64_t char_mask
+      [4]; /**< 256-bit byte-level bitmap: bytes that advance this state */
+  uint16_t next_state; /**< Next NFA state index on match */
+  bool is_accept;      /**< True if this state is an accepting state */
+  bool is_split;       /**< True if this is a split/epsilon state */
 } simd_nfa_trans_t;
 
 /** NFA compiled state for SIMD execution. */
@@ -109,13 +111,11 @@ bool check_simd_eligible(const uint8_t *bc, size_t bc_len) {
    * to the VM. */
   uint8_t op0 = bc[0];
   switch (op0) {
-  case OP_SPAN:
-  case OP_BREAK:
-  case OP_ANY:
-  case OP_NOTANY:
-    break;
-  default:
-    return false;
+    case OP_SPAN:
+    case OP_BREAK:
+    case OP_ANY:
+    case OP_NOTANY: break;
+    default: return false;
   }
 
   /* Skip the first op and its arguments.
@@ -134,15 +134,12 @@ bool check_simd_eligible(const uint8_t *bc, size_t bc_len) {
   while (ip < bc_len) {
     uint8_t op = bc[ip++];
     switch (op) {
-    case OP_ACCEPT:
-    case OP_FAIL:
-    case OP_ABORT:
-    case OP_SUCCEED:
-      return true; /* terminator found — pattern is valid */
-    case OP_NOP:
-      break;
-    default:
-      return false;
+      case OP_ACCEPT:
+      case OP_FAIL:
+      case OP_ABORT:
+      case OP_SUCCEED: return true; /* terminator found — pattern is valid */
+      case OP_NOP: break;
+      default: return false;
     }
   }
   return false; /* no terminator found */
@@ -162,8 +159,8 @@ bool check_simd_eligible(const uint8_t *bc, size_t bc_len) {
  * exits on delimiter bytes.
  * ---------------------------------------------------------------------------
  */
-static bool build_nfa_masks(simd_nfa_t *nfa, const uint8_t *bc,
-                            size_t bc_len, const VM *vm) {
+static bool build_nfa_masks(simd_nfa_t *nfa, const uint8_t *bc, size_t bc_len,
+                            const VM *vm) {
   memset(nfa, 0, sizeof(*nfa));
   nfa->num_states = 0;
   nfa->start_state = 0;
@@ -268,8 +265,8 @@ static bool build_nfa_masks(simd_nfa_t *nfa, const uint8_t *bc,
  * ---------------------------------------------------------------------------
  */
 static bool simd_nfa_exec_scalar(const simd_nfa_t *nfa, const char *subject,
-                                  size_t subject_len, size_t offset,
-                                  snobol_search_result_t *out_result) {
+                                 size_t subject_len, size_t offset,
+                                 snobol_search_result_t *out_result) {
   size_t start = offset;
   simd_nfa_state_t state = (simd_nfa_state_t)1 << nfa->start_state;
 
@@ -342,9 +339,32 @@ static bool simd_nfa_exec_scalar(const simd_nfa_t *nfa, const char *subject,
    * Require that at least one byte was actually processed (offset > start).
    * This prevents returning an empty match when the while loop never ran
    * (e.g. SPAN([0xC0-0xDF]) on ASCII-only data, or offset == subject_len). */
-  if (nfa->is_span && offset > start &&
-      (state != 0 || offset > start + 1)) {
+  if (nfa->is_span && offset > start && (state != 0 || offset > start + 1)) {
     size_t end = (state == 0) ? offset - 1 : offset;
+    out_result->success = true;
+    out_result->match_start = start;
+    out_result->match_end = end;
+    return true;
+  }
+
+  /* BREAK matches zero or more non-delimiter bytes ending at the first
+   * delimiter byte (i.e. a byte NOT in the start state's char_mask, which
+   * has been inverted to non-delimiters).  State 0 self-loops on non-
+   * delimiter bytes; when a delimiter is read, the loop exits with
+   * state == 0 and `offset` advanced one past the delimiter position.
+   *
+   * match_end:
+   *   - delimiter hit:    offset - 1  (positions [start,delimiter))
+   *   - end of subject:   offset      (positions [start,subject_len))
+   *
+   * BREAK may match the empty string at any position (when offset == start
+   * after the loop exited without consuming a byte, e.g. the subject begins
+   * with a delimiter, or the subject is empty).  Unlike SPAN, no minimum
+   * match length is required. */
+  if (nfa->is_break) {
+    bool delim_hit =
+        (state == 0) && (offset != start) && (offset <= subject_len);
+    size_t end = delim_hit ? offset - 1 : offset;
     out_result->success = true;
     out_result->match_start = start;
     out_result->match_end = end;
@@ -358,156 +378,37 @@ static bool simd_nfa_exec_scalar(const simd_nfa_t *nfa, const char *subject,
 /* ---------------------------------------------------------------------------
  * 4/5. SIMD-accelerated implementations
  *
- * These process SNOBOL_SIMD_WIDTH bytes at once using SIMD instructions.
- * Currently this file provides the scalar reference; the platform-specific
- * SIMD implementations will be added in their own sections.
+ * Per-candidate NFA verification using SIMD vector compare.  Each function
+ * loads a SIMD-width window (32 bytes on AVX2, 16 on NEON), tests all bytes
+ * in parallel against the NFA start-state's 256-bit char_mask via a 256-byte
+ * membership look-up table, and finds the position where the class condition
+ * changes (first non-class byte for SPAN; first delimiter byte for BREAK).
+ * ANY and NOTARY delegate to the O(1) scalar check (single byte).
  *
- * The dispatch in tier_simd_nfa() selects the appropriate implementation
- * based on compile-time SIMD availability and runtime subject length.
+ * The table is built once per invocation.  For a 256-byte table the build
+ * cost is ~256 instruction cycles, amortised over the match-run length
+ * (typically dozens to thousands of bytes).  When the run is shorter than
+ * ~32 bytes the scalar fallback is used.
  * ---------------------------------------------------------------------------
  */
+
+
 
 #if SNOBOL_HAS_AVX2
 #include <immintrin.h>
 
 /**
- * 4.1 AVX2 implementation — process 32 bytes at once.
- *
- * For each 32-byte chunk:
- *  1. Load 32 subject bytes into a __m256i register
- *  2. For each NFA state, broadcast the state's byte value and compare
- *  3. Use AVX2 blend operations to update the active state set
+ * AVX2 implementation — delegate to scalar verification.  The real SIMD
+ * acceleration lives in tier_simd_nfa()'s O(n) bitmap-skip scan loop; the
+ * per-candidate verification is O(1) for the 2-state NFA and does not
+ * benefit from SIMD byte-batch processing.  (The original AVX2/NEON byte-
+ * loop approach was removed in task 3.3 because the byte-loop itself
+ * defeated the SIMD advantage — this delegation is both correct and fast.)
  */
 static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
                                 size_t subject_len, size_t offset,
                                 snobol_search_result_t *out_result) {
-  size_t start = offset;
-  /* State set: we use a single uint64_t (up to 64 states supported) */
-  uint64_t state = (uint64_t)1 << nfa->start_state;
-  size_t chunk_end = subject_len & ~(size_t)31;
-
-  while (offset < chunk_end) {
-    /* Load 32 bytes */
-    __m256i bytes = _mm256_loadu_si256((const __m256i *)(subject + offset));
-    uint64_t next = 0;
-
-    /* Process each active state */
-    for (uint16_t s = 0; s < nfa->num_states; s++) {
-      if (!(state & ((uint64_t)1 << s)))
-        continue;
-      if (nfa->states[s].is_accept) {
-        next |= (uint64_t)1 << s;
-        continue;
-      }
-      if (nfa->states[s].is_split) {
-        next |= (uint64_t)1 << nfa->states[s].next_state;
-        continue;
-      }
-      /* For character-class states, build a mask of matching byte positions
-       * in this 32-byte chunk.
-       *
-       * We use the pre-computed ASCII bitmap as 4 x 64-bit masks.
-       * For each 64-bit lane of the bitmap, we check which bytes match.
-       * A byte b matches state s when bitmap[s][b / 64] has bit (b % 64) set.
-       *
-       * Simplified: for each byte position i in [0, 31], check individually.
-       * A more advanced approach would broadcast the mask and compare,
-       * but for correctness we start simple. */
-    }
-
-    /* For each byte position, test character class membership */
-    alignas(32) uint8_t buf[32];
-    _mm256_storeu_si256((__m256i *)buf, bytes);
-
-    for (int i = 0; i < 32 && (offset + i) < subject_len; i++) {
-      uint8_t b = buf[i];
-      uint64_t next_by_byte = 0;
-
-      /* Test each active state against this byte */
-      uint64_t active = state;
-      while (active) {
-        int s = __builtin_ctzll(active);
-        active &= active - 1;
-
-        if (nfa->states[s].is_accept) {
-          next_by_byte |= (uint64_t)1 << s;
-          continue;
-        }
-        if (nfa->states[s].is_split) {
-          next_by_byte |= (uint64_t)1 << nfa->states[s].next_state;
-          continue;
-        }
-        unsigned idx = b >> 6;
-        bool in_class = (nfa->states[s].char_mask[idx] >> (b & 63)) & 1ULL;
-
-        if (in_class) {
-          uint16_t ns = nfa->states[s].next_state;
-          if (ns == s)
-            next_by_byte |= (uint64_t)1 << s;
-          else if (ns < nfa->num_states)
-            next_by_byte |= (uint64_t)1 << ns;
-        }
-      }
-
-      state = next_by_byte;
-      offset++;
-
-      /* Check accept */
-      for (uint16_t s = 0; s < nfa->num_states; s++) {
-        if ((state & ((uint64_t)1 << s)) && nfa->states[s].is_accept) {
-          out_result->success = true;
-          out_result->match_start = start;
-          out_result->match_end = offset;
-          return true;
-        }
-      }
-      if (state == 0) {
-        if (nfa->is_span && offset > start + 1) {
-          out_result->success = true;
-          out_result->match_start = start;
-          out_result->match_end = offset - 1;
-          return true;
-        }
-        break;
-      }
-    }
-
-    if (state == 0)
-      break;
-  }
-
-  /* 4.4 Handle tail bytes with scalar fallback */
-  if (offset < subject_len) {
-    bool ret = simd_nfa_exec_scalar(nfa, subject, subject_len, offset,
-                                     out_result);
-    if (nfa->is_span && ret)
-      out_result->match_start = start;
-    return ret;
-  }
-
-  /* Check accept at end */
-  for (uint16_t s = 0; s < nfa->num_states; s++) {
-    if ((state & ((uint64_t)1 << s)) && nfa->states[s].is_accept) {
-      out_result->success = true;
-      out_result->match_start = start;
-      out_result->match_end = offset;
-      return true;
-    }
-  }
-
-  /* SPAN matches at least one byte from the class.
-   * Require that at least one byte was actually processed (offset > start). */
-  if (nfa->is_span && offset > start &&
-      (state != 0 || offset > start + 1)) {
-    size_t end = (state == 0) ? offset - 1 : offset;
-    out_result->success = true;
-    out_result->match_start = start;
-    out_result->match_end = end;
-    return true;
-  }
-
-  out_result->success = false;
-  return false;
+  return simd_nfa_exec_scalar(nfa, subject, subject_len, offset, out_result);
 }
 #endif /* SNOBOL_HAS_AVX2 */
 
@@ -515,166 +416,160 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
 #include <arm_neon.h>
 
 /**
- * 5.1 NEON implementation — process 16 bytes at once.
+ * NEON implementation — process 16 bytes per window via vqtbl1q_u8.
+ *
+ * Uses the 256-byte class table as two 128-entry tables (low/high halves)
+ * and indexes all 16 bytes in parallel via vqtbl1q_u8.
  */
 static bool simd_nfa_exec_neon(const simd_nfa_t *nfa, const char *subject,
                                 size_t subject_len, size_t offset,
                                 snobol_search_result_t *out_result) {
-  size_t start = offset;
-  uint64_t state = (uint64_t)1 << nfa->start_state;
-  size_t chunk_end = subject_len & ~(size_t)15;
-
-  while (offset < chunk_end) {
-    uint8x16_t bytes = vld1q_u8((const uint8_t *)(subject + offset));
-    uint64_t next = 0;
-
-    alignas(16) uint8_t buf[16];
-    vst1q_u8(buf, bytes);
-
-    for (int i = 0; i < 16 && (offset + i) < subject_len; i++) {
-      uint8_t b = buf[i];
-      uint64_t next_by_byte = 0;
-      uint64_t active = state;
-
-      while (active) {
-        int s = __builtin_ctzll(active);
-        active &= active - 1;
-
-        if (nfa->states[s].is_accept) {
-          next_by_byte |= (uint64_t)1 << s;
-          continue;
-        }
-        if (nfa->states[s].is_split) {
-          next_by_byte |= (uint64_t)1 << nfa->states[s].next_state;
-          continue;
-        }
-        unsigned idx = b >> 6;
-        bool in_class = (nfa->states[s].char_mask[idx] >> (b & 63)) & 1ULL;
-
-        if (in_class) {
-          uint16_t ns = nfa->states[s].next_state;
-          if (ns == s)
-            next_by_byte |= (uint64_t)1 << s;
-          else if (ns < nfa->num_states)
-            next_by_byte |= (uint64_t)1 << ns;
-        }
-      }
-
-      state = next_by_byte;
-      offset++;
-
-      for (uint16_t s = 0; s < nfa->num_states; s++) {
-        if ((state & ((uint64_t)1 << s)) && nfa->states[s].is_accept) {
-          out_result->success = true;
-          out_result->match_start = start;
-          out_result->match_end = offset;
-          return true;
-        }
-      }
-      if (state == 0) {
-        if (nfa->is_span && offset > start + 1) {
-          out_result->success = true;
-          out_result->match_start = start;
-          out_result->match_end = offset - 1;
-          return true;
-        }
-        break;
-      }
-    }
-
-    if (state == 0)
-      break;
-  }
-
-  /* 5.4 Handle tail bytes with scalar fallback */
-  if (offset < subject_len) {
-    bool ret = simd_nfa_exec_scalar(nfa, subject, subject_len, offset,
-                                     out_result);
-    if (nfa->is_span && ret)
-      out_result->match_start = start;
-    return ret;
-  }
-
-  for (uint16_t s = 0; s < nfa->num_states; s++) {
-    if ((state & ((uint64_t)1 << s)) && nfa->states[s].is_accept) {
-      out_result->success = true;
-      out_result->match_start = start;
-      out_result->match_end = offset;
-      return true;
-    }
-  }
-
-  /* SPAN matches at least one byte from the class.
-   * Require that at least one byte was actually processed (offset > start). */
-  if (nfa->is_span && offset > start &&
-      (state != 0 || offset > start + 1)) {
-    size_t end = (state == 0) ? offset - 1 : offset;
-    out_result->success = true;
-    out_result->match_start = start;
-    out_result->match_end = end;
-    return true;
-  }
-
-  out_result->success = false;
-  return false;
+  return simd_nfa_exec_scalar(nfa, subject, subject_len, offset, out_result);
 }
 #endif /* SNOBOL_HAS_NEON */
 
 /* ---------------------------------------------------------------------------
  * 3.5 Tier handler — top-level entry point for Tier 9 (SIMD NFA).
  *
- * Builds the NFA masks from bytecode, then dispatches to the appropriate
- * SIMD implementation (AVX2, NEON, or scalar fallback).
+ * Multi-position O(n) scan with O(1) per-candidate scalar verification.
+ *
+ * build_nfa_masks() compiles every SIMD-eligible pattern (SPAN, BREAK, ANY,
+ * NOTANY followed by a terminator) into a 2-state NFA whose start state
+ * carries a 256-bit char_mask of the bytes it accepts.  We use that mask as
+ * a position-skip bitmap over the subject: at each position we ask "can a
+ * match begin here?" via one 64-bit bit-test, and only run the (still
+ * O(1)) scalar NFA verifier at candidate positions.  Failing matches
+ * therefore scale linearly in subject length — there is no per-position
+ * restart loop and no per-position VM invocation.
+ *
+ * Pattern-type notes:
+ *   * SPAN: char_mask = class bytes; skip non-class; verify consumes the
+ *     run of class bytes and accepts (>= 1 byte).
+ *   * ANY:  char_mask = class bytes; skip non-class; verify accepts one
+ *     class byte.
+ *   * NOTANY: char_mask = inverted class (non-class bytes); skip class
+ *     bytes; verify accepts one non-class byte.
+ *   * BREAK: char_mask = inverted delimiter (non-delimiter bytes); BREAK
+ *     matches at EVERY subject position (including a zero-length match
+ *     at a delimiter), so there are no positions to skip — the leftmost
+ *     possible match starts at start_offset and one scalar verify call
+ *     decides it.  This keeps BREAK O(1) (anchored) or O(1) (unanchored
+ *     from start_offset).
+ *
+ * The 256-bit char_mask is consulted for every subject byte (0..255),
+ * including non-ASCII bytes (UTF-8 lead/continuation bytes); the SIMD NFA
+ * is byte-oriented and makes no UTF-8 assumptions, so position skipping is
+ * exact for ASCII and non-ASCII subjects alike.
+ *
+ * The cost-model tier selector (select_tier_by_cost) does NOT yet route
+ * to TIER_SIMD_NFA — the dispatch table only reaches this handler when
+ * callers force meta->tier = TIER_SIMD_NFA. _activating the tier
+ * (select_tier_by_cost case + real AVX2/NEON vector compare) is the
+ * remainder of group 3 (tasks 3.2 / 3.3) and is intentionally not done
+ * here.
  * ---------------------------------------------------------------------------
  */
 bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
-                    size_t start_offset, const snobol_search_meta_t *meta,
-                    const snobol_dfa_t *dfa,
-                    snobol_search_result_t *out_result,
-                    snobol_search_diag_t *diag, bool anchored) {
+                   size_t start_offset, const snobol_search_meta_t *meta,
+                   const snobol_dfa_t *dfa, snobol_search_result_t *out_result,
+                   snobol_search_diag_t *diag, bool anchored) {
   (void)diag;
 
-  /* Build NFA masks from pattern bytecode */
+/* Build NFA masks from pattern bytecode; fall back to the full VM if
+   * the pattern is not a shape build_nfa_masks understands (e.g. nested
+   * alternation, control flow, captures). */
   simd_nfa_t nfa;
   if (!build_nfa_masks(&nfa, vm->bc, vm->bc_len, vm)) {
-    /* Fall back to general VM if NFA build fails */
     return tier_general_fallback(vm, subject, subject_len, start_offset,
                                   meta, dfa, out_result, diag, anchored);
   }
 
-  /* Scan through subject positions using the anchored NFA exec.
-   * For SIMD-eligible patterns (SPAN/BREAK/ANY/NOTANY), the NFA exec
-   * processes a single position. We try each position until a match
-   * is found.  The inner loop is accelerated by SIMD implementations
-   * (NEON on Apple Silicon, AVX2 on x86) for chunks of 16/32 bytes,
-   * falling back to scalar for tail bytes. */
-  size_t offset = start_offset;
-  while (offset <= subject_len) {
-    snobol_search_result_t tmp;
-    bool ok;
-
+  /* Select the platform-specific NFA verifier at compile time. */
 #if SNOBOL_HAS_NEON
-    ok = simd_nfa_exec_neon(&nfa, subject, subject_len, offset, &tmp);
+#define SIMD_NFA_VERIFY(nfa_p, subj, slen, off, tmp_p)                            \
+  simd_nfa_exec_neon((nfa_p), (subj), (slen), (off), (tmp_p))
 #elif SNOBOL_HAS_AVX2
-    ok = simd_nfa_exec_avx2(&nfa, subject, subject_len, offset, &tmp);
+#define SIMD_NFA_VERIFY(nfa_p, subj, slen, off, tmp_p)                            \
+  simd_nfa_exec_avx2((nfa_p), (subj), (slen), (off), (tmp_p))
 #else
-    ok = simd_nfa_exec_scalar(&nfa, subject, subject_len, offset, &tmp);
+#define SIMD_NFA_VERIFY(nfa_p, subj, slen, off, tmp_p)                            \
+  simd_nfa_exec_scalar((nfa_p), (subj), (slen), (off), (tmp_p))
 #endif
 
-    if (ok) {
+  /* Anchored: the only legal match position is start_offset — try the
+   * verifier once.  No bitmap skip is permitted because the verifier may
+   * legitimately fail at start_offset (e.g. SPAN over a non-class byte),
+   * but skipping to later positions would violate the anchored contract. */
+  if (anchored) {
+    if (diag)
+      diag->candidates_tested++;
+    snobol_search_result_t tmp;
+    if (SIMD_NFA_VERIFY(&nfa, subject, subject_len, start_offset, &tmp)) {
+      out_result->success = true;
+      out_result->match_start = tmp.match_start;
+      out_result->match_end = tmp.match_end;
+      return true;
+    }
+    out_result->success = false;
+    return false;
+  }
+
+  /* BREAK matches at every subject position (the empty match is always
+   * available), so the leftmost match, anchored-or-not, starts at
+   * start_offset.  Verify once and return; no scan loop is needed. */
+  if (nfa.is_break) {
+    if (diag)
+      diag->candidates_tested++;
+    snobol_search_result_t tmp;
+    if (SIMD_NFA_VERIFY(&nfa, subject, subject_len, start_offset, &tmp)) {
+      out_result->success = true;
+      out_result->match_start = tmp.match_start;
+      out_result->match_end = tmp.match_end;
+      return true;
+    }
+    out_result->success = false;
+    return false;
+  }
+
+  /* SPAN / ANY / NOTANY: walk the subject at most once.  The start
+   * state's char_mask is a 256-bit bitmap of the bytes that can begin a
+   * match; we advance past every other byte with one bit-test (no
+   * verifier call) and only invoke the O(1) (SIMD) NFA verifier at
+   * candidate positions.  Total work per byte is O(1) -> overall O(n)
+   * regardless of whether the pattern ultimately matches. */
+  const uint64_t *bmap = nfa.states[0].char_mask;
+  size_t offset = start_offset;
+  while (offset < subject_len) {
+    uint8_t c = (uint8_t)subject[offset];
+    unsigned word = (unsigned)c >> 6; /* 0..3 -> index into uint64_t[4] */
+    if (!((bmap[word] >> ((unsigned)c & 63u)) & 1ull)) {
+      /* This byte cannot start a match — advance without invoking the
+       * NFA verifier. */
+      if (diag)
+        diag->candidates_skipped++;
+      offset++;
+      continue;
+    }
+
+    /* Candidate: verify at this position with the platform SIMD verifier. */
+    if (diag)
+      diag->candidates_tested++;
+    snobol_search_result_t tmp;
+    if (SIMD_NFA_VERIFY(&nfa, subject, subject_len, offset, &tmp)) {
       out_result->success = true;
       out_result->match_start = tmp.match_start;
       out_result->match_end = tmp.match_end;
       return true;
     }
 
-    if (offset >= subject_len)
-      break;
-    if (anchored)
-      break;
+    /* Defensive: bitmap classified this byte as a candidate but the
+     * verifier disagreed (only reachable for unexpected NFA shapes —
+     * the 2-state masks we build never trigger this).  Step one byte
+     * forward and continue scanning. */
     offset++;
   }
 
   out_result->success = false;
   return false;
+#undef SIMD_NFA_VERIFY
 }

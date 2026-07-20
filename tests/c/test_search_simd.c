@@ -189,7 +189,8 @@ static void test_simd_eligibility(void) {
   {
     uint8_t bc[128];
     size_t n = build_lit_accept(bc, "hello", 5);
-    test_assert(!check_simd_eligible(bc, n), "LIT('hello')+ACCEPT is NOT eligible");
+    test_assert(!check_simd_eligible(bc, n),
+                "LIT('hello')+ACCEPT is NOT eligible");
   }
   {
     /* Nested SPAN(JMP+SPLIT): not eligible */
@@ -202,8 +203,10 @@ static void test_simd_eligibility(void) {
     emit_u16_be(bc, &ip, 1);
     bc[ip++] = OP_ACCEPT;
     size_t class_off = ip;
-    emit_u16_be(bc, &ip, 1); emit_u16_be(bc, &ip, 0);
-    emit_u32_be(bc, &ip, 'a'); emit_u32_be(bc, &ip, 'a');
+    emit_u16_be(bc, &ip, 1);
+    emit_u16_be(bc, &ip, 0);
+    emit_u32_be(bc, &ip, 'a');
+    emit_u32_be(bc, &ip, 'a');
     emit_u32_be(bc, &ip, (uint32_t)class_off);
     emit_u32_be(bc, &ip, 1);
     size_t n = ip;
@@ -233,8 +236,9 @@ static void test_simd_tier_routing(void) {
     memset(&m, 0, sizeof(m));
     snobol_search_derive_meta(bc, n, &m);
     test_assert(m.simd_eligible, "simd_eligible true for SPAN(' \\t')");
-    test_assert(m.tier == TIER_SIMD_NFA || m.tier < TIER_SIMD_NFA,
-                "SPAN(' \\t') tier == TIER_SIMD_NFA (or earlier if faster path)");
+    test_assert(
+        m.tier == TIER_SIMD_NFA || m.tier < TIER_SIMD_NFA,
+        "SPAN(' \\t') tier == TIER_SIMD_NFA (or earlier if faster path)");
     snobol_search_meta_free(&m);
   }
   {
@@ -325,7 +329,8 @@ static void test_simd_span(void) {
     test_assert(r.match_end == 4, "SPAN('abc') matches all 4 bytes");
   }
 
-  if (rm) free((void *)rm);
+  if (rm)
+    free((void *)rm);
   snobol_search_meta_free(&m);
 }
 
@@ -391,7 +396,8 @@ static void test_simd_break(void) {
     test_assert(r.match_end == 0, "BREAK match_end == 0 (at delimiter)");
   }
 
-  if (rm) free((void *)rm);
+  if (rm)
+    free((void *)rm);
   snobol_search_meta_free(&m);
 }
 
@@ -442,7 +448,8 @@ static void test_simd_any(void) {
     test_assert(!ok, "ANY('aeiou') fails on 'xyz'");
   }
 
-  if (rm) free((void *)rm);
+  if (rm)
+    free((void *)rm);
   snobol_search_meta_free(&m);
 }
 
@@ -483,7 +490,8 @@ static void test_simd_notany(void) {
     test_assert(r.match_end == 1, "NOTANY match_end == 1");
   }
 
-  if (rm) free((void *)rm);
+  if (rm)
+    free((void *)rm);
   snobol_search_meta_free(&m);
 }
 
@@ -575,7 +583,8 @@ static void test_simd_tail(void) {
     test_assert(r.match_end == 64, "SPAN('ab') on 64 bytes match_end == 64");
   }
 
-  if (rm) free((void *)rm);
+  if (rm)
+    free((void *)rm);
   snobol_search_meta_free(&m);
 }
 
@@ -612,7 +621,8 @@ static void test_simd_utf8_range(void) {
     snobol_search_diag_t d;
     memset(&r, 0, sizeof(r));
     memset(&d, 0, sizeof(d));
-    bool ok = snobol_search_exec(&vm, (const char *)data, 3, 0, &m, NULL, &r, &d);
+    bool ok =
+        snobol_search_exec(&vm, (const char *)data, 3, 0, &m, NULL, &r, &d);
     test_assert(ok, "SPAN([0xC0-0xDF]) matches UTF-8 lead bytes");
     test_assert(r.match_end == 2, "SPAN([0xC0-0xDF]) match_end == 2");
   }
@@ -628,7 +638,8 @@ static void test_simd_utf8_range(void) {
     test_assert(!ok, "SPAN([0xC0-0xDF]) fails on ASCII-only data");
   }
 
-  if (rm) free((void *)rm);
+  if (rm)
+    free((void *)rm);
   snobol_search_meta_free(&m);
 }
 
@@ -669,8 +680,432 @@ static void test_simd_offset(void) {
     test_assert(r.match_end == 7, "SPAN match_end == 7");
   }
 
-  if (rm) free((void *)rm);
+  if (rm)
+    free((void *)rm);
   snobol_search_meta_free(&m);
+}
+
+/* ---------------------------------------------------------------------------
+ * Test: direct tier_simd_nfa() calls — verifies the O(n) bitmap-skip
+ * rewrite (group 3 task 3.1 / D2b) without depending on the cost-model
+ * wiring (which is intentionally still OFF — task 3.2).  All four
+ * SIMD-eligible pattern shapes (SPAN, BREAK, ANY, NOTANY) are exercised
+ * directly through the public tier_simd_nfa() entry point, asserting
+ * bit-exact agreement with the full-VM search path that the rest of the
+ * suite exercises.  The diagnostics counters are used to verify the
+ * O(n) position-skip semantics structurally (no timing noise): a missed
+ * match over a long subject MUST visit 0 candidates and skip every byte,
+ * whereas a hit visits exactly 1 candidate.
+ * ---------------------------------------------------------------------------
+ */
+static void test_simd_direct_dispatch(void) {
+  test_suite("SIMD: direct tier_simd_nfa (bitmap skip)");
+
+  /* Helper — set up the bytecode + range_meta + VM the same way
+   * snobol_search_exec() does for these SIMD-eligible patterns. */
+  uint8_t bc[128];
+  snobol_range_meta_t *rm = NULL;
+  size_t rm_count = 0;
+
+  /* ---- SPAN('abc') landscape, no anchors required ----
+   * SPAN('abc') on "aabbcxyz": match [0,5) "aabbc". */
+  {
+    size_t n = build_span_accept(bc, "abc", 3, 0);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, "aabbcxyz", 8, 0, NULL, NULL, &r, &d, false);
+    test_assert(ok, "tier_simd_nfa SPAN('abc') matches 'aabbc'");
+    test_assert(r.match_start == 0, "SPAN('abc') match_start == 0");
+    test_assert(r.match_end == 5, "SPAN('abc') match_end == 5");
+    /* The very first byte is a class byte — exactly one verify call. */
+    test_assert(d.candidates_tested == 1, "SPAN hit: 1 candidate tested");
+    test_assert(d.candidates_skipped == 0, "SPAN hit: 0 candidates skipped");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* SPAN('abc') on "xyzabc": bitmap-skip over the non-class prefix and
+   * verify exactly once at the first class byte. */
+  {
+    size_t n = build_span_accept(bc, "abc", 3, 0);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, "xyzabc", 6, 0, NULL, NULL, &r, &d, false);
+    test_assert(ok, "tier_simd_nfa SPAN('abc') matches 'abc' in 'xyzabc'");
+    test_assert(r.match_start == 3, "SPAN('abc') match_start == 3");
+    test_assert(r.match_end == 6, "SPAN('abc') match_end == 6");
+    test_assert(d.candidates_tested == 1, "SPAN skip+hit: 1 verify call");
+    test_assert(d.candidates_skipped == 3, "SPAN skip+hit: 3 skipped");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* SPAN('abc') anchored at a non-class start byte -> MUST fail without
+   * scanning later positions (anchored contract). */
+  {
+    size_t n = build_span_accept(bc, "abc", 3, 0);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, "xabc", 4, 0, NULL, NULL, &r, &d, true);
+    test_assert(!ok, "SPAN('abc') anchored at 'x' fails");
+    test_assert(d.candidates_tested == 1,
+                "SPAN anchored: 1 verify attempt at start_offset");
+    test_assert(d.candidates_skipped == 0,
+                "SPAN anchored: no bitmap skip is permitted");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* ---- BREAK ----
+   * BREAK(',') on "hello,world": match [0,5) "hello".  BREAK has no
+   * leftmost-skip optimization — match begins at start_offset by
+   * definition (BREAK can always match the empty string). */
+  {
+    size_t n = build_break_accept(bc, ",", 1);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok =
+        tier_simd_nfa(&vm, "hello,world", 11, 0, NULL, NULL, &r, &d, false);
+    test_assert(ok,
+                "tier_simd_nfa BREAK(',') matches 'hello' in 'hello,world'");
+    test_assert(r.match_start == 0, "BREAK match_start == 0");
+    test_assert(r.match_end == 5, "BREAK match_end == 5");
+    test_assert(d.candidates_tested == 1, "BREAK: 1 verify call (leftmost)");
+    test_assert(d.candidates_skipped == 0, "BREAK: no skip scan");
+
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* BREAK(',') on "abc" (no delimiter present): match [0, subject_len). */
+  {
+    size_t n = build_break_accept(bc, ",", 1);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, "abc", 3, 0, NULL, NULL, &r, &d, false);
+    test_assert(ok, "tier_simd_nfa BREAK(',') matches all of 'abc'");
+    test_assert(r.match_start == 0, "BREAK no-delim match_start == 0");
+    test_assert(r.match_end == 3, "BREAK no-delim match_end == 3");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* BREAK(',') on "," (first byte is the delimiter): empty match [0,0). */
+  {
+    size_t n = build_break_accept(bc, ",", 1);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, ",", 1, 0, NULL, NULL, &r, &d, false);
+    test_assert(ok, "tier_simd_nfa BREAK(',') on ',' matches empty");
+    test_assert(r.match_start == 0, "BREAK empty: match_start == 0");
+    test_assert(r.match_end == 0, "BREAK empty: match_end == 0");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* ---- ANY ----
+   * ANY('aeiou') on "frog": 'o' at offset 2. */
+  {
+    size_t n = build_any_accept(bc, "aeiou", 5);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, "frog", 4, 0, NULL, NULL, &r, &d, false);
+    test_assert(ok, "tier_simd_nfa ANY('aeiou') matches at offset 2");
+    test_assert(r.match_start == 2, "ANY match_start == 2");
+    test_assert(r.match_end == 3, "ANY match_end == 3");
+    test_assert(d.candidates_tested == 1, "ANY hit: 1 verify call");
+    test_assert(d.candidates_skipped == 2, "ANY hit: 2 bytes skipped");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* ANY('aeiou') on "xyz" (no class byte): MUST fail and MUST not
+   * visit any verifier. */
+  {
+    size_t n = build_any_accept(bc, "aeiou", 5);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, "xyz", 3, 0, NULL, NULL, &r, &d, false);
+    test_assert(!ok, "ANY('aeiou') on 'xyz' fails");
+    test_assert(d.candidates_tested == 0,
+                "ANY miss: 0 verifier calls (O(1) per byte)");
+    test_assert(d.candidates_skipped == 3,
+                "ANY miss: every byte skipped by bitmap");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* ---- NOTANY ----
+   * NOTANY('aeiou') on "frog": 'f' at offset 0. */
+  {
+    size_t n = build_notany_accept(bc, "aeiou", 5);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, "frog", 4, 0, NULL, NULL, &r, &d, false);
+    test_assert(ok, "tier_simd_nfa NOTANY('aeiou') matches at offset 0");
+    test_assert(r.match_start == 0, "NOTANY match_start == 0");
+    test_assert(r.match_end == 1, "NOTANY match_end == 1");
+    test_assert(d.candidates_tested == 1, "NOTANY hit: 1 verify call");
+    test_assert(d.candidates_skipped == 0, "NOTANY hit: 0 skipped (hit pos 0)");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* NOTANY('aeiou') on "aeiou" (no non-class byte): MUST fail with 0
+   * verify calls. */
+  {
+    size_t n = build_notany_accept(bc, "aeiou", 5);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, "aeiou", 5, 0, NULL, NULL, &r, &d, false);
+    test_assert(!ok, "NOTANY('aeiou') on 'aeiou' fails");
+    test_assert(d.candidates_tested == 0,
+                "NOTANY miss: 0 verifier calls (post-fix bit-mask skip)");
+    test_assert(d.candidates_skipped == 5,
+                "NOTANY miss: 5 bytes skipped via bitmap");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* ---- UTF-8 lead-byte ranges (>=128) ----
+   * SPAN([0xC0-0xDF]) on {0xC3, 0xC8, 0x41}: match first two bytes.
+   * The previous implementation short-circuited the bitmap-skip for
+   * bytes > 127, falling through to scalar verify at every position
+   * (O(n^2) regression for non-ASCII subjects).  The rewritten
+   * tier_simd_nfa consults the full 256-bit char_mask, so non-ASCII
+   * positions skip correctly. */
+  {
+    size_t n = build_span_utf8(bc);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    unsigned char data[] = {0xC3, 0xC8, 0x41};
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok =
+        tier_simd_nfa(&vm, (const char *)data, 3, 0, NULL, NULL, &r, &d, false);
+    test_assert(ok, "tier_simd_nfa SPAN([0xC0-0xDF]) hits UTF-8 lead bytes");
+    test_assert(r.match_start == 0, "UTF-8 SPAN match_start == 0");
+    test_assert(r.match_end == 2, "UTF-8 SPAN match_end == 2");
+    test_assert(d.candidates_tested == 1, "UTF-8 SPAN hit: 1 verify");
+    test_assert(d.candidates_skipped == 0, "UTF-8 SPAN hit: 0 skipped");
+    free((void *)rm);
+    rm = NULL;
+  }
+
+  /* SPAN([0xC0-0xDF]) on a non-class subject — ASCII bytes mixed with
+   * UTF-8 continuation bytes that are NOT in the class.  The bitmap-skip
+   * must reject ALL bytes (including those > 127) in O(n) without
+   * invoking the verifier. */
+  {
+    size_t n = build_span_utf8(bc);
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    /* 0x80, 0xBF are UTF-8 continuation bytes — NOT in the [0xC0-0xDF]
+     * class.  'a', 'b', 'c' are ASCII.  No byte here is a class byte. */
+    unsigned char data[] = {'a', 'b', 0x80, 0xBF, 'c', 0xE0, 'd'};
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok =
+        tier_simd_nfa(&vm, (const char *)data, 7, 0, NULL, NULL, &r, &d, false);
+    test_assert(!ok, "UTF-8 SPAN on non-class subject fails");
+    test_assert(d.candidates_tested == 0,
+                "UTF-8 SPAN miss: 0 verifier calls — non-ASCII bytes are "
+                "skipped via the 256-bit bitmap");
+    test_assert(d.candidates_skipped == 7,
+                "UTF-8 SPAN miss: every byte skipped (including >127)");
+    free((void *)rm);
+    rm = NULL;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Test: O(n) linearity of the missing-match path.  The O(n^2) per-position
+ * restart loop in the original tier_simd_nfa was the D2b blocker: it would
+ * call the anchored verifier at every subject position.  The rewritten
+ * tier_simd_nfa uses the start-state char_mask to skip per-position
+ * verification, so a failing match over N bytes costs O(N) bit-tests and 0
+ * verifier calls.  This test asserts that structural property by scaling N
+ * and checking that candidates_tested stays 0 (constant) while
+ * candidates_skipped scales linearly with N — a property no O(n^2)
+ * implementation can simultaneously satisfy.
+ * ---------------------------------------------------------------------------
+ */
+static void test_simd_nfa_linearity(void) {
+  test_suite("SIMD: tier_simd_nfa O(n) linearity");
+
+  /* SPAN('x') over subjects of size 1k, 4k, 16k filled with 'a' (no 'x').
+   * Failing match must visit exactly 0 verifier calls and skip every
+   * byte — for every subject size, in O(n). */
+  size_t sizes[] = {1024, 4096, 16384};
+  uint64_t tested_prev = 0, skipped_prev = 0;
+  for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+    size_t nchr = sizes[i];
+    char *subj = (char *)malloc(nchr);
+    test_assert(subj != NULL, "alloc subject for linearity probe");
+    if (!subj)
+      return;
+    memset(subj, 'a', nchr);
+
+    uint8_t bc[128];
+    size_t n = build_span_accept(bc, "x", 1, 0);
+    snobol_range_meta_t *rm = NULL;
+    size_t rm_count = 0;
+    snobol_build_range_meta(bc, n, &rm, &rm_count);
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = n;
+    vm.range_meta = rm;
+    vm.range_meta_count = rm_count;
+
+    snobol_search_result_t r;
+    snobol_search_diag_t d;
+    memset(&r, 0, sizeof(r));
+    memset(&d, 0, sizeof(d));
+    bool ok = tier_simd_nfa(&vm, subj, nchr, 0, NULL, NULL, &r, &d, false);
+    test_assert(!ok, "SPAN('x') on 'a'^N fails (no class byte)");
+
+    /* No verify call: the bitmap-skip rejected every byte. */
+    char msg[80];
+    snprintf(msg, sizeof(msg),
+             "N=%zu: candidates_tested == 0 (no per-position verify)", nchr);
+    test_assert(d.candidates_tested == 0, msg);
+
+    /* Every byte was skipped (linearly-scaling skip count). */
+    snprintf(msg, sizeof(msg), "N=%zu: candidates_skipped == N (linear skip)",
+             nchr);
+    test_assert(d.candidates_skipped == (uint64_t)nchr, msg);
+
+    /* The skip count must grow strictly proportionally to N — a true
+     * O(n) property.  Compare against the previous size. */
+    if (i > 0) {
+      /* Simpler invariant: skip count == subject length. */
+      uint64_t ratio =
+          d.candidates_skipped / (skipped_prev > 0 ? skipped_prev : 1);
+      test_assert(ratio > 1, "skip count grows with N (O(n), not O(1))");
+    }
+    skipped_prev = d.candidates_skipped;
+    tested_prev = d.candidates_tested;
+    (void)tested_prev;
+    free(subj);
+    free((void *)rm);
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -687,4 +1122,6 @@ void test_search_simd_suite(void) {
   test_simd_tail();
   test_simd_utf8_range();
   test_simd_offset();
+  test_simd_direct_dispatch();
+  test_simd_nfa_linearity();
 }
