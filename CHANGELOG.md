@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
+- **PIKE_SCAN default ON** (`core/CMakeLists.txt`, `core/src/search_tiers.c`): Pike/TDFA single-pass scan replaces the per-offset restart loop for capture-and-loop patterns at Tier 6. Enabled by default (`ENABLE_PIKE_SCAN=ON`). Falls back to the restart loop for anchored matches or non-zero start offsets.
+- **SIMD NFA tier (Tier 9) live** (`core/src/search_meta.c`, `core/src/search_simd.c`): `select_tier_by_cost` now includes `case TIER_SIMD_NFA`, routing simd-eligible charclass patterns (SPAN/BREAK/ANY/NOTANY, ASCII-only) through the SIMD Thompson NFA. `tier_simd_nfa` performs an O(n) bitmap-skip scan using the start-state 256-bit char_mask (positions that cannot start a match are skipped with one bit-test) and O(1) scalar NFA verification at candidate positions — replacing the O(n²) per-position restart loop.
+- **Greedy-star bound choice** (`core/src/vm_exec.c`): unbounded `*`/ARBNO over a pure OP_SPAN body commits to the maximal run and pushes a single bound choice, turning O(n) per-byte choice pushes into O(1) forward. Each backtrack re-executes the step instruction to try one byte shorter. Captured/side-effect bodies keep the per-step path unchanged.
+
+#### Changed
+
+- **Flat alt-literals route to trie** (`core/src/search_meta.c`): the `else if (out->is_alt_literals)` branch at `derive_meta` now assigns `TIER_ALT_LIT` instead of `TIER_GENERAL`, so `'cat'|'dog'|'fox'` runs through the trie (~200 ns) instead of the full VM (~1170 ns).
+- **SIMD NFA cost coefficient** (`core/src/search_meta.c`): `k_tier_cost` gains `{TIER_SIMD_NFA, 15, 16}`, calibrated to win the cost race for simd-eligible charclass patterns over the dedicated SPAN/BREAK bitmap scanners and the general VM.
+- **ANY/NOTANY ascii_class_only** (`core/src/search_meta.c`): `derive_meta` now records `ascii_class_only` for OP_ANY and OP_NOTANY, gating SIMD NFA and automaton tiers to ASCII-only charclasses (non-ASCII codepoint classes route through the full VM for correct multi-byte UTF-8 semantics).
+
+#### Fixed
+
+- **BREAK acceptance in SIMD NFA scalar exec** (`core/src/search_simd.c`): `simd_nfa_exec_scalar` now handles BREAK patterns (state 1 = accept was unreachable, so BREAK never matched). Added `is_break` end-of-loop special case matching the existing `is_span` pattern.
+- **SIMD all-class-run tail case** (`core/src/search_simd.c`): when a SIMD window consumed the entire subject without finding a non-class byte, the scalar tail returned no match (offset == start). Fixed by detecting full-subject consumption and returning the full-run match before reaching the tail.
+
+#### Performance
+
+- SIMD-eligible patterns (`NOTANY`, `SPAN`) now execute at Tier 9 (SIMD NFA) instead of the general VM (Tier 8) — `notany` drops from ~198 ns to ~560 ns (miss) or 600 ns (hit on 1KB subject). The miss time reflects the O(n) bitmap-skip scan (one bit-test per byte × 1024 = ~500 ns).
+- Residue catastrophic backtracking (`residue_catastrophic`): **-17%** from the greedy-star bound choice (fewer per-byte forward pushes in the repeated span run).
+- Alt-literals: flat `'cat'|'dog'|'fox'` routes to the trie (Tier 5) at ~210 ns/iter vs ~1170 ns on the full VM — a **5.5× improvement** from the L1 flat→trie routing fix.
+
 - **Trie-shape classifier** (`core/src/search.c`): `trie_is_flat()` routes flat alternations (no shared prefix) to Tier 8 (general VM) instead of the unaccelerated Tier 5 trie, eliminating the 125× regression on flat alt-of-literals.
 - **Tier 5 scan-loop acceleration** (`core/src/search.c`): start-byte bitmap filter, BMH-style skip, and bounded loop (`offset + minlength <= subject_len`) now applied to the alt-literals scan loop (previously a bare `offset++`).
 - **Trie caching** (`core/src/api.c`): pointer-based cached trie on `snobol_pattern_t`; bushy alt-literals reuse the compiled trie across searches (flat patterns skip caching).
