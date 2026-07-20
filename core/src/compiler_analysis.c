@@ -52,6 +52,63 @@ uint32_t charclass_count = 0;
 uint8_t next_loop_id = 0;
 bool compiler_case_insensitive = false;
 
+/* ── Nullable (empty-matchable) analysis for zero-width-loop bounding (W2b) ──
+ *
+ * A sub-pattern is "nullable" if it can match the empty string. arbno/ARB over
+ * a nullable sub-pattern can create zero-width closures; detecting this lets
+ * the compiler warn (and the VM bound iterations) to avoid O(n^2)/exponential
+ * choice-point blowup. */
+
+bool ast_node_nullable(const ast_node_t *node) {
+  if (!node)
+    return false;
+  switch (node->type) {
+  case AST_ARBNO:
+  case AST_REPETITION:
+    /* arbno / repeat(0, …) can match zero times → nullable. */
+    if (node->type == AST_ARBNO)
+      return true;
+    return node->data.repetition.min == 0;
+  case AST_ALT:
+    /* nullable if either branch can match empty. */
+    return ast_node_nullable(node->data.alt.left) ||
+           ast_node_nullable(node->data.alt.right);
+  case AST_CONCAT:
+    /* nullable only if EVERY part is nullable. */
+    for (size_t i = 0; i < node->data.concat.count; i++) {
+      if (!ast_node_nullable(node->data.concat.parts[i]))
+        return false;
+    }
+    return node->data.concat.count == 0;
+  case AST_CAP:
+  case AST_EMIT:
+    return ast_node_nullable(node->data.cap.sub);
+  case AST_LITERAL:
+    /* A literal only matches empty if it is the empty string. */
+    return node->data.literal.len == 0;
+  case AST_SUCCEED:
+  case AST_FAIL:
+  case AST_FENCE:
+  case AST_REM:
+  case AST_BREAKX:
+  case AST_BAL:
+    /* Zero-width structural nodes that match (or fail) without consuming. */
+    return true;
+  default:
+    /* SPAN/ANY/NOTANY/LEN/POS/TAB/RPOS/RTAB/BAL/GOTO/LABEL/EVAL/etc. cannot
+     * match empty (POS/TAB require a specific cursor position). */
+    return false;
+  }
+}
+
+void snobol_diag(const char *msg) {
+  static int diag_enabled = -1;
+  if (diag_enabled < 0)
+    diag_enabled = (getenv("SNOBOL_DIAG") != nullptr) ? 1 : 0;
+  if (diag_enabled)
+    fprintf(stderr, "[snobol-diag] %s\n", msg ? msg : "");
+}
+
 void free_charclass_list(void) {
   CCEntry *e = charclass_head;
   while (e) {

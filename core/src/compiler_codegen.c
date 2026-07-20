@@ -482,6 +482,15 @@ static int emit_arbno_c(ast_node_t *sub, CodeBuf *c) {
   if (next_loop_id >= MAX_LOOPS)
     return -1;
 
+  /* Zero-width-loop bounding (W2b): an unbounded arbno over a nullable
+   * sub-pattern can create O(n^2)/exponential choice-point blowup. The VM now
+   * caps iterations to subject_len (semantically identical), and we emit a
+   * diagnostic so the caller is aware. */
+  if (ast_node_nullable(sub)) {
+    snobol_diag("arbno over a nullable sub-pattern: bounding zero-width "
+                "iterations to subject length");
+  }
+
   uint8_t loop_id = next_loop_id++;
   uint32_t min = 0;
   uint32_t max = (uint32_t)-1;

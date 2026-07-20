@@ -61,6 +61,14 @@ extern uint32_t charclass_count;
 extern uint8_t next_loop_id;
 extern bool compiler_case_insensitive;
 
+/* Nullable (empty-matchable) analysis for zero-width-loop bounding (W2b). */
+bool ast_node_nullable(const ast_node_t *node);
+
+/* Diagnostic sink (W2b): prints @p msg to stderr only when SNOBOL_DIAG is set
+ * in the environment, so zero-width-loop bounding can be observed without
+ * polluting normal output. */
+void snobol_diag(const char *msg);
+
 void free_charclass_list(void);
 int add_or_get_charclass(const char *s, size_t len);
 void add_range(CCEntry *e, uint32_t start, uint32_t end);

@@ -102,6 +102,14 @@ static int emit_arbno(zval *sub, CodeBuf *c) {
 
   if (next_loop_id >= MAX_LOOPS)
     return -1;
+
+  /* Zero-width-loop bounding (W2b): emit a diagnostic when the unbounded
+   * arbno iterates over a nullable sub-pattern (the VM caps iterations). */
+  if (ast_node_nullable(sub)) {
+    snobol_diag("arbno over a nullable sub-pattern: bounding zero-width "
+                "iterations to subject length");
+  }
+
   uint8_t loop_id = next_loop_id++;
   uint32_t min = 0;
   uint32_t max = (uint32_t)-1;

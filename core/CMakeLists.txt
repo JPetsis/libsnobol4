@@ -53,6 +53,10 @@ if(NOT MSVC)
 endif()
 
 # Set up include directories
+# Profiling counters are cheap and used by the catastrophic/trail C tests to
+# assert bounded choice-point counts.
+target_compile_definitions(snobol4 PRIVATE SNOBOL_PROFILE)
+
 target_include_directories(snobol4
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
