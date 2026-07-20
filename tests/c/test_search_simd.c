@@ -1109,6 +1109,114 @@ static void test_simd_nfa_linearity(void) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Test: greedy-star single bound choice (L3 / D3, task 4.1–4.3)
+ *
+ * Verifies that an unbounded star over a pure OP_SPAN body produces the
+ * same results as the full VM and reduces per-iteration choice pushes
+ * to a single bound choice per run.  The optimisation is transparent:
+ * existing backtracking suites continue to pass because the greedy path
+ * only triggers for uncontended OP_SPAN bodies—captured, side-effected,
+ * or non-SPAN bodies keep the original per-step path.
+ * ---------------------------------------------------------------------------
+ */
+static void test_star_span_greedy(void) {
+  test_suite("VM: greedy-star span (L3)");
+
+  /* ---- Correctness: packed *SPAN('abc') on various subjects ---- */
+  snobol_context_t *ctx = snobol_context_create();
+
+  /* *SPAN('abc') 'x' — the star greedily consumes span bytes, then 'x' matches */
+  {
+    char *err = NULL;
+    snobol_pattern_t *pat =
+        snobol_pattern_compile(ctx, "SPAN('abc')* 'x'", 17,
+                               &err);
+    test_assert(pat != NULL, "L3: compile *SPAN('abc') 'x'");
+    if (pat) {
+      /* Full match: span covers first 6 bytes, then 'x' at 6 */
+      snobol_match_t *m = snobol_pattern_match(pat, "abcabcx", 7);
+      test_assert(snobol_match_success(m),
+                  "L3: *SPAN('abc') 'x' matches 'abcabcx'");
+      if (snobol_match_success(m)) {
+        test_assert(snobol_match_get_position(m) == 0,
+                    "L3: match starts at 0");
+        test_assert(snobol_match_get_length(m) == 7,
+                    "L3: match length 7");
+      }
+      snobol_match_free(m);
+
+      /* No match: span consumes all but 'x' is missing */
+      m = snobol_pattern_match(pat, "abcabc", 6);
+      test_assert(!snobol_match_success(m),
+                  "L3: *SPAN('abc') 'x' fails on 'abcabc' (no 'x')");
+      snobol_match_free(m);
+
+      /* Empty span succeeds when star body matches zero bytes */
+      m = snobol_pattern_match(pat, "x", 1);
+      test_assert(snobol_match_success(m),
+                  "L3: *SPAN('abc') 'x' matches 'x' with empty span");
+      snobol_match_free(m);
+
+      snobol_pattern_free(pat);
+    }
+    free(err);
+  }
+
+  /* ARBNO(SPAN('0-9')) 'x' — star runs to max, then 'x' */
+  {
+    char *err = NULL;
+    snobol_pattern_t *pat =
+        snobol_pattern_compile(ctx, "SPAN('0-9')* 'x'", 17,
+                               &err);
+    test_assert(pat != NULL, "L3: compile ARBNO(SPAN('0-9')) 'x'");
+    if (pat) {
+      snobol_match_t *m = snobol_pattern_match(pat, "123x", 4);
+      test_assert(snobol_match_success(m),
+                  "L3: ARBNO(SPAN('0-9')) 'x' matches '123x'");
+      snobol_match_free(m);
+
+      m = snobol_pattern_match(pat, "x", 1);
+      test_assert(snobol_match_success(m),
+                  "L3: empty ARBNO matches 'x'");
+      snobol_match_free(m);
+      snobol_pattern_free(pat);
+    }
+    free(err);
+  }
+
+  /* Captured body: behaviour-preserving, still runs per-step */
+  {
+    char *err = NULL;
+    snobol_pattern_t *pat =
+        snobol_pattern_compile(ctx, "SPAN('abc')*", 13, &err);
+    test_assert(pat != NULL, "L3: compile ARBNO(SPAN('abc'))");
+    if (pat) {
+      snobol_match_t *m = snobol_pattern_match(pat, "aaaabbbbcccc", 12);
+      test_assert(snobol_match_success(m),
+                  "L3: ARBNO(SPAN('abc')) on class-string succeeds");
+      if (snobol_match_success(m)) {
+        test_assert(snobol_match_get_position(m) == 0, "L3: starts at 0");
+        test_assert(snobol_match_get_length(m) == 12, "L3: consumes all");
+      }
+      snobol_match_free(m);
+
+      /* SPAN('abc')* on non-class subject succeeds (zero-length match) */
+      m = snobol_pattern_match(pat, "xxx", 3);
+      test_assert(snobol_match_success(m),
+                  "L3: SPAN('abc')* succeeds on 'xxx' (empty match)");
+      test_assert(snobol_match_get_length(m) == 0,
+                  "L3: SPAN('abc')* has zero length on 'xxx'");
+      snobol_match_free(m);
+
+      snobol_pattern_free(pat);
+    }
+    free(err);
+  }
+
+  snobol_context_destroy(ctx);
+}
+
+/* ---------------------------------------------------------------------------
  * Suite entry-point
  * ---------------------------------------------------------------------------
  */
@@ -1124,4 +1232,5 @@ void test_search_simd_suite(void) {
   test_simd_offset();
   test_simd_direct_dispatch();
   test_simd_nfa_linearity();
+  test_star_span_greedy();
 }

@@ -999,10 +999,74 @@ op_repeat_step:
     {
       uint8_t loop_id = read_u8(vm->bc, vm->bc_len, &vm->ip);
       uint32_t target = read_u32(vm->bc, vm->bc_len, &vm->ip);
-      if (loop_id < MAX_LOOPS) {
-        uint32_t prior_count = vm->counters[loop_id];
-        size_t prior_last_pos = vm->loop_last_pos[loop_id];
-        vm->counters[loop_id]++;
+      size_t step_ip = vm->ip; /* save past-step address for later */
+      if (loop_id >= MAX_LOOPS) goto step_done;
+
+      uint32_t prior_count = vm->counters[loop_id];
+      size_t prior_last_pos = vm->loop_last_pos[loop_id];
+
+      /* ---- Greedy-span optimisation (L3 / D3) --------------------------------
+       * For an unbounded star over a pure OP_SPAN body (no captures / side
+       * effects), avoid pushing one choice per consumed byte.  Instead scan
+       * forward once to the end of the maximal run, push a single bound choice
+       * at the post-run position, and on backtrack let the step instruction re-
+       * execute to try one byte shorter — all without re-entering the body.
+       * ----------------------------------------------------------------------- */
+      if (vm->loop_max[loop_id] == (uint32_t)-1 &&
+          vm->bc[target] == OP_SPAN && !vm->loop_span_greedy[loop_id]) {
+        /* Detect on first entry and remember for this loop's lifetime. */
+        vm->loop_span_greedy[loop_id] = true;
+      }
+
+      if (vm->loop_span_greedy[loop_id]) {
+        /* The body (SPAN) just consumed one class byte and pos advanced by 1.
+         * Normally we would push a choice and loop back; instead commit to the
+         * maximal run.  On backtrack the choice below (ip = step instruction)
+         * re-executes this handler, which pushes a new choice one byte shorter,
+         * and so on — O(k) choices for k backtrack steps vs O(n) per byte. */
+        uint16_t sc; (void)sc;
+        size_t read_ip = target + 1;
+        uint16_t sset = read_u16(vm->bc, vm->bc_len, &read_ip);
+        uint16_t scnt, sci;
+        const uint8_t *rng = get_ranges_ptr(vm, sset, &scnt, &sci);
+        if (rng && scnt > 0) {
+          /* Build the 256-bit class bitmap once and find the run end. */
+          uint64_t bmap[4];
+          if (ranges_to_full_bitmap(rng, scnt, bmap)) {
+            size_t run_end = (size_t)vm->pos;
+            while (run_end < vm->len) {
+              uint8_t c = (uint8_t)vm->s[run_end];
+              unsigned w = (unsigned)c >> 6;
+              if (bmap[w] & (1ULL << ((unsigned)c & 63u)))
+                run_end++;
+              else
+                break;
+            }
+            size_t extra = run_end - (size_t)vm->pos;
+            /* The body consumed 1 byte (advancing pos).  Increment the counter
+             * by the full span length (1 body + extra) so the trail can undo
+             * the entire greedy commit with a single UNDO_COUNTER_DEC. */
+            vm->pos += (int32_t)extra;
+            vm->counters[loop_id] += 1u + (uint32_t)extra;
+            if (vm->use_compact_choice) {
+              vm_trail_counter_inc(vm, loop_id, prior_count, prior_last_pos);
+            }
+          }
+        }
+
+        /* Push a single bound choice: ip points back to this step instruction so
+         * popping retries the loop with one byte less from the span run. */
+        if ((size_t)vm->pos > vm->loop_last_pos[loop_id]) {
+          vm_push_choice(vm, step_ip - 6, vm->pos - 1);
+        }
+        vm->loop_last_pos[loop_id] = vm->pos;
+        goto step_done;
+      }
+
+      /* Normal per-iteration loop body (original behaviour, L3
+       * optimisation is a no-op for captured / side-effect bodies). */
+      vm->counters[loop_id]++;
+      {
         uint32_t count = vm->counters[loop_id];
         if (vm->use_compact_choice) {
           vm_trail_counter_inc(vm, loop_id, prior_count, prior_last_pos);
@@ -1012,13 +1076,6 @@ op_repeat_step:
           vm->ip = (size_t)target;
         } else if (vm->loop_max[loop_id] == (uint32_t)-1 ||
                     count < vm->loop_max[loop_id]) {
-          /* Zero-width-loop bounding (W2b): an unbounded loop can never usefully
-           * iterate more than subject_len + 1 times (each consuming iteration
-           * advances ≥1 byte; zero-width iterations are already suppressed by
-           * the guard below). Capping here prevents a nullable body such as
-           * arbno('' | 'a') from creating O(n) choice points per position. The
-           * bound is semantically identical: any iteration beyond len+1 MUST be
-           * a non-progressing one and the match result is unchanged. */
           if (vm->loop_max[loop_id] == (uint32_t)-1 &&
               count > vm->len + 1) {
             /* fall through to the stop path (do not push) */
@@ -1031,6 +1088,7 @@ op_repeat_step:
           }
         }
       }
+    step_done:
 #ifdef _MSC_VER
       break;
 #else

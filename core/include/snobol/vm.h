@@ -450,6 +450,7 @@ typedef struct {
   uint32_t loop_min[MAX_LOOPS];
   uint32_t loop_max[MAX_LOOPS];
   size_t loop_last_pos[MAX_LOOPS];
+  bool loop_span_greedy[MAX_LOOPS]; /* body is pure OP_SPAN — use max-greedy */
 
   // optimization: track which captures/counters are actually used
   uint8_t max_cap_used;     // highest capture index used + 1 (0 = none used)

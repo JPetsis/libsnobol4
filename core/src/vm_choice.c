@@ -170,7 +170,7 @@ void snobol_vm_reset(VM *vm) {
   memset(vm->loop_min, 0, sizeof(vm->loop_min));
   memset(vm->loop_max, 0, sizeof(vm->loop_max));
   memset(vm->loop_last_pos, 0, sizeof(vm->loop_last_pos));
-  vm->max_cap_used = 0;
+  memset(vm->loop_span_greedy, 0, sizeof(vm->loop_span_greedy));
   vm->max_counter_used = 0;
   vm->ip = 0;
   vm->pos = 0;
