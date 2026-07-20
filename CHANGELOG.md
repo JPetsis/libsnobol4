@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SIMD-eligible patterns (`NOTANY`, `SPAN`) now execute at Tier 9 (SIMD NFA) instead of the general VM (Tier 8) — `notany` drops from ~198 ns to ~560 ns (miss) or 600 ns (hit on 1KB subject). The miss time reflects the O(n) bitmap-skip scan (one bit-test per byte × 1024 = ~500 ns).
 - Residue catastrophic backtracking (`residue_catastrophic`): **-17%** from the greedy-star bound choice (fewer per-byte forward pushes in the repeated span run).
 - Alt-literals: flat `'cat'|'dog'|'fox'` routes to the trie (Tier 5) at ~210 ns/iter vs ~1170 ns on the full VM — a **5.5× improvement** from the L1 flat→trie routing fix.
+- C test suite: **67350/67350** assertions, **246/246** cases pass.
+- PHP test suite: **319/319** tests, **621** assertions pass.
 
 - **Trie-shape classifier** (`core/src/search.c`): `trie_is_flat()` routes flat alternations (no shared prefix) to Tier 8 (general VM) instead of the unaccelerated Tier 5 trie, eliminating the 125× regression on flat alt-of-literals.
 - **Tier 5 scan-loop acceleration** (`core/src/search.c`): start-byte bitmap filter, BMH-style skip, and bounded loop (`offset + minlength <= subject_len`) now applied to the alt-literals scan loop (previously a bare `offset++`).
