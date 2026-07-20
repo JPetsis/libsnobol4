@@ -23,8 +23,7 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
 * **Robust Backtracking Engine**:
   * **Catastrophic Backtracking Protection**: Detects and prevents infinite loops in nested zero-width matches
   * **Deep Recursion**: Dynamically growable choice stack handles deeply nested patterns without crashing
-  * **Compact Choice Stack**: Write-log delta encoding stores only changed capture registers per choice point, reducing
-    memory footprint by ≥50% for patterns with ≥10 choice points (default; legacy mode via `SNOBOL_LEGACY_CHOICE=1`)
+  * **Compact Choice Stack**: Trail / undo-log choice save (default) stores only `ip`, `pos`, and a trail index per choice point — O(1) push regardless of loop/emit count; records live in a page-linked arena. Legacy full-snapshot mode remains available via `SNOBOL_LEGACY_CHOICE=1`
 * **Rich Pattern Primitives**:
   * **Literals**: Exact string matching
   * **Concatenation & Alternation**: Sequential and alternative pattern composition

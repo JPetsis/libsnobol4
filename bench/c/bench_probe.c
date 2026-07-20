@@ -520,6 +520,73 @@ static void run_alt_literals_search(int64_t iters, probe_result_t *r) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Full-VM residue scenarios (Tier 8) — exercise the W2a–W2d choice-stack
+ * optimizations: REPEAT/EMIT-heavy backtracking and zero-width closures.
+ * --------------------------------------------------------------------------- */
+
+/* Subject for residue scenarios: a long run of one repeated byte so that
+ * backtracking / repetition has room to iterate without being trivially short.
+ */
+static const char *SUBJECT_RESIDUE =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+/* REPEAT/EMIT-heavy residue: repetition over a span produces many choice
+ * points on backtracking. The trail/arena choice stack keeps each push O(1).
+ * The capture forces the full-VM (Tier 8) residue path so the choice stack is
+ * the dominant cost. */
+static void run_residue_repeat(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "@r('a'*) 'b'",
+                                          strlen("@r('a'*) 'b'"));
+    size_t slen = strlen(SUBJECT_RESIDUE);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_RESIDUE, slen);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    capture_tiers(pat, slen, r);
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+/* Zero-width closure: repetition over a nullable body (here the empty literal)
+ * would otherwise push a choice point per iteration without consuming input,
+ * blowing up exponentially. W2b bounds iterations to subject_len + 1, so the
+ * match completes in bounded (linear) time. */
+static void run_residue_zero_width(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    /* ('')* — each iteration matches the empty string (nullable closure). */
+    snobol_pattern_t *pat = compile_or_die(ctx, "(''*) 'b'",
+                                          strlen("(''*) 'b'"));
+    size_t slen = strlen(SUBJECT_RESIDUE);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_RESIDUE, slen);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    capture_tiers(pat, slen, r);
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+/* ---------------------------------------------------------------------------
  * DFA automaton scenario (Tier 7)
  * --------------------------------------------------------------------------- */
 
@@ -1019,7 +1086,9 @@ int main(void) {
         /* { "span_simd",           run_span_simd,           iters            }, */
         /* { "span_simd_miss",      run_span_simd_miss,      iters            }, */
         { "tokenize_conv",        run_tokenize_convenience, tokenize_iters   },
-        { "tokenize_reuse",       run_tokenize,             tokenize_iters   },
+        { "tokenize_reuse",        run_tokenize,             tokenize_iters   },
+        { "residue_repeat",        run_residue_repeat,       iters            },
+        { "residue_zero_width",    run_residue_zero_width,   iters            },
 #ifdef HAVE_PCRE2
         /* { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            }, */
         /* { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters            }, */

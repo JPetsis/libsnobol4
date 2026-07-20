@@ -51,6 +51,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SNOBOL remains **1.3×–9.5× slower than PCRE2** on the synthetic probe scenarios (closest on SIMD scan at ~1.66×, widest on alternation/alt-literals at ~8–9.5×).
 - **Shared-prefix BMH skip for alternation-of-literals** (`core/src/search_meta.c`, `core/src/search_tiers.c`): `derive_meta` now computes the longest common leading byte string across all alt-literal branches (`alt_literals_shared_prefix()`) and populates the existing Boyer–Moore–Horspool skip window from it, so the per-offset trial loop (TIER_GENERAL / TIER_AUTOMATON / TIER_SEARCH_VM) advances failing positions by more than one byte. Bushy alternations keep the trie (`has_literal_prefix` stays false and the automaton reroute now excludes all alt-literals); flat alternations have no shared prefix and are unaffected. Measured result: no regression on the standalone probe (the BMH only fires when a pattern reaches TIER_GENERAL/AUTOMATON *with* a shared alt-literal prefix; bushy→trie, flat→no shared prefix).
 
+### Full-VM Backtracking Optimization
+
+Behavior-preserving improvements to the full VM's (`vm_exec`, Tier 8) choice
+stack — the remaining performance lever for the irreducibly stateful residue
+(`EVAL`, `DYNAMIC`, `TABLE_*`, `ARRAY_*`, `EMIT_*`, `GOTO`/`LABEL`, `BAL`).
+
+#### Added
+
+- **Trail / undo-log choice save** (`core/src/vm_capture.c`, `core/src/vm_choice.c`): replaces the per-choice full-state `memcpy` snapshot. A `CompactChoiceHeader` now stores only `ip`, `pos`, `var_count`, and a `trail_base` index into a per-thread undo trail; state is restored on backtrack by replaying the abandoned thread's trail entries in reverse (`vm_trail_replay`). Choice-push cost becomes O(1) regardless of the number of loops or emits.
+- **Page-linked choice-stack arena** (`core/include/snobol/vm.h`, `core/src/vm_choice.c`): `ChoiceArena` (4 KB pages, LIFO pop) replaces the realloc'd contiguous `vm->choices` buffer. Live records are never moved (no copy-on-grow), and `choice_allocated` now reflects precise peak footprint.
+- **Zero-width-loop bounding** (`core/src/compiler_analysis.c`, `core/src/compiler.c`, `core/src/compiler_codegen.c`, `core/src/vm_exec.c`): `ast_node_nullable()` flags `ARB`/`ARBNO`/`REPEAT` over a nullable body at compile time (diagnostic via `snobol_diag`); `OP_REPEAT_STEP` skips the choice push once the iteration count exceeds `subject_len + 1`, bounding the backtracking blow-up for zero-width closures.
+- **Short-circuit empty copies** (`core/src/vm_choice.c`): the legacy path guards its counter/capture `memcpy`s behind `max_counter_used > 0` / `max_cap_used > 0`; the compact/trail path copies no counters or write-log bytes at all. Non-`REPEAT` / non-`EMIT` patterns therefore push choice records with zero snapshot payload.
+- **`SNOBOL_PROFILE` always defined for the core library** (`core/CMakeLists.txt`): populates `vm->profile.{dispatch_count,push_count,pop_count,max_depth}` so the catastrophic/choice tests can assert bounded choice-point counts.
+
+#### Changed
+
+- The legacy full-snapshot choice path (`struct choice`, selected by `SNOBOL_LEGACY_CHOICE=1`) is retained as a behavioral oracle; the default compact path is now trail + arena based.
+
+#### Added (tests)
+
+- `tests/c/test_vm_trail.c`: trail save produces bit-identical matches, captures, and EMIT output to the legacy snapshot path (run in both modes).
+- `tests/c/test_choice_arena.c`: arena unit/reset/deep-backtrack tests.
+- `tests/c/test_choice_shortcircuit.c`: non-`REPEAT`/non-`EMIT` patterns push zero-copy choice records.
+- `tests/c/test_catastrophic.c`: zero-width-loop bounding keeps `dispatch_count` constant (not exponential) for `arbno(arbno(''))`.
+
+#### Performance
+
+- Choice-push is now O(1) for `REPEAT`/`EMIT`-heavy patterns (previously O(total loops + total emits) per backtracking point). Exact end-to-end speedup for Tier-8 residue patterns is tracked in `bench/BENCHMARKS.md`; see W5 benchmarks below.
+
 ### OSS Readiness (library-grade hygiene)
 
 #### Added

@@ -121,7 +121,7 @@ libsnobol4's VM uses controlled backtracking with explicit choice points. The eq
 $pattern = "(('a' | 'aa' | 'aaa') ARBNO) 'b'";
 ```
 
-At each choice point, the VM records only the state that changed (via compact write-log delta encoding). The matching strategy is predictable — the engine explores choices systematically without the exponential explosion that can occur in PCRE.
+At each choice point, the VM records only cheap scalar state plus an index into a per-thread undo trail (`vm_trail_replay` restores the abandoned thread's mutations in reverse). Choice-push is O(1) regardless of loop/emit count, and records live in a page-linked arena. The matching strategy is predictable — the engine explores choices systematically without the exponential explosion that can occur in PCRE.
 
 ### Concrete Scenario
 
@@ -134,7 +134,9 @@ At each choice point, the VM records only the state that changed (via compact wr
 
 libsnobol4 includes:
 
-- **Compact choice stack** — delta-encoded write-log records, not full snapshots
+- **Trail / undo-log choice stack** — O(1) push; records only `ip`, `pos`, and a trail index (no counter / write-log `memcpy`)
+- **Page-linked choice-stack arena** — no realloc copy, precise peak accounting
+- **Zero-width-loop bounding** — an unbounded repeat/arbno over a nullable body is capped at `subject_len + 1` iterations, so nested zero-width closures (`arbno(arbno(''))`) fail in linear time instead of exponentially
 - **FENCE** — explicit backtracking cut primitive
 - **ABORT** — immediate match termination
 - **SUCCEED** — force success at current position
