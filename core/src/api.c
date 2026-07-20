@@ -417,7 +417,9 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
 
   snobol_buf_free(&out_buf);
   vm_free_labels(&vm);
-  if (vm.choices) snobol_free(vm.choices);
+  if (vm.choices_arena)
+    vm_arena_destroy(vm.choices_arena);
+  vm.choices_arena = nullptr;
   return m;
 }
 
@@ -494,7 +496,9 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
 
   snobol_buf_free(&out_buf);
   vm_free_labels(&vm);
-  if (vm.choices) snobol_free(vm.choices);
+  if (vm.choices_arena)
+    vm_arena_destroy(vm.choices_arena);
+  vm.choices_arena = nullptr;
   return m;
 }
 
@@ -590,7 +594,9 @@ bool snobol_pattern_search_reuse(snobol_pattern_t *pattern,
 
   snobol_buf_free(&out_buf);
   vm_free_labels(&vm);
-  if (vm.choices) snobol_free(vm.choices);
+  if (vm.choices_arena)
+    vm_arena_destroy(vm.choices_arena);
+  vm.choices_arena = nullptr;
   return ok;
 }
 
@@ -660,8 +666,9 @@ void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
     snobol_buf_free(&state->out_buf);
   }
   vm_free_labels(&state->vm);
-  if (state->vm.choices)
-    snobol_free(state->vm.choices);
+  if (state->vm.choices_arena)
+    vm_arena_destroy(state->vm.choices_arena);
+  state->vm.choices_arena = nullptr;
   if (state->range_meta)
     snobol_free(state->range_meta);
   if (state->match.output) {

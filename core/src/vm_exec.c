@@ -369,28 +369,36 @@ static bool vm_legacy_choice_mode(void) {
 }
 
 bool vm_run(VM *vm) {
-  size_t initial_cap = 4096;
-  if (!vm->choices) {
-    vm->choices = snobol_malloc(initial_cap);
-    if (!vm->choices)
+  if (!vm->choices_arena) {
+    vm->choices_arena = vm_arena_create();
+    if (!vm->choices_arena)
       return false;
-    vm->choices_cap = initial_cap;
+  } else {
+    vm_arena_reset(vm->choices_arena);
   }
   vm->choices_top = 0;
   /* Cache the choice-mode flag once per process instead of getenv() per match. */
   vm->use_compact_choice = !vm_legacy_choice_mode();
   if (vm->use_compact_choice) {
+    if (!vm->trail) {
+      vm_trail_init(vm);
+      vm->trail_cap = 256;
+      vm->trail = snobol_malloc(vm->trail_cap * sizeof(UndoRecord));
+      if (!vm->trail) {
+        if (!vm->keep_choices) {
+          vm_arena_destroy(vm->choices_arena);
+          vm->choices_arena = nullptr;
+        }
+        return false;
+      }
+    } else {
+      vm_trail_clear(vm);
+    }
+    /* Write-log retained for API compatibility; not used by the trail. */
     if (!vm->write_log) {
       vm_write_log_init(vm);
       vm->write_log_cap = MAX_CAPS;
       vm->write_log = snobol_malloc(vm->write_log_cap * sizeof(WriteLogEntry));
-      if (!vm->write_log) {
-        if (!vm->keep_choices) {
-          snobol_free(vm->choices);
-          vm->choices = nullptr;
-        }
-        return false;
-      }
     } else {
       vm_write_log_clear(vm);
     }
@@ -479,10 +487,8 @@ op_accept:
     case OP_ACCEPT:
 #endif
       if (!vm->keep_choices) {
-        if (vm->choices) {
-          snobol_free(vm->choices);
-          vm->choices = nullptr;
-        }
+        vm_arena_destroy(vm->choices_arena);
+        vm->choices_arena = nullptr;
         if (vm->use_compact_choice && vm->write_log) {
           vm_write_log_free(vm);
         }
@@ -715,7 +721,7 @@ op_cap_start:
       uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
       if (r < MAX_CAPS) {
         if (vm->use_compact_choice) {
-          vm_write_log_track_cap_start(vm, r, vm->cap_start[r]);
+          vm_trail_cap_write(vm, r, 0, vm->cap_start[r], vm->cap_end[r]);
         }
         vm->cap_start[r] = vm->pos;
         if (r >= vm->max_cap_used)
@@ -737,7 +743,7 @@ op_cap_end:
       uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
       if (r < MAX_CAPS) {
         if (vm->use_compact_choice) {
-          vm_write_log_track_cap_end(vm, r, vm->cap_end[r]);
+          vm_trail_cap_write(vm, r, 1, vm->cap_start[r], vm->cap_end[r]);
         }
         vm->cap_end[r] = vm->pos;
         if (r >= vm->max_cap_used)
@@ -746,6 +752,10 @@ op_cap_end:
            it appears in the match result without an explicit
            OP_ASSIGN.  Cap registers and var indices are 1:1. */
         if (r < MAX_VARS) {
+          if (vm->use_compact_choice) {
+            vm_trail_var_write(vm, (uint8_t)r, vm->var_start[r],
+                               vm->var_end[r]);
+          }
           vm->var_start[r] = vm->cap_start[r];
           vm->var_end[r] = vm->cap_end[r];
           if ((size_t)r + 1 > vm->var_count)
@@ -768,6 +778,10 @@ op_assign:
       uint16_t var = read_u16(vm->bc, vm->bc_len, &vm->ip);
       uint8_t r = read_u8(vm->bc, vm->bc_len, &vm->ip);
       if (var < MAX_VARS && r < MAX_CAPS) {
+        if (vm->use_compact_choice) {
+          vm_trail_var_write(vm, (uint8_t)var, vm->var_start[var],
+                             vm->var_end[var]);
+        }
         if (var >= vm->var_count)
           vm->var_count = (size_t)var + 1;
         vm->var_start[var] = vm->cap_start[r];
@@ -986,14 +1000,29 @@ op_repeat_step:
       uint8_t loop_id = read_u8(vm->bc, vm->bc_len, &vm->ip);
       uint32_t target = read_u32(vm->bc, vm->bc_len, &vm->ip);
       if (loop_id < MAX_LOOPS) {
+        uint32_t prior_count = vm->counters[loop_id];
+        size_t prior_last_pos = vm->loop_last_pos[loop_id];
         vm->counters[loop_id]++;
         uint32_t count = vm->counters[loop_id];
+        if (vm->use_compact_choice) {
+          vm_trail_counter_inc(vm, loop_id, prior_count, prior_last_pos);
+        }
         if (count < vm->loop_min[loop_id]) {
           vm->loop_last_pos[loop_id] = vm->pos;
           vm->ip = (size_t)target;
         } else if (vm->loop_max[loop_id] == (uint32_t)-1 ||
-                   count < vm->loop_max[loop_id]) {
+                    count < vm->loop_max[loop_id]) {
+          /* Zero-width-loop bounding (W2b): an unbounded loop can never usefully
+           * iterate more than subject_len + 1 times (each consuming iteration
+           * advances ≥1 byte; zero-width iterations are already suppressed by
+           * the guard below). Capping here prevents a nullable body such as
+           * arbno('' | 'a') from creating O(n) choice points per position. The
+           * bound is semantically identical: any iteration beyond len+1 MUST be
+           * a non-progressing one and the match result is unchanged. */
           if (vm->loop_max[loop_id] == (uint32_t)-1 &&
+              count > vm->len + 1) {
+            /* fall through to the stop path (do not push) */
+          } else if (vm->loop_max[loop_id] == (uint32_t)-1 &&
               vm->pos == vm->loop_last_pos[loop_id]) {
           } else {
             vm_push_choice(vm, vm->ip, vm->pos);
@@ -1840,11 +1869,10 @@ op_dynamic:
       memcpy(saved_cap_end, vm->cap_end, sizeof(saved_cap_end));
 
       /* Save/restore the choice stack and write-log: vm_run() frees
-       * vm->choices and vm->write_log on both success and failure
+       * vm->choices_arena and vm->write_log on both success and failure
        * paths, so the recursive call would destroy the outer call's
        * backtracking state, causing heap corruption on Windows. */
-      void *saved_choices = vm->choices;
-      size_t saved_choices_cap = vm->choices_cap;
+      ChoiceArena *saved_arena = vm->choices_arena;
       size_t saved_choices_top = vm->choices_top;
       bool saved_compact = vm->use_compact_choice;
       WriteLogEntry *saved_wlog = vm->write_log;
@@ -1854,8 +1882,7 @@ op_dynamic:
       size_t saved_wlog_cc = vm->write_log_compressed_count;
       bool saved_wlog_dirty = vm->write_log_dirty;
       /* Null out so vm_run() allocates fresh state for the inner run */
-      vm->choices = nullptr;
-      vm->choices_cap = 0;
+      vm->choices_arena = nullptr;
       vm->choices_top = 0;
       vm->write_log = nullptr;
       vm->write_log_cap = 0;
@@ -1881,8 +1908,7 @@ op_dynamic:
       vm->bc_len = saved_bc_len;
       vm->ip = saved_ip;
       /* Restore choice stack and write-log that vm_run() freed */
-      vm->choices = saved_choices;
-      vm->choices_cap = saved_choices_cap;
+      vm->choices_arena = saved_arena;
       vm->choices_top = saved_choices_top;
       vm->use_compact_choice = saved_compact;
       vm->write_log = saved_wlog;
@@ -2056,6 +2082,8 @@ op_fence:
        * preventing backtracking past this point.
        * This implements "possessive" / atomic behaviour.
        */
+      if (vm->choices_arena)
+        vm_arena_reset(vm->choices_arena);
       vm->choices_top = 0;
 #ifdef _MSC_VER
       break;
@@ -2235,12 +2263,12 @@ op_abort:
        * No operands.
        */
       vm->abort_flag = 1;
+      if (vm->choices_arena)
+        vm_arena_reset(vm->choices_arena);
       vm->choices_top = 0;
       if (!vm->keep_choices) {
-        if (vm->choices) {
-          snobol_free(vm->choices);
-          vm->choices = nullptr;
-        }
+        vm_arena_destroy(vm->choices_arena);
+        vm->choices_arena = nullptr;
         if (vm->use_compact_choice && vm->write_log) {
           vm_write_log_free(vm);
         }
@@ -2260,10 +2288,8 @@ op_succeed:
        * No operands.
        */
       if (!vm->keep_choices) {
-        if (vm->choices) {
-          snobol_free(vm->choices);
-          vm->choices = nullptr;
-        }
+        vm_arena_destroy(vm->choices_arena);
+        vm->choices_arena = nullptr;
         if (vm->use_compact_choice && vm->write_log) {
           vm_write_log_free(vm);
         }
@@ -2287,10 +2313,8 @@ op_succeed:
     /* Interpreter dispatch time tracking retired with tracing JIT */
   }
   if (!vm->keep_choices) {
-    if (vm->choices) {
-      snobol_free(vm->choices);
-      vm->choices = nullptr;
-    }
+    vm_arena_destroy(vm->choices_arena);
+    vm->choices_arena = nullptr;
     if (vm->use_compact_choice && vm->write_log) {
       vm_write_log_free(vm);
     }
@@ -2298,10 +2322,8 @@ op_succeed:
   return false;
 fail_ret:
   if (!vm->keep_choices) {
-    if (vm->choices) {
-      snobol_free(vm->choices);
-      vm->choices = nullptr;
-    }
+    vm_arena_destroy(vm->choices_arena);
+    vm->choices_arena = nullptr;
     if (vm->use_compact_choice && vm->write_log) {
       vm_write_log_free(vm);
     }

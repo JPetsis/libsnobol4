@@ -45,6 +45,9 @@ add_executable(snobol4_tests
     test_search_runtime.c
     test_fusion.c
     test_compact_choice.c
+    test_vm_trail.c
+    test_choice_arena.c
+    test_choice_shortcircuit.c
     test_search_automaton.c
     test_search_simd.c
     test_search_alt_literals.c

@@ -164,7 +164,7 @@ typedef enum {
   OP_EVAL,      /**< Call back to host; fn: u16, reg: u8 */
   OP_ANCHOR,    /**< Position anchor; type: u8 (0=start, 1=end) */
   OP_REPEAT_INIT,  /**< Begin bounded repetition; loop_id: u8, min: u32, max:
-                      u32, skip_target: u32 */
+                       u32, skip_target: u32 */
   OP_REPEAT_STEP,  /**< Step bounded repetition; loop_id: u8, jmp_target: u32 */
   OP_EMIT_LITERAL, /**< Append literal to output; offset: u32, len: u32 */
   OP_EMIT_CAPTURE, /**< Append capture register to output; reg: u8 */
@@ -304,19 +304,52 @@ typedef struct {
 } WriteLogEntry;
 
 /**
- * @brief Header for a compact choice stack record (delta/write-log based).
+ * @brief Undo-record op kinds for the per-thread backtracking trail.
  *
- * Followed in memory by: counter snapshots, loop_last_pos snapshots,
- * write-log entries, and a trailing uint32_t copy of total_size.
+ * The trail records only the mutations a thread makes to live VM state
+ * (counters, captures, named variables) since the last choice point. On a
+ * choice pop, the records belonging to the abandoned thread are replayed in
+ * reverse to restore pre-choice state — replacing the full memcpy snapshot.
+ */
+typedef enum {
+  UNDO_COUNTER_DEC = 0, /**< OP_REPEAT_STEP incremented a counter */
+  UNDO_CAP_WRITE,       /**< OP_CAP_START / OP_CAP_END wrote a capture reg */
+  UNDO_WL_POP,          /**< Write-log entry was appended (capture delta) */
+  UNDO_VAR_WRITE        /**< OP_ASSIGN wrote a named variable reg */
+} UndoKind;
+
+/**
+ * @brief A single trail undo record.
+ *
+ * Records what was mutated and the prior value so it can be restored on
+ * backtrack. Bit-packed to keep the trail small: every choice point that
+ * abandons a thread replays only the records it owns.
+ */
+typedef struct {
+  uint8_t kind;     /**< UndoKind */
+  uint8_t index;    /**< Register index (counter / capture / variable id) */
+  uint8_t sub;      /**< 0 = start field, 1 = end field (CAP/VAR), 0 otherwise */
+  uint32_t prior_u; /**< Prior counter value (UNDO_COUNTER_DEC) */
+  size_t prior_a;   /**< Prior value A (cap_start / var_start / old_start) */
+  size_t prior_b;   /**< Prior value B (cap_end / var_end / old_end) */
+  size_t prior_lp;  /**< Prior loop_last_pos (UNDO_COUNTER_DEC) */
+} UndoRecord;
+
+/**
+ * @brief Header for a compact choice stack record (trail-based).
+ *
+ * The record no longer snapshots full state; it stores only cheap scalar
+ * fields and the trail-base index. State is restored by replaying the trail
+ * entries belonging to the abandoned thread (see UndoRecord).
  */
 typedef struct {
   uint32_t total_size; /**< Total size of this record including trailing size */
   size_t ip;           /**< Instruction pointer to restore */
   size_t pos;          /**< Subject position to restore */
   size_t var_count;    /**< Snapshot of vm->var_count */
-  uint8_t max_cap_used;     /**< Number of captures tracked */
-  uint8_t max_counter_used; /**< Number of counters tracked */
-  uint8_t write_log_count;  /**< Number of write-log entries */
+  uint8_t max_cap_used;     /**< Highest capture index used + 1 */
+  uint8_t max_counter_used; /**< Highest counter index used + 1 */
+  uint32_t trail_base;      /**< Number of trail entries before this choice */
   uint8_t pad;              /**< Padding for alignment */
 } CompactChoiceHeader;
 
@@ -337,6 +370,41 @@ struct choice {
   uint8_t max_cap_used_snapshot;
   uint8_t max_counter_used_snapshot;
 };
+
+/* ── Choice-stack arena (W2c) ──────────────────────────────────────────────
+ * The full-VM choice stack is stored in a page-linked arena rather than a
+ * single realloc'd contiguous buffer. Each page holds a run of fixed/compact
+ * records; when a record does not fit in the current page's spare space a new
+ * page is chained. Popping walks back within the current page (records carry a
+ * trailing size word), freeing empty pages past the head. This bounds peak
+ * allocation to the live working set and avoids large contiguous reallocs. */
+
+#define CHOICE_ARENA_PAGE_SIZE 4096
+
+typedef struct ChoiceArenaPage {
+  uint8_t *data;             /**< Page payload (allocated, may exceed page size) */
+  size_t cap;                /**< Usable capacity of @c data */
+  size_t used;               /**< Bytes used in @c data */
+  struct ChoiceArenaPage *prev;
+  struct ChoiceArenaPage *next;
+} ChoiceArenaPage;
+
+typedef struct ChoiceArena {
+  ChoiceArenaPage *head;     /**< First (never freed by reset) page */
+  ChoiceArenaPage *cur;      /**< Page currently appended to */
+  size_t total_used;         /**< Total live bytes across pages (== choices_top) */
+  size_t peak_used;          /**< High-water mark of total_used */
+  size_t last_rec_size;      /**< Footprint of most recently allocated record */
+} ChoiceArena;
+
+ChoiceArena *vm_arena_create(void);
+void vm_arena_destroy(ChoiceArena *arena);
+void vm_arena_reset(ChoiceArena *arena);
+/* Reserve @p n contiguous bytes for a new record; returns the write pointer
+ * (already advanced in the arena). A trailing size word is NOT written here. */
+uint8_t *vm_arena_alloc(ChoiceArena *arena, size_t n);
+/* Remove the most recently allocated record from the arena. */
+void vm_arena_pop_last(ChoiceArena *arena);
 
 /**
  * @brief VM state: all mutable state for a single pattern execution.
@@ -394,11 +462,16 @@ typedef struct {
   emit_cb emit_fn;
   void *emit_udata;
 
-  // choice stack for backtracking
+  // choice stack for backtracking (page-linked arena, W2c)
+  ChoiceArena *choices_arena;
+  size_t choices_top;        /* == arena->total_used, for stats */
+  bool use_compact_choice;
+  /* Scratch byte-buffer shared with the lightweight search-VM (Tier 6): it
+   * stores search_choice_t records here. Not used by the full-VM backtracking
+   * stack (that lives in choices_arena). Retained so search_vm_init_from_vm /
+   * search_vm_writeback_to_vm keep working unchanged. */
   void *choices;
   size_t choices_cap;
-  size_t choices_top;
-  bool use_compact_choice;
   size_t choice_allocated; /* Total bytes allocated for choice records (for
                               stats) */
   size_t
@@ -407,7 +480,15 @@ typedef struct {
   size_t choice_peak_memory; /* Peak bytes used by the choice stack
                                 simultaneously */
   size_t choice_live_depth;  /* Current number of live (not yet popped) choice
-                                points */
+                                 points */
+
+  /* Undo trail for trail-based choice save (W2a): records only the mutations a
+   * thread makes since the last choice point. Mirrors the choice stack: depth
+   * invariant trail_top == (number of live choice points). Restored by
+   * replaying the abandoned thread's entries in reverse. */
+  UndoRecord *trail;  /* Growable array of undo records */
+  size_t trail_cap;   /* Allocated capacity (records) */
+  size_t trail_top;   /* Number of live trail records */
 
   /* Write-log for compact choice stack: tracks capture modifications */
   WriteLogEntry *write_log;  /* Circular buffer of modification entries */
@@ -415,7 +496,7 @@ typedef struct {
   size_t write_log_next;     /* Next slot to use (circular) */
   uint64_t write_log_bitmap; /* Bitmap: bit i set => entry i has valid data */
   size_t write_log_compressed_count; /* Count of entries when compressed at
-                                        choice point */
+                                         choice point */
   bool write_log_dirty; /* True if write-log has un-compressed entries */
 
   // callback for EVAL: returns true if ok, false to cause fail
@@ -669,10 +750,33 @@ size_t vm_write_log_count_entries(const VM *vm);
 /** @brief Copy write-log entries into a caller-provided buffer. */
 void vm_write_log_copy_entries(const VM *vm, WriteLogEntry *dst,
                                size_t dst_cap);
-/** @brief Restore capture state from a compact choice record header. */
-void vm_write_log_restore(VM *vm, const CompactChoiceHeader *hdr);
 /** @brief Return the total size in bytes of a compact choice record. */
 size_t vm_compact_choice_record_size(const CompactChoiceHeader *hdr);
+
+/* Undo trail management for trail-based choice save (W2a) */
+/** @brief Allocate the undo trail buffer. */
+void vm_trail_init(VM *vm);
+/** @brief Free the undo trail buffer. */
+void vm_trail_free(VM *vm);
+/** @brief Reset trail depth to zero without freeing memory. */
+void vm_trail_clear(VM *vm);
+/** @brief Push a record onto the trail, growing the buffer as needed. */
+void vm_trail_push(VM *vm, UndoRecord rec);
+/** @brief Record a counter increment (OP_REPEAT_STEP) for undo on backtrack. */
+void vm_trail_counter_inc(VM *vm, uint8_t loop_id, uint32_t prior_count,
+                          size_t prior_last_pos);
+/** @brief Record a capture-register write (OP_CAP_START/OP_CAP_END) for undo.
+ *  @p sub is 0 to restore only @p prior_start, 1 to restore only @p prior_end,
+ *  and 2 to restore both. */
+void vm_trail_cap_write(VM *vm, uint8_t cap, uint8_t sub, size_t prior_start,
+                        size_t prior_end);
+/** @brief Record a named-variable write (OP_ASSIGN) for undo on backtrack. */
+void vm_trail_var_write(VM *vm, uint8_t var, size_t prior_start,
+                        size_t prior_end);
+/** @brief Replay trail entries [base, top) in reverse, restoring prior state. */
+void vm_trail_replay(VM *vm, size_t base);
+/** @brief Return the current number of live trail records. */
+size_t vm_trail_depth(const VM *vm);
 
 /* Choice stack statistics */
 /** @brief Return the current bytes used by the choice stack. */

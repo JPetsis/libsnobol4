@@ -145,17 +145,121 @@ void vm_write_log_copy_entries(const VM *vm, WriteLogEntry *dst,
   }
 }
 
-void vm_write_log_restore(VM *vm, const CompactChoiceHeader *hdr) {
-  const uint8_t *p = (const uint8_t *)(hdr + 1);
-  if (hdr->max_counter_used > 0) {
-    p += hdr->max_counter_used * (sizeof(uint32_t) + sizeof(size_t));
-  }
-  for (uint8_t i = 0; i < hdr->write_log_count; i++) {
-    const WriteLogEntry *e = (const WriteLogEntry *)p;
-    if (e->cap_index < MAX_CAPS) {
-      vm->cap_start[e->cap_index] = e->old_start;
-      vm->cap_end[e->cap_index] = e->old_end;
-    }
-    p += sizeof(WriteLogEntry);
-  }
+/* ========== Undo trail for trail-based choice save (W2a) ========== */
+
+void vm_trail_init(VM *vm) {
+  vm->trail = nullptr;
+  vm->trail_cap = 0;
+  vm->trail_top = 0;
 }
+
+void vm_trail_free(VM *vm) {
+  if (vm->trail) {
+    snobol_free(vm->trail);
+    vm->trail = nullptr;
+  }
+  vm->trail_cap = 0;
+  vm->trail_top = 0;
+}
+
+void vm_trail_clear(VM *vm) { vm->trail_top = 0; }
+
+void vm_trail_push(VM *vm, UndoRecord rec) {
+  if (vm->trail_top >= vm->trail_cap) {
+    size_t new_cap = vm->trail_cap ? vm->trail_cap * 2 : 256;
+    while (new_cap <= vm->trail_top)
+      new_cap *= 2;
+    UndoRecord *nt = (UndoRecord *)snobol_realloc(vm->trail,
+                                                 new_cap * sizeof(UndoRecord));
+    if (!nt)
+      return;
+    vm->trail = nt;
+    vm->trail_cap = new_cap;
+  }
+  vm->trail[vm->trail_top++] = rec;
+}
+
+void vm_trail_counter_inc(VM *vm, uint8_t loop_id, uint32_t prior_count,
+                          size_t prior_last_pos) {
+  if (!vm->use_compact_choice)
+    return;
+  UndoRecord r;
+  memset(&r, 0, sizeof(r));
+  r.kind = UNDO_COUNTER_DEC;
+  r.index = loop_id;
+  r.prior_u = prior_count;
+  r.prior_lp = prior_last_pos;
+  vm_trail_push(vm, r);
+}
+
+void vm_trail_cap_write(VM *vm, uint8_t cap, uint8_t sub, size_t prior_start,
+                        size_t prior_end) {
+  if (!vm->use_compact_choice)
+    return;
+  UndoRecord r;
+  memset(&r, 0, sizeof(r));
+  r.kind = UNDO_CAP_WRITE;
+  r.index = cap;
+  r.sub = sub;
+  r.prior_a = prior_start;
+  r.prior_b = prior_end;
+  vm_trail_push(vm, r);
+}
+
+void vm_trail_var_write(VM *vm, uint8_t var, size_t prior_start,
+                        size_t prior_end) {
+  if (!vm->use_compact_choice)
+    return;
+  UndoRecord r;
+  memset(&r, 0, sizeof(r));
+  r.kind = UNDO_VAR_WRITE;
+  r.index = var;
+  r.prior_a = prior_start;
+  r.prior_b = prior_end;
+  vm_trail_push(vm, r);
+}
+
+void vm_trail_replay(VM *vm, size_t base) {
+  /* Replay [base, top) in reverse so the most recent mutation is undone first.
+   * For a single register, the reverse order naturally restores the original
+   * value (later writes overwrite earlier ones; undoing the last write first
+   * is required for correctness). */
+  for (size_t i = vm->trail_top; i > base; i--) {
+    const UndoRecord *e = &vm->trail[i - 1];
+    switch (e->kind) {
+    case UNDO_COUNTER_DEC:
+      if (e->index < MAX_LOOPS) {
+        vm->counters[e->index] = e->prior_u;
+        vm->loop_last_pos[e->index] = e->prior_lp;
+      }
+      break;
+    case UNDO_CAP_WRITE:
+      if (e->index < MAX_CAPS) {
+        if (e->sub == 0)
+          vm->cap_start[e->index] = e->prior_a;
+        else if (e->sub == 1)
+          vm->cap_end[e->index] = e->prior_b;
+        else {
+          vm->cap_start[e->index] = e->prior_a;
+          vm->cap_end[e->index] = e->prior_b;
+        }
+      }
+      break;
+    case UNDO_WL_POP:
+      /* Retained for header compatibility; capture restoration now uses
+       * UNDO_CAP_WRITE. No-op. */
+      break;
+    case UNDO_VAR_WRITE:
+      if (e->index < MAX_VARS) {
+        vm->var_start[e->index] = e->prior_a;
+        vm->var_end[e->index] = e->prior_b;
+      }
+      break;
+    default:
+      break;
+    }
+  }
+  vm->trail_top = base;
+}
+
+size_t vm_trail_depth(const VM *vm) { return vm->trail_top; }

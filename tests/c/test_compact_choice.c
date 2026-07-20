@@ -173,43 +173,42 @@ static void test_compact_choice_size_calculation(void) {
   VM vm;
   memset(&vm, 0, sizeof(vm));
   vm.use_compact_choice = true;
-  vm_write_log_init(&vm);
-  vm.write_log_cap = 64;
-  vm.write_log = malloc(vm.write_log_cap * sizeof(WriteLogEntry));
-  vm.choices = malloc(4096);
-  vm.choices_cap = 4096;
+  vm_trail_init(&vm);
+  vm.trail_cap = 256;
+  vm.trail = malloc(vm.trail_cap * sizeof(UndoRecord));
+  vm.choices_arena = vm_arena_create();
   vm.choices_top = 0;
 
-  // Simulate: max_cap_used = 10, no counters, 1 write-log entry
+  // Simulate: many captures and counters mutated before the choice. With the
+  // trail-based choice save the record size is INDEPENDENT of how many
+  // captures/counters/emits happened — it is a fixed-size header + trailing u32.
   vm.max_cap_used = 10;
-  // Track one modification
-  vm_write_log_track_cap_start(&vm, 0, 0);
-  vm_write_log_track_cap_end(&vm, 0, 5);
+  vm.max_counter_used = 5;
 
-  // Compute expected data size: CompactChoiceHeader + 1 WriteLogEntry
-  size_t expected_data = sizeof(CompactChoiceHeader) + sizeof(WriteLogEntry);
-  // Total allocation includes trailing size and 8-byte alignment
-  size_t expected_total = expected_data + sizeof(uint32_t);
-  expected_total = (expected_total + 7) & ~7;
+  // Compute expected data size. The arena stores each record as
+  // [leading size word][payload][trailing size word]; the compact payload is
+  // CompactChoiceHeader + trailing uint32, so the footprint is that plus the
+  // two size words.
+  size_t expected_total =
+      sizeof(CompactChoiceHeader) + sizeof(uint32_t) + 2 * sizeof(uint32_t);
 
-  // Simulate push by calling vm_push_choice (it will compress and allocate)
+  // Simulate push by calling vm_push_choice.
   uint8_t dummy_bc[1] = {OP_ACCEPT};
   vm.bc = dummy_bc;
   vm.bc_len = 1;
   vm.ip = 0;
   vm.pos = 0;
-  vm.max_counter_used = 0;
 
   vm_push_choice(&vm, 0, 0);
 
   size_t allocated = vm.choice_allocated;
   printf("  [info] allocated=%zu expected=%zu\n", allocated, expected_total);
   test_assert(allocated == expected_total,
-              "Compact record size matches calculation");
+              "Compact record size is fixed (trail-based, independent of state)");
 
   // Cleanup
-  free(vm.choices);
-  vm_write_log_free(&vm);
+  vm_arena_destroy(vm.choices_arena);
+  vm_trail_free(&vm);
 }
 
 /* ── Mode consistency test (legacy vs compact) ──────────────────────────── */
@@ -282,8 +281,7 @@ static void test_memory_reduction_with_many_choices(void) {
   memset(&vm_legacy, 0, sizeof(vm_legacy));
   vm_legacy.use_compact_choice = false;
   vm_legacy.max_cap_used = 10;
-  vm_legacy.choices = malloc(4096);
-  vm_legacy.choices_cap = 4096;
+  vm_legacy.choices_arena = vm_arena_create();
   vm_legacy.choices_top = 0;
   vm_legacy.choice_allocated = 0;
 
@@ -291,50 +289,50 @@ static void test_memory_reduction_with_many_choices(void) {
     vm_push_choice(&vm_legacy, 0, 0);
   }
   size_t legacy_total = vm_legacy.choice_allocated;
-  free(vm_legacy.choices);
+  vm_arena_destroy(vm_legacy.choices_arena);
 
   // Compact mode
   VM vm_compact;
   memset(&vm_compact, 0, sizeof(vm_compact));
   vm_compact.use_compact_choice = true;
   vm_compact.max_cap_used = 10;
-  vm_write_log_init(&vm_compact);
-  vm_compact.write_log_cap = 64;
-  vm_compact.write_log =
-      malloc(vm_compact.write_log_cap * sizeof(WriteLogEntry));
-  vm_compact.choices = malloc(4096);
-  vm_compact.choices_cap = 4096;
+  vm_trail_init(&vm_compact);
+  vm_compact.trail_cap = 256;
+  vm_compact.trail = malloc(vm_compact.trail_cap * sizeof(UndoRecord));
+  vm_compact.choices_arena = vm_arena_create();
   vm_compact.choices_top = 0;
   vm_compact.choice_allocated = 0;
 
+  // With the trail-based choice save, pushing a choice does NOT copy capture or
+  // counter state — every record is the same small fixed size regardless of how
+  // much state was mutated.
   for (int i = 0; i < N; i++) {
-    vm_write_log_track_cap_start(&vm_compact, 0, 0);
-    vm_write_log_track_cap_end(&vm_compact, 0, 5);
     vm_push_choice(&vm_compact, 0, 0);
   }
   size_t compact_total = vm_compact.choice_allocated;
 
-  free(vm_compact.choices);
-  vm_write_log_free(&vm_compact);
+  vm_arena_destroy(vm_compact.choices_arena);
+  vm_trail_free(&vm_compact);
 
-  // Compute expected sizes
-  // Legacy records: sizeof(struct choice) per record, no trailing size, no
-  // alignment padding
-  size_t legacy_per = sizeof(struct choice);
+  // Compute expected sizes. The arena stores each record as
+  // [leading size word][payload][trailing size word], so the per-record
+  // footprint = payload + 2*sizeof(uint32_t).
+  // Legacy records: sizeof(struct choice) payload.
+  size_t legacy_per = sizeof(struct choice) + 2 * sizeof(uint32_t);
   size_t legacy_expected = N * legacy_per;
-  // Compact records: header + 1 write-log entry + trailing uint32_t, aligned to
-  // 8 bytes
-  size_t compact_per = sizeof(CompactChoiceHeader) + sizeof(WriteLogEntry);
-  size_t compact_expected = N * (((compact_per + sizeof(uint32_t) + 7) & ~7));
+  // Compact records: header + trailing uint32_t, plus 2 size words total.
+  size_t compact_per =
+      sizeof(CompactChoiceHeader) + sizeof(uint32_t) + 2 * sizeof(uint32_t);
+  size_t compact_expected = N * compact_per;
 
   printf("  [info] legacy_total=%zu legacy_expected=%zu\n", legacy_total,
          legacy_expected);
   test_assert(legacy_total == legacy_expected,
-              "Legacy total allocation matches expected");
+               "Legacy total allocation matches expected");
   printf("  [info] compact_total=%zu compact_expected=%zu\n", compact_total,
          compact_expected);
   test_assert(compact_total == compact_expected,
-              "Compact total allocation matches expected");
+               "Compact total allocation matches expected");
 
   double ratio = (double)compact_total / (double)legacy_total;
   printf("  [info] ratio=%.2f\n", ratio);
@@ -382,7 +380,7 @@ static void test_choice_statistics_api(void) {
   size_t avg_size = vm_choice_record_average_size(&vm);
   test_assert(avg_size > 0, "Average record size should be > 0");
   size_t expected_compact =
-      ((sizeof(CompactChoiceHeader) + sizeof(uint32_t) + 7) & ~7);
+      sizeof(CompactChoiceHeader) + sizeof(uint32_t) + 2 * sizeof(uint32_t);
   printf("  [info] avg_size=%zu expected≈%zu\n", avg_size, expected_compact);
   test_assert(avg_size >= expected_compact - 1 &&
                   avg_size <= expected_compact + 1,

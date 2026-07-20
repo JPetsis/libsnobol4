@@ -304,6 +304,9 @@ void test_builtin_dispatch_suite(void);
 void test_search_runtime_suite(void);
 void test_fusion_suite(void);
 void test_compact_choice_suite(void);
+void test_vm_trail_suite(void);
+void test_choice_arena_suite(void);
+void test_choice_shortcircuit_suite(void);
 /* Unicode / API new suites */
 void test_unicode_fold_suite(void);
 void test_pattern_case_suite(void);
@@ -400,6 +403,9 @@ int main(void) {
   RUN_SUITE("Search Runtime", test_search_runtime_suite);
   RUN_SUITE("Fusion: SPLIT/ANY", test_fusion_suite);
   RUN_SUITE("Compact Choice Stack", test_compact_choice_suite);
+  RUN_SUITE("VM Trail Choice Save", test_vm_trail_suite);
+  RUN_SUITE("Choice-Stack Arena", test_choice_arena_suite);
+  RUN_SUITE("Choice Short-Circuit", test_choice_shortcircuit_suite);
   RUN_SUITE("Search: Automaton", test_search_automaton_suite);
   RUN_SUITE("Search: SIMD NFA", test_search_simd_suite);
   RUN_SUITE("Search: Alt-literals & small-prefix", test_search_alt_literals_suite);

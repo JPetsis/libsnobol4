@@ -26,12 +26,137 @@
 #endif
 
 size_t vm_compact_choice_record_size(const CompactChoiceHeader *hdr) {
-  size_t sz = sizeof(CompactChoiceHeader);
-  if (hdr->max_counter_used > 0) {
-    sz += hdr->max_counter_used * (sizeof(uint32_t) + sizeof(size_t));
+  (void)hdr;
+  /* Trail-based records are fixed-size: header + trailing size uint32. */
+  size_t sz = sizeof(CompactChoiceHeader) + sizeof(uint32_t);
+  return (sz + 7) & ~7;
+}
+
+/* ── Choice-stack arena (W2c) ───────────────────────────────────────────────
+ * Each record is stored as [uint32 leading_size][payload][uint32 trailing_size]
+ * within a page. Pop reads the trailing word of the current page's tail; depth
+ * walking reads the leading word. Pages are chained and empty pages past the
+ * head are freed on reset/pop. */
+
+ChoiceArena *vm_arena_create(void) {
+  ChoiceArena *a = (ChoiceArena *)snobol_malloc(sizeof(*a));
+  if (!a)
+    return nullptr;
+  a->head = (ChoiceArenaPage *)snobol_malloc(sizeof(ChoiceArenaPage));
+  if (!a->head) {
+    snobol_free(a);
+    return nullptr;
   }
-  sz += hdr->write_log_count * sizeof(WriteLogEntry);
-  return sz;
+  a->head->data = (uint8_t *)snobol_malloc(CHOICE_ARENA_PAGE_SIZE);
+  if (!a->head->data) {
+    snobol_free(a->head);
+    snobol_free(a);
+    return nullptr;
+  }
+  a->head->cap = CHOICE_ARENA_PAGE_SIZE;
+  a->head->used = 0;
+  a->head->prev = a->head->next = nullptr;
+  a->cur = a->head;
+  a->total_used = 0;
+  a->peak_used = 0;
+  a->last_rec_size = 0;
+  return a;
+}
+
+void vm_arena_destroy(ChoiceArena *a) {
+  if (!a)
+    return;
+  ChoiceArenaPage *p = a->head;
+  while (p) {
+    ChoiceArenaPage *nx = p->next;
+    snobol_free(p->data);
+    snobol_free(p);
+    p = nx;
+  }
+  snobol_free(a);
+}
+
+void vm_arena_reset(ChoiceArena *a) {
+  if (!a)
+    return;
+  ChoiceArenaPage *p = a->head->next;
+  while (p) {
+    ChoiceArenaPage *nx = p->next;
+    snobol_free(p->data);
+    snobol_free(p);
+    p = nx;
+  }
+  a->head->next = nullptr;
+  a->head->used = 0;
+  a->cur = a->head;
+  a->total_used = 0;
+  a->peak_used = 0;
+  a->last_rec_size = 0;
+}
+
+static ChoiceArenaPage *arena_new_page(size_t need) {
+  ChoiceArenaPage *p = (ChoiceArenaPage *)snobol_malloc(sizeof(*p));
+  if (!p)
+    return nullptr;
+  size_t cap = need > CHOICE_ARENA_PAGE_SIZE ? need : CHOICE_ARENA_PAGE_SIZE;
+  p->data = (uint8_t *)snobol_malloc(cap);
+  if (!p->data) {
+    snobol_free(p);
+    return nullptr;
+  }
+  p->cap = cap;
+  p->used = 0;
+  p->prev = p->next = nullptr;
+  return p;
+}
+
+uint8_t *vm_arena_alloc(ChoiceArena *a, size_t payload_len) {
+  if (!a)
+    return nullptr;
+  size_t footprint = payload_len + 2 * sizeof(uint32_t);
+  if (a->cur->used + footprint > a->cur->cap) {
+    ChoiceArenaPage *np = arena_new_page(footprint);
+    if (!np)
+      return nullptr;
+    np->prev = a->cur;
+    a->cur->next = np;
+    a->cur = np;
+  }
+  uint8_t *base = a->cur->data + a->cur->used;
+  uint32_t *lw = (uint32_t *)base;
+  uint32_t *tw = (uint32_t *)(base + footprint - sizeof(uint32_t));
+  lw[0] = (uint32_t)footprint;
+  tw[0] = (uint32_t)footprint;
+  a->cur->used += footprint;
+  a->total_used += footprint;
+  if (a->total_used > a->peak_used)
+    a->peak_used = a->total_used;
+  a->last_rec_size = footprint;
+  return base + sizeof(uint32_t); /* payload area */
+}
+
+void vm_arena_pop_last(ChoiceArena *a) {
+  if (!a || a->total_used == 0)
+    return;
+  /* Trailing size word sits just before the page tail. */
+  uint32_t footprint =
+      *(uint32_t *)(a->cur->data + a->cur->used - sizeof(uint32_t));
+  a->cur->used -= footprint;
+  a->total_used -= footprint;
+  if (a->cur->used == 0 && a->cur != a->head) {
+    ChoiceArenaPage *prev = a->cur->prev;
+    prev->next = nullptr;
+    snobol_free(a->cur->data);
+    snobol_free(a->cur);
+    a->cur = prev;
+  }
+  if (a->cur->used > 0) {
+    /* Recover the new last record's footprint from its trailing word. */
+    a->last_rec_size =
+        *(uint32_t *)(a->cur->data + a->cur->used - sizeof(uint32_t));
+  } else {
+    a->last_rec_size = 0;
+  }
 }
 
 /* Reset VM between match attempts while preserving choice allocation */
@@ -53,6 +178,8 @@ void snobol_vm_reset(VM *vm) {
   vm->in_goto_fail = false;
   vm->current_label = 0;
   vm->choices_top = 0;
+  if (vm->choices_arena)
+    vm_arena_reset(vm->choices_arena);
   vm->choice_allocated = 0;
   vm->choice_push_count = 0;
   vm->choice_peak_depth = 0;
@@ -66,19 +193,18 @@ void snobol_vm_reset(VM *vm) {
 size_t vm_choice_stack_memory_usage(VM *vm) { return vm->choices_top; }
 
 size_t vm_choice_stack_depth(VM *vm) {
-  /* Depth = number of choice records on stack.
-   * We can estimate by dividing total bytes by average record size,
-   * or we can walk the stack counting records. Walking is O(n) but accurate.
-   * For simplicity, we walk the stack.
-   */
+  /* Depth = number of choice records on the arena stack. Each record carries
+   * a leading size word, so we walk page-by-page counting records. */
+  if (!vm->choices_arena)
+    return 0;
   size_t depth = 0;
-  size_t pos = 0;
-  while (pos < vm->choices_top) {
-    CompactChoiceHeader *h =
-        (CompactChoiceHeader *)((uint8_t *)vm->choices + pos);
-    size_t rec_size = h->total_size;
-    pos += rec_size;
-    depth++;
+  for (ChoiceArenaPage *p = vm->choices_arena->head; p; p = p->next) {
+    size_t pos = 0;
+    while (pos + 2 * sizeof(uint32_t) <= p->used) {
+      uint32_t footprint = *(uint32_t *)(p->data + pos);
+      pos += footprint;
+      depth++;
+    }
   }
   return depth;
 }
@@ -91,75 +217,48 @@ size_t vm_choice_record_average_size(VM *vm) {
 }
 
 void vm_push_choice(VM *vm, size_t ip, size_t pos) {
-  if (!vm->choices)
+  if (!vm->choices_arena)
     return;
 #ifdef SNOBOL_PROFILE
   vm->profile.push_count++;
 #endif
   if (vm->use_compact_choice) {
-    uint8_t num_counters = vm->max_counter_used;
-    size_t wl_entries = vm_write_log_count_entries(vm);
-    size_t data_size = sizeof(CompactChoiceHeader);
-    if (num_counters > 0) {
-      data_size += num_counters * (sizeof(uint32_t) + sizeof(size_t));
-    }
-    data_size += wl_entries * sizeof(WriteLogEntry);
-    uint32_t record_size = (uint32_t)(data_size + sizeof(uint32_t));
-    record_size = (record_size + 7) & ~7;
-    if (vm->choices_top + record_size >= vm->choices_cap) {
-      size_t new_cap = vm->choices_cap ? vm->choices_cap * 2 : 4096;
-      while (vm->choices_top + record_size >= new_cap)
-        new_cap *= 2;
-      void *new_choices = snobol_realloc(vm->choices, new_cap);
-      if (!new_choices)
-        return;
-      vm->choices = new_choices;
-      vm->choices_cap = new_cap;
-    }
+    /* Trail-based choice save (W2a): the record stores only cheap scalar
+     * fields and the trail-base index. State is restored by replaying the
+     * abandoned thread's undo records in reverse (see vm_pop_choice), so no
+     * counter / write-log memcpy is needed. Choice-push cost is now O(1)
+     * regardless of the number of loops or emits. Allocation goes through the
+     * page-linked arena (W2c). */
+    size_t rec_payload = sizeof(CompactChoiceHeader) + sizeof(uint32_t);
     CompactChoiceHeader *h =
-        (CompactChoiceHeader *)((uint8_t *)vm->choices + vm->choices_top);
-    h->total_size = record_size;
+        (CompactChoiceHeader *)vm_arena_alloc(vm->choices_arena, rec_payload);
+    if (!h)
+      return;
+    h->total_size = (uint32_t)rec_payload;
     h->ip = ip;
     h->pos = pos;
     h->var_count = vm->var_count;
     h->max_cap_used = vm->max_cap_used;
-    h->max_counter_used = num_counters;
-    h->write_log_count = (uint8_t)wl_entries;
+    h->max_counter_used = vm->max_counter_used;
+    h->trail_base = (uint32_t)vm->trail_top;
     h->pad = 0;
-    uint8_t *p = (uint8_t *)(h + 1);
-    if (num_counters > 0) {
-      memcpy(p, vm->counters, num_counters * sizeof(uint32_t));
-      p += num_counters * sizeof(uint32_t);
-      memcpy(p, vm->loop_last_pos, num_counters * sizeof(size_t));
-      p += num_counters * sizeof(size_t);
-    }
-    vm_write_log_copy_entries(vm, (WriteLogEntry *)p, wl_entries);
     uint32_t *size_ptr =
-        (uint32_t *)((uint8_t *)h + record_size - sizeof(uint32_t));
-    *size_ptr = record_size;
-    vm->choices_top += record_size;
-    vm->choice_allocated += record_size;
+        (uint32_t *)((uint8_t *)h + rec_payload - sizeof(uint32_t));
+    *size_ptr = (uint32_t)rec_payload;
+    vm->choices_top = vm->choices_arena->total_used;
+    vm->choice_allocated += rec_payload + 2 * sizeof(uint32_t);
     vm->choice_push_count++;
     vm->choice_live_depth++;
-    /* Track peak values */
     if (vm->choices_top > vm->choice_peak_memory)
       vm->choice_peak_memory = vm->choices_top;
     if (vm->choice_live_depth > vm->choice_peak_depth)
       vm->choice_peak_depth = vm->choice_live_depth;
-    vm_write_log_clear(vm);
   } else {
-    size_t record_size = sizeof(struct choice);
-    if (vm->choices_top + record_size >= vm->choices_cap) {
-      size_t new_cap =
-          vm->choices_cap ? vm->choices_cap * 2 : (128 * sizeof(struct choice));
-      void *new_choices = snobol_realloc(vm->choices, new_cap);
-      if (!new_choices)
-        return;
-      vm->choices = new_choices;
-      vm->choices_cap = new_cap;
-    }
     struct choice *c =
-        (struct choice *)((uint8_t *)vm->choices + vm->choices_top);
+        (struct choice *)vm_arena_alloc(vm->choices_arena,
+                                        sizeof(struct choice));
+    if (!c)
+      return;
     c->ip = ip;
     c->pos = pos;
     c->var_count_snapshot = vm->var_count;
@@ -176,11 +275,10 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
       memcpy(c->loop_last_pos_snapshot, vm->loop_last_pos,
              vm->max_counter_used * sizeof(size_t));
     }
-    vm->choices_top += record_size;
-    vm->choice_allocated += record_size;
+    vm->choices_top = vm->choices_arena->total_used;
+    vm->choice_allocated += sizeof(struct choice) + 2 * sizeof(uint32_t);
     vm->choice_push_count++;
     vm->choice_live_depth++;
-    /* Track peak values */
     if (vm->choices_top > vm->choice_peak_memory)
       vm->choice_peak_memory = vm->choices_top;
     if (vm->choice_live_depth > vm->choice_peak_depth)
@@ -189,44 +287,32 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
 }
 
 bool vm_pop_choice(VM *vm) {
-  if (!vm->choices || vm->choices_top == 0)
+  if (!vm->choices_arena || vm->choices_arena->total_used == 0)
     return false;
 #ifdef SNOBOL_PROFILE
   vm->profile.pop_count++;
 #endif
   if (vm->use_compact_choice) {
-    uint32_t last_size;
-    memcpy(&last_size,
-           (uint8_t *)vm->choices + vm->choices_top - sizeof(uint32_t),
-           sizeof(uint32_t));
-    vm->choices_top -= last_size;
+    ChoiceArenaPage *pg = vm->choices_arena->cur;
+    uint32_t footprint = *(uint32_t *)(pg->data + pg->used - sizeof(uint32_t));
+    uint8_t *rec_base = pg->data + pg->used - footprint;
     CompactChoiceHeader *h =
-        (CompactChoiceHeader *)((uint8_t *)vm->choices + vm->choices_top);
+        (CompactChoiceHeader *)(rec_base + sizeof(uint32_t));
     vm->ip = h->ip;
     vm->pos = h->pos;
     vm->var_count = h->var_count;
     vm->max_cap_used = h->max_cap_used;
     vm->max_counter_used = h->max_counter_used;
-    uint8_t *p = (uint8_t *)(h + 1);
-    if (h->max_counter_used > 0) {
-      memcpy(vm->counters, p, h->max_counter_used * sizeof(uint32_t));
-      p += h->max_counter_used * sizeof(uint32_t);
-      memcpy(vm->loop_last_pos, p, h->max_counter_used * sizeof(size_t));
-      p += h->max_counter_used * sizeof(size_t);
-    }
-    /* Restore captures from write-log entries (delta) */
-    for (uint8_t i = 0; i < h->write_log_count; i++) {
-      const WriteLogEntry *e = (const WriteLogEntry *)p;
-      if (e->cap_index < MAX_CAPS) {
-        vm->cap_start[e->cap_index] = e->old_start;
-        vm->cap_end[e->cap_index] = e->old_end;
-      }
-      p += sizeof(WriteLogEntry);
-    }
+    /* Restore counters / captures / vars by replaying the abandoned thread's
+     * trail entries in reverse. This is bit-exact with the prior snapshot
+     * path because every mutation since the choice was pushed is undone in
+     * the opposite order it was applied. */
+    vm_trail_replay(vm, h->trail_base);
   } else {
-    vm->choices_top -= sizeof(struct choice);
-    struct choice *c =
-        (struct choice *)((uint8_t *)vm->choices + vm->choices_top);
+    ChoiceArenaPage *pg = vm->choices_arena->cur;
+    uint32_t footprint = *(uint32_t *)(pg->data + pg->used - sizeof(uint32_t));
+    uint8_t *rec_base = pg->data + pg->used - footprint;
+    struct choice *c = (struct choice *)(rec_base + sizeof(uint32_t));
     vm->ip = c->ip;
     vm->pos = c->pos;
     vm->var_count = c->var_count_snapshot;
@@ -244,6 +330,8 @@ bool vm_pop_choice(VM *vm) {
              vm->max_counter_used * sizeof(size_t));
     }
   }
+  vm_arena_pop_last(vm->choices_arena);
+  vm->choices_top = vm->choices_arena->total_used;
   if (vm->choice_live_depth > 0)
     vm->choice_live_depth--;
   return true;
