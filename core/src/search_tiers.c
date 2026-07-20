@@ -2783,7 +2783,16 @@ bool pike_scan(const uint8_t *bc, size_t bc_len,
         if (tp > pos && defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
         goto pike_next;
       }
-      if (op == OP_ANY) { ip += 2; tp++; th.ip = ip; th.pos = tp;
+      if (op == OP_ANY) {
+        uint16_t sid = (uint16_t)((bc[ip]<<8)|bc[ip+1]); ip += 2;
+        uint16_t cnt = 0;
+        const uint8_t *rp = (sid > 0 && (size_t)(sid-1) < range_meta_count) ? range_meta[sid-1].ranges_ptr : NULL;
+        cnt = rp ? range_meta[sid-1].count : 0;
+        uint32_t cp; int by;
+        if (!utf8_peek_next(subject, subject_len, tp, &cp, &by)) goto pike_die;
+        if (!rp || !range_contains(rp, cnt, cp)) goto pike_die;
+        tp += by;
+        th.ip = ip; th.pos = tp;
         if (tp > pos && defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
         goto pike_next;
       }
@@ -2805,9 +2814,8 @@ bool pike_scan(const uint8_t *bc, size_t bc_len,
         cnt = rp ? range_meta[sid-1].count : 0;
         size_t sp = tp;
         if (rp) { while (sp < subject_len) { uint32_t cp; int by; if (!utf8_peek_next(subject, subject_len, sp, &cp, &by)) break; if (!range_contains(rp, cnt, cp)) break; sp += by; } }
-        else { sp = subject_len; }
+        else { sp = subject_len; } /* NULL ranges: match any (full VM compat) */
         if (sp == tp) goto pike_die;
-        if (sp >= subject_len) goto pike_die;
         th.ip = ip; th.pos = sp;
         if (defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
         goto pike_next;
@@ -2856,7 +2864,10 @@ static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
                             snobol_search_diag_t *diag, bool anchored) {
   (void)dfa;
 #ifdef SNOBOL_PIKE_SCAN
-  if (start_offset == 0) {
+  /* pike_scan does not support anchored mode — it scans the full subject.
+   * When anchored, fall through to the restart loop which respects the
+   * anchor constraint (single position). */
+  if (start_offset == 0 && !anchored) {
     if (diag) diag->search_vm_tests++;
     return pike_scan(vm->bc, vm->bc_len, subject, subject_len, meta,
                      vm->range_meta, vm->range_meta_count, vm, out_result);
