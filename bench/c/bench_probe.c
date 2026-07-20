@@ -815,6 +815,60 @@ static void run_pcre2_tokenize(int64_t iters, probe_result_t *r) {
     pcre2_code_free(re);
 }
 
+/* Catastrophic-backtracking contrast (W2b): PCRE2 (a+)+ over a short run of
+ * 'a's with no trailing 'b' is the canonical exponential case. SNOBOL's
+ * bounded repeat keeps the equivalent pattern linear. Uses a deliberately
+ * short subject (20 'a's) and a single iteration so the PCRE2 side finishes
+ * in a measurable (not astronomical) time. */
+static const char *SUBJECT_CAT =
+    "aaaaaaaaaa";
+
+static void run_pcre2_catastrophic(int64_t iters, probe_result_t *r) {
+    pcre2_code *re = pcre2_compile_or_die("(a+)+b", 0);
+    pcre2_match_data *md = pcre2_match_data_create_from_pattern(re, NULL);
+    size_t slen = strlen(SUBJECT_CAT);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        pcre2_match(re, (PCRE2_SPTR)SUBJECT_CAT, slen, 0, 0, md, NULL);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    pcre2_match_data_free(md);
+    pcre2_code_free(re);
+}
+
+static void run_residue_catastrophic(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    /* Equivalent SNOBOL pattern to PCRE2 (a+)+b: one-or-more 'a', repeated,
+     * then 'b'. 'b' is absent, so it fails — but bounded, not exponentially.
+     * Uses the full 128-'a' residue subject to demonstrate linearity at scale
+     * where PCRE2 would be exponential. */
+    snobol_pattern_t *pat = compile_or_die(ctx, "('a'+)+ 'b'",
+                                          strlen("('a'+)+ 'b'"));
+    size_t slen = strlen(SUBJECT_RESIDUE);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, SUBJECT_CAT, slen);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    capture_tiers(pat, slen, r);
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
 static void run_pcre2_span_simd(int64_t iters, probe_result_t *r) {
     pcre2_code *re = pcre2_compile_or_die("[0-9]+", 0);
     pcre2_match_data *md = pcre2_match_data_create_from_pattern(re, NULL);
@@ -1089,15 +1143,17 @@ int main(void) {
         { "tokenize_reuse",        run_tokenize,             tokenize_iters   },
         { "residue_repeat",        run_residue_repeat,       iters            },
         { "residue_zero_width",    run_residue_zero_width,   iters            },
+        { "residue_catastrophic",  run_residue_catastrophic, 1000             },
 #ifdef HAVE_PCRE2
-        /* { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            }, */
-        /* { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters            }, */
-        /* { "pcre2_span_comma",    run_pcre2_span_comma,    iters            }, */
-        /* { "pcre2_alternation",   run_pcre2_alternation,   iters            }, */
-        /* { "pcre2_alt_literals",  run_pcre2_alt_literals,  iters            }, */
-        /* { "pcre2_span_simd",     run_pcre2_span_simd,     iters            }, */
-        /* { "pcre2_span_simd_miss",run_pcre2_span_simd_miss, iters           }, */
-        /* { "pcre2_tokenize",      run_pcre2_tokenize,      tokenize_iters   }, */
+        { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            },
+        { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters            },
+        { "pcre2_span_comma",    run_pcre2_span_comma,    iters            },
+        { "pcre2_alternation",   run_pcre2_alternation,   iters            },
+        { "pcre2_alt_literals",  run_pcre2_alt_literals,  iters            },
+        { "pcre2_span_simd",     run_pcre2_span_simd,     iters            },
+        { "pcre2_span_simd_miss",run_pcre2_span_simd_miss, iters           },
+        { "pcre2_tokenize",      run_pcre2_tokenize,      tokenize_iters   },
+        { "pcre2_catastrophic",  run_pcre2_catastrophic,  1                 },
 #endif
     };
     size_t n = sizeof(scenarios) / sizeof(scenarios[0]);
