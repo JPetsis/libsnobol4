@@ -1496,16 +1496,15 @@ snobol_search_tier_t select_tier_by_cost(const snobol_search_meta_t *meta,
        * for both anchored and unanchored matches — tier_simd_nfa handles
        * the anchored contract directly (verifies at start_offset only).
        *
-       * The SIMD engine is byte-wise; ANY/NOTANY are codepoint-wise in the
-       * full VM.  Gate on ascii_class_only for ANY/NOTANY so non-ASCII code-
-       * point classes (e.g. 'α' :i compiled to ANY over a UTF-8 codepoint
-       * range > 255) are NOT routed through SIMD — they would only match the
-       * first byte of the multi-byte sequence there.  SPAN/BREAK are byte-
-       * wise in both engines, so they are eligible regardless of class
-       * contents (including non-ASCII byte ranges like [0xC0-0xDF]). */
-      eligible = meta->simd_eligible &&
-                 (meta->is_span_family || meta->is_break_family ||
-                  meta->ascii_class_only);
+       * The SIMD NFA's 256-bit char_mask is byte-oriented.  Non-ASCII
+       * charclasses (whether byte-level >127 or codepoint-level >255) break
+       * the assumption: the build_nfa_masks function fails for codepoint
+       * ranges (>255), forcing a fallback to tier_general_fallback whose
+       * start-bitmap may be empty for such patterns, producing a false no-
+       * match.  Require ascii_class_only so SIMD NFA only runs for pure-
+       * ASCII charclasses — non-ASCII patterns route through other tiers
+       * (SEARCH_VM / GENERAL) which handle them correctly. */
+      eligible = meta->simd_eligible && meta->ascii_class_only;
       break;
     case TIER_GENERAL:
       eligible = true; /* always available as fallback */
