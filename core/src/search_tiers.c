@@ -136,10 +136,9 @@ static bool SNOBOL_HOT trie_match(const snobol_auto_trie_t * SNOBOL_RESTRICT t,
  * Trie-shape classifier.
  *
  * A trie is "flat" when no node below the root has more than one outgoing
- * edge, i.e. the alternatives share no common prefix.  Such a trie gives no
- * benefit over the general VM, which already has start-bitmap + BMH +
- * minlength acceleration.  A "bushy" trie (at least one deeper branch point)
- * benefits from trie matching.
+ * edge, i.e. the alternatives share no common prefix.  Such a trie provides
+ * no minlength acceleration (a bushy trie does), but is still a correct
+ * set-membership test and avoids the full VM.
  * ---------------------------------------------------------------------------
  */
 static bool SNOBOL_PURE trie_is_flat(const snobol_auto_trie_t *trie) {

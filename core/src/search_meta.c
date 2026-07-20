@@ -1313,8 +1313,8 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     out->tier = TIER_BITMAP;
   else if (out->is_alt_literals && !out->is_alt_literals_flat)
     out->tier = TIER_ALT_LIT;
-  else if (out->is_alt_literals) /* flat: fall through to general VM */
-    out->tier = TIER_GENERAL;
+  else if (out->is_alt_literals) /* flat: trie (no minlength accel, but correct) */
+    out->tier = TIER_ALT_LIT;
   else if (out->simd_eligible)
     out->tier = TIER_SIMD_NFA;
   else if (out->search_vm_eligible)
@@ -1428,12 +1428,11 @@ snobol_search_tier_t select_tier_by_cost(const snobol_search_meta_t *meta,
       eligible = meta->has_candidate_bitmap && meta->is_single_char_alt;
       break;
     case TIER_ALT_LIT:
-      /* Bushy alt-literals use the trie; flat ones fall through to GENERAL. */
-      eligible = meta->is_alt_literals && !meta->is_alt_literals_flat;
+      /* Both bushy and flat alt-literals use the trie. */
+      eligible = meta->is_alt_literals;
       break;
     case TIER_SEARCH_VM:
-      /* Alt-literals never use the search VM: flat -> GENERAL (D1),
-       * bushy -> ALT_LIT. Other search-VM-eligible patterns may use it. */
+      /* Alt-literals never use the search VM: flat and bushy -> ALT_LIT. */
       eligible = meta->search_vm_eligible && !meta->is_alt_literals;
       break;
     case TIER_GENERAL:

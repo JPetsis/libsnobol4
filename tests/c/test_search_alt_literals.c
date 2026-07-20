@@ -107,10 +107,11 @@ static size_t build_split_3(uint8_t *bc, const char *s1, size_t len1,
   return ip;
 }
 
-/* Task 1.1 / 1.3: flat alternation-of-literals must be routed to
- * TIER_GENERAL, never the unaccelerated trie (TIER_ALT_LIT). */
-void test_alt_literals_flat_fallback(void) {
-  test_suite("Alt-literals: flat fallback to TIER_GENERAL");
+/* Flat alternation-of-literals routes to the trie (TIER_ALT_LIT), which
+ * handles flat tries as a set-membership test (no minlength acceleration
+ * but correct matching). */
+void test_alt_literals_flat_trie(void) {
+  test_suite("Alt-literals: flat routes to trie");
 
   uint8_t bc[256];
   size_t bc_len = build_split_3(bc, "apple", 5, "orange", 6, "banana", 6);
@@ -120,8 +121,8 @@ void test_alt_literals_flat_fallback(void) {
 
   test_assert(meta.is_alt_literals, "detected as alt-literals");
   test_assert(meta.is_alt_literals_flat, "classified flat (no shared prefix)");
-  test_assert(meta.tier == TIER_GENERAL,
-              "flat alt-literals dispatched to TIER_GENERAL");
+  test_assert(meta.tier == TIER_ALT_LIT,
+              "flat alt-literals dispatched to TIER_ALT_LIT (trie)");
 
   /* Behavioral correctness through the search entrypoint. */
   VM vm;
@@ -130,8 +131,14 @@ void test_alt_literals_flat_fallback(void) {
   vm.bc_len = bc_len;
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, "I ate a banana for lunch", 23, 0, &meta,
-                               NULL, &result, NULL);
-  test_assert(ok, "flat alt-literals still matches 'banana' via Tier 8");
+                                NULL, &result, NULL);
+  test_assert(ok, "flat alt-literals matches 'banana' via trie");
+
+  /* Verify no-match case. */
+  result.success = false;
+  ok = snobol_search_exec(&vm, "nothing here", 12, 0, &meta, NULL, &result,
+                           NULL);
+  test_assert(!ok, "flat alt-literals no match on non-matching subject");
 
   snobol_search_meta_free(&meta);
 }
@@ -303,7 +310,7 @@ void test_alt_literals_bmh_skip(void) {
 }
 
 void test_search_alt_literals_suite(void) {
-  test_alt_literals_flat_fallback();
+  test_alt_literals_flat_trie();
   test_alt_literals_bushy_trie();
   test_tier5_start_bitmap_skip();
   test_2byte_prefix_memchr();
