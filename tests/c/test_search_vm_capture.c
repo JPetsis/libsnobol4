@@ -60,8 +60,7 @@ static bool cap_equals(const VM *vm, uint8_t reg, const char *subject,
  * Note: The parser hardcodes @r(...) to register 1 (not 0).
  * So expected_cap1 checks register 1, expected_cap0 checks register 0.
  */
-static void assert_captures_match(const char *pattern_str,
-                                  const char *subject,
+static void assert_captures_match(const char *pattern_str, const char *subject,
                                   const char *expected_cap0,
                                   const char *expected_cap1) {
   snobol_context_t *ctx = snobol_context_create();
@@ -90,7 +89,7 @@ static void assert_captures_match(const char *pattern_str,
   svm.range_meta_count = svm_rmc;
   snobol_search_result_t result;
   bool ok_svm = snobol_search_exec(&svm, subject, strlen(subject), 0, meta,
-                                    NULL, &result, NULL);
+                                   NULL, &result, NULL);
 
   /* ---- Run via vm_run (Tier 8, full VM) ---- */
   VM fvm = make_vm(bc, bc_len, subject);
@@ -111,8 +110,7 @@ static void assert_captures_match(const char *pattern_str,
                   "full VM: cap0 matches expected");
       test_assert(svm.cap_start[0] == fvm.cap_start[0],
                   "cap0 start consistent");
-      test_assert(svm.cap_end[0] == fvm.cap_end[0],
-                  "cap0 end consistent");
+      test_assert(svm.cap_end[0] == fvm.cap_end[0], "cap0 end consistent");
     }
     if (expected_cap1) {
       test_assert(cap_equals(&svm, 1, subject, expected_cap1),
@@ -121,8 +119,7 @@ static void assert_captures_match(const char *pattern_str,
                   "full VM: cap1 matches expected");
       test_assert(svm.cap_start[1] == fvm.cap_start[1],
                   "cap1 start consistent");
-      test_assert(svm.cap_end[1] == fvm.cap_end[1],
-                  "cap1 end consistent");
+      test_assert(svm.cap_end[1] == fvm.cap_end[1], "cap1 end consistent");
     }
   } else if (ok_svm && !ok_vm) {
     /* Full VM doesn't have unanchored search loop; search-VM does.

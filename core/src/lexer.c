@@ -173,91 +173,91 @@ token_t snobol_lexer_next(snobol_lexer_t *lexer) {
 
   /* Single-character tokens */
   switch (c) {
-  case '|':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_PIPE);
+    case '|':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_PIPE);
 
-  case '(':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_LPAREN);
+    case '(':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_LPAREN);
 
-  case ')':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_RPAREN);
+    case ')':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_RPAREN);
 
-  case '*':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_STAR);
+    case '*':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_STAR);
 
-  case '+':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_PLUS);
+    case '+':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_PLUS);
 
-  case '?':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_QUESTION);
+    case '?':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_QUESTION);
 
-  case '^':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_ANCHOR_START);
+    case '^':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_ANCHOR_START);
 
-  case '$':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_ANCHOR_END);
+    case '$':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_ANCHOR_END);
 
-  case '@':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_AT);
+    case '@':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_AT);
 
-  case ':':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_COLON);
+    case ':':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_COLON);
 
-  case '[':
-    lexer->pos++;
-    lexer->column++;
-    return scan_charclass(lexer);
+    case '[':
+      lexer->pos++;
+      lexer->column++;
+      return scan_charclass(lexer);
 
-  case ']':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_RBRACKET);
+    case ']':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_RBRACKET);
 
-  case '=':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_EQUALS);
+    case '=':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_EQUALS);
 
-  case ',':
-    lexer->pos++;
-    lexer->column++;
-    return make_token(TOKEN_COMMA);
+    case ',':
+      lexer->pos++;
+      lexer->column++;
+      return make_token(TOKEN_COMMA);
 
-  case '\'':
-    lexer->pos++; /* Skip opening quote */
-    lexer->column++;
-    return scan_literal(lexer);
+    case '\'':
+      lexer->pos++; /* Skip opening quote */
+      lexer->column++;
+      return scan_literal(lexer);
 
-  default:
-    /* Check for identifier */
-    if (is_ident_start(c)) {
-      return scan_ident(lexer);
-    }
+    default:
+      /* Check for identifier */
+      if (is_ident_start(c)) {
+        return scan_ident(lexer);
+      }
 
-    /* Unknown character - skip and try again */
-    lexer->pos++;
-    lexer->column++;
-    return snobol_lexer_next(lexer);
+      /* Unknown character - skip and try again */
+      lexer->pos++;
+      lexer->column++;
+      return snobol_lexer_next(lexer);
   }
 }
 
@@ -315,43 +315,24 @@ void snobol_lexer_destroy(snobol_lexer_t *lexer) {
 
 const char *snobol_token_name(token_type_t type) {
   switch (type) {
-  case TOKEN_EOF:
-    return "EOF";
-  case TOKEN_LIT:
-    return "LITERAL";
-  case TOKEN_IDENT:
-    return "IDENT";
-  case TOKEN_CHARCLASS:
-    return "CHARCLASS";
-  case TOKEN_PIPE:
-    return "PIPE";
-  case TOKEN_LPAREN:
-    return "LPAREN";
-  case TOKEN_RPAREN:
-    return "RPAREN";
-  case TOKEN_STAR:
-    return "STAR";
-  case TOKEN_PLUS:
-    return "PLUS";
-  case TOKEN_QUESTION:
-    return "QUESTION";
-  case TOKEN_ANCHOR_START:
-    return "ANCHOR_START";
-  case TOKEN_ANCHOR_END:
-    return "ANCHOR_END";
-  case TOKEN_AT:
-    return "AT";
-  case TOKEN_COLON:
-    return "COLON";
-  case TOKEN_LBRACKET:
-    return "LBRACKET";
-  case TOKEN_RBRACKET:
-    return "RBRACKET";
-  case TOKEN_EQUALS:
-    return "EQUALS";
-  case TOKEN_COMMA:
-    return "COMMA";
-  default:
-    return "UNKNOWN";
+    case TOKEN_EOF: return "EOF";
+    case TOKEN_LIT: return "LITERAL";
+    case TOKEN_IDENT: return "IDENT";
+    case TOKEN_CHARCLASS: return "CHARCLASS";
+    case TOKEN_PIPE: return "PIPE";
+    case TOKEN_LPAREN: return "LPAREN";
+    case TOKEN_RPAREN: return "RPAREN";
+    case TOKEN_STAR: return "STAR";
+    case TOKEN_PLUS: return "PLUS";
+    case TOKEN_QUESTION: return "QUESTION";
+    case TOKEN_ANCHOR_START: return "ANCHOR_START";
+    case TOKEN_ANCHOR_END: return "ANCHOR_END";
+    case TOKEN_AT: return "AT";
+    case TOKEN_COLON: return "COLON";
+    case TOKEN_LBRACKET: return "LBRACKET";
+    case TOKEN_RBRACKET: return "RBRACKET";
+    case TOKEN_EQUALS: return "EQUALS";
+    case TOKEN_COMMA: return "COMMA";
+    default: return "UNKNOWN";
   }
 }

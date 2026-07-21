@@ -5,7 +5,6 @@
  *   pattern "hello"; flags=0 behaves identically to snobol_pattern_compile;
  *   unknown flag bits are tolerated.
  * Latin-1 case-insensitive tests.
- * JIT disabled comment is placed in api.c at the TODO(jit-case-fold) site.
  */
 
 #include <stdbool.h>

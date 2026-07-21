@@ -481,7 +481,8 @@ static void test_automaton_search_semantics(void) {
   vm.bc_len = bc_len;
 
   snobol_search_result_t result;
-  bool ok = snobol_search_exec(&vm, "xybz", 4, 0, &auto_meta, NULL, &result, NULL);
+  bool ok =
+      snobol_search_exec(&vm, "xybz", 4, 0, &auto_meta, NULL, &result, NULL);
   test_assert(ok, "automaton search finds 'b' in 'xybz'");
   test_assert(result.match_start == 2, "automaton match_start == 2");
 }
@@ -563,7 +564,8 @@ static void test_alt_literals_multiple_alternatives(void) {
   bc[ip++] = OP_LIT;
   emit_u32_be(bc, &ip, (uint32_t)(ip + 4 + 4));
   emit_u32_be(bc, &ip, 3);
-  memcpy(bc + ip, "abc", 3); ip += 3;
+  memcpy(bc + ip, "abc", 3);
+  ip += 3;
   bc[ip++] = OP_ACCEPT;
 
   /* Inner SPLIT for "def" | "ghi" */
@@ -614,7 +616,8 @@ static void test_alt_literals_tier3a_path(void) {
   /* Match 'dog' */
   ok = snobol_search_exec(&vm, "xxdogxx", 7, 0, &m, NULL, &result, NULL);
   test_assert(ok, "alt-literals Tier3a: 'dog' found in 'xxdogxx'");
-  test_assert(result.match_start == 2, "alt-literals Tier3a: 'dog' match_start == 2");
+  test_assert(result.match_start == 2,
+              "alt-literals Tier3a: 'dog' match_start == 2");
 
   /* No match */
   ok = snobol_search_exec(&vm, "xxxxxxx", 7, 0, &m, NULL, &result, NULL);
@@ -644,8 +647,7 @@ static void test_literal_only_meta(void) {
   snobol_search_derive_meta(bc, n, &m);
   snobol_search_meta_free(&m);
   test_assert(m.is_literal_only, "literal-only: LIT+ACCEPT detected");
-  test_assert(m.search_vm_eligible,
-              "literal-only: also search-vm eligible");
+  test_assert(m.search_vm_eligible, "literal-only: also search-vm eligible");
 
   /* LIT + ACCEPT with a zero-width prefix (POS) is NOT literal-only: POS is a
    * position constraint (only satisfied at absolute offset 0), so the pattern
@@ -658,20 +660,22 @@ static void test_literal_only_meta(void) {
     bc[ip++] = OP_LIT;
     emit_u32_be(bc, &ip, (uint32_t)(ip + 8 - lit_off));
     emit_u32_be(bc, &ip, 3);
-    bc[ip++] = 'f'; bc[ip++] = 'o'; bc[ip++] = 'o';
+    bc[ip++] = 'f';
+    bc[ip++] = 'o';
+    bc[ip++] = 'o';
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
-  snobol_search_meta_free(&m);
-    test_assert(!m.is_literal_only,
-                "literal-only: POS LIT ACCEPT NOT literal-only (position constraint)");
+    snobol_search_meta_free(&m);
+    test_assert(
+        !m.is_literal_only,
+        "literal-only: POS LIT ACCEPT NOT literal-only (position constraint)");
   }
 
   /* SPLIT pattern — NOT literal-only */
   n = build_break_accept(bc, OP_SPLIT, "x", 1);
   snobol_search_derive_meta(bc, n, &m);
   snobol_search_meta_free(&m);
-  test_assert(!m.is_literal_only,
-              "literal-only: SPLIT pattern NOT detected");
+  test_assert(!m.is_literal_only, "literal-only: SPLIT pattern NOT detected");
 }
 
 /* ===================================================================
@@ -697,12 +701,14 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = OP_LIT;
     emit_u32_be(bc, &ip, (uint32_t)(ip + 8)); /* lit inline */
     emit_u32_be(bc, &ip, 3);
-    bc[ip++] = 'a'; bc[ip++] = 'b'; bc[ip++] = 'c';
+    bc[ip++] = 'a';
+    bc[ip++] = 'b';
+    bc[ip++] = 'c';
     bc[ip++] = OP_CAP_END;
     bc[ip++] = 0;
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
-  snobol_search_meta_free(&m);
+    snobol_search_meta_free(&m);
     test_assert(m.search_vm_eligible,
                 "search-vm eligible: CAP_START is eligible");
   }
@@ -713,15 +719,16 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = OP_LIT;
     emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
     emit_u32_be(bc, &ip, 3);
-    bc[ip++] = 'a'; bc[ip++] = 'b'; bc[ip++] = 'c';
+    bc[ip++] = 'a';
+    bc[ip++] = 'b';
+    bc[ip++] = 'c';
     bc[ip++] = OP_EVAL;
     emit_u16_be(bc, &ip, 0);
     bc[ip++] = 0;
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
-  snobol_search_meta_free(&m);
-    test_assert(!m.search_vm_eligible,
-                "search-vm eligible: EVAL not eligible");
+    snobol_search_meta_free(&m);
+    test_assert(!m.search_vm_eligible, "search-vm eligible: EVAL not eligible");
   }
 
   /* Pattern with OP_ANY (charclass) — eligible */
@@ -735,17 +742,21 @@ static void test_search_vm_eligible_meta(void) {
     size_t class_off = ip;
     emit_u16_be(bc, &ip, 5);
     emit_u16_be(bc, &ip, 0);
-    emit_u32_be(bc, &ip, 'a'); emit_u32_be(bc, &ip, 'a');
-    emit_u32_be(bc, &ip, 'e'); emit_u32_be(bc, &ip, 'e');
-    emit_u32_be(bc, &ip, 'i'); emit_u32_be(bc, &ip, 'i');
-    emit_u32_be(bc, &ip, 'o'); emit_u32_be(bc, &ip, 'o');
-    emit_u32_be(bc, &ip, 'u'); emit_u32_be(bc, &ip, 'u');
+    emit_u32_be(bc, &ip, 'a');
+    emit_u32_be(bc, &ip, 'a');
+    emit_u32_be(bc, &ip, 'e');
+    emit_u32_be(bc, &ip, 'e');
+    emit_u32_be(bc, &ip, 'i');
+    emit_u32_be(bc, &ip, 'i');
+    emit_u32_be(bc, &ip, 'o');
+    emit_u32_be(bc, &ip, 'o');
+    emit_u32_be(bc, &ip, 'u');
+    emit_u32_be(bc, &ip, 'u');
     emit_u32_be(bc, &ip, (uint32_t)class_off);
     emit_u32_be(bc, &ip, 1);
     snobol_search_derive_meta(bc, ip, &m);
-  snobol_search_meta_free(&m);
-    test_assert(m.search_vm_eligible,
-                "search-vm eligible: ANY is eligible");
+    snobol_search_meta_free(&m);
+    test_assert(m.search_vm_eligible, "search-vm eligible: ANY is eligible");
   }
 
   /* Pattern with OP_ASSIGN — NOT eligible */
@@ -760,9 +771,8 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = 0;
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
-  snobol_search_meta_free(&m);
-    test_assert(m.search_vm_eligible,
-                "search-vm eligible: ASSIGN is eligible");
+    snobol_search_meta_free(&m);
+    test_assert(m.search_vm_eligible, "search-vm eligible: ASSIGN is eligible");
   }
 
   /* Pattern with OP_DYNAMIC — NOT eligible */
@@ -775,7 +785,7 @@ static void test_search_vm_eligible_meta(void) {
     bc[ip++] = OP_DYNAMIC;
     bc[ip++] = OP_ACCEPT;
     snobol_search_derive_meta(bc, ip, &m);
-  snobol_search_meta_free(&m);
+    snobol_search_meta_free(&m);
     test_assert(!m.search_vm_eligible,
                 "search-vm eligible: DYNAMIC not eligible");
   }
@@ -795,9 +805,10 @@ static void test_search_vm_correctness(void) {
     size_t n = build_lit_accept(bc, "hello", 5);
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
-  snobol_search_meta_free(&m);
+    snobol_search_meta_free(&m);
     test_assert(m.is_literal_only, "search-vm: LIT+ACCEPT is literal-only");
-    test_assert(m.search_vm_eligible, "search-vm: LIT+ACCEPT is search-vm-eligible");
+    test_assert(m.search_vm_eligible,
+                "search-vm: LIT+ACCEPT is search-vm-eligible");
 
     VM vm;
     memset(&vm, 0, sizeof(vm));
@@ -823,9 +834,10 @@ static void test_search_vm_correctness(void) {
     size_t n = ip;
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
-  snobol_search_meta_free(&m);
+    snobol_search_meta_free(&m);
     test_assert(!m.is_literal_only, "search-vm: LEN+ACCEPT not literal-only");
-    test_assert(m.search_vm_eligible, "search-vm: LEN+ACCEPT is search-vm-eligible");
+    test_assert(m.search_vm_eligible,
+                "search-vm: LEN+ACCEPT is search-vm-eligible");
 
     VM vm;
     memset(&vm, 0, sizeof(vm));
@@ -850,14 +862,15 @@ static void test_search_vm_correctness(void) {
     size_t class_off = ip;
     emit_u16_be(bc, &ip, 1);
     emit_u16_be(bc, &ip, 0);
-    emit_u32_be(bc, &ip, '0'); emit_u32_be(bc, &ip, '9');
+    emit_u32_be(bc, &ip, '0');
+    emit_u32_be(bc, &ip, '9');
     emit_u32_be(bc, &ip, (uint32_t)class_off);
     emit_u32_be(bc, &ip, 1);
     size_t n = ip;
 
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
-  snobol_search_meta_free(&m);
+    snobol_search_meta_free(&m);
     test_assert(m.search_vm_eligible, "search-vm: ANY eligible");
 
     VM vm;
@@ -879,7 +892,8 @@ static void test_search_vm_correctness(void) {
     test_assert(d.search_vm_tests == 0,
                 "search-vm: ANY handled by Tier 3 bitmap, not Tier 7");
 
-    if (rm) free((void*)rm);
+    if (rm)
+      free((void *)rm);
   }
 
   /* NOTANY + ACCEPT — not literal-only, search-VM eligible */
@@ -891,14 +905,15 @@ static void test_search_vm_correctness(void) {
     size_t class_off = ip;
     emit_u16_be(bc, &ip, 1);
     emit_u16_be(bc, &ip, 0);
-    emit_u32_be(bc, &ip, 'a'); emit_u32_be(bc, &ip, 'z');
+    emit_u32_be(bc, &ip, 'a');
+    emit_u32_be(bc, &ip, 'z');
     emit_u32_be(bc, &ip, (uint32_t)class_off);
     emit_u32_be(bc, &ip, 1);
     size_t n = ip;
 
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
-  snobol_search_meta_free(&m);
+    snobol_search_meta_free(&m);
     test_assert(m.search_vm_eligible, "search-vm: NOTANY eligible");
 
     VM vm;
@@ -920,7 +935,8 @@ static void test_search_vm_correctness(void) {
     test_assert(d.search_vm_tests > 0 || m.simd_eligible,
                 "NOTANY routed through Tier 7 or Tier 9");
 
-    if (rm) free((void*)rm);
+    if (rm)
+      free((void *)rm);
     free(vm.choices);
   }
 
@@ -931,7 +947,9 @@ static void test_search_vm_correctness(void) {
     bc[ip++] = OP_LIT;
     emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
     emit_u32_be(bc, &ip, 3);
-    bc[ip++] = 'c'; bc[ip++] = 'a'; bc[ip++] = 't';
+    bc[ip++] = 'c';
+    bc[ip++] = 'a';
+    bc[ip++] = 't';
     size_t lit2_off = ip;
     bc[ip++] = OP_LIT;
     emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
@@ -942,10 +960,11 @@ static void test_search_vm_correctness(void) {
 
     snobol_search_meta_t m;
     snobol_search_derive_meta(bc, n, &m);
-  snobol_search_meta_free(&m);
+    snobol_search_meta_free(&m);
     test_assert(!m.is_literal_only, "search-vm: LIT+LIT not literal-only");
     test_assert(m.has_literal_prefix, "search-vm: LIT+LIT has prefix");
-    test_assert(m.search_vm_eligible, "search-vm: LIT+LIT is search-vm-eligible");
+    test_assert(m.search_vm_eligible,
+                "search-vm: LIT+LIT is search-vm-eligible");
 
     VM vm;
     memset(&vm, 0, sizeof(vm));
@@ -961,7 +980,7 @@ static void test_search_vm_correctness(void) {
 }
 
 /* ===================================================================
- * Literal-only fast path tests (Task 4.2)
+ * Literal-only fast path tests
  * =================================================================== */
 static void test_literal_only_path(void) {
   uint8_t bc[64];
@@ -993,14 +1012,17 @@ static void test_literal_only_path(void) {
   test_assert(pat != NULL, "literal-only path: compile succeeds");
   snobol_match_t *mt = snobol_pattern_match(pat, "hello world", 11);
   test_assert(mt != NULL, "literal-only path: match result non-null");
-  test_assert(snobol_match_success(mt), "literal-only path: anchored match succeeds");
-  test_assert(snobol_match_get_position(mt) == 0, "literal-only path: position == 0");
+  test_assert(snobol_match_success(mt),
+              "literal-only path: anchored match succeeds");
+  test_assert(snobol_match_get_position(mt) == 0,
+              "literal-only path: position == 0");
   snobol_match_free(mt);
 
   /* anchored no-match */
   mt = snobol_pattern_match(pat, "hi world", 8);
   test_assert(mt != NULL, "literal-only path: no-match result non-null");
-  test_assert(!snobol_match_success(mt), "literal-only path: anchored no-match");
+  test_assert(!snobol_match_success(mt),
+              "literal-only path: anchored no-match");
   snobol_match_free(mt);
   snobol_pattern_free(pat);
 }
@@ -1019,9 +1041,11 @@ static void test_tier_index_matches_if_branches(void) {
     snobol_pattern_t *p = snobol_pattern_compile(ctx, "'hello'", 7, &err);
     test_assert(p != NULL, "tier test: literal pattern compiled");
     snobol_search_meta_t meta;
-    snobol_search_derive_meta(snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p), &meta);
-  snobol_search_meta_free(&meta);
-    test_assert(meta.tier == TIER_LITERAL, "literal pattern tier == TIER_LITERAL");
+    snobol_search_derive_meta(snobol_pattern_get_bc(p),
+                              snobol_pattern_get_bc_len(p), &meta);
+    snobol_search_meta_free(&meta);
+    test_assert(meta.tier == TIER_LITERAL,
+                "literal pattern tier == TIER_LITERAL");
     test_assert(meta.tier == 2, "TIER_LITERAL == 2");
     snobol_pattern_free(p);
     snobol_context_destroy(ctx);
@@ -1038,7 +1062,7 @@ static void test_tier_index_matches_if_branches(void) {
     bc[ip++] = OP_ACCEPT;
     snobol_search_meta_t meta;
     snobol_search_derive_meta(bc, ip, &meta);
-  snobol_search_meta_free(&meta);
+    snobol_search_meta_free(&meta);
     /* Without range_meta, ascii_class_only is false, so tier is not BREAK_SCAN */
     test_assert(meta.tier < TIER_COUNT, "BREAK pattern tier is valid");
   }
@@ -1053,7 +1077,7 @@ static void test_tier_index_matches_if_branches(void) {
     bc[ip++] = OP_ACCEPT;
     snobol_search_meta_t meta;
     snobol_search_derive_meta(bc, ip, &meta);
-  snobol_search_meta_free(&meta);
+    snobol_search_meta_free(&meta);
     test_assert(meta.tier < TIER_COUNT, "SPAN pattern tier is valid");
   }
 
@@ -1065,15 +1089,18 @@ static void test_tier_index_matches_if_branches(void) {
     if (p) {
       /* Use accessor to check tier */
       snobol_search_meta_t meta;
-      snobol_search_derive_meta(snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p), &meta);
-      test_assert(meta.tier == TIER_SEARCH_VM, "LEN+LIT tier == TIER_SEARCH_VM");
+      snobol_search_derive_meta(snobol_pattern_get_bc(p),
+                                snobol_pattern_get_bc_len(p), &meta);
+      test_assert(meta.tier == TIER_SEARCH_VM,
+                  "LEN+LIT tier == TIER_SEARCH_VM");
       snobol_search_meta_free(&meta);
       snobol_pattern_free(p);
     } else {
       /* If compile fails, test that we at least tried */
       test_assert(true, "LEN+LIT compile failed (syntax may differ)");
     }
-    if (err) free(err);
+    if (err)
+      free(err);
     snobol_context_destroy(ctx);
   }
 }
@@ -1117,7 +1144,8 @@ static void test_search_vm_reset_fields(void) {
   test_assert(p != NULL, "reset field test: pattern compiled");
 
   snobol_search_meta_t meta;
-  snobol_search_derive_meta(snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p), &meta);
+  snobol_search_derive_meta(snobol_pattern_get_bc(p),
+                            snobol_pattern_get_bc_len(p), &meta);
   snobol_search_meta_free(&meta);
 
   snobol_search_result_t result;
@@ -1150,26 +1178,32 @@ static void test_bmh_table_alloc_free(void) {
   /* Pattern with literal prefix ≥ 2 bytes triggers BMH allocation */
   char *err = NULL;
   snobol_context_t *ctx = snobol_context_create();
-  snobol_pattern_t *p = snobol_pattern_compile(ctx, "'hello' 'world'", 15, &err);
+  snobol_pattern_t *p =
+      snobol_pattern_compile(ctx, "'hello' 'world'", 15, &err);
   test_assert(p != NULL, "BMH test: pattern compiled");
 
   snobol_search_meta_t meta;
-  snobol_search_derive_meta(snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p), &meta);
+  snobol_search_derive_meta(snobol_pattern_get_bc(p),
+                            snobol_pattern_get_bc_len(p), &meta);
 
   /* BMH should be allocated for a pattern with 2+ byte literal prefix */
   test_assert(meta.has_bmh_skip, "BMH test: has_bmh_skip is true");
   test_assert(meta.bmh_skip != NULL, "BMH test: bmh_skip pointer is non-NULL");
-  test_assert(meta.bmh_skip_len == 5, "BMH test: bmh_skip_len == 5 (length of 'hello')");
+  test_assert(meta.bmh_skip_len == 5,
+              "BMH test: bmh_skip_len == 5 (length of 'hello')");
 
   /* Verify BMH table values */
   if (meta.bmh_skip) {
     /* 'h' is at offset 0, skip = 5-1-0 = 4 */
-    test_assert(meta.bmh_skip[(unsigned char)'h'] == 4, "BMH: skip for 'h' == 4");
+    test_assert(meta.bmh_skip[(unsigned char)'h'] == 4,
+                "BMH: skip for 'h' == 4");
     /* 'e' is at offset 1, skip = 5-1-1 = 3 */
-    test_assert(meta.bmh_skip[(unsigned char)'e'] == 3, "BMH: skip for 'e' == 3");
+    test_assert(meta.bmh_skip[(unsigned char)'e'] == 3,
+                "BMH: skip for 'e' == 3");
     /* 'l' appears at offset 2 and 4; last occurrence at 4, skip = 5-1-4 = 0 */
     /* But the algorithm sets skip for each occurrence, so the last one wins */
-    test_assert(meta.bmh_skip[(unsigned char)'l'] <= 4, "BMH: skip for 'l' is valid");
+    test_assert(meta.bmh_skip[(unsigned char)'l'] <= 4,
+                "BMH: skip for 'l' is valid");
   }
 
   /* Free the BMH table and pattern */
@@ -1181,7 +1215,8 @@ static void test_bmh_table_alloc_free(void) {
   snobol_pattern_t *p2 = snobol_pattern_compile(ctx, "'x'", 3, &err);
   test_assert(p2 != NULL, "BMH test: single-char pattern compiled");
   snobol_search_meta_t meta2;
-  snobol_search_derive_meta(snobol_pattern_get_bc(p2), snobol_pattern_get_bc_len(p2), &meta2);
+  snobol_search_derive_meta(snobol_pattern_get_bc(p2),
+                            snobol_pattern_get_bc_len(p2), &meta2);
   /* Single-char literal has prefix_len=1, which is < 2, so no BMH */
   test_assert(!meta2.has_bmh_skip, "BMH test: single-char has no BMH");
   test_assert(meta2.bmh_skip == NULL, "BMH test: single-char bmh_skip is NULL");
@@ -1191,7 +1226,7 @@ static void test_bmh_table_alloc_free(void) {
 }
 
 /* ===================================================================
- * Dispatch order tests via diagnostics (Task 4.5)
+ * Dispatch order tests via diagnostics
  * =================================================================== */
 static void test_dispatch_order(void) {
   uint8_t bc[128];
@@ -1220,7 +1255,9 @@ static void test_dispatch_order(void) {
     bc[ip++] = OP_LIT;
     emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
     emit_u32_be(bc, &ip, 3);
-    bc[ip++] = 'c'; bc[ip++] = 'a'; bc[ip++] = 't';
+    bc[ip++] = 'c';
+    bc[ip++] = 'a';
+    bc[ip++] = 't';
     /* second literal */
     size_t lit2_off = ip;
     bc[ip++] = OP_LIT;
@@ -1276,9 +1313,10 @@ static void test_w1b_start_bitmap_after_zero_width(void) {
       memset(&vm, 0, sizeof(vm));
       snobol_search_result_t result;
       snobol_search_diag_t diag;
-      bool ok = snobol_search_exec(&vm, "abc123", 6, 0, meta, NULL, &result,
-                                   &diag);
-      test_assert(!ok, "w1b: ^SPAN does not match 'abc123' (anchored, 'a' not digit)");
+      bool ok =
+          snobol_search_exec(&vm, "abc123", 6, 0, meta, NULL, &result, &diag);
+      test_assert(
+          !ok, "w1b: ^SPAN does not match 'abc123' (anchored, 'a' not digit)");
       test_assert(diag.candidates_skipped > 0,
                   "w1b: ^SPAN skips non-digit positions via bitmap");
       snobol_pattern_free(pat);
@@ -1296,7 +1334,8 @@ static void test_w1b_start_bitmap_after_zero_width(void) {
       const uint8_t *bc = snobol_pattern_get_bc(pat);
       size_t bc_len = snobol_pattern_get_bc_len(pat);
       const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
-      test_assert(meta->has_literal_prefix, "w1b: 'id:' SPAN has literal_prefix");
+      test_assert(meta->has_literal_prefix,
+                  "w1b: 'id:' SPAN has literal_prefix");
       test_assert(meta->literal_prefix_len >= 3,
                   "w1b: 'id:' SPAN literal_prefix_len >= 3");
 
@@ -1319,7 +1358,8 @@ static void test_w1b_start_bitmap_after_zero_width(void) {
        * Both call the same tier handler internally; this verifies the VM setup
        * (range_meta, emit callback) produces identical results. */
       size_t range_count = 0;
-      const snobol_range_meta_t *rm = snobol_pattern_get_range_meta(pat, &range_count);
+      const snobol_range_meta_t *rm =
+          snobol_pattern_get_range_meta(pat, &range_count);
       VM vm;
       memset(&vm, 0, sizeof(VM));
       vm.bc = snobol_pattern_get_bc(pat);
@@ -1430,7 +1470,6 @@ void test_search_runtime_suite(void) {
   /* NEW: Dispatch order via diagnostics */
   test_dispatch_order();
 
-  /* NEW: Explicit tests for search-overhead tasks */
   test_tier_index_matches_if_branches();
   test_search_vm_reset_fields();
   test_bmh_table_alloc_free();

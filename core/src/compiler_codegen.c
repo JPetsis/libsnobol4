@@ -597,179 +597,169 @@ static int emit_node_c(ast_node_t *node, CodeBuf *c) {
     return -1;
 
   switch (node->type) {
-  case AST_LITERAL:
-    if (compiler_case_insensitive) {
-      return emit_lit_case_insensitive_c(c, node->data.literal.text,
-                                         node->data.literal.len);
-    }
-    return emit_lit_bytes(c, node->data.literal.text, node->data.literal.len);
+    case AST_LITERAL:
+      if (compiler_case_insensitive) {
+        return emit_lit_case_insensitive_c(c, node->data.literal.text,
+                                           node->data.literal.len);
+      }
+      return emit_lit_bytes(c, node->data.literal.text, node->data.literal.len);
 
-  case AST_CONCAT:
-    for (size_t i = 0; i < node->data.concat.count; i++) {
-      if (emit_node_c(node->data.concat.parts[i], c) != 0) {
+    case AST_CONCAT:
+      for (size_t i = 0; i < node->data.concat.count; i++) {
+        if (emit_node_c(node->data.concat.parts[i], c) != 0) {
+          return -1;
+        }
+      }
+      return 0;
+
+    case AST_ALT:
+      return emit_alt_c(node->data.alt.left, node->data.alt.right, c);
+
+    case AST_REPETITION: {
+      /* Create stub AST nodes for min/max values */
+      ast_node_t min_node = {.type = AST_LEN,
+                             .data.len.n = node->data.repetition.min};
+      ast_node_t max_node = {.type = AST_LEN,
+                             .data.len.n = node->data.repetition.max};
+      return emit_repeat_c(node->data.repetition.sub, &min_node, &max_node, c);
+    }
+
+    case AST_SPAN:
+      return emit_span_c(node->data.charclass.set, node->data.charclass.len, c);
+
+    case AST_BREAK:
+      return emit_break_c(node->data.charclass.set, node->data.charclass.len,
+                          c);
+
+    case AST_ANY:
+      return emit_any_c(node->data.charclass.set, node->data.charclass.len, c);
+
+    case AST_NOTANY:
+      return emit_notany_c(node->data.charclass.set, node->data.charclass.len,
+                           c);
+
+    case AST_ARBNO: return emit_arbno_c(node->data.arbno.sub, c);
+
+    case AST_CAP: {
+      /* Emit capture start, sub-pattern, capture end */
+      cb_emit_u8(c, OP_CAP_START);
+      cb_emit_u8(c, (uint8_t)node->data.cap.reg);
+
+      if (emit_node_c(node->data.cap.sub, c) != 0)
+        return -1;
+
+      cb_emit_u8(c, OP_CAP_END);
+      cb_emit_u8(c, (uint8_t)node->data.cap.reg);
+      return 0;
+    }
+
+    case AST_ASSIGN:
+      return emit_assign_c(node->data.assign.var, node->data.assign.reg, c);
+
+    case AST_LEN: return emit_len_c(node->data.len.n, c);
+
+    case AST_EVAL:
+      return emit_eval_c(node->data.eval.fn, node->data.eval.reg, c);
+
+    case AST_DYNAMIC_EVAL:
+      /* Dynamic eval: compile inner expression and emit as dynamic pattern */
+      return emit_node_c(node->data.dynamic_eval.expr, c);
+
+    case AST_ANCHOR:
+      return emit_anchor_c(
+          node->data.anchor.atype == ANCHOR_START ? "start" : "end", c);
+
+    case AST_EMIT:
+      return emit_emit_c(node->data.emit.text, node->data.emit.reg, c);
+
+    case AST_BREAKX:
+      return emit_breakx_c(node->data.breakx.set, node->data.breakx.len, c);
+
+    case AST_BAL:
+      return emit_bal_c(node->data.bal.open_cp, node->data.bal.close_cp, c);
+
+    case AST_FENCE: return emit_fence_c(c);
+
+    case AST_REM: return emit_rem_c(c);
+
+    case AST_RPOS: return emit_rpos_c(node->data.rpos_rtab.n, c);
+
+    case AST_RTAB: return emit_rtab_c(node->data.rpos_rtab.n, c);
+
+    case AST_POS: return emit_pos_c(node->data.rpos_rtab.n, c);
+
+    case AST_TAB: return emit_tab_c(node->data.rpos_rtab.n, c);
+
+    case AST_ABORT: return emit_abort_c(c);
+
+    case AST_FAIL: cb_emit_u8(c, OP_FAIL); return 0;
+
+    case AST_SUCCEED: return emit_succeed_c(c);
+
+    case AST_LABEL: {
+      /* Emit OP_LABEL opcode, register offset, detect duplicates */
+      const char *name = node->data.label.name;
+      if (!name)
+        return -1;
+
+      /* Duplicate label check */
+      int existing = find_label_c(name);
+      if (existing >= 0 && label_table_c[existing].defined) {
+        snprintf(label_error_c, sizeof(label_error_c), "Duplicate label: '%s'",
+                 name);
+        label_has_error_c = true;
+        SNOBOL_LOG("emit_node_c: duplicate label '%s'", name);
         return -1;
       }
-    }
-    return 0;
 
-  case AST_ALT:
-    return emit_alt_c(node->data.alt.left, node->data.alt.right, c);
+      int idx = get_or_create_label_c(name);
+      if (idx < 0)
+        return -1;
 
-  case AST_REPETITION: {
-    /* Create stub AST nodes for min/max values */
-    ast_node_t min_node = {.type = AST_LEN,
-                           .data.len.n = node->data.repetition.min};
-    ast_node_t max_node = {.type = AST_LEN,
-                           .data.len.n = node->data.repetition.max};
-    return emit_repeat_c(node->data.repetition.sub, &min_node, &max_node, c);
-  }
+      /* Emit OP_LABEL with numeric label ID */
+      cb_emit_u8(c, OP_LABEL);
+      cb_emit_u16(c, (uint16_t)idx);
 
-  case AST_SPAN:
-    return emit_span_c(node->data.charclass.set, node->data.charclass.len, c);
-
-  case AST_BREAK:
-    return emit_break_c(node->data.charclass.set, node->data.charclass.len, c);
-
-  case AST_ANY:
-    return emit_any_c(node->data.charclass.set, node->data.charclass.len, c);
-
-  case AST_NOTANY:
-    return emit_notany_c(node->data.charclass.set, node->data.charclass.len, c);
-
-  case AST_ARBNO:
-    return emit_arbno_c(node->data.arbno.sub, c);
-
-  case AST_CAP: {
-    /* Emit capture start, sub-pattern, capture end */
-    cb_emit_u8(c, OP_CAP_START);
-    cb_emit_u8(c, (uint8_t)node->data.cap.reg);
-
-    if (emit_node_c(node->data.cap.sub, c) != 0)
-      return -1;
-
-    cb_emit_u8(c, OP_CAP_END);
-    cb_emit_u8(c, (uint8_t)node->data.cap.reg);
-    return 0;
-  }
-
-  case AST_ASSIGN:
-    return emit_assign_c(node->data.assign.var, node->data.assign.reg, c);
-
-  case AST_LEN:
-    return emit_len_c(node->data.len.n, c);
-
-  case AST_EVAL:
-    return emit_eval_c(node->data.eval.fn, node->data.eval.reg, c);
-
-  case AST_DYNAMIC_EVAL:
-    /* Dynamic eval: compile inner expression and emit as dynamic pattern */
-    return emit_node_c(node->data.dynamic_eval.expr, c);
-
-  case AST_ANCHOR:
-    return emit_anchor_c(
-        node->data.anchor.atype == ANCHOR_START ? "start" : "end", c);
-
-  case AST_EMIT:
-    return emit_emit_c(node->data.emit.text, node->data.emit.reg, c);
-
-  case AST_BREAKX:
-    return emit_breakx_c(node->data.breakx.set, node->data.breakx.len, c);
-
-  case AST_BAL:
-    return emit_bal_c(node->data.bal.open_cp, node->data.bal.close_cp, c);
-
-  case AST_FENCE:
-    return emit_fence_c(c);
-
-  case AST_REM:
-    return emit_rem_c(c);
-
-  case AST_RPOS:
-    return emit_rpos_c(node->data.rpos_rtab.n, c);
-
-  case AST_RTAB:
-    return emit_rtab_c(node->data.rpos_rtab.n, c);
-
-  case AST_POS:
-    return emit_pos_c(node->data.rpos_rtab.n, c);
-
-  case AST_TAB:
-    return emit_tab_c(node->data.rpos_rtab.n, c);
-
-  case AST_ABORT:
-    return emit_abort_c(c);
-
-  case AST_FAIL:
-    cb_emit_u8(c, OP_FAIL);
-    return 0;
-
-  case AST_SUCCEED:
-    return emit_succeed_c(c);
-
-  case AST_LABEL: {
-    /* Emit OP_LABEL opcode, register offset, detect duplicates */
-    const char *name = node->data.label.name;
-    if (!name)
-      return -1;
-
-    /* Duplicate label check */
-    int existing = find_label_c(name);
-    if (existing >= 0 && label_table_c[existing].defined) {
-      snprintf(label_error_c, sizeof(label_error_c), "Duplicate label: '%s'",
-               name);
-      label_has_error_c = true;
-      SNOBOL_LOG("emit_node_c: duplicate label '%s'", name);
-      return -1;
-    }
-
-    int idx = get_or_create_label_c(name);
-    if (idx < 0)
-      return -1;
-
-    /* Emit OP_LABEL with numeric label ID */
-    cb_emit_u8(c, OP_LABEL);
-    cb_emit_u16(c, (uint16_t)idx);
-
-    /* Record the offset AFTER OP_LABEL+id - this is where OP_GOTO will transfer
+      /* Record the offset AFTER OP_LABEL+id - this is where OP_GOTO will transfer
      * to */
-    label_table_c[idx].offset = (uint32_t)cb_pos(c);
-    label_table_c[idx].defined = true;
+      label_table_c[idx].offset = (uint32_t)cb_pos(c);
+      label_table_c[idx].defined = true;
 
-    /* Compile the target pattern (code that runs at/after this label) */
-    if (node->data.label.target) {
-      return emit_node_c(node->data.label.target, c);
+      /* Compile the target pattern (code that runs at/after this label) */
+      if (node->data.label.target) {
+        return emit_node_c(node->data.label.target, c);
+      }
+      return 0;
     }
-    return 0;
-  }
 
-  case AST_GOTO: {
-    /* Emit OP_GOTO for goto statement */
-    const char *label_name = node->data.goto_stmt.label;
-    if (!label_name)
+    case AST_GOTO: {
+      /* Emit OP_GOTO for goto statement */
+      const char *label_name = node->data.goto_stmt.label;
+      if (!label_name)
+        return -1;
+
+      int idx = get_or_create_label_c(label_name);
+      if (idx < 0)
+        return -1;
+
+      label_table_c[idx].referenced = true;
+
+      cb_emit_u8(c, OP_GOTO);
+      cb_emit_u16(c, (uint16_t)idx);
+      return 0;
+    }
+
+    case AST_TABLE_ACCESS:
+      return emit_table_access_c(node->data.table_access.table,
+                                 node->data.table_access.key, c);
+
+    case AST_TABLE_UPDATE:
+      return emit_table_update_c(node->data.table_update.table,
+                                 node->data.table_update.key,
+                                 node->data.table_update.value, c);
+
+    default:
+      SNOBOL_LOG("emit_node_c: unknown node type %d", node->type);
       return -1;
-
-    int idx = get_or_create_label_c(label_name);
-    if (idx < 0)
-      return -1;
-
-    label_table_c[idx].referenced = true;
-
-    cb_emit_u8(c, OP_GOTO);
-    cb_emit_u16(c, (uint16_t)idx);
-    return 0;
-  }
-
-  case AST_TABLE_ACCESS:
-    return emit_table_access_c(node->data.table_access.table,
-                               node->data.table_access.key, c);
-
-  case AST_TABLE_UPDATE:
-    return emit_table_update_c(node->data.table_update.table,
-                               node->data.table_update.key,
-                               node->data.table_update.value, c);
-
-  default:
-    SNOBOL_LOG("emit_node_c: unknown node type %d", node->type);
-    return -1;
   }
 }

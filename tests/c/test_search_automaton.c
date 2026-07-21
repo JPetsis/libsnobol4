@@ -184,7 +184,8 @@ static VM make_vm(const uint8_t *bc, size_t bc_len) {
 }
 
 /* Force automaton path by clearing all earlier-tier meta flags */
-static snobol_search_meta_t make_automaton_meta(const uint8_t *bc, size_t bc_len) {
+static snobol_search_meta_t make_automaton_meta(const uint8_t *bc,
+                                                size_t bc_len) {
   snobol_search_meta_t m;
   snobol_search_derive_meta(bc, bc_len, &m);
   m.is_break_family = false;
@@ -225,8 +226,7 @@ static void test_dfa_build_unsupported_opcode(void) {
   test_assert(dfa != NULL, "build_dfa succeeded (non-NULL)");
   if (dfa) {
     test_assert(dfa->num_states == 1, "dfa->num_states == 1 (degenerate)");
-    test_assert(dfa->start_state == 0,
-                "start_state is 0");
+    test_assert(dfa->start_state == 0, "start_state is 0");
 
     bool found_accept = false;
     for (uint32_t s = 0; s < dfa->num_states; s++) {
@@ -236,7 +236,7 @@ static void test_dfa_build_unsupported_opcode(void) {
       }
     }
     test_assert(!found_accept,
-               "no accepting state (LEN not in automaton instruction set)");
+                "no accepting state (LEN not in automaton instruction set)");
     snobol_dfa_free(dfa);
   }
 }
@@ -257,8 +257,7 @@ static void test_dfa_build_split_alternation(void) {
   test_assert(dfa != NULL, "build_dfa succeeded for alternation");
   if (dfa) {
     test_assert(dfa->num_states > 0, "num_states > 0");
-    test_assert(dfa->start_state < dfa->num_states,
-                "start_state within range");
+    test_assert(dfa->start_state < dfa->num_states, "start_state within range");
 
     bool found_accept = false;
     for (uint32_t s = 0; s < dfa->num_states; s++) {
@@ -288,7 +287,8 @@ static void test_dfa_exec_match_offset_zero(void) {
   VM vm = make_vm(bc, bc_len);
   snobol_dfa_t *dfa = build_dfa(bc, bc_len, &vm);
   test_assert(dfa != NULL, "build_dfa succeeded");
-  if (!dfa) return;
+  if (!dfa)
+    return;
 
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, "abcdef", 6, 0, &meta, dfa, &result, NULL);
@@ -314,11 +314,13 @@ static void test_dfa_exec_match_nonzero_offset(void) {
   VM vm = make_vm(bc, bc_len);
   snobol_dfa_t *dfa = build_dfa(bc, bc_len, &vm);
   test_assert(dfa != NULL, "build_dfa succeeded");
-  if (!dfa) return;
+  if (!dfa)
+    return;
 
   snobol_search_result_t result;
 
-  bool ok = snobol_search_exec(&vm, "----xyz----", 11, 0, &meta, dfa, &result, NULL);
+  bool ok =
+      snobol_search_exec(&vm, "----xyz----", 11, 0, &meta, dfa, &result, NULL);
   test_assert(ok, "match found in search mode");
   test_assert(result.match_start == 4, "match_start == 4");
   test_assert(result.match_end == 7, "match_end == 7");
@@ -349,7 +351,8 @@ static void test_dfa_exec_no_match(void) {
   VM vm = make_vm(bc, bc_len);
   snobol_dfa_t *dfa = build_dfa(bc, bc_len, &vm);
   test_assert(dfa != NULL, "build_dfa succeeded");
-  if (!dfa) return;
+  if (!dfa)
+    return;
 
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, "xxxxxxx", 7, 0, &meta, dfa, &result, NULL);
@@ -378,11 +381,11 @@ static void test_non_eligible_fallback(void) {
   VM vm = make_vm(bc, bc_len);
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, "a,b,c", 5, 0, &meta, NULL, &result, NULL);
-   test_assert(ok, "BREAKX matches via accelerated BREAK path");
-   /* BREAKX(',') on "a,b,c" matches the leading non-delimiter run "a":
+  test_assert(ok, "BREAKX matches via accelerated BREAK path");
+  /* BREAKX(',') on "a,b,c" matches the leading non-delimiter run "a":
     * start 0, end 1 (exclusive of the following ','). */
-   test_assert(result.match_start == 0, "BREAKX match_start == 0 ('a')");
-   test_assert(result.match_end == 1, "BREAKX match_end == 1 (before ',')");
+  test_assert(result.match_start == 0, "BREAKX match_start == 0 ('a')");
+  test_assert(result.match_end == 1, "BREAKX match_end == 1 (before ',')");
 
   snobol_search_meta_free(&meta);
 }
@@ -424,21 +427,21 @@ static void test_repeat_in_automaton(void) {
   /* REPEAT_INIT: opcode(1) + loop_id(1) + min(4) + max(4) + skip_target(4) = 14 bytes */
   size_t init_ip = ip;
   bc[ip++] = OP_REPEAT_INIT;
-  bc[ip++] = 0;  /* loop_id */
-  emit_u32_be(bc, &ip, 0);        /* min = 0 */
-  emit_u32_be(bc, &ip, (uint32_t)-1);  /* max = -1 (unbounded) */
-  emit_u32_be(bc, &ip, 0);        /* skip_target placeholder */
+  bc[ip++] = 0;                       /* loop_id */
+  emit_u32_be(bc, &ip, 0);            /* min = 0 */
+  emit_u32_be(bc, &ip, (uint32_t)-1); /* max = -1 (unbounded) */
+  emit_u32_be(bc, &ip, 0);            /* skip_target placeholder */
 
   /* Body: LIT 'a' */
   size_t body_ip = ip;
   bc[ip++] = OP_LIT;
-  emit_u32_be(bc, &ip, (uint32_t)(ip + 8));  /* data offset (after len field) */
-  emit_u32_be(bc, &ip, 1);        /* length = 1 */
+  emit_u32_be(bc, &ip, (uint32_t)(ip + 8)); /* data offset (after len field) */
+  emit_u32_be(bc, &ip, 1);                  /* length = 1 */
   bc[ip++] = 'a';
 
   /* REPEAT_STEP: opcode(1) + loop_id(1) + jmp_target(4) = 6 bytes */
   bc[ip++] = OP_REPEAT_STEP;
-  bc[ip++] = 0;  /* loop_id */
+  bc[ip++] = 0; /* loop_id */
   emit_u32_be(bc, &ip, (uint32_t)body_ip);
 
   /* Skip target: LIT 'b' ACCEPT */
@@ -450,7 +453,7 @@ static void test_repeat_in_automaton(void) {
   bc[ip++] = OP_ACCEPT;
 
   /* Patch skip_target in REPEAT_INIT */
-  size_t patch = init_ip + 1 + 1 + 4 + 4;  /* after opcode, loop_id, min, max */
+  size_t patch = init_ip + 1 + 1 + 4 + 4; /* after opcode, loop_id, min, max */
   bc[patch + 0] = (uint8_t)((skip_ip >> 24) & 0xFF);
   bc[patch + 1] = (uint8_t)((skip_ip >> 16) & 0xFF);
   bc[patch + 2] = (uint8_t)((skip_ip >> 8) & 0xFF);
@@ -464,7 +467,8 @@ static void test_repeat_in_automaton(void) {
   VM vm = make_vm(bc, bc_len);
   snobol_dfa_t *dfa = build_dfa(bc, bc_len, &vm);
   test_assert(dfa != NULL, "build_dfa succeeded for REPEAT pattern");
-  if (!dfa) return;
+  if (!dfa)
+    return;
 
   snobol_search_result_t result;
 
@@ -506,11 +510,13 @@ static void test_dfa_lifecycle(void) {
   VM vm = make_vm(bc, bc_len);
   snobol_dfa_t *dfa = build_dfa(bc, bc_len, &vm);
   test_assert(dfa != NULL, "DFA allocated");
-  if (!dfa) return;
+  if (!dfa)
+    return;
 
   snobol_search_meta_t meta = make_automaton_meta(bc, bc_len);
   snobol_search_result_t result;
-  bool ok = snobol_search_exec(&vm, "hello world", 11, 0, &meta, dfa, &result, NULL);
+  bool ok =
+      snobol_search_exec(&vm, "hello world", 11, 0, &meta, dfa, &result, NULL);
   test_assert(ok, "DFA-based match succeeded");
   test_assert(result.match_start == 0, "match_start == 0");
 

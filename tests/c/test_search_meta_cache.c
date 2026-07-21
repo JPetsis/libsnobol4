@@ -29,8 +29,7 @@ void test_search_meta_cache_suite(void) {
   {
     snobol_context_t *ctx = snobol_context_create();
     char *err = NULL;
-    snobol_pattern_t *pat =
-        snobol_pattern_compile_ex(ctx, "'pqr'", 5, 0, &err);
+    snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, "'pqr'", 5, 0, &err);
     test_assert(pat != NULL, "compile succeeds");
     if (pat) {
       snobol_match_t *m =

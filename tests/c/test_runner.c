@@ -408,7 +408,8 @@ int main(void) {
   RUN_SUITE("Choice Short-Circuit", test_choice_shortcircuit_suite);
   RUN_SUITE("Search: Automaton", test_search_automaton_suite);
   RUN_SUITE("Search: SIMD NFA", test_search_simd_suite);
-  RUN_SUITE("Search: Alt-literals & small-prefix", test_search_alt_literals_suite);
+  RUN_SUITE("Search: Alt-literals & small-prefix",
+            test_search_alt_literals_suite);
   RUN_SUITE("Automaton: BMH-skip", test_automaton_skip_suite);
   RUN_SUITE("Arena Allocator", test_arena_suite);
   /* Unicode / API */
@@ -416,8 +417,10 @@ int main(void) {
   RUN_SUITE("Pattern: Case-Insensitive", test_pattern_case_suite);
   RUN_SUITE("API Version", test_api_version_suite);
   RUN_SUITE("API: snobol_match()", test_api_match_suite);
-  RUN_SUITE("API: snobol_pattern_match_literal()", test_api_literal_match_suite);
-  RUN_SUITE("API: snobol_match_reset() / search_reuse()", test_reusable_match_suite);
+  RUN_SUITE("API: snobol_pattern_match_literal()",
+            test_api_literal_match_suite);
+  RUN_SUITE("API: snobol_match_reset() / search_reuse()",
+            test_reusable_match_suite);
   RUN_SUITE("Reuse Search: _ex parity with search()", test_reuse_search_suite);
   RUN_SUITE("Grammar: BREAK / BREAKX", test_break_grammar_suite);
   RUN_SUITE("Property-Based Tests", test_property_based_suite);
@@ -460,8 +463,8 @@ int main(void) {
   print_rule_w('=', rule_w);
   printf("\n");
   print_rule_w('=', rule_w);
-  printf("  %-*s  %7s  %7s  %9s\n", name_w, "Suite", "Passed",
-          "Failed", "Time(ms)");
+  printf("  %-*s  %7s  %7s  %9s\n", name_w, "Suite", "Passed", "Failed",
+         "Time(ms)");
   print_rule_w('-', rule_w);
 
   double total_ms = 0.0;
@@ -471,8 +474,8 @@ int main(void) {
       printf("  \033[31m✗\033[0m %-*s  %7d  \033[31m%7d\033[0m  %9.2f\n",
              name_w - 2, r->name, r->passed, r->failed, r->time_ms);
     else
-      printf("  ✓ %-*s  %7d  %7d  %9.2f\n", name_w - 2, r->name,
-             r->passed, r->failed, r->time_ms);
+      printf("  ✓ %-*s  %7d  %7d  %9.2f\n", name_w - 2, r->name, r->passed,
+             r->failed, r->time_ms);
     total_ms += r->time_ms;
   }
 

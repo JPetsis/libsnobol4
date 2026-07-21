@@ -17,7 +17,9 @@ static int setenv(const char *name, const char *value, int overwrite) {
   (void)overwrite;
   return _putenv_s(name, value);
 }
-static int unsetenv(const char *name) { return _putenv_s(name, ""); }
+static int unsetenv(const char *name) {
+  return _putenv_s(name, "");
+}
 #else
 #include <unistd.h> /* setenv/unsetenv */
 #endif
@@ -49,7 +51,9 @@ static uint32_t bc_add_lit(Bc *b, const char *bytes, size_t len) {
   return off;
 }
 
-static void bc_u8(Bc *b, uint8_t v) { b->bc[b->ip++] = v; }
+static void bc_u8(Bc *b, uint8_t v) {
+  b->bc[b->ip++] = v;
+}
 static void bc_u16(Bc *b, uint16_t v) {
   b->bc[b->ip++] = (uint8_t)((v >> 8) & 0xFF);
   b->bc[b->ip++] = (uint8_t)(v & 0xFF);
@@ -75,10 +79,10 @@ static void bc_build_repeat_emit(Bc *b, uint8_t loop_id, uint8_t cap_reg) {
   size_t init_pos = b->ip;
   bc_u8(b, OP_REPEAT_INIT);
   bc_u8(b, loop_id);
-  bc_u32(b, 0);                 /* min */
-  bc_u32(b, (uint32_t)-1);      /* max = unbounded */
+  bc_u32(b, 0);            /* min */
+  bc_u32(b, (uint32_t)-1); /* max = unbounded */
   size_t skip_off = b->ip;
-  bc_u32(b, 0);                 /* skip_target placeholder */
+  bc_u32(b, 0); /* skip_target placeholder */
 
   size_t body_start = b->ip;
   bc_u8(b, OP_CAP_START);

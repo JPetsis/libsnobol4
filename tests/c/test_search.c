@@ -63,7 +63,8 @@ static void test_trie_cache_hit(void) {
     snobol_match_free(m);
   }
   snobol_auto_trie_t *cache2 = snobol_pattern_get_trie_cache(pat);
-  test_assert(cache2 == cache1, "trie cache reused (not rebuilt) on 2nd search");
+  test_assert(cache2 == cache1,
+              "trie cache reused (not rebuilt) on 2nd search");
 
   /* Many more searches keep the same cache pointer. */
   for (int i = 0; i < 20; i++) {
@@ -133,9 +134,9 @@ static void test_2byte_prefix_memchr_path(void) {
     const char *subj;
     size_t len;
   } cases[] = {
-      {"abx", 3},       {"aby", 3},       {"ab", 2},     {"abz", 3},
-      {"xxabxyyy", 8},  {"ababx", 5},     {"zzz", 3},    {"aaxbbx", 6},
-      {"aabx", 4},      {"", 0},          {"aaaa", 4},   {"abxaabx", 7},
+      {"abx", 3},      {"aby", 3},   {"ab", 2},   {"abz", 3},
+      {"xxabxyyy", 8}, {"ababx", 5}, {"zzz", 3},  {"aaxbbx", 6},
+      {"aabx", 4},     {"", 0},      {"aaaa", 4}, {"abxaabx", 7},
   };
 
   for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); k++) {

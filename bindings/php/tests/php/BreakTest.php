@@ -6,7 +6,7 @@ use PHPUnit\Framework\TestCase;
 use Snobol\PatternHelper as PH;
 
 /**
- * PHP-side coverage for BREAK / BREAKX (task P7.4).
+ * PHP-side coverage for BREAK / BREAKX.
  *
  * The C grammar test (test_break_grammar.c) verifies routing to TIER_BREAK_SCAN
  * and correct delimited-field matching. This test exercises the same patterns

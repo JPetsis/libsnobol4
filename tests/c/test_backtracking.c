@@ -29,7 +29,9 @@ static void debug_dump_state(const char *label, const VM *vm) {
 #endif
 }
 
-static void emit_u8(uint8_t *bc, size_t *ip, uint8_t v) { bc[(*ip)++] = v; }
+static void emit_u8(uint8_t *bc, size_t *ip, uint8_t v) {
+  bc[(*ip)++] = v;
+}
 
 static void emit_u16(uint8_t *bc, size_t *ip, uint16_t v) {
   bc[(*ip)++] = (uint8_t)((v >> 8) & 0xFF);
@@ -122,9 +124,15 @@ static uint32_t bc_add_lit(Bc *b, const char *bytes, size_t len) {
   return off;
 }
 
-static void bc_emit_u8(Bc *b, uint8_t v) { emit_u8(b->bc, &b->ip, v); }
-static void bc_emit_u16(Bc *b, uint16_t v) { emit_u16(b->bc, &b->ip, v); }
-static void bc_emit_u32(Bc *b, uint32_t v) { emit_u32(b->bc, &b->ip, v); }
+static void bc_emit_u8(Bc *b, uint8_t v) {
+  emit_u8(b->bc, &b->ip, v);
+}
+static void bc_emit_u16(Bc *b, uint16_t v) {
+  emit_u16(b->bc, &b->ip, v);
+}
+static void bc_emit_u32(Bc *b, uint32_t v) {
+  emit_u32(b->bc, &b->ip, v);
+}
 
 static void bc_emit_lit1(Bc *b, char c) {
   uint32_t off = bc_add_lit(b, &c, 1);

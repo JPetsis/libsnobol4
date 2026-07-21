@@ -40,7 +40,8 @@ static int64_t now_ns(void) {
   return (int64_t)(cnt.QuadPart * 1000000000LL / freq.QuadPart);
 #elif defined(__APPLE__)
   static mach_timebase_info_data_t info = {0};
-  if (info.denom == 0) mach_timebase_info(&info);
+  if (info.denom == 0)
+    mach_timebase_info(&info);
   uint64_t raw = mach_absolute_time();
   return (int64_t)(raw * info.numer / info.denom);
 #else
@@ -90,7 +91,8 @@ static void test_correctness(void) {
   snobol_match_t *m2 = search("('foo' | 'fop')", "zzfoo");
   test_assert(m2 != NULL && snobol_match_success(m2), "match succeeds");
   if (m2) {
-    test_assert(snobol_match_get_position(m2) == 2, "match at offset 2 ('foo')");
+    test_assert(snobol_match_get_position(m2) == 2,
+                "match at offset 2 ('foo')");
     snobol_match_free(m2);
   }
 
@@ -116,7 +118,8 @@ static void test_linear_time(void) {
   int64_t t1 = now_ns();
 
   double ms = (double)(t1 - t0) / 1.0e6;
-  test_assert(m != NULL && !snobol_match_success(m), "no match on long 'a' run");
+  test_assert(m != NULL && !snobol_match_success(m),
+              "no match on long 'a' run");
   /* Linear scan of 2 MB should finish in well under a second. */
   test_assert(ms < 1000.0, "long failing subject scanned in < 1s (linear)");
 

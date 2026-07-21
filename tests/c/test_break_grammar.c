@@ -1,5 +1,5 @@
 /**
- * test_break_grammar.c — Grammar wiring for BREAK / BREAKX (task 7.3)
+ * test_break_grammar.c — Grammar wiring for BREAK / BREAKX
  *
  * Verifies that:
  *   - BREAK(set) and BREAKX(set) parse and compile (previously the parser
@@ -45,7 +45,8 @@ void test_break_grammar_suite(void) {
   {
     snobol_context_t *ctx = snobol_context_create();
     char *err = NULL;
-    snobol_pattern_t *pat = snobol_pattern_compile(ctx, "BREAKX(',')", 11, &err);
+    snobol_pattern_t *pat =
+        snobol_pattern_compile(ctx, "BREAKX(',')", 11, &err);
     test_assert(pat != NULL, "BREAKX(',') compiles");
     if (pat) {
       const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);

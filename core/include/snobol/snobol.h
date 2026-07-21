@@ -314,9 +314,9 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
  * whose bytecode is a single anchored literal (e.g. "'abc'").
  */
 typedef struct snobol_literal_match {
-  bool success;      /**< Whether the literal matched at position 0. */
-  size_t position;   /**< Match start position (always 0 on success). */
-  size_t length;     /**< Byte length of the matched literal. */
+  bool success;    /**< Whether the literal matched at position 0. */
+  size_t position; /**< Match start position (always 0 on success). */
+  size_t length;   /**< Byte length of the matched literal. */
 } snobol_literal_match_t;
 
 /**
@@ -335,8 +335,9 @@ typedef struct snobol_literal_match {
  * @param[in] len     Byte length of @p subject.
  * @return Lightweight result struct (zero heap allocations).
  */
-snobol_literal_match_t snobol_pattern_match_literal(
-    snobol_pattern_t *pattern, const char *subject, size_t len);
+snobol_literal_match_t snobol_pattern_match_literal(snobol_pattern_t *pattern,
+                                                    const char *subject,
+                                                    size_t len);
 
 /**
  * @brief Execute a compiled pattern in search (un-anchored) mode.
@@ -379,8 +380,8 @@ typedef struct snobol_pattern_search_state snobol_pattern_search_state_t;
  * @return Newly allocated state, or NULL on allocation failure.
  *         Free with snobol_pattern_search_state_destroy().
  */
-snobol_pattern_search_state_t *
-snobol_pattern_search_state_create(const uint8_t *bc, size_t bc_len);
+snobol_pattern_search_state_t *snobol_pattern_search_state_create(
+    const uint8_t *bc, size_t bc_len);
 
 /**
  * @brief Associate an owning pattern with a search state.
@@ -500,9 +501,8 @@ void snobol_match_reset(snobol_match_t *match);
  * @return true if match succeeded, false otherwise.
  *         Results are written to *match_out.
  */
-bool snobol_pattern_search_reuse(snobol_pattern_t *pattern,
-                                 const char *subject, size_t len,
-                                 snobol_match_t *match_out);
+bool snobol_pattern_search_reuse(snobol_pattern_t *pattern, const char *subject,
+                                 size_t len, snobol_match_t *match_out);
 
 /* Match result access */
 /**

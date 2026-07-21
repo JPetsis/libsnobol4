@@ -8,7 +8,9 @@
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
 
-static void emit_u8(uint8_t *bc, size_t *ip, uint8_t v) { bc[(*ip)++] = v; }
+static void emit_u8(uint8_t *bc, size_t *ip, uint8_t v) {
+  bc[(*ip)++] = v;
+}
 static void emit_u32(uint8_t *bc, size_t *ip, uint32_t v) {
   bc[(*ip)++] = (v >> 24) & 0xFF;
   bc[(*ip)++] = (v >> 16) & 0xFF;
@@ -217,8 +219,7 @@ static void test_zero_width_loop_bounding(void) {
 #ifdef SNOBOL_PROFILE
   printf("  > Profile: dispatch=%llu push=%llu max_depth=%zu\n",
          (unsigned long long)vm.profile.dispatch_count,
-         (unsigned long long)vm.profile.push_count,
-         vm.profile.max_depth);
+         (unsigned long long)vm.profile.push_count, vm.profile.max_depth);
   // Linear bound: ~ (N+1) outer * (N+1) inner is unacceptable; with the cap
   // each loop runs at most N+1 times. Assert well below any exponential
   // threshold — a generous linear/quadratic bound is enough to catch

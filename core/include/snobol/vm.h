@@ -326,9 +326,9 @@ typedef enum {
  * abandons a thread replays only the records it owns.
  */
 typedef struct {
-  uint8_t kind;     /**< UndoKind */
-  uint8_t index;    /**< Register index (counter / capture / variable id) */
-  uint8_t sub;      /**< 0 = start field, 1 = end field (CAP/VAR), 0 otherwise */
+  uint8_t kind;  /**< UndoKind */
+  uint8_t index; /**< Register index (counter / capture / variable id) */
+  uint8_t sub;   /**< 0 = start field, 1 = end field (CAP/VAR), 0 otherwise */
   uint32_t prior_u; /**< Prior counter value (UNDO_COUNTER_DEC) */
   size_t prior_a;   /**< Prior value A (cap_start / var_start / old_start) */
   size_t prior_b;   /**< Prior value B (cap_end / var_end / old_end) */
@@ -382,19 +382,19 @@ struct choice {
 #define CHOICE_ARENA_PAGE_SIZE 4096
 
 typedef struct ChoiceArenaPage {
-  uint8_t *data;             /**< Page payload (allocated, may exceed page size) */
-  size_t cap;                /**< Usable capacity of @c data */
-  size_t used;               /**< Bytes used in @c data */
+  uint8_t *data; /**< Page payload (allocated, may exceed page size) */
+  size_t cap;    /**< Usable capacity of @c data */
+  size_t used;   /**< Bytes used in @c data */
   struct ChoiceArenaPage *prev;
   struct ChoiceArenaPage *next;
 } ChoiceArenaPage;
 
 typedef struct ChoiceArena {
-  ChoiceArenaPage *head;     /**< First (never freed by reset) page */
-  ChoiceArenaPage *cur;      /**< Page currently appended to */
-  size_t total_used;         /**< Total live bytes across pages (== choices_top) */
-  size_t peak_used;          /**< High-water mark of total_used */
-  size_t last_rec_size;      /**< Footprint of most recently allocated record */
+  ChoiceArenaPage *head; /**< First (never freed by reset) page */
+  ChoiceArenaPage *cur;  /**< Page currently appended to */
+  size_t total_used;     /**< Total live bytes across pages (== choices_top) */
+  size_t peak_used;      /**< High-water mark of total_used */
+  size_t last_rec_size;  /**< Footprint of most recently allocated record */
 } ChoiceArena;
 
 ChoiceArena *vm_arena_create(void);
@@ -465,7 +465,7 @@ typedef struct {
 
   // choice stack for backtracking (page-linked arena, W2c)
   ChoiceArena *choices_arena;
-  size_t choices_top;        /* == arena->total_used, for stats */
+  size_t choices_top; /* == arena->total_used, for stats */
   bool use_compact_choice;
   /* Scratch byte-buffer shared with the lightweight search-VM (Tier 6): it
    * stores search_choice_t records here. Not used by the full-VM backtracking
@@ -487,9 +487,9 @@ typedef struct {
    * thread makes since the last choice point. Mirrors the choice stack: depth
    * invariant trail_top == (number of live choice points). Restored by
    * replaying the abandoned thread's entries in reverse. */
-  UndoRecord *trail;  /* Growable array of undo records */
-  size_t trail_cap;   /* Allocated capacity (records) */
-  size_t trail_top;   /* Number of live trail records */
+  UndoRecord *trail; /* Growable array of undo records */
+  size_t trail_cap;  /* Allocated capacity (records) */
+  size_t trail_top;  /* Number of live trail records */
 
   /* Write-log for compact choice stack: tracks capture modifications */
   WriteLogEntry *write_log;  /* Circular buffer of modification entries */
@@ -555,11 +555,11 @@ typedef struct {
   const uint8_t *bc; /**< Compiled bytecode pointer (not owned). */
   size_t bc_len;     /**< Bytecode length in bytes. */
 
-  const char *s;     /**< Subject string pointer (adjusted by offset). */
-  size_t len;        /**< Remaining subject length (subject_len - offset). */
+  const char *s; /**< Subject string pointer (adjusted by offset). */
+  size_t len;    /**< Remaining subject length (subject_len - offset). */
 
-  size_t ip;         /**< Instruction pointer. */
-  size_t pos;        /**< Subject byte position. */
+  size_t ip;  /**< Instruction pointer. */
+  size_t pos; /**< Subject byte position. */
 
   /** Cached charclass range metadata (set_id -> range data). */
   const snobol_range_meta_t *range_meta;
@@ -614,8 +614,8 @@ const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id,
  * @param[out] out_count  Receives number of table entries (0 if none).
  */
 void snobol_build_range_meta(const uint8_t *bc, size_t bc_len,
-                              snobol_range_meta_t **out_table,
-                              size_t *out_count);
+                             snobol_range_meta_t **out_table,
+                             size_t *out_count);
 
 /**
  * @brief Build a 128-bit ASCII bitmap from range data; returns false if any

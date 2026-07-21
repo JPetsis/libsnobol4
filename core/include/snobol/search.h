@@ -82,17 +82,18 @@ struct snobol_pattern; /* forward decl — only used as an opaque pointer */
  * ---------------------------------------------------------------------------
  */
 typedef enum {
-  TIER_BREAK_SCAN = 0,    /**< BREAK/BREAKX with ASCII bitmap scan */
-  TIER_SPAN_SCAN = 1,     /**< SPAN with ASCII bitmap scan */
-  TIER_LITERAL = 2,       /**< Literal-only fast path (no VM) */
-  TIER_PREFIX = 3,        /**< Literal prefix (memmem / memchr) */
-  TIER_BITMAP = 4,        /**< Candidate-set bitmap for single-char alt */
-  TIER_ALT_LIT = 5,       /**< Alternation-of-literals (trie-based) */
-  TIER_SEARCH_VM = 6,     /**< Search-VM for eligible patterns */
-  TIER_AUTOMATON = 7,     /**< DFA automaton for eligible patterns */
-  TIER_GENERAL = 8,       /**< General VM fallback with start-byte bitmap */
-  TIER_SIMD_NFA = 9,      /**< SIMD-accelerated Thompson NFA for charclass patterns */
-  TIER_COUNT = 10         /**< Number of tiers (sentinel) */
+  TIER_BREAK_SCAN = 0, /**< BREAK/BREAKX with ASCII bitmap scan */
+  TIER_SPAN_SCAN = 1,  /**< SPAN with ASCII bitmap scan */
+  TIER_LITERAL = 2,    /**< Literal-only fast path (no VM) */
+  TIER_PREFIX = 3,     /**< Literal prefix (memmem / memchr) */
+  TIER_BITMAP = 4,     /**< Candidate-set bitmap for single-char alt */
+  TIER_ALT_LIT = 5,    /**< Alternation-of-literals (trie-based) */
+  TIER_SEARCH_VM = 6,  /**< Search-VM for eligible patterns */
+  TIER_AUTOMATON = 7,  /**< DFA automaton for eligible patterns */
+  TIER_GENERAL = 8,    /**< General VM fallback with start-byte bitmap */
+  TIER_SIMD_NFA =
+      9,          /**< SIMD-accelerated Thompson NFA for charclass patterns */
+  TIER_COUNT = 10 /**< Number of tiers (sentinel) */
 } snobol_search_tier_t;
 
 /* ---------------------------------------------------------------------------
@@ -101,23 +102,23 @@ typedef enum {
  * Packed into snobol_search_meta_t.flags for single-word access.
  * ---------------------------------------------------------------------------
  */
-#define META_HAS_LITERAL_PREFIX   (1u << 0)
-#define META_HAS_FIRST_BYTE       (1u << 1)
+#define META_HAS_LITERAL_PREFIX (1u << 0)
+#define META_HAS_FIRST_BYTE (1u << 1)
 #define META_HAS_CANDIDATE_BITMAP (1u << 2)
-#define META_MAY_MATCH_EMPTY      (1u << 3)
-#define META_ALWAYS_CONSUMES      (1u << 4)
-#define META_IS_SINGLE_CHAR_ALT   (1u << 5)
-#define META_IS_BREAK_FAMILY      (1u << 6)
-#define META_IS_SPAN_FAMILY       (1u << 7)
-#define META_IS_BREAKX            (1u << 8)
-#define META_ASCII_CLASS_ONLY     (1u << 9)
-#define META_HAS_START_BITMAP     (1u << 10)
-#define META_AUTOMATON_ELIGIBLE   (1u << 11)
-#define META_IS_ALT_LITERALS      (1u << 12)
-#define META_HAS_BMH_SKIP         (1u << 13)
-#define META_IS_LITERAL_ONLY      (1u << 14)
-#define META_SEARCH_VM_ELIGIBLE   (1u << 15)
-#define META_SIMD_ELIGIBLE        (1u << 16)
+#define META_MAY_MATCH_EMPTY (1u << 3)
+#define META_ALWAYS_CONSUMES (1u << 4)
+#define META_IS_SINGLE_CHAR_ALT (1u << 5)
+#define META_IS_BREAK_FAMILY (1u << 6)
+#define META_IS_SPAN_FAMILY (1u << 7)
+#define META_IS_BREAKX (1u << 8)
+#define META_ASCII_CLASS_ONLY (1u << 9)
+#define META_HAS_START_BITMAP (1u << 10)
+#define META_AUTOMATON_ELIGIBLE (1u << 11)
+#define META_IS_ALT_LITERALS (1u << 12)
+#define META_HAS_BMH_SKIP (1u << 13)
+#define META_IS_LITERAL_ONLY (1u << 14)
+#define META_SEARCH_VM_ELIGIBLE (1u << 15)
+#define META_SIMD_ELIGIBLE (1u << 16)
 #define META_IS_ALT_LITERALS_FLAT (1u << 17)
 
 /* ---------------------------------------------------------------------------
@@ -141,11 +142,12 @@ typedef enum {
  * The DEAD state (SNOBOL_DFA_DEAD) means no valid continuation.
  */
 typedef struct {
-  uint16_t *trans;        /**< Flattened 256 × num_states transition table */
-  uint32_t num_states;    /**< Number of DFA states (excluding DEAD) */
-  uint8_t *accepting;     /**< Bitmap: byte (num_states+7)/8, bit i set => state i is accepting */
-  uint16_t start_state;   /**< Start DFA state index */
-  uint32_t state_cap;     /**< Allocated capacity in states */
+  uint16_t *trans;     /**< Flattened 256 × num_states transition table */
+  uint32_t num_states; /**< Number of DFA states (excluding DEAD) */
+  uint8_t *
+      accepting; /**< Bitmap: byte (num_states+7)/8, bit i set => state i is accepting */
+  uint16_t start_state; /**< Start DFA state index */
+  uint32_t state_cap;   /**< Allocated capacity in states */
 } snobol_dfa_t;
 
 /**
@@ -168,8 +170,8 @@ snobol_auto_trie_t *snobol_pattern_get_trie_cache(
 
 typedef struct {
   /* Packed flags and tier index ------------------------------------------ */
-  uint32_t flags;     /**< Bitfield of META_* flag constants */
-  uint8_t tier;       /**< Tier index (snobol_search_tier_t) for dispatch */
+  uint32_t flags; /**< Bitfield of META_* flag constants */
+  uint8_t tier;   /**< Tier index (snobol_search_tier_t) for dispatch */
 
   bool has_literal_prefix;
   uint8_t literal_prefix[SNOBOL_SEARCH_MAX_PREFIX];
@@ -254,7 +256,7 @@ typedef struct {
    * and is valid as long as pos + bmh_skip_len <= subject_len.
    * bmh_skip_len is identical to literal_prefix_len when has_bmh_skip is set. */
   bool has_bmh_skip;
-  uint8_t *bmh_skip;  /**< Heap-allocated BMH table (NULL if not computed) */
+  uint8_t *bmh_skip; /**< Heap-allocated BMH table (NULL if not computed) */
   size_t bmh_skip_len;
 
   /* Literal-only detection ------------------------------------------------ */
@@ -296,24 +298,30 @@ typedef struct {
  * Each macro tests exactly one bit; arguments are evaluated once.
  * ---------------------------------------------------------------------------
  */
-#define snobol_meta_has_literal_prefix(m)  (!!((m)->flags & META_HAS_LITERAL_PREFIX))
-#define snobol_meta_has_first_byte(m)      (!!((m)->flags & META_HAS_FIRST_BYTE))
-#define snobol_meta_has_candidate_bitmap(m) (!!((m)->flags & META_HAS_CANDIDATE_BITMAP))
-#define snobol_meta_may_match_empty(m)     (!!((m)->flags & META_MAY_MATCH_EMPTY))
-#define snobol_meta_always_consumes(m)     (!!((m)->flags & META_ALWAYS_CONSUMES))
-#define snobol_meta_is_single_char_alt(m)  (!!((m)->flags & META_IS_SINGLE_CHAR_ALT))
-#define snobol_meta_is_break_family(m)     (!!((m)->flags & META_IS_BREAK_FAMILY))
-#define snobol_meta_is_span_family(m)      (!!((m)->flags & META_IS_SPAN_FAMILY))
-#define snobol_meta_is_breakx(m)           (!!((m)->flags & META_IS_BREAKX))
-#define snobol_meta_ascii_class_only(m)    (!!((m)->flags & META_ASCII_CLASS_ONLY))
-#define snobol_meta_has_start_bitmap(m)    (!!((m)->flags & META_HAS_START_BITMAP))
-#define snobol_meta_automaton_eligible(m)  (!!((m)->flags & META_AUTOMATON_ELIGIBLE))
-#define snobol_meta_is_alt_literals(m)     (!!((m)->flags & META_IS_ALT_LITERALS))
-#define snobol_meta_alt_literals_flat(m)   (!!((m)->flags & META_IS_ALT_LITERALS_FLAT))
-#define snobol_meta_has_bmh_skip(m)        (!!((m)->flags & META_HAS_BMH_SKIP))
-#define snobol_meta_is_literal_only(m)     (!!((m)->flags & META_IS_LITERAL_ONLY))
-#define snobol_meta_search_vm_eligible(m)  (!!((m)->flags & META_SEARCH_VM_ELIGIBLE))
-#define snobol_meta_simd_eligible(m)       (!!((m)->flags & META_SIMD_ELIGIBLE))
+#define snobol_meta_has_literal_prefix(m) \
+  (!!((m)->flags & META_HAS_LITERAL_PREFIX))
+#define snobol_meta_has_first_byte(m) (!!((m)->flags & META_HAS_FIRST_BYTE))
+#define snobol_meta_has_candidate_bitmap(m) \
+  (!!((m)->flags & META_HAS_CANDIDATE_BITMAP))
+#define snobol_meta_may_match_empty(m) (!!((m)->flags & META_MAY_MATCH_EMPTY))
+#define snobol_meta_always_consumes(m) (!!((m)->flags & META_ALWAYS_CONSUMES))
+#define snobol_meta_is_single_char_alt(m) \
+  (!!((m)->flags & META_IS_SINGLE_CHAR_ALT))
+#define snobol_meta_is_break_family(m) (!!((m)->flags & META_IS_BREAK_FAMILY))
+#define snobol_meta_is_span_family(m) (!!((m)->flags & META_IS_SPAN_FAMILY))
+#define snobol_meta_is_breakx(m) (!!((m)->flags & META_IS_BREAKX))
+#define snobol_meta_ascii_class_only(m) (!!((m)->flags & META_ASCII_CLASS_ONLY))
+#define snobol_meta_has_start_bitmap(m) (!!((m)->flags & META_HAS_START_BITMAP))
+#define snobol_meta_automaton_eligible(m) \
+  (!!((m)->flags & META_AUTOMATON_ELIGIBLE))
+#define snobol_meta_is_alt_literals(m) (!!((m)->flags & META_IS_ALT_LITERALS))
+#define snobol_meta_alt_literals_flat(m) \
+  (!!((m)->flags & META_IS_ALT_LITERALS_FLAT))
+#define snobol_meta_has_bmh_skip(m) (!!((m)->flags & META_HAS_BMH_SKIP))
+#define snobol_meta_is_literal_only(m) (!!((m)->flags & META_IS_LITERAL_ONLY))
+#define snobol_meta_search_vm_eligible(m) \
+  (!!((m)->flags & META_SEARCH_VM_ELIGIBLE))
+#define snobol_meta_simd_eligible(m) (!!((m)->flags & META_SIMD_ELIGIBLE))
 
 /**
  * @brief Set a flag bit in metadata flags.
@@ -325,10 +333,12 @@ typedef struct {
  */
 /* Verify tier field is within the first cache line (64 bytes)
  * so that dispatch decisions don't pull in the full metadata struct. */
-static_assert(offsetof(snobol_search_meta_t, tier) < 64,
-              "tier field must be within first 64 bytes of snobol_search_meta_t");
+static_assert(
+    offsetof(snobol_search_meta_t, tier) < 64,
+    "tier field must be within first 64 bytes of snobol_search_meta_t");
 
-static inline void snobol_meta_set_flag(snobol_search_meta_t *m, uint32_t flag) {
+static inline void snobol_meta_set_flag(snobol_search_meta_t *m,
+                                        uint32_t flag) {
   m->flags |= flag;
 }
 
@@ -454,13 +464,10 @@ void snobol_search_dump_cost_model(FILE *out);
  * @return true if a match was found; false if no match in [start_offset,
  * subject_len]
  */
-SNOBOL_NODISCARD bool snobol_search_exec(VM *vm, const char *subject,
-                                         size_t subject_len,
-                                         size_t start_offset,
-                                         const snobol_search_meta_t *meta,
-                                         const snobol_dfa_t *dfa,
-                                         snobol_search_result_t *out_result,
-                                         snobol_search_diag_t *diag);
+SNOBOL_NODISCARD bool snobol_search_exec(
+    VM *vm, const char *subject, size_t subject_len, size_t start_offset,
+    const snobol_search_meta_t *meta, const snobol_dfa_t *dfa,
+    snobol_search_result_t *out_result, snobol_search_diag_t *diag);
 
 /**
  * Anchored (SNOBOL-style) match entry point used by Pattern::match().
@@ -481,12 +488,10 @@ SNOBOL_NODISCARD bool snobol_search_exec(VM *vm, const char *subject,
  * @param diag    Optional diagnostics output (may be NULL)
  * @return true if a match was found starting at offset 0; false otherwise
  */
-SNOBOL_NODISCARD bool snobol_search_exec_anchored(VM *vm, const char *subject,
-                                                   size_t subject_len,
-                                                   const snobol_search_meta_t *meta,
-                                                   const snobol_dfa_t *dfa,
-                                                   snobol_search_result_t *out_result,
-                                                   snobol_search_diag_t *diag);
+SNOBOL_NODISCARD bool snobol_search_exec_anchored(
+    VM *vm, const char *subject, size_t subject_len,
+    const snobol_search_meta_t *meta, const snobol_dfa_t *dfa,
+    snobol_search_result_t *out_result, snobol_search_diag_t *diag);
 
 /**
  * Diagnostic readout: return the *executed* dispatch tier that
@@ -552,10 +557,9 @@ bool check_simd_eligible(const uint8_t *bc, size_t bc_len);
  * @return true when a match is found
  */
 bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
-                    size_t start_offset, const snobol_search_meta_t *meta,
-                    const snobol_dfa_t *dfa,
-                    snobol_search_result_t *out_result,
-                    snobol_search_diag_t *diag, bool anchored);
+                   size_t start_offset, const snobol_search_meta_t *meta,
+                   const snobol_dfa_t *dfa, snobol_search_result_t *out_result,
+                   snobol_search_diag_t *diag, bool anchored);
 
 /**
  * Free a DFA allocated by build_dfa().

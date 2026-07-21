@@ -16,7 +16,9 @@ static unsigned char prng_byte(void) {
   return (unsigned char)(prng_state >> 32);
 }
 
-static void prng_seed(size_t seed) { prng_state = seed; }
+static void prng_seed(size_t seed) {
+  prng_state = seed;
+}
 
 static void fill_random_bytes(unsigned char *buf, size_t len) {
   for (size_t i = 0; i < len; i++) {
@@ -112,7 +114,8 @@ static bool capture_count_consistent(const char *pat_str, size_t pat_len,
 static bool substitution_roundtrip(const char *pat_str, size_t pat_len,
                                    const char *sub, size_t sub_len,
                                    const char *tpl, size_t tpl_len) {
-  (void)tpl; (void)tpl_len;
+  (void)tpl;
+  (void)tpl_len;
   snobol_context_t *ctx = snobol_context_create();
   if (!ctx)
     return true;

@@ -147,9 +147,9 @@ void dynamic_pattern_release(dynamic_pattern_t *pattern);
  * @param out_key Output: cache key structure
  * @return Pointer to cache key (valid while source is valid)
  */
-const dynamic_pattern_cache_key_t *
-dynamic_pattern_compute_key(const char *source, size_t source_len,
-                            dynamic_pattern_cache_key_t *out_key);
+const dynamic_pattern_cache_key_t *dynamic_pattern_compute_key(
+    const char *source, size_t source_len,
+    dynamic_pattern_cache_key_t *out_key);
 
 /**
  * @brief Initialize dynamic pattern cache

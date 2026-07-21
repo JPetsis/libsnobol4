@@ -7,7 +7,9 @@
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
 
-static void emit_u8(uint8_t *bc, size_t *ip, uint8_t v) { bc[(*ip)++] = v; }
+static void emit_u8(uint8_t *bc, size_t *ip, uint8_t v) {
+  bc[(*ip)++] = v;
+}
 static void emit_u32(uint8_t *bc, size_t *ip, uint32_t v) {
   bc[(*ip)++] = (v >> 24) & 0xFF;
   bc[(*ip)++] = (v >> 16) & 0xFF;

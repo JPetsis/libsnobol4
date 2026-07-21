@@ -1,10 +1,9 @@
 /**
  * test_reuse_search.c — Differential tests for the reusable search API
  *
- * Implements task 1.4 of the search-perf-measured-wins change:
- *   Assert snobol_pattern_search_ex() results (position / length / captures)
- *   equal snobol_pattern_search() across capture, alt, span, and prefix
- *   patterns, and that N iterations terminate (no hang / pathological slowdown).
+ * Asserts snobol_pattern_search_ex() results (position / length / captures)
+ * equal snobol_pattern_search() across capture, alt, span, and prefix
+ * patterns, and that N iterations terminate (no hang / pathological slowdown).
  *
  * The reuse path historically hung on automaton-eligible patterns because the
  * cached DFA was never supplied (dfa=NULL). This suite pins the fix.
@@ -34,7 +33,8 @@ static void assert_same_match(snobol_match_t *got, snobol_match_t *ref,
   test_assert(snobol_match_get_position(got) == snobol_match_get_position(ref),
               msg);
   snprintf(msg, sizeof(msg), "%s: length matches", label);
-  test_assert(snobol_match_get_length(got) == snobol_match_get_length(ref), msg);
+  test_assert(snobol_match_get_length(got) == snobol_match_get_length(ref),
+              msg);
   snprintf(msg, sizeof(msg), "%s: var count matches", label);
   test_assert(got->var_count == ref->var_count, msg);
 
@@ -56,7 +56,8 @@ static void diff_patterns(const char *label, const char *pattern, size_t plen,
                           const char *subject, size_t slen) {
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
-  snobol_pattern_t *pat = snobol_pattern_compile(ctx, pattern, strlen(pattern), &err);
+  snobol_pattern_t *pat =
+      snobol_pattern_compile(ctx, pattern, strlen(pattern), &err);
   char cmsg[256];
   snprintf(cmsg, sizeof(cmsg), "compile succeeds [%s]%s%s", label,
            err ? ": " : "", err ? err : "");
@@ -111,8 +112,7 @@ void test_reuse_search_suite(void) {
   diff_patterns("prefix", "'id:' SPAN('0-9')", 18, "id:42 and id:7", 13);
 
   /* Automaton-eligible: alt-literal prefix + SPAN (the old hang case) */
-  diff_patterns("alt_prefix", "('foo'|'fop') SPAN('z')", 22,
-                 "fopzzzfoo", 8);
+  diff_patterns("alt_prefix", "('foo'|'fop') SPAN('z')", 22, "fopzzzfoo", 8);
 
   /* No-match subject must also agree */
   diff_patterns("nomatch", "@r(SPAN('0-9'))", 15, "no digits here", 14);

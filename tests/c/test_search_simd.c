@@ -687,8 +687,8 @@ static void test_simd_offset(void) {
 
 /* ---------------------------------------------------------------------------
  * Test: direct tier_simd_nfa() calls — verifies the O(n) bitmap-skip
- * rewrite (group 3 task 3.1 / D2b) without depending on the cost-model
- * wiring (which is intentionally still OFF — task 3.2).  All four
+ * rewrite without depending on the cost-model
+ * wiring (which is intentionally still OFF).  All four
  * SIMD-eligible pattern shapes (SPAN, BREAK, ANY, NOTANY) are exercised
  * directly through the public tier_simd_nfa() entry point, asserting
  * bit-exact agreement with the full-VM search path that the rest of the
@@ -1109,7 +1109,7 @@ static void test_simd_nfa_linearity(void) {
 }
 
 /* ---------------------------------------------------------------------------
- * Test: greedy-star single bound choice (L3 / D3, task 4.1–4.3)
+ * Test: greedy-star single bound choice
  *
  * Verifies that an unbounded star over a pure OP_SPAN body produces the
  * same results as the full VM and reduces per-iteration choice pushes
@@ -1129,8 +1129,7 @@ static void test_star_span_greedy(void) {
   {
     char *err = NULL;
     snobol_pattern_t *pat =
-        snobol_pattern_compile(ctx, "SPAN('abc')* 'x'", 17,
-                               &err);
+        snobol_pattern_compile(ctx, "SPAN('abc')* 'x'", 17, &err);
     test_assert(pat != NULL, "L3: compile *SPAN('abc') 'x'");
     if (pat) {
       /* Full match: span covers first 6 bytes, then 'x' at 6 */
@@ -1138,10 +1137,8 @@ static void test_star_span_greedy(void) {
       test_assert(snobol_match_success(m),
                   "L3: *SPAN('abc') 'x' matches 'abcabcx'");
       if (snobol_match_success(m)) {
-        test_assert(snobol_match_get_position(m) == 0,
-                    "L3: match starts at 0");
-        test_assert(snobol_match_get_length(m) == 7,
-                    "L3: match length 7");
+        test_assert(snobol_match_get_position(m) == 0, "L3: match starts at 0");
+        test_assert(snobol_match_get_length(m) == 7, "L3: match length 7");
       }
       snobol_match_free(m);
 
@@ -1166,8 +1163,7 @@ static void test_star_span_greedy(void) {
   {
     char *err = NULL;
     snobol_pattern_t *pat =
-        snobol_pattern_compile(ctx, "SPAN('0-9')* 'x'", 17,
-                               &err);
+        snobol_pattern_compile(ctx, "SPAN('0-9')* 'x'", 17, &err);
     test_assert(pat != NULL, "L3: compile ARBNO(SPAN('0-9')) 'x'");
     if (pat) {
       snobol_match_t *m = snobol_pattern_match(pat, "123x", 4);
@@ -1176,8 +1172,7 @@ static void test_star_span_greedy(void) {
       snobol_match_free(m);
 
       m = snobol_pattern_match(pat, "x", 1);
-      test_assert(snobol_match_success(m),
-                  "L3: empty ARBNO matches 'x'");
+      test_assert(snobol_match_success(m), "L3: empty ARBNO matches 'x'");
       snobol_match_free(m);
       snobol_pattern_free(pat);
     }

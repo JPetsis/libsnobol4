@@ -20,6 +20,7 @@ AllowShortCaseLabelsOnASingleLine: true
 
 # Line length
 ColumnLimit: 80
+PenaltyReturnTypeOnItsOwnLine: 10000
 
 # Alignment
 AlignAfterOpenBracket: Align

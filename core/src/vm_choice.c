@@ -198,7 +198,9 @@ void snobol_vm_reset(VM *vm) {
 }
 
 /* Choice stack statistics */
-size_t vm_choice_stack_memory_usage(VM *vm) { return vm->choices_top; }
+size_t vm_choice_stack_memory_usage(VM *vm) {
+  return vm->choices_top;
+}
 
 size_t vm_choice_stack_depth(VM *vm) {
   /* Depth = number of choice records on the arena stack. Each record carries
@@ -262,9 +264,8 @@ void vm_push_choice(VM *vm, size_t ip, size_t pos) {
     if (vm->choice_live_depth > vm->choice_peak_depth)
       vm->choice_peak_depth = vm->choice_live_depth;
   } else {
-    struct choice *c =
-        (struct choice *)vm_arena_alloc(vm->choices_arena,
-                                        sizeof(struct choice));
+    struct choice *c = (struct choice *)vm_arena_alloc(vm->choices_arena,
+                                                       sizeof(struct choice));
     if (!c)
       return;
     c->ip = ip;

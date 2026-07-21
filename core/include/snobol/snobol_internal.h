@@ -92,7 +92,7 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt,
     fclose(f);
   }
 }
-#define SNOBOL_LOG(fmt, ...)                                                   \
+#define SNOBOL_LOG(fmt, ...) \
   snobol_log_impl(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
 #else
 #define SNOBOL_LOG(fmt, ...) ((void)0)

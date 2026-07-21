@@ -28,7 +28,8 @@ void test_api_literal_match_suite(void) {
     test_assert(pat != NULL, "literal pattern compiled");
     test_assert(error == NULL, "no compile error");
 
-    snobol_literal_match_t r = snobol_pattern_match_literal(pat, "hello world", 11);
+    snobol_literal_match_t r =
+        snobol_pattern_match_literal(pat, "hello world", 11);
     test_assert(r.success, "'hello' matches 'hello world'");
     test_assert(r.position == 0, "position is 0");
     test_assert(r.length == 5, "length is 5");
@@ -42,7 +43,8 @@ void test_api_literal_match_suite(void) {
     snobol_pattern_t *pat = snobol_pattern_compile(ctx, "'xyz'", 5, &error);
     test_assert(pat != NULL, "literal pattern compiled");
 
-    snobol_literal_match_t r = snobol_pattern_match_literal(pat, "hello world", 11);
+    snobol_literal_match_t r =
+        snobol_pattern_match_literal(pat, "hello world", 11);
     test_assert(!r.success, "'xyz' does not match 'hello world'");
     test_assert(r.position == 0, "position is 0 on failure");
     test_assert(r.length == 0, "length is 0 on failure");
@@ -72,7 +74,8 @@ void test_api_literal_match_suite(void) {
 
     /* Call multiple times to verify no memory leaks under ASan */
     for (int i = 0; i < 100; i++) {
-      snobol_literal_match_t r = snobol_pattern_match_literal(pat, "test subject", 12);
+      snobol_literal_match_t r =
+          snobol_pattern_match_literal(pat, "test subject", 12);
       test_assert(r.success, "match succeeds in loop");
       test_assert(r.length == 4, "length is 4 in loop");
     }

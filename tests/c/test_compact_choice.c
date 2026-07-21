@@ -18,7 +18,9 @@ static int setenv(const char *name, const char *value, int overwrite) {
   (void)overwrite;
   return _putenv_s(name, value);
 }
-static int unsetenv(const char *name) { return _putenv_s(name, ""); }
+static int unsetenv(const char *name) {
+  return _putenv_s(name, "");
+}
 #else
 #include <unistd.h> /* setenv/unsetenv */
 #endif
@@ -86,7 +88,9 @@ static uint32_t bc_add_lit(Bc *b, const char *bytes, size_t len) {
   return off;
 }
 
-static void bc_emit_u8(Bc *b, uint8_t v) { b->bc[b->ip++] = v; }
+static void bc_emit_u8(Bc *b, uint8_t v) {
+  b->bc[b->ip++] = v;
+}
 static void bc_emit_u16(Bc *b, uint16_t v) {
   b->bc[b->ip++] = (uint8_t)((v >> 8) & 0xFF);
   b->bc[b->ip++] = (uint8_t)(v & 0xFF);
@@ -203,8 +207,9 @@ static void test_compact_choice_size_calculation(void) {
 
   size_t allocated = vm.choice_allocated;
   printf("  [info] allocated=%zu expected=%zu\n", allocated, expected_total);
-  test_assert(allocated == expected_total,
-              "Compact record size is fixed (trail-based, independent of state)");
+  test_assert(
+      allocated == expected_total,
+      "Compact record size is fixed (trail-based, independent of state)");
 
   // Cleanup
   vm_arena_destroy(vm.choices_arena);
@@ -328,11 +333,11 @@ static void test_memory_reduction_with_many_choices(void) {
   printf("  [info] legacy_total=%zu legacy_expected=%zu\n", legacy_total,
          legacy_expected);
   test_assert(legacy_total == legacy_expected,
-               "Legacy total allocation matches expected");
+              "Legacy total allocation matches expected");
   printf("  [info] compact_total=%zu compact_expected=%zu\n", compact_total,
          compact_expected);
   test_assert(compact_total == compact_expected,
-               "Compact total allocation matches expected");
+              "Compact total allocation matches expected");
 
   double ratio = (double)compact_total / (double)legacy_total;
   printf("  [info] ratio=%.2f\n", ratio);

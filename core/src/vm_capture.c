@@ -162,15 +162,17 @@ void vm_trail_free(VM *vm) {
   vm->trail_top = 0;
 }
 
-void vm_trail_clear(VM *vm) { vm->trail_top = 0; }
+void vm_trail_clear(VM *vm) {
+  vm->trail_top = 0;
+}
 
 void vm_trail_push(VM *vm, UndoRecord rec) {
   if (vm->trail_top >= vm->trail_cap) {
     size_t new_cap = vm->trail_cap ? vm->trail_cap * 2 : 256;
     while (new_cap <= vm->trail_top)
       new_cap *= 2;
-    UndoRecord *nt = (UndoRecord *)snobol_realloc(vm->trail,
-                                                 new_cap * sizeof(UndoRecord));
+    UndoRecord *nt =
+        (UndoRecord *)snobol_realloc(vm->trail, new_cap * sizeof(UndoRecord));
     if (!nt)
       return;
     vm->trail = nt;
@@ -227,39 +229,40 @@ void vm_trail_replay(VM *vm, size_t base) {
   for (size_t i = vm->trail_top; i > base; i--) {
     const UndoRecord *e = &vm->trail[i - 1];
     switch (e->kind) {
-    case UNDO_COUNTER_DEC:
-      if (e->index < MAX_LOOPS) {
-        vm->counters[e->index] = e->prior_u;
-        vm->loop_last_pos[e->index] = e->prior_lp;
-      }
-      break;
-    case UNDO_CAP_WRITE:
-      if (e->index < MAX_CAPS) {
-        if (e->sub == 0)
-          vm->cap_start[e->index] = e->prior_a;
-        else if (e->sub == 1)
-          vm->cap_end[e->index] = e->prior_b;
-        else {
-          vm->cap_start[e->index] = e->prior_a;
-          vm->cap_end[e->index] = e->prior_b;
+      case UNDO_COUNTER_DEC:
+        if (e->index < MAX_LOOPS) {
+          vm->counters[e->index] = e->prior_u;
+          vm->loop_last_pos[e->index] = e->prior_lp;
         }
-      }
-      break;
-    case UNDO_WL_POP:
-      /* Retained for header compatibility; capture restoration now uses
+        break;
+      case UNDO_CAP_WRITE:
+        if (e->index < MAX_CAPS) {
+          if (e->sub == 0)
+            vm->cap_start[e->index] = e->prior_a;
+          else if (e->sub == 1)
+            vm->cap_end[e->index] = e->prior_b;
+          else {
+            vm->cap_start[e->index] = e->prior_a;
+            vm->cap_end[e->index] = e->prior_b;
+          }
+        }
+        break;
+      case UNDO_WL_POP:
+        /* Retained for header compatibility; capture restoration now uses
        * UNDO_CAP_WRITE. No-op. */
-      break;
-    case UNDO_VAR_WRITE:
-      if (e->index < MAX_VARS) {
-        vm->var_start[e->index] = e->prior_a;
-        vm->var_end[e->index] = e->prior_b;
-      }
-      break;
-    default:
-      break;
+        break;
+      case UNDO_VAR_WRITE:
+        if (e->index < MAX_VARS) {
+          vm->var_start[e->index] = e->prior_a;
+          vm->var_end[e->index] = e->prior_b;
+        }
+        break;
+      default: break;
     }
   }
   vm->trail_top = base;
 }
 
-size_t vm_trail_depth(const VM *vm) { return vm->trail_top; }
+size_t vm_trail_depth(const VM *vm) {
+  return vm->trail_top;
+}

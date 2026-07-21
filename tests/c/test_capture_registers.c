@@ -46,8 +46,8 @@ static void test_lazy_correct(void) {
   m->var_count = 3;
 
   const char *subject = "hello world";
-  set_register(m, 1, subject, 0, 5);  /* "hello" -> variable "1" */
-  set_register(m, 2, subject, 6, 5);  /* "world" -> variable "2" */
+  set_register(m, 1, subject, 0, 5); /* "hello" -> variable "1" */
+  set_register(m, 2, subject, 6, 5); /* "world" -> variable "2" */
 
   /* Both unmaterialized before any read. */
   test_assert(m->var_values[1] == NULL && m->var_values[2] == NULL,

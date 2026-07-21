@@ -113,9 +113,9 @@ void dynamic_pattern_release(dynamic_pattern_t *pattern) {
   snobol_free(pattern);
 }
 
-const dynamic_pattern_cache_key_t *
-dynamic_pattern_compute_key(const char *source, size_t source_len,
-                            dynamic_pattern_cache_key_t *out_key) {
+const dynamic_pattern_cache_key_t *dynamic_pattern_compute_key(
+    const char *source, size_t source_len,
+    dynamic_pattern_cache_key_t *out_key) {
   if (!source || !out_key) {
     return nullptr;
   }
@@ -182,9 +182,9 @@ void dynamic_pattern_cache_destroy(dynamic_pattern_cache_t *cache) {
   cache->bucket_count = 0;
 }
 
-static dynamic_pattern_cache_entry_t *
-cache_find_entry(dynamic_pattern_cache_t *cache, uint32_t hash,
-                 const char *source, size_t source_len) {
+static dynamic_pattern_cache_entry_t *cache_find_entry(
+    dynamic_pattern_cache_t *cache, uint32_t hash, const char *source,
+    size_t source_len) {
   size_t bucket = hash % cache->bucket_count;
   dynamic_pattern_cache_entry_t *entry = cache->buckets[bucket];
 

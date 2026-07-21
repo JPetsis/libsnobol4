@@ -24,7 +24,7 @@ extern "C" {
 #ifndef SNOBOL_NODISCARD
 #if defined(__cplusplus) && __cplusplus >= 201703L
 #define SNOBOL_NODISCARD [[nodiscard]]
-#elif !defined(__cplusplus) && defined(__STDC_VERSION__) &&                    \
+#elif !defined(__cplusplus) && defined(__STDC_VERSION__) && \
     __STDC_VERSION__ >= 202311L
 #define SNOBOL_NODISCARD [[nodiscard]]
 #elif defined(__GNUC__) || defined(__clang__)
@@ -38,7 +38,7 @@ extern "C" {
 #ifndef SNOBOL_MAYBE_UNUSED
 #if defined(__cplusplus) && __cplusplus >= 201703L
 #define SNOBOL_MAYBE_UNUSED [[maybe_unused]]
-#elif !defined(__cplusplus) && defined(__STDC_VERSION__) &&                    \
+#elif !defined(__cplusplus) && defined(__STDC_VERSION__) && \
     __STDC_VERSION__ >= 202311L
 #define SNOBOL_MAYBE_UNUSED [[maybe_unused]]
 #elif defined(__GNUC__) || defined(__clang__)
@@ -116,9 +116,9 @@ extern "C" {
  * expression with no overhead. */
 #ifndef likely
 #if defined(__GNUC__) || defined(__clang__)
-#define likely(x)   __builtin_expect(!!(x), 1)
+#define likely(x) __builtin_expect(!!(x), 1)
 #else
-#define likely(x)   (x)
+#define likely(x) (x)
 #endif
 #endif
 

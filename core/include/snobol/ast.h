@@ -39,7 +39,7 @@ extern "C" {
  * Check if AST version is compatible
  * Returns true if major version matches and minor version >= required
  */
-#define SNOBOL_AST_VERSION_CHECK(major, minor)                                 \
+#define SNOBOL_AST_VERSION_CHECK(major, minor) \
   ((major) == SNOBOL_AST_VERSION_MAJOR && (minor) <= SNOBOL_AST_VERSION_MINOR)
 
 /**

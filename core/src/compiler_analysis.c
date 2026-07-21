@@ -21,7 +21,9 @@ void cb_ensure(CodeBuf *c, size_t need) {
   c->buf = snobol_realloc(c->buf, newcap);
   c->cap = newcap;
 }
-size_t cb_pos(CodeBuf *c) { return c->len; }
+size_t cb_pos(CodeBuf *c) {
+  return c->len;
+}
 void cb_emit_u8(CodeBuf *c, uint8_t v) {
   cb_ensure(c, 1);
   c->buf[c->len++] = v;
@@ -63,41 +65,40 @@ bool ast_node_nullable(const ast_node_t *node) {
   if (!node)
     return false;
   switch (node->type) {
-  case AST_ARBNO:
-  case AST_REPETITION:
-    /* arbno / repeat(0, …) can match zero times → nullable. */
-    if (node->type == AST_ARBNO)
+    case AST_ARBNO:
+    case AST_REPETITION:
+      /* arbno / repeat(0, …) can match zero times → nullable. */
+      if (node->type == AST_ARBNO)
+        return true;
+      return node->data.repetition.min == 0;
+    case AST_ALT:
+      /* nullable if either branch can match empty. */
+      return ast_node_nullable(node->data.alt.left) ||
+             ast_node_nullable(node->data.alt.right);
+    case AST_CONCAT:
+      /* nullable only if EVERY part is nullable. */
+      for (size_t i = 0; i < node->data.concat.count; i++) {
+        if (!ast_node_nullable(node->data.concat.parts[i]))
+          return false;
+      }
+      return node->data.concat.count == 0;
+    case AST_CAP:
+    case AST_EMIT: return ast_node_nullable(node->data.cap.sub);
+    case AST_LITERAL:
+      /* A literal only matches empty if it is the empty string. */
+      return node->data.literal.len == 0;
+    case AST_SUCCEED:
+    case AST_FAIL:
+    case AST_FENCE:
+    case AST_REM:
+    case AST_BREAKX:
+    case AST_BAL:
+      /* Zero-width structural nodes that match (or fail) without consuming. */
       return true;
-    return node->data.repetition.min == 0;
-  case AST_ALT:
-    /* nullable if either branch can match empty. */
-    return ast_node_nullable(node->data.alt.left) ||
-           ast_node_nullable(node->data.alt.right);
-  case AST_CONCAT:
-    /* nullable only if EVERY part is nullable. */
-    for (size_t i = 0; i < node->data.concat.count; i++) {
-      if (!ast_node_nullable(node->data.concat.parts[i]))
-        return false;
-    }
-    return node->data.concat.count == 0;
-  case AST_CAP:
-  case AST_EMIT:
-    return ast_node_nullable(node->data.cap.sub);
-  case AST_LITERAL:
-    /* A literal only matches empty if it is the empty string. */
-    return node->data.literal.len == 0;
-  case AST_SUCCEED:
-  case AST_FAIL:
-  case AST_FENCE:
-  case AST_REM:
-  case AST_BREAKX:
-  case AST_BAL:
-    /* Zero-width structural nodes that match (or fail) without consuming. */
-    return true;
-  default:
-    /* SPAN/ANY/NOTANY/LEN/POS/TAB/RPOS/RTAB/BAL/GOTO/LABEL/EVAL/etc. cannot
+    default:
+      /* SPAN/ANY/NOTANY/LEN/POS/TAB/RPOS/RTAB/BAL/GOTO/LABEL/EVAL/etc. cannot
      * match empty (POS/TAB require a specific cursor position). */
-    return false;
+      return false;
   }
 }
 
@@ -312,8 +313,8 @@ CCEntry *get_cc_entry(uint32_t id) {
  * Register a new charclass that is the union of two CCEntry ranges.
  * ea / eb may be nullptr; in that case cp_a / cp_b is a single codepoint.
  */
-int fuse_add_union_cc(CCEntry *ea, uint32_t cp_a, CCEntry *eb,
-                      uint32_t cp_b, uint8_t ci) {
+int fuse_add_union_cc(CCEntry *ea, uint32_t cp_a, CCEntry *eb, uint32_t cp_b,
+                      uint8_t ci) {
   uint16_t na = ea ? ea->range_count : 1;
   uint16_t nb = eb ? eb->range_count : 1;
   CCEntry *ne = snobol_malloc(sizeof(*ne));

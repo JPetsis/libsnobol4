@@ -698,7 +698,7 @@ PHP_METHOD(Snobol_Pattern, setJit) {
  * Optimisation opportunity: callers can avoid this memset by using the
  * stateful snobol_pattern_search_ex() API, which manages the VM state
  * internally. That refactor is captured in the jit-search-perf-baseline
- * change's searchSplit/searchAll/searchReplace tasks.
+ * change's searchSplit/searchAll/searchReplace paths.
  * ----------------------------------------------------------------------- */
 static void php_snobol_init_vm_for_search(VM *vm,
                                            snobol_pattern_t *intern,

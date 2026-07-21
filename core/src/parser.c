@@ -87,7 +87,9 @@ static token_t advance(snobol_lexer_t *lexer) {
   return snobol_lexer_next(lexer);
 }
 
-static token_t peek(snobol_lexer_t *lexer) { return snobol_lexer_peek(lexer); }
+static token_t peek(snobol_lexer_t *lexer) {
+  return snobol_lexer_peek(lexer);
+}
 
 static bool match(snobol_lexer_t *lexer, token_type_t type) {
   token_t tok = peek(lexer);
@@ -381,39 +383,36 @@ static ast_node_t *parse_repetition(snobol_parser_t *parser,
   token_t tok = peek(lexer);
 
   switch (tok.type) {
-  case TOKEN_STAR:
-    advance(lexer);
-    return snobol_ast_create_arbno(primary);
+    case TOKEN_STAR: advance(lexer); return snobol_ast_create_arbno(primary);
 
-  case TOKEN_PLUS:
-    advance(lexer);
-    /* x+ = x x* = concat(x, arbno(x)) */
-    {
-      ast_node_t *clone = snobol_ast_clone(primary);
-      ast_node_t *arbno = snobol_ast_create_arbno(primary);
-      ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
-      if (!parts) {
-        snobol_ast_free(arbno);
-        snobol_ast_free(clone);
-        return nullptr;
+    case TOKEN_PLUS:
+      advance(lexer);
+      /* x+ = x x* = concat(x, arbno(x)) */
+      {
+        ast_node_t *clone = snobol_ast_clone(primary);
+        ast_node_t *arbno = snobol_ast_create_arbno(primary);
+        ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+        if (!parts) {
+          snobol_ast_free(arbno);
+          snobol_ast_free(clone);
+          return nullptr;
+        }
+        if (!clone) {
+          snobol_ast_free(arbno);
+          free(parts);
+          return nullptr;
+        }
+        parts[0] = clone;
+        parts[1] = arbno;
+        return snobol_ast_create_concat(parts, 2);
       }
-      if (!clone) {
-        snobol_ast_free(arbno);
-        free(parts);
-        return nullptr;
-      }
-      parts[0] = clone;
-      parts[1] = arbno;
-      return snobol_ast_create_concat(parts, 2);
-    }
 
-  case TOKEN_QUESTION:
-    advance(lexer);
-    /* x? = alt(x, empty) - simplified as repetition with min=0, max=1 */
-    return snobol_ast_create_repeat(primary, 0, 1);
+    case TOKEN_QUESTION:
+      advance(lexer);
+      /* x? = alt(x, empty) - simplified as repetition with min=0, max=1 */
+      return snobol_ast_create_repeat(primary, 0, 1);
 
-  default:
-    return primary;
+    default: return primary;
   }
 }
 
@@ -422,87 +421,87 @@ static ast_node_t *parse_primary(snobol_parser_t *parser,
   token_t tok = peek(lexer);
 
   switch (tok.type) {
-  case TOKEN_LIT:
-    advance(lexer);
-    return snobol_ast_create_lit(tok.data.string.text, tok.data.string.len);
+    case TOKEN_LIT:
+      advance(lexer);
+      return snobol_ast_create_lit(tok.data.string.text, tok.data.string.len);
 
-  case TOKEN_CHARCLASS:
-    advance(lexer);
-    return snobol_ast_create_span(tok.data.string.text, tok.data.string.len);
+    case TOKEN_CHARCLASS:
+      advance(lexer);
+      return snobol_ast_create_span(tok.data.string.text, tok.data.string.len);
 
-  case TOKEN_LPAREN:
-    advance(lexer);
-    {
-      ast_node_t *inner = parse_alternation(parser, lexer);
-      if (!inner)
-        return nullptr;
+    case TOKEN_LPAREN:
+      advance(lexer);
+      {
+        ast_node_t *inner = parse_alternation(parser, lexer);
+        if (!inner)
+          return nullptr;
 
-      if (!expect(parser, lexer, TOKEN_RPAREN)) {
-        snobol_ast_free(inner);
-        return nullptr;
+        if (!expect(parser, lexer, TOKEN_RPAREN)) {
+          snobol_ast_free(inner);
+          return nullptr;
+        }
+
+        return inner;
       }
 
-      return inner;
-    }
-
-  case TOKEN_ANCHOR_START:
-    advance(lexer);
-    {
-      ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
-      if (node) {
-        node->type = AST_ANCHOR;
-        node->data.anchor.atype = ANCHOR_START;
-      }
-      return node;
-    }
-
-  case TOKEN_ANCHOR_END:
-    advance(lexer);
-    {
-      ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
-      if (node) {
-        node->type = AST_ANCHOR;
-        node->data.anchor.atype = ANCHOR_END;
-      }
-      return node;
-    }
-
-  case TOKEN_AT:
-    advance(lexer);
-    {
-      /* Capture: @IDENT or @integer */
-      tok = peek(lexer);
-      int reg = 0;
-
-      if (tok.type == TOKEN_IDENT) {
-        /* For now, use a fixed register for named captures */
-        /* A real implementation would manage a symbol table */
-        reg = 1; /* Simplified */
-        advance(lexer);
-      } else if (tok.type == TOKEN_STAR) {
-        /* This shouldn't happen, handle gracefully */
-        reg = 1;
-      } else {
-        set_error(parser, "Expected capture target",
-                  snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
-        return nullptr;
+    case TOKEN_ANCHOR_START:
+      advance(lexer);
+      {
+        ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
+        if (node) {
+          node->type = AST_ANCHOR;
+          node->data.anchor.atype = ANCHOR_START;
+        }
+        return node;
       }
 
-      ast_node_t *sub = parse_primary(parser, lexer);
-      if (!sub)
-        return nullptr;
+    case TOKEN_ANCHOR_END:
+      advance(lexer);
+      {
+        ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
+        if (node) {
+          node->type = AST_ANCHOR;
+          node->data.anchor.atype = ANCHOR_END;
+        }
+        return node;
+      }
 
-      return snobol_ast_create_cap(reg, sub);
-    }
+    case TOKEN_AT:
+      advance(lexer);
+      {
+        /* Capture: @IDENT or @integer */
+        tok = peek(lexer);
+        int reg = 0;
 
-  case TOKEN_IDENT:
-    /* Could be function call or bare identifier */
-    return parse_function_call(parser, lexer);
+        if (tok.type == TOKEN_IDENT) {
+          /* For now, use a fixed register for named captures */
+          /* A real implementation would manage a symbol table */
+          reg = 1; /* Simplified */
+          advance(lexer);
+        } else if (tok.type == TOKEN_STAR) {
+          /* This shouldn't happen, handle gracefully */
+          reg = 1;
+        } else {
+          set_error(parser, "Expected capture target",
+                    snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+          return nullptr;
+        }
 
-  default:
-    set_error(parser, "Unexpected token in pattern",
-              snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
-    return nullptr;
+        ast_node_t *sub = parse_primary(parser, lexer);
+        if (!sub)
+          return nullptr;
+
+        return snobol_ast_create_cap(reg, sub);
+      }
+
+    case TOKEN_IDENT:
+      /* Could be function call or bare identifier */
+      return parse_function_call(parser, lexer);
+
+    default:
+      set_error(parser, "Unexpected token in pattern",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
   }
 }
 

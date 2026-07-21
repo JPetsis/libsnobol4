@@ -984,195 +984,173 @@ int snobol_template_bind_tables(uint8_t *bc, size_t bc_len, const char **names,
     uint8_t op = bc[ip++];
 
     switch (op) {
-    case OP_ACCEPT:
-      return result; /* end of template bytecode */
+      case OP_ACCEPT: return result; /* end of template bytecode */
 
-    case OP_EMIT_LITERAL: {
-      /* off:u32(4) + len:u32(4) + data[len] */
-      if (ip + 8 > bc_len)
-        return result;
-      uint32_t lit_len = ((uint32_t)bc[ip + 4] << 24) |
-                         ((uint32_t)bc[ip + 5] << 16) |
-                         ((uint32_t)bc[ip + 6] << 8) | (uint32_t)bc[ip + 7];
-      ip += 8 + lit_len;
-      break;
-    }
-
-    case OP_EMIT_CAPTURE:
-      ip += 1; /* reg:u8 */
-      break;
-
-    case OP_EMIT_EXPR:
-      ip += 2; /* reg:u8, expr_type:u8 (legacy) */
-      break;
-
-    case OP_EMIT_FORMAT: {
-      /* reg:u8, format_type:u8 [+ width:u16, fill:u8 for LPAD/RPAD] */
-      if (ip + 2 > bc_len)
-        return result;
-      uint8_t fmt = bc[ip + 1];
-      ip += 2;
-      if (fmt == SNBL_FMT_LPAD || fmt == SNBL_FMT_RPAD) {
-        ip += 3; /* width:u16 + fill:u8 */
-      }
-      break;
-    }
-
-    case OP_LIT: {
-      if (ip + 8 > bc_len)
-        return result;
-      uint32_t len = ((uint32_t)bc[ip + 4] << 24) |
-                     ((uint32_t)bc[ip + 5] << 16) |
-                     ((uint32_t)bc[ip + 6] << 8) | (uint32_t)bc[ip + 7];
-      ip += 8 + len;
-      break;
-    }
-
-    case OP_ANY:
-    case OP_NOTANY:
-    case OP_SPAN:
-    case OP_BREAK:
-    case OP_BREAKX:
-      ip += 2;
-      break;
-
-    case OP_LEN:
-      ip += 4;
-      break;
-
-    case OP_CAP_START:
-    case OP_CAP_END:
-      ip += 1;
-      break;
-
-    case OP_ASSIGN:
-      ip += 3;
-      break;
-
-    case OP_REM:
-    case OP_FENCE:
-    case OP_DYNAMIC:
-    case OP_NOP:
-    case OP_FAIL:
-      /* no operands */
-      break;
-
-    case OP_SPLIT:
-    case OP_REPEAT_INIT:
-      ip += 8;
-      break;
-
-    case OP_REPEAT_STEP:
-    case OP_JMP:
-      ip += 4;
-      break;
-
-    case OP_RPOS:
-    case OP_RTAB:
-    case OP_POS:
-    case OP_TAB:
-      ip += 4;
-      break;
-
-    case OP_ABORT:
-    case OP_SUCCEED:
-      /* no operands */
-      break;
-
-    case OP_LABEL:
-    case OP_GOTO:
-    case OP_GOTO_F:
-      ip += 2;
-      break;
-
-    case OP_BAL:
-      ip += 8;
-      break;
-
-    case OP_EVAL:
-      ip += 3;
-      break;
-
-    case OP_EMIT_TABLE: {
-      /* table_id:u16, key_type:u8, name_len:u8, name_bytes[name_len], <key
-       * payload> */
-      if (ip + 4 > bc_len)
-        return result;
-      uint16_t tid = ((uint16_t)bc[ip] << 8) | bc[ip + 1];
-      uint8_t key_type = bc[ip + 2];
-      uint8_t nm_len = bc[ip + 3];
-
-      if (ip + 4 + nm_len > bc_len)
-        return result;
-
-      if (tid == (uint16_t)SNBL_TABLE_ID_UNBOUND) {
-        const char *name_ptr = (const char *)bc + ip + 4;
-        bool resolved = false;
-        for (size_t k = 0; k < n; k++) {
-          if (names[k] && strlen(names[k]) == nm_len &&
-              memcmp(names[k], name_ptr, nm_len) == 0) {
-            bc[ip] = (uint8_t)((ids[k] >> 8) & 0xFF);
-            bc[ip + 1] = (uint8_t)(ids[k] & 0xFF);
-            resolved = true;
-            break;
-          }
-        }
-        if (!resolved)
-          result = -1;
+      case OP_EMIT_LITERAL: {
+        /* off:u32(4) + len:u32(4) + data[len] */
+        if (ip + 8 > bc_len)
+          return result;
+        uint32_t lit_len = ((uint32_t)bc[ip + 4] << 24) |
+                           ((uint32_t)bc[ip + 5] << 16) |
+                           ((uint32_t)bc[ip + 6] << 8) | (uint32_t)bc[ip + 7];
+        ip += 8 + lit_len;
+        break;
       }
 
-      ip +=
-          2 + 1 + 1 + nm_len; /* table_id + key_type + name_len + name_bytes */
+      case OP_EMIT_CAPTURE:
+        ip += 1; /* reg:u8 */
+        break;
 
-      /* skip key payload */
-      if (key_type == 0) {
-        /* literal key: key_len:u16, key_bytes[key_len] */
+      case OP_EMIT_EXPR:
+        ip += 2; /* reg:u8, expr_type:u8 (legacy) */
+        break;
+
+      case OP_EMIT_FORMAT: {
+        /* reg:u8, format_type:u8 [+ width:u16, fill:u8 for LPAD/RPAD] */
         if (ip + 2 > bc_len)
           return result;
-        uint16_t key_len = ((uint16_t)bc[ip] << 8) | bc[ip + 1];
-        ip += 2 + key_len;
-      } else if (key_type == 1) {
-        /* capture key: key_reg:u8 */
-        ip += 1;
-      }
-      break;
-    }
-
-    case OP_TABLE_GET:
-    case OP_TABLE_SET: {
-      /* table_id:u16, reg:u8, reg:u8, name_len:u8, name_bytes[name_len] */
-      if (ip + 4 > bc_len)
-        return result;
-      uint16_t tid = ((uint16_t)bc[ip] << 8) | bc[ip + 1];
-      uint8_t nm_len = bc[ip + 4];
-
-      if (ip + 5 + nm_len > bc_len)
-        return result;
-
-      if (tid == (uint16_t)SNBL_TABLE_ID_UNBOUND) {
-        const char *name_ptr = (const char *)bc + ip + 5;
-        bool resolved = false;
-        for (size_t k = 0; k < n; k++) {
-          if (names[k] && strlen(names[k]) == nm_len &&
-              memcmp(names[k], name_ptr, nm_len) == 0) {
-            bc[ip] = (uint8_t)((ids[k] >> 8) & 0xFF);
-            bc[ip + 1] = (uint8_t)(ids[k] & 0xFF);
-            resolved = true;
-            break;
-          }
+        uint8_t fmt = bc[ip + 1];
+        ip += 2;
+        if (fmt == SNBL_FMT_LPAD || fmt == SNBL_FMT_RPAD) {
+          ip += 3; /* width:u16 + fill:u8 */
         }
-        SNOBOL_LOG("snobol_template_bind_tables: tid=0xFFFF nm_len=%d "
-                   "name='%.*s' resolved=%d",
-                   (int)nm_len, (int)nm_len, name_ptr, (int)resolved);
-        if (!resolved)
-          result = -1;
+        break;
       }
-      ip += 5 + nm_len;
-      break;
-    }
 
-    default:
-      return result; /* unknown op — stop walking safely */
+      case OP_LIT: {
+        if (ip + 8 > bc_len)
+          return result;
+        uint32_t len = ((uint32_t)bc[ip + 4] << 24) |
+                       ((uint32_t)bc[ip + 5] << 16) |
+                       ((uint32_t)bc[ip + 6] << 8) | (uint32_t)bc[ip + 7];
+        ip += 8 + len;
+        break;
+      }
+
+      case OP_ANY:
+      case OP_NOTANY:
+      case OP_SPAN:
+      case OP_BREAK:
+      case OP_BREAKX: ip += 2; break;
+
+      case OP_LEN: ip += 4; break;
+
+      case OP_CAP_START:
+      case OP_CAP_END: ip += 1; break;
+
+      case OP_ASSIGN: ip += 3; break;
+
+      case OP_REM:
+      case OP_FENCE:
+      case OP_DYNAMIC:
+      case OP_NOP:
+      case OP_FAIL:
+        /* no operands */
+        break;
+
+      case OP_SPLIT:
+      case OP_REPEAT_INIT: ip += 8; break;
+
+      case OP_REPEAT_STEP:
+      case OP_JMP: ip += 4; break;
+
+      case OP_RPOS:
+      case OP_RTAB:
+      case OP_POS:
+      case OP_TAB: ip += 4; break;
+
+      case OP_ABORT:
+      case OP_SUCCEED:
+        /* no operands */
+        break;
+
+      case OP_LABEL:
+      case OP_GOTO:
+      case OP_GOTO_F: ip += 2; break;
+
+      case OP_BAL: ip += 8; break;
+
+      case OP_EVAL: ip += 3; break;
+
+      case OP_EMIT_TABLE: {
+        /* table_id:u16, key_type:u8, name_len:u8, name_bytes[name_len], <key
+       * payload> */
+        if (ip + 4 > bc_len)
+          return result;
+        uint16_t tid = ((uint16_t)bc[ip] << 8) | bc[ip + 1];
+        uint8_t key_type = bc[ip + 2];
+        uint8_t nm_len = bc[ip + 3];
+
+        if (ip + 4 + nm_len > bc_len)
+          return result;
+
+        if (tid == (uint16_t)SNBL_TABLE_ID_UNBOUND) {
+          const char *name_ptr = (const char *)bc + ip + 4;
+          bool resolved = false;
+          for (size_t k = 0; k < n; k++) {
+            if (names[k] && strlen(names[k]) == nm_len &&
+                memcmp(names[k], name_ptr, nm_len) == 0) {
+              bc[ip] = (uint8_t)((ids[k] >> 8) & 0xFF);
+              bc[ip + 1] = (uint8_t)(ids[k] & 0xFF);
+              resolved = true;
+              break;
+            }
+          }
+          if (!resolved)
+            result = -1;
+        }
+
+        ip += 2 + 1 + 1 +
+              nm_len; /* table_id + key_type + name_len + name_bytes */
+
+        /* skip key payload */
+        if (key_type == 0) {
+          /* literal key: key_len:u16, key_bytes[key_len] */
+          if (ip + 2 > bc_len)
+            return result;
+          uint16_t key_len = ((uint16_t)bc[ip] << 8) | bc[ip + 1];
+          ip += 2 + key_len;
+        } else if (key_type == 1) {
+          /* capture key: key_reg:u8 */
+          ip += 1;
+        }
+        break;
+      }
+
+      case OP_TABLE_GET:
+      case OP_TABLE_SET: {
+        /* table_id:u16, reg:u8, reg:u8, name_len:u8, name_bytes[name_len] */
+        if (ip + 4 > bc_len)
+          return result;
+        uint16_t tid = ((uint16_t)bc[ip] << 8) | bc[ip + 1];
+        uint8_t nm_len = bc[ip + 4];
+
+        if (ip + 5 + nm_len > bc_len)
+          return result;
+
+        if (tid == (uint16_t)SNBL_TABLE_ID_UNBOUND) {
+          const char *name_ptr = (const char *)bc + ip + 5;
+          bool resolved = false;
+          for (size_t k = 0; k < n; k++) {
+            if (names[k] && strlen(names[k]) == nm_len &&
+                memcmp(names[k], name_ptr, nm_len) == 0) {
+              bc[ip] = (uint8_t)((ids[k] >> 8) & 0xFF);
+              bc[ip + 1] = (uint8_t)(ids[k] & 0xFF);
+              resolved = true;
+              break;
+            }
+          }
+          SNOBOL_LOG("snobol_template_bind_tables: tid=0xFFFF nm_len=%d "
+                     "name='%.*s' resolved=%d",
+                     (int)nm_len, (int)nm_len, name_ptr, (int)resolved);
+          if (!resolved)
+            result = -1;
+        }
+        ip += 5 + nm_len;
+        break;
+      }
+
+      default: return result; /* unknown op — stop walking safely */
     }
   }
 

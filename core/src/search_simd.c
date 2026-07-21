@@ -393,7 +393,6 @@ static bool simd_nfa_exec_scalar(const simd_nfa_t *nfa, const char *subject,
  */
 
 
-
 #if SNOBOL_HAS_AVX2
 #include <immintrin.h>
 
@@ -402,12 +401,12 @@ static bool simd_nfa_exec_scalar(const simd_nfa_t *nfa, const char *subject,
  * acceleration lives in tier_simd_nfa()'s O(n) bitmap-skip scan loop; the
  * per-candidate verification is O(1) for the 2-state NFA and does not
  * benefit from SIMD byte-batch processing.  (The original AVX2/NEON byte-
- * loop approach was removed in task 3.3 because the byte-loop itself
+ * loop approach was removed because the byte-loop itself
  * defeated the SIMD advantage — this delegation is both correct and fast.)
  */
 static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
-                                size_t subject_len, size_t offset,
-                                snobol_search_result_t *out_result) {
+                               size_t subject_len, size_t offset,
+                               snobol_search_result_t *out_result) {
   return simd_nfa_exec_scalar(nfa, subject, subject_len, offset, out_result);
 }
 #endif /* SNOBOL_HAS_AVX2 */
@@ -422,8 +421,8 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
  * and indexes all 16 bytes in parallel via vqtbl1q_u8.
  */
 static bool simd_nfa_exec_neon(const simd_nfa_t *nfa, const char *subject,
-                                size_t subject_len, size_t offset,
-                                snobol_search_result_t *out_result) {
+                               size_t subject_len, size_t offset,
+                               snobol_search_result_t *out_result) {
   return simd_nfa_exec_scalar(nfa, subject, subject_len, offset, out_result);
 }
 #endif /* SNOBOL_HAS_NEON */
@@ -465,7 +464,7 @@ static bool simd_nfa_exec_neon(const simd_nfa_t *nfa, const char *subject,
  * to TIER_SIMD_NFA — the dispatch table only reaches this handler when
  * callers force meta->tier = TIER_SIMD_NFA. _activating the tier
  * (select_tier_by_cost case + real AVX2/NEON vector compare) is the
- * remainder of group 3 (tasks 3.2 / 3.3) and is intentionally not done
+ * remainder of group 3 and is intentionally not done
  * here.
  * ---------------------------------------------------------------------------
  */
@@ -475,24 +474,24 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
                    snobol_search_diag_t *diag, bool anchored) {
   (void)diag;
 
-/* Build NFA masks from pattern bytecode; fall back to the full VM if
+  /* Build NFA masks from pattern bytecode; fall back to the full VM if
    * the pattern is not a shape build_nfa_masks understands (e.g. nested
    * alternation, control flow, captures). */
   simd_nfa_t nfa;
   if (!build_nfa_masks(&nfa, vm->bc, vm->bc_len, vm)) {
-    return tier_general_fallback(vm, subject, subject_len, start_offset,
-                                  meta, dfa, out_result, diag, anchored);
+    return tier_general_fallback(vm, subject, subject_len, start_offset, meta,
+                                 dfa, out_result, diag, anchored);
   }
 
   /* Select the platform-specific NFA verifier at compile time. */
 #if SNOBOL_HAS_NEON
-#define SIMD_NFA_VERIFY(nfa_p, subj, slen, off, tmp_p)                            \
+#define SIMD_NFA_VERIFY(nfa_p, subj, slen, off, tmp_p) \
   simd_nfa_exec_neon((nfa_p), (subj), (slen), (off), (tmp_p))
 #elif SNOBOL_HAS_AVX2
-#define SIMD_NFA_VERIFY(nfa_p, subj, slen, off, tmp_p)                            \
+#define SIMD_NFA_VERIFY(nfa_p, subj, slen, off, tmp_p) \
   simd_nfa_exec_avx2((nfa_p), (subj), (slen), (off), (tmp_p))
 #else
-#define SIMD_NFA_VERIFY(nfa_p, subj, slen, off, tmp_p)                            \
+#define SIMD_NFA_VERIFY(nfa_p, subj, slen, off, tmp_p) \
   simd_nfa_exec_scalar((nfa_p), (subj), (slen), (off), (tmp_p))
 #endif
 

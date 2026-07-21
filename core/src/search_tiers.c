@@ -109,10 +109,10 @@ static bool trie_insert(snobol_auto_trie_t *t, const uint8_t *s, size_t len) {
  * number of bytes consumed.
  * ---------------------------------------------------------------------------
  */
-static bool SNOBOL_HOT trie_match(const snobol_auto_trie_t * SNOBOL_RESTRICT t,
-                                  const char * SNOBOL_RESTRICT subject,
+static bool SNOBOL_HOT trie_match(const snobol_auto_trie_t *SNOBOL_RESTRICT t,
+                                  const char *SNOBOL_RESTRICT subject,
                                   size_t subject_len, size_t offset,
-                                  size_t * SNOBOL_RESTRICT match_len) {
+                                  size_t *SNOBOL_RESTRICT match_len) {
   size_t pos = offset;
   uint16_t n = 0; /* start at root */
   while (pos < subject_len) {
@@ -174,12 +174,10 @@ static inline bool SNOBOL_ALWAYS_INLINE bitmap256_test(const uint8_t bm[32],
   return (bm[b >> 3] & (uint8_t)(1u << (b & 7))) != 0;
 }
 
-static bool SNOBOL_HOT search_alt_literals_try(VM * SNOBOL_RESTRICT vm,
-                                                const char * SNOBOL_RESTRICT subject,
-                                      size_t subject_len, size_t start_offset,
-                                      const snobol_search_meta_t *meta,
-                                      snobol_search_result_t *out_result,
-                                      bool anchored) {
+static bool SNOBOL_HOT search_alt_literals_try(
+    VM *SNOBOL_RESTRICT vm, const char *SNOBOL_RESTRICT subject,
+    size_t subject_len, size_t start_offset, const snobol_search_meta_t *meta,
+    snobol_search_result_t *out_result, bool anchored) {
   snobol_pattern_t *pat = vm->pattern;
   const snobol_auto_trie_t *trie = NULL;
   snobol_auto_trie_t local; /* built only on a cache miss */
@@ -209,21 +207,42 @@ static bool SNOBOL_HOT search_alt_literals_try(VM * SNOBOL_RESTRICT vm,
 
     while (sp > 0 && all_ok) {
       size_t ip = stack[--sp];
-      if (ip + 2 > bc_len) { all_ok = false; break; }
+      if (ip + 2 > bc_len) {
+        all_ok = false;
+        break;
+      }
       uint8_t op = bc[ip];
       if (op == OP_LIT) {
         /* Leaf: insert literal into trie */
-        if (ip + 10 > bc_len) { all_ok = false; break; }
+        if (ip + 10 > bc_len) {
+          all_ok = false;
+          break;
+        }
         uint32_t off = search_read_u32(bc, ip + 1);
         uint32_t len = search_read_u32(bc, ip + 5);
-        if (off >= bc_len || off + len > bc_len) { all_ok = false; break; }
-        if (!trie_insert(&local, bc + off, len)) { all_ok = false; break; }
+        if (off >= bc_len || off + len > bc_len) {
+          all_ok = false;
+          break;
+        }
+        if (!trie_insert(&local, bc + off, len)) {
+          all_ok = false;
+          break;
+        }
       } else if (op == OP_SPLIT) {
-        if (ip + 9 > bc_len) { all_ok = false; break; }
+        if (ip + 9 > bc_len) {
+          all_ok = false;
+          break;
+        }
         uint32_t a = search_read_u32(bc, ip + 1);
         uint32_t b = search_read_u32(bc, ip + 5);
-        if (a >= bc_len || b >= bc_len) { all_ok = false; break; }
-        if (sp + 2 > 64) { all_ok = false; break; }
+        if (a >= bc_len || b >= bc_len) {
+          all_ok = false;
+          break;
+        }
+        if (sp + 2 > 64) {
+          all_ok = false;
+          break;
+        }
         stack[sp++] = b;
         stack[sp++] = a;
       } else {
@@ -281,8 +300,8 @@ static bool SNOBOL_HOT search_alt_literals_try(VM * SNOBOL_RESTRICT vm,
      *    available, e.g. for literal-leading alt patterns). */
     if (meta && meta->has_bmh_skip &&
         offset + meta->bmh_skip_len <= subject_len) {
-      size_t adv =
-          meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+      size_t adv = meta->bmh_skip[(
+          unsigned char)subject[offset + meta->bmh_skip_len - 1]];
       offset += adv > 0 ? adv : 1;
     } else {
       offset++;
@@ -321,10 +340,11 @@ static inline void search_reset_vm(VM *vm, const char *subject,
  * ---------------------------------------------------------------------------
  */
 static bool search_break_accelerated(VM *vm, const char *subject,
-                                      size_t subject_len, size_t start_offset,
-                                      const snobol_search_meta_t *meta,
-                                      snobol_search_result_t *out_result,
-                                      snobol_search_diag_t *diag, bool anchored) {
+                                     size_t subject_len, size_t start_offset,
+                                     const snobol_search_meta_t *meta,
+                                     snobol_search_result_t *out_result,
+                                     snobol_search_diag_t *diag,
+                                     bool anchored) {
   const uint64_t *bmap = meta->class_bitmap;
   size_t offset = start_offset;
 
@@ -384,8 +404,8 @@ static bool search_break_accelerated(VM *vm, const char *subject,
 static bool search_span_accelerated(VM *vm, const char *subject,
                                     size_t subject_len, size_t start_offset,
                                     const snobol_search_meta_t *meta,
-                                     snobol_search_result_t *out_result,
-                                     snobol_search_diag_t *diag, bool anchored) {
+                                    snobol_search_result_t *out_result,
+                                    snobol_search_diag_t *diag, bool anchored) {
   const uint64_t *bmap = meta->class_bitmap;
   size_t offset = start_offset;
 
@@ -429,12 +449,12 @@ static bool search_span_accelerated(VM *vm, const char *subject,
  * ---------------------------------------------------------------------------
  */
 static SNOBOL_ALIGNED(64) bool SNOBOL_HOT
-search_literal_accelerated(VM * SNOBOL_RESTRICT vm,
-                           const char * SNOBOL_RESTRICT subject,
-                                       size_t subject_len, size_t start_offset,
-                                       const snobol_search_meta_t *meta,
-                                        snobol_search_result_t *out_result,
-                                        snobol_search_diag_t *diag, bool anchored) {
+    search_literal_accelerated(VM *SNOBOL_RESTRICT vm,
+                               const char *SNOBOL_RESTRICT subject,
+                               size_t subject_len, size_t start_offset,
+                               const snobol_search_meta_t *meta,
+                               snobol_search_result_t *out_result,
+                               snobol_search_diag_t *diag, bool anchored) {
   size_t offset = start_offset;
 
   while (offset <= subject_len) {
@@ -451,7 +471,8 @@ search_literal_accelerated(VM * SNOBOL_RESTRICT vm,
     } else if (meta->literal_prefix_len == 2) {
       /* Two-byte prefix: paired memchr avoids memmem's setup overhead
        * (~30ns), which dominates for such short needles. */
-      const char *p = (const char *)memchr(hay, meta->literal_prefix[0], haylen);
+      const char *p =
+          (const char *)memchr(hay, meta->literal_prefix[0], haylen);
       while (p) {
         if (p + 1 < hay + haylen && (uint8_t)p[1] == meta->literal_prefix[1])
           break;
@@ -513,10 +534,11 @@ search_literal_accelerated(VM * SNOBOL_RESTRICT vm,
  * ---------------------------------------------------------------------------
  */
 static bool search_bitmap_accelerated(VM *vm, const char *subject,
-                                       size_t subject_len, size_t start_offset,
-                                       const snobol_search_meta_t *meta,
-                                       snobol_search_result_t *out_result,
-                                       snobol_search_diag_t *diag, bool anchored) {
+                                      size_t subject_len, size_t start_offset,
+                                      const snobol_search_meta_t *meta,
+                                      snobol_search_result_t *out_result,
+                                      snobol_search_diag_t *diag,
+                                      bool anchored) {
   const uint64_t *bmap = meta->candidate_bitmap;
   size_t offset = start_offset;
 
@@ -559,11 +581,11 @@ static bool search_bitmap_accelerated(VM *vm, const char *subject,
  * no bytecode dispatch, no choice stack, no capture tracking.
  * ---------------------------------------------------------------------------
  */
-static bool search_literal_only(VM *vm, const char *subject,
-                                 size_t subject_len, size_t start_offset,
-                                 const snobol_search_meta_t *meta,
-                                 snobol_search_result_t *out_result,
-                                 snobol_search_diag_t *diag, bool anchored) {
+static bool search_literal_only(VM *vm, const char *subject, size_t subject_len,
+                                size_t start_offset,
+                                const snobol_search_meta_t *meta,
+                                snobol_search_result_t *out_result,
+                                snobol_search_diag_t *diag, bool anchored) {
   (void)vm;
   (void)meta;
   size_t offset = start_offset;
@@ -676,7 +698,8 @@ typedef struct {
   size_t var_count;
 } search_choice_t;
 
-static inline bool search_vm_push_choice(search_vm_t *vm, size_t ip, size_t pos) {
+static inline bool search_vm_push_choice(search_vm_t *vm, size_t ip,
+                                         size_t pos) {
   if (!vm->choices) {
     /* Lazily allocate the choice stack on first push so linear (non-
      * backtracking) patterns never pay for it. Room for two frames so the
@@ -688,8 +711,8 @@ static inline bool search_vm_push_choice(search_vm_t *vm, size_t ip, size_t pos)
     vm->choices_cap = initial_cap;
   }
   if (vm->choices_top + sizeof(search_choice_t) >= vm->choices_cap) {
-    size_t new_cap = vm->choices_cap ? vm->choices_cap * 2
-                                     : 16 * sizeof(search_choice_t);
+    size_t new_cap =
+        vm->choices_cap ? vm->choices_cap * 2 : 16 * sizeof(search_choice_t);
     while (vm->choices_top + sizeof(search_choice_t) >= new_cap)
       new_cap *= 2;
     void *new_choices = snobol_realloc(vm->choices, new_cap);
@@ -698,7 +721,8 @@ static inline bool search_vm_push_choice(search_vm_t *vm, size_t ip, size_t pos)
     vm->choices = new_choices;
     vm->choices_cap = new_cap;
   }
-  search_choice_t *c = (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top);
+  search_choice_t *c =
+      (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top);
   c->ip = ip;
   c->pos = pos;
   /* Save capture registers */
@@ -717,7 +741,8 @@ static inline bool search_vm_pop_choice(search_vm_t *vm) {
   if (!vm->choices || vm->choices_top == 0)
     return false;
   vm->choices_top -= sizeof(search_choice_t);
-  search_choice_t *c = (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top);
+  search_choice_t *c =
+      (search_choice_t *)((uint8_t *)vm->choices + vm->choices_top);
   vm->ip = c->ip;
   vm->pos = c->pos;
   /* Restore capture registers */
@@ -779,9 +804,9 @@ static inline void search_vm_init_from_vm(search_vm_t *svm, const VM *vm) {
  * caller did not populate vm->range_meta, so the search-VM never silently
  * fails to match a SPAN/BREAK pattern. */
 static const uint8_t *search_vm_resolve_range(const search_vm_t *svm,
-                                               uint16_t set_id,
-                                               uint16_t *out_count,
-                                               uint16_t *out_case) {
+                                              uint16_t set_id,
+                                              uint16_t *out_count,
+                                              uint16_t *out_case) {
   VM tmp;
   memset(&tmp, 0, sizeof(tmp));
   tmp.bc = svm->bc;
@@ -820,9 +845,10 @@ static inline void search_vm_writeback_to_vm(const search_vm_t *svm, VM *vm) {
   }
 }
 
-static bool SNOBOL_HOT search_vm_exec(search_vm_t * SNOBOL_RESTRICT vm,
-                                  const char * SNOBOL_RESTRICT subject, size_t subject_len,
-                           size_t offset, snobol_search_result_t *out_result) {
+static bool SNOBOL_HOT search_vm_exec(search_vm_t *SNOBOL_RESTRICT vm,
+                                      const char *SNOBOL_RESTRICT subject,
+                                      size_t subject_len, size_t offset,
+                                      snobol_search_result_t *out_result) {
   (void)subject;
   (void)subject_len;
   const uint8_t *bc = vm->bc;
@@ -895,7 +921,8 @@ static bool SNOBOL_HOT search_vm_exec(search_vm_t * SNOBOL_RESTRICT vm,
     if (ip >= bc_len) {
       if (!search_vm_pop_choice(vm))
         goto svm_fail_ret;
-      ip = vm->ip; pos = vm->pos;
+      ip = vm->ip;
+      pos = vm->pos;
       continue;
     }
     uint8_t op = bc[ip++];
@@ -907,673 +934,685 @@ static bool SNOBOL_HOT search_vm_exec(search_vm_t * SNOBOL_RESTRICT vm,
 
 /* ---- Zero-width ops ---- */
 #ifndef _MSC_VER
-svm_nop:
+  svm_nop:
 #endif
 #ifdef _MSC_VER
-    case OP_NOP:
+  case OP_NOP:
 #endif
-      continue;
+    continue;
 
 #ifndef _MSC_VER
-svm_fence:
+  svm_fence:
 #endif
 #ifdef _MSC_VER
-    case OP_FENCE:
+  case OP_FENCE:
 #endif
-      /* Cut: discard all prior choice points */
-      vm->choices_top = 0;
-      continue;
+    /* Cut: discard all prior choice points */
+    vm->choices_top = 0;
+    continue;
 
 #ifndef _MSC_VER
-svm_anchor:
+  svm_anchor:
 #endif
 #ifdef _MSC_VER
-    case OP_ANCHOR:
+  case OP_ANCHOR:
 #endif
-    {
-      uint8_t anchor_type = bc[ip++];
-      bool anchor_ok = (anchor_type == 0) ? (pos == 0) : (pos == len);
-      if (!anchor_ok) {
-        if (!search_vm_pop_choice(vm))
-          goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
-        continue;
-      }
+  {
+    uint8_t anchor_type = bc[ip++];
+    bool anchor_ok = (anchor_type == 0) ? (pos == 0) : (pos == len);
+    if (!anchor_ok) {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
       continue;
     }
+    continue;
+  }
 
 /* ---- Terminal opcodes ---- */
 #ifndef _MSC_VER
-svm_accept:
+  svm_accept:
 #endif
 #ifdef _MSC_VER
-    case OP_ACCEPT:
+  case OP_ACCEPT:
 #endif
-      out_result->success = true;
-      out_result->match_start = offset;
-      out_result->match_end = offset + pos;
-      return true;
+    out_result->success = true;
+    out_result->match_start = offset;
+    out_result->match_end = offset + pos;
+    return true;
 
 #ifndef _MSC_VER
-svm_abort:
+  svm_abort:
 #endif
 #ifdef _MSC_VER
-    case OP_ABORT:
+  case OP_ABORT:
 #endif
-      /* ABORT: immediately terminate the entire match (SNOBOL semantics). */
-      out_result->success = false;
-      out_result->aborted = true;
-      return false;
+    /* ABORT: immediately terminate the entire match (SNOBOL semantics). */
+    out_result->success = false;
+    out_result->aborted = true;
+    return false;
 
 #ifndef _MSC_VER
-svm_succeed:
+  svm_succeed:
 #endif
 #ifdef _MSC_VER
-    case OP_SUCCEED:
+  case OP_SUCCEED:
 #endif
-      /* Force success at current position, consuming nothing more */
-      out_result->success = true;
-      out_result->match_start = offset;
-      out_result->match_end = offset + pos;
-      return true;
+    /* Force success at current position, consuming nothing more */
+    out_result->success = true;
+    out_result->match_start = offset;
+    out_result->match_end = offset + pos;
+    return true;
 
 /* ---- Capture-aware ops (Tier 6 search-VM) ---- */
 #ifndef _MSC_VER
-svm_cap_start:
+  svm_cap_start:
 #endif
 #ifdef _MSC_VER
-    case OP_CAP_START:
+  case OP_CAP_START:
 #endif
-    {
-      uint8_t r = read_u8(bc, bc_len, &ip);
-      if (r < MAX_CAPS) {
-        vm->cap_start[r] = pos;
-        if (r >= vm->max_cap_used)
-          vm->max_cap_used = r + 1;
-      }
-      continue;
+  {
+    uint8_t r = read_u8(bc, bc_len, &ip);
+    if (r < MAX_CAPS) {
+      vm->cap_start[r] = pos;
+      if (r >= vm->max_cap_used)
+        vm->max_cap_used = r + 1;
     }
+    continue;
+  }
 
 #ifndef _MSC_VER
-svm_cap_end:
+  svm_cap_end:
 #endif
 #ifdef _MSC_VER
-    case OP_CAP_END:
+  case OP_CAP_END:
 #endif
-    {
-      uint8_t r = read_u8(bc, bc_len, &ip);
-      if (r < MAX_CAPS) {
-        vm->cap_end[r] = pos;
-        if (r >= vm->max_cap_used)
-          vm->max_cap_used = r + 1;
-        /* Also expose capture register as variable v<r> */
-        if (r < MAX_VARS) {
-          vm->var_start[r] = vm->cap_start[r];
-          vm->var_end[r] = vm->cap_end[r];
-          if ((size_t)r + 1 > vm->var_count)
-            vm->var_count = (size_t)r + 1;
-        }
+  {
+    uint8_t r = read_u8(bc, bc_len, &ip);
+    if (r < MAX_CAPS) {
+      vm->cap_end[r] = pos;
+      if (r >= vm->max_cap_used)
+        vm->max_cap_used = r + 1;
+      /* Also expose capture register as variable v<r> */
+      if (r < MAX_VARS) {
+        vm->var_start[r] = vm->cap_start[r];
+        vm->var_end[r] = vm->cap_end[r];
+        if ((size_t)r + 1 > vm->var_count)
+          vm->var_count = (size_t)r + 1;
       }
-      continue;
     }
+    continue;
+  }
 
 #ifndef _MSC_VER
-svm_assign:
+  svm_assign:
 #endif
 #ifdef _MSC_VER
-    case OP_ASSIGN:
+  case OP_ASSIGN:
 #endif
-    {
-      uint16_t var = read_u16(bc, bc_len, &ip);
-      uint8_t r = read_u8(bc, bc_len, &ip);
-      if (var < MAX_VARS && r < MAX_CAPS) {
-        if (var >= vm->var_count)
-          vm->var_count = (size_t)var + 1;
-        vm->var_start[var] = vm->cap_start[r];
-        vm->var_end[var] = vm->cap_end[r];
-      }
-      continue;
+  {
+    uint16_t var = read_u16(bc, bc_len, &ip);
+    uint8_t r = read_u8(bc, bc_len, &ip);
+    if (var < MAX_VARS && r < MAX_CAPS) {
+      if (var >= vm->var_count)
+        vm->var_count = (size_t)var + 1;
+      vm->var_start[var] = vm->cap_start[r];
+      vm->var_end[var] = vm->cap_end[r];
     }
+    continue;
+  }
 
 #ifndef _MSC_VER
-svm_breakx:
+  svm_breakx:
 #endif
 #ifdef _MSC_VER
-    case OP_BREAKX:
+  case OP_BREAKX:
 #endif
-    {
-      /* BREAKX: like BREAK but pushes a retry choice point.
+  {
+    /* BREAKX: like BREAK but pushes a retry choice point.
        * When the choice is popped, pos advances past the break char. */
-      size_t breakx_ip = ip - 1; /* points to OP_BREAKX opcode */
-      uint16_t set_id = read_u16(bc, bc_len, &ip);
-      const uint8_t *rp = nullptr;
-      uint16_t cnt = 0;
-      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
-        rp = srange[set_id - 1].ranges_ptr;
-        cnt = srange[set_id - 1].count;
-      } else if (set_id > 0 && vm->bc) {
-        uint16_t cflag;
-        rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
-      }
-      /* Advance past non-break characters (like OP_BREAK) */
-      while (pos < len) {
-        bool in_class = false;
-        if (rp) {
-          uint8_t c = (uint8_t)s[pos];
-          uint64_t map[2];
-          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
-              bitmap_test(map, c)) {
+    size_t breakx_ip = ip - 1; /* points to OP_BREAKX opcode */
+    uint16_t set_id = read_u16(bc, bc_len, &ip);
+    const uint8_t *rp = nullptr;
+    uint16_t cnt = 0;
+    if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+      rp = srange[set_id - 1].ranges_ptr;
+      cnt = srange[set_id - 1].count;
+    } else if (set_id > 0 && vm->bc) {
+      uint16_t cflag;
+      rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
+    }
+    /* Advance past non-break characters (like OP_BREAK) */
+    while (pos < len) {
+      bool in_class = false;
+      if (rp) {
+        uint8_t c = (uint8_t)s[pos];
+        uint64_t map[2];
+        if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+            bitmap_test(map, c)) {
+          in_class = true;
+        } else {
+          uint32_t cp;
+          int bytes;
+          if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+              range_contains(rp, cnt, cp)) {
             in_class = true;
-          } else {
-            uint32_t cp;
-            int bytes;
-            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
-                range_contains(rp, cnt, cp)) {
-              in_class = true;
-            }
           }
         }
-        if (in_class)
-          break; /* found break char */
-        pos++;
       }
-      /* If we stopped at a break char, push a retry choice that
-       * re-executes BREAKX from the position AFTER the break char */
-      if (pos < len) {
-        uint32_t bx_cp2;
-        int bx_skip = 1;
-        if (utf8_peek_next(s, len, pos, &bx_cp2, &bx_skip))
-          ; /* bx_skip now holds byte count of break char */
-        search_vm_push_choice(vm, breakx_ip, pos + (size_t)bx_skip);
-      }
-      continue;
+      if (in_class)
+        break; /* found break char */
+      pos++;
     }
+    /* If we stopped at a break char, push a retry choice that
+       * re-executes BREAKX from the position AFTER the break char */
+    if (pos < len) {
+      uint32_t bx_cp2;
+      int bx_skip = 1;
+      if (utf8_peek_next(s, len, pos, &bx_cp2, &bx_skip))
+        ; /* bx_skip now holds byte count of break char */
+      search_vm_push_choice(vm, breakx_ip, pos + (size_t)bx_skip);
+    }
+    continue;
+  }
 
 #ifndef _MSC_VER
-svm_fail:
+  svm_fail:
 #endif
 #ifdef _MSC_VER
-    case OP_FAIL:
+  case OP_FAIL:
 #endif
-    {
-      bool had = search_vm_pop_choice(vm);
-      if (!had)
-        goto svm_fail_ret;
-      ip = vm->ip; pos = vm->pos;
-      continue;
-    }
+  {
+    bool had = search_vm_pop_choice(vm);
+    if (!had)
+      goto svm_fail_ret;
+    ip = vm->ip;
+    pos = vm->pos;
+    continue;
+  }
 
 /* ---- LIT: inline literal match ---- */
 #ifndef _MSC_VER
-svm_lit:
+  svm_lit:
 #endif
 #ifdef _MSC_VER
-    case OP_LIT:
+  case OP_LIT:
 #endif
-    {
-      uint32_t lit_off = read_u32(bc, bc_len, &ip);
-      uint32_t lit_len = read_u32(bc, bc_len, &ip);
-      if (lit_off == ip)
-        ip += lit_len;
-      if (lit_len <= len - pos &&
-          memcmp(s + pos, bc + lit_off, lit_len) == 0) {
-        pos += lit_len;
-      } else {
-        if (!search_vm_pop_choice(vm))
-          goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
-      }
-      continue;
+  {
+    uint32_t lit_off = read_u32(bc, bc_len, &ip);
+    uint32_t lit_len = read_u32(bc, bc_len, &ip);
+    if (lit_off == ip)
+      ip += lit_len;
+    if (lit_len <= len - pos && memcmp(s + pos, bc + lit_off, lit_len) == 0) {
+      pos += lit_len;
+    } else {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
     }
+    continue;
+  }
 
 /* ---- LEN: advance by N codepoints ---- */
 #ifndef _MSC_VER
-svm_len:
+  svm_len:
 #endif
 #ifdef _MSC_VER
-    case OP_LEN:
+  case OP_LEN:
 #endif
-    {
-      uint32_t n = read_u32(bc, bc_len, &ip);
-      size_t p = pos;
-      uint32_t i;
-      for (i = 0; i < n; i++) {
-        uint32_t cp;
-        int bytes;
-        if (!utf8_peek_next(s, len, p, &cp, &bytes))
-          break;
-        p += bytes;
-      }
-      if (i < n) {
-        if (!search_vm_pop_choice(vm))
-          goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
-        continue;
-      }
-      pos = p;
+  {
+    uint32_t n = read_u32(bc, bc_len, &ip);
+    size_t p = pos;
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+      uint32_t cp;
+      int bytes;
+      if (!utf8_peek_next(s, len, p, &cp, &bytes))
+        break;
+      p += bytes;
+    }
+    if (i < n) {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
       continue;
     }
+    pos = p;
+    continue;
+  }
 
 /* ---- ANY: match single char in class ---- */
 #ifndef _MSC_VER
-svm_any:
+  svm_any:
 #endif
 #ifdef _MSC_VER
-    case OP_ANY:
+  case OP_ANY:
 #endif
-    {
-      uint16_t set_id = read_u16(bc, bc_len, &ip);
-      bool ok = false;
-      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
-        const uint8_t *rp = srange[set_id - 1].ranges_ptr;
-        uint16_t cnt = srange[set_id - 1].count;
-        if (rp) {
-          if (pos < len) {
-            uint8_t c = (uint8_t)s[pos];
-            uint64_t map[2];
-            if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
-                bitmap_test(map, c)) {
+  {
+    uint16_t set_id = read_u16(bc, bc_len, &ip);
+    bool ok = false;
+    if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+      const uint8_t *rp = srange[set_id - 1].ranges_ptr;
+      uint16_t cnt = srange[set_id - 1].count;
+      if (rp) {
+        if (pos < len) {
+          uint8_t c = (uint8_t)s[pos];
+          uint64_t map[2];
+          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+              bitmap_test(map, c)) {
+            ok = true;
+          } else {
+            uint32_t cp;
+            int bytes;
+            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+                range_contains(rp, cnt, cp)) {
               ok = true;
-            } else {
-              uint32_t cp;
-              int bytes;
-              if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
-                  range_contains(rp, cnt, cp)) {
-                ok = true;
-              }
             }
           }
         }
       }
-      if (ok) {
-        /* Advance by 1 byte (ASCII) or multi-byte (UTF-8) */
-        uint32_t cp;
-        int bytes;
-        if (!utf8_peek_next(s, len, pos, &cp, &bytes)) {
-          if (!search_vm_pop_choice(vm))
-            goto svm_fail_ret;
-          ip = vm->ip; pos = vm->pos;
-          continue;
-        }
-        pos += bytes;
-      } else {
+    }
+    if (ok) {
+      /* Advance by 1 byte (ASCII) or multi-byte (UTF-8) */
+      uint32_t cp;
+      int bytes;
+      if (!utf8_peek_next(s, len, pos, &cp, &bytes)) {
         if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
+        ip = vm->ip;
+        pos = vm->pos;
+        continue;
       }
-      continue;
+      pos += bytes;
+    } else {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
     }
+    continue;
+  }
 
 /* ---- NOTANY: match single char NOT in class ---- */
 #ifndef _MSC_VER
-svm_notany:
+  svm_notany:
 #endif
 #ifdef _MSC_VER
-    case OP_NOTANY:
+  case OP_NOTANY:
 #endif
-    {
-      uint16_t set_id = read_u16(bc, bc_len, &ip);
-      bool in_class = false;
-      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
-        const uint8_t *rp = srange[set_id - 1].ranges_ptr;
-        uint16_t cnt = srange[set_id - 1].count;
-        if (rp && pos < len) {
-          uint8_t c = (uint8_t)s[pos];
-          uint64_t map[2];
-          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
-              bitmap_test(map, c)) {
+  {
+    uint16_t set_id = read_u16(bc, bc_len, &ip);
+    bool in_class = false;
+    if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+      const uint8_t *rp = srange[set_id - 1].ranges_ptr;
+      uint16_t cnt = srange[set_id - 1].count;
+      if (rp && pos < len) {
+        uint8_t c = (uint8_t)s[pos];
+        uint64_t map[2];
+        if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+            bitmap_test(map, c)) {
+          in_class = true;
+        } else {
+          uint32_t cp;
+          int bytes;
+          if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+              range_contains(rp, cnt, cp)) {
             in_class = true;
-          } else {
-            uint32_t cp;
-            int bytes;
-            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
-                range_contains(rp, cnt, cp)) {
-              in_class = true;
-            }
           }
         }
       }
-      if (!in_class && pos < len) {
-        uint32_t cp;
-        int bytes;
-        if (!utf8_peek_next(s, len, pos, &cp, &bytes)) {
-          if (!search_vm_pop_choice(vm))
-            goto svm_fail_ret;
-          ip = vm->ip; pos = vm->pos;
-          continue;
-        }
-        pos += bytes;
-      } else {
+    }
+    if (!in_class && pos < len) {
+      uint32_t cp;
+      int bytes;
+      if (!utf8_peek_next(s, len, pos, &cp, &bytes)) {
         if (!search_vm_pop_choice(vm))
           goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
+        ip = vm->ip;
+        pos = vm->pos;
+        continue;
       }
-      continue;
+      pos += bytes;
+    } else {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
     }
+    continue;
+  }
 
 /* ---- SPAN: consume 1+ characters in class ---- */
 #ifndef _MSC_VER
-svm_span:
+  svm_span:
 #endif
 #ifdef _MSC_VER
-    case OP_SPAN:
+  case OP_SPAN:
 #endif
-    {
-      uint16_t set_id = read_u16(bc, bc_len, &ip);
-      const uint8_t *rp = nullptr;
-      uint16_t cnt = 0;
-      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
-        rp = srange[set_id - 1].ranges_ptr;
-        cnt = srange[set_id - 1].count;
-      } else if (set_id > 0 && vm->bc) {
-        /* Fallback to bytecode-embedded ranges (mirrors the full VM's
+  {
+    uint16_t set_id = read_u16(bc, bc_len, &ip);
+    const uint8_t *rp = nullptr;
+    uint16_t cnt = 0;
+    if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+      rp = srange[set_id - 1].ranges_ptr;
+      cnt = srange[set_id - 1].count;
+    } else if (set_id > 0 && vm->bc) {
+      /* Fallback to bytecode-embedded ranges (mirrors the full VM's
          * get_ranges_ptr).  Keeps the search-VM correct even when the
          * caller did not populate vm->range_meta. */
-        uint16_t cflag;
-        rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
-      }
-      size_t start = pos;
-      while (pos < len) {
-        bool in_class = false;
-        if (rp) {
-          uint8_t c = (uint8_t)s[pos];
-          uint64_t map[2];
-          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
-              bitmap_test(map, c)) {
+      uint16_t cflag;
+      rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
+    }
+    size_t start = pos;
+    while (pos < len) {
+      bool in_class = false;
+      if (rp) {
+        uint8_t c = (uint8_t)s[pos];
+        uint64_t map[2];
+        if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+            bitmap_test(map, c)) {
+          in_class = true;
+        } else {
+          uint32_t cp;
+          int bytes;
+          if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+              range_contains(rp, cnt, cp)) {
             in_class = true;
-          } else {
-            uint32_t cp;
-            int bytes;
-            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
-                range_contains(rp, cnt, cp)) {
-              in_class = true;
-            }
           }
         }
-        if (!in_class)
-          break;
-        uint32_t cp;
-        int bytes;
-        if (!utf8_peek_next(s, len, pos, &cp, &bytes))
-          break;
-        pos += bytes;
       }
-      if (pos == start) {
-        /* SPAN requires at least 1 char */
-        if (!search_vm_pop_choice(vm))
-          goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
-      }
-      continue;
+      if (!in_class)
+        break;
+      uint32_t cp;
+      int bytes;
+      if (!utf8_peek_next(s, len, pos, &cp, &bytes))
+        break;
+      pos += bytes;
     }
+    if (pos == start) {
+      /* SPAN requires at least 1 char */
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
+    }
+    continue;
+  }
 
 /* ---- BREAK: consume 0+ characters until one in class ---- */
 #ifndef _MSC_VER
-svm_break:
+  svm_break:
 #endif
 #ifdef _MSC_VER
-    case OP_BREAK:
+  case OP_BREAK:
 #endif
-    {
-      uint16_t set_id = read_u16(bc, bc_len, &ip);
-      const uint8_t *rp = nullptr;
-      uint16_t cnt = 0;
-      if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
-        rp = srange[set_id - 1].ranges_ptr;
-        cnt = srange[set_id - 1].count;
-      } else if (set_id > 0 && vm->bc) {
-        uint16_t cflag;
-        rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
-      }
-      while (pos < len) {
-        bool in_class = false;
-        if (rp) {
-          uint8_t c = (uint8_t)s[pos];
-          uint64_t map[2];
-          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
-              bitmap_test(map, c)) {
+  {
+    uint16_t set_id = read_u16(bc, bc_len, &ip);
+    const uint8_t *rp = nullptr;
+    uint16_t cnt = 0;
+    if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
+      rp = srange[set_id - 1].ranges_ptr;
+      cnt = srange[set_id - 1].count;
+    } else if (set_id > 0 && vm->bc) {
+      uint16_t cflag;
+      rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
+    }
+    while (pos < len) {
+      bool in_class = false;
+      if (rp) {
+        uint8_t c = (uint8_t)s[pos];
+        uint64_t map[2];
+        if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+            bitmap_test(map, c)) {
+          in_class = true;
+        } else {
+          uint32_t cp;
+          int bytes;
+          if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+              range_contains(rp, cnt, cp)) {
             in_class = true;
-          } else {
-            uint32_t cp;
-            int bytes;
-            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
-                range_contains(rp, cnt, cp)) {
-              in_class = true;
-            }
           }
         }
-        if (in_class)
-          break;
-        uint32_t cp;
-        int bytes;
-        if (!utf8_peek_next(s, len, pos, &cp, &bytes))
-          break;
-        pos += bytes;
       }
-      continue;
+      if (in_class)
+        break;
+      uint32_t cp;
+      int bytes;
+      if (!utf8_peek_next(s, len, pos, &cp, &bytes))
+        break;
+      pos += bytes;
     }
+    continue;
+  }
 
 /* ---- POS: succeed at exact byte offset ---- */
 #ifndef _MSC_VER
-svm_pos:
+  svm_pos:
 #endif
 #ifdef _MSC_VER
-    case OP_POS:
+  case OP_POS:
 #endif
-    {
-      uint32_t n = read_u32(bc, bc_len, &ip);
-      if (pos != (size_t)n) {
-        if (!search_vm_pop_choice(vm))
-          goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
-        continue;
-      }
+  {
+    uint32_t n = read_u32(bc, bc_len, &ip);
+    if (pos != (size_t)n) {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
       continue;
     }
+    continue;
+  }
 
 /* ---- RPOS: succeed at N codepoints from end ---- */
 #ifndef _MSC_VER
-svm_rpos:
+  svm_rpos:
 #endif
 #ifdef _MSC_VER
-    case OP_RPOS:
+  case OP_RPOS:
 #endif
-    {
-      uint32_t n = read_u32(bc, bc_len, &ip);
-      /* Count remaining codepoints from pos to end */
-      size_t p = pos;
-      uint32_t remaining = 0;
-      while (p < len) {
-        uint32_t cp;
-        int bytes;
-        if (!utf8_peek_next(s, len, p, &cp, &bytes))
-          break;
-        p += bytes;
-        remaining++;
-      }
-      if (remaining != n) {
-        if (!search_vm_pop_choice(vm))
-          goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
-        continue;
-      }
+  {
+    uint32_t n = read_u32(bc, bc_len, &ip);
+    /* Count remaining codepoints from pos to end */
+    size_t p = pos;
+    uint32_t remaining = 0;
+    while (p < len) {
+      uint32_t cp;
+      int bytes;
+      if (!utf8_peek_next(s, len, p, &cp, &bytes))
+        break;
+      p += bytes;
+      remaining++;
+    }
+    if (remaining != n) {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
       continue;
     }
+    continue;
+  }
 
 /* ---- TAB: advance to exact byte offset ---- */
 #ifndef _MSC_VER
-svm_tab:
+  svm_tab:
 #endif
 #ifdef _MSC_VER
-    case OP_TAB:
+  case OP_TAB:
 #endif
-    {
-      uint32_t n = read_u32(bc, bc_len, &ip);
-      /* Count codepoints from start to n, advance pos to that byte */
-      size_t p = 0;
-      uint32_t i;
-      for (i = 0; i < n; i++) {
-        uint32_t cp;
-        int bytes;
-        if (!utf8_peek_next(s, len, p, &cp, &bytes))
-          break;
-        p += bytes;
-      }
-      if (i < n || p > len) {
-        if (!search_vm_pop_choice(vm))
-          goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
-        continue;
-      }
-      pos = p;
+  {
+    uint32_t n = read_u32(bc, bc_len, &ip);
+    /* Count codepoints from start to n, advance pos to that byte */
+    size_t p = 0;
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+      uint32_t cp;
+      int bytes;
+      if (!utf8_peek_next(s, len, p, &cp, &bytes))
+        break;
+      p += bytes;
+    }
+    if (i < n || p > len) {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
       continue;
     }
+    pos = p;
+    continue;
+  }
 
 /* ---- RTAB: advance to N codepoints from end ---- */
 #ifndef _MSC_VER
-svm_rtab:
+  svm_rtab:
 #endif
 #ifdef _MSC_VER
-    case OP_RTAB:
+  case OP_RTAB:
 #endif
-    {
-      uint32_t n = read_u32(bc, bc_len, &ip);
-      /* Count total codepoints */
-      size_t p = 0;
-      uint32_t total_cp = 0;
-      while (p < len) {
-        uint32_t cp;
-        int bytes;
-        if (!utf8_peek_next(s, len, p, &cp, &bytes))
-          break;
-        p += bytes;
-        total_cp++;
-      }
-      if (n > total_cp) {
-        if (!search_vm_pop_choice(vm))
-          goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
-        continue;
-      }
-      /* Advance to (total_cp - n)th codepoint */
-      uint32_t target = total_cp - n;
-      p = 0;
-      uint32_t i;
-      for (i = 0; i < target; i++) {
-        uint32_t cp;
-        int bytes;
-        if (!utf8_peek_next(s, len, p, &cp, &bytes))
-          break;
-        p += bytes;
-      }
-      if (i < target) {
-        if (!search_vm_pop_choice(vm))
-          goto svm_fail_ret;
-        ip = vm->ip; pos = vm->pos;
-        continue;
-      }
-      pos = p;
+  {
+    uint32_t n = read_u32(bc, bc_len, &ip);
+    /* Count total codepoints */
+    size_t p = 0;
+    uint32_t total_cp = 0;
+    while (p < len) {
+      uint32_t cp;
+      int bytes;
+      if (!utf8_peek_next(s, len, p, &cp, &bytes))
+        break;
+      p += bytes;
+      total_cp++;
+    }
+    if (n > total_cp) {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
       continue;
     }
+    /* Advance to (total_cp - n)th codepoint */
+    uint32_t target = total_cp - n;
+    p = 0;
+    uint32_t i;
+    for (i = 0; i < target; i++) {
+      uint32_t cp;
+      int bytes;
+      if (!utf8_peek_next(s, len, p, &cp, &bytes))
+        break;
+      p += bytes;
+    }
+    if (i < target) {
+      if (!search_vm_pop_choice(vm))
+        goto svm_fail_ret;
+      ip = vm->ip;
+      pos = vm->pos;
+      continue;
+    }
+    pos = p;
+    continue;
+  }
 
 /* ---- JMP: unconditional jump ---- */
 #ifndef _MSC_VER
-svm_jmp:
+  svm_jmp:
 #endif
 #ifdef _MSC_VER
-    case OP_JMP:
+  case OP_JMP:
 #endif
-    {
-      uint32_t tgt = read_u32(bc, bc_len, &ip);
-      ip = (size_t)tgt;
-      continue;
-    }
+  {
+    uint32_t tgt = read_u32(bc, bc_len, &ip);
+    ip = (size_t)tgt;
+    continue;
+  }
 
 /* ---- SPLIT: non-deterministic branch ---- */
 #ifndef _MSC_VER
-svm_split:
+  svm_split:
 #endif
 #ifdef _MSC_VER
-    case OP_SPLIT:
+  case OP_SPLIT:
 #endif
-    {
-      uint32_t a = read_u32(bc, bc_len, &ip);
-      uint32_t b = read_u32(bc, bc_len, &ip);
-      search_vm_push_choice(vm, (size_t)b, pos);
-      ip = (size_t)a;
-      continue;
-    }
+  {
+    uint32_t a = read_u32(bc, bc_len, &ip);
+    uint32_t b = read_u32(bc, bc_len, &ip);
+    search_vm_push_choice(vm, (size_t)b, pos);
+    ip = (size_t)a;
+    continue;
+  }
 
 /* ---- REPEAT_INIT: begin bounded repetition ---- */
 #ifndef _MSC_VER
-svm_repeat_init:
+  svm_repeat_init:
 #endif
 #ifdef _MSC_VER
-    case OP_REPEAT_INIT:
+  case OP_REPEAT_INIT:
 #endif
-    {
-      uint8_t loop_id = read_u8(bc, bc_len, &ip);
-      uint32_t min = read_u32(bc, bc_len, &ip);
-      uint32_t max = read_u32(bc, bc_len, &ip);
-      uint32_t skip_target = read_u32(bc, bc_len, &ip);
-      if (loop_id < MAX_LOOPS) {
-        vm->counters[loop_id] = 0;
-        vm->loop_min[loop_id] = min;
-        vm->loop_max[loop_id] = max;
-        vm->loop_last_pos[loop_id] = pos;
-        if (loop_id + 1 > vm->max_counter_used)
-          vm->max_counter_used = loop_id + 1;
-        /* Allow 0-iteration exit only when min is 0 */
-        if (min == 0)
-          search_vm_push_choice(vm, (size_t)skip_target, pos);
-      }
-      continue;
+  {
+    uint8_t loop_id = read_u8(bc, bc_len, &ip);
+    uint32_t min = read_u32(bc, bc_len, &ip);
+    uint32_t max = read_u32(bc, bc_len, &ip);
+    uint32_t skip_target = read_u32(bc, bc_len, &ip);
+    if (loop_id < MAX_LOOPS) {
+      vm->counters[loop_id] = 0;
+      vm->loop_min[loop_id] = min;
+      vm->loop_max[loop_id] = max;
+      vm->loop_last_pos[loop_id] = pos;
+      if (loop_id + 1 > vm->max_counter_used)
+        vm->max_counter_used = loop_id + 1;
+      /* Allow 0-iteration exit only when min is 0 */
+      if (min == 0)
+        search_vm_push_choice(vm, (size_t)skip_target, pos);
     }
+    continue;
+  }
 
 /* ---- REPEAT_STEP: step bounded repetition ---- */
 #ifndef _MSC_VER
-svm_repeat_step:
+  svm_repeat_step:
 #endif
 #ifdef _MSC_VER
-    case OP_REPEAT_STEP:
+  case OP_REPEAT_STEP:
 #endif
-    {
-      uint8_t loop_id = read_u8(bc, bc_len, &ip);
-      uint32_t jmp_target = read_u32(bc, bc_len, &ip);
-      if (loop_id < MAX_LOOPS) {
-        vm->counters[loop_id]++;
-        uint32_t count = vm->counters[loop_id];
-        uint32_t min = vm->loop_min[loop_id];
-        uint32_t max = vm->loop_max[loop_id];
-        if (count < min) {
-          /* Must satisfy the minimum: keep looping, no choice */
-          vm->loop_last_pos[loop_id] = pos;
-          ip = (size_t)jmp_target;
-        } else if (max == (uint32_t)-1 || count < max) {
-          if (max == (uint32_t)-1 && pos == vm->loop_last_pos[loop_id]) {
-            /* Unbounded and no forward progress: exit without looping */
-          } else {
-            /* Push the EXIT choice (post-step instruction); fall through
+  {
+    uint8_t loop_id = read_u8(bc, bc_len, &ip);
+    uint32_t jmp_target = read_u32(bc, bc_len, &ip);
+    if (loop_id < MAX_LOOPS) {
+      vm->counters[loop_id]++;
+      uint32_t count = vm->counters[loop_id];
+      uint32_t min = vm->loop_min[loop_id];
+      uint32_t max = vm->loop_max[loop_id];
+      if (count < min) {
+        /* Must satisfy the minimum: keep looping, no choice */
+        vm->loop_last_pos[loop_id] = pos;
+        ip = (size_t)jmp_target;
+      } else if (max == (uint32_t)-1 || count < max) {
+        if (max == (uint32_t)-1 && pos == vm->loop_last_pos[loop_id]) {
+          /* Unbounded and no forward progress: exit without looping */
+        } else {
+          /* Push the EXIT choice (post-step instruction); fall through
              * to continue looping. If the body later fails, we backtrack
              * to this exit point. */
-            search_vm_push_choice(vm, ip, pos);
-            vm->loop_last_pos[loop_id] = pos;
-            ip = (size_t)jmp_target;
-          }
+          search_vm_push_choice(vm, ip, pos);
+          vm->loop_last_pos[loop_id] = pos;
+          ip = (size_t)jmp_target;
         }
-        /* else count >= max: fall through to exit */
       }
-      continue;
+      /* else count >= max: fall through to exit */
     }
-
-#ifdef _MSC_VER
-    }
-#endif
+    continue;
   }
 
-svm_fail_ret:
-  out_result->success = false;
-  return false;
+#ifdef _MSC_VER
+  }
+#endif
+}
+
+svm_fail_ret: out_result->success = false;
+return false;
 }
 #undef SEARCH_VM_MAX_RANGES
 
@@ -1614,14 +1653,19 @@ typedef struct {
 } nfa_set_t;
 
 /** Reset a set to empty. */
-static inline void nfa_set_clear(nfa_set_t *s) { s->count = 0; }
+static inline void nfa_set_clear(nfa_set_t *s) {
+  s->count = 0;
+}
 
 /** Insert a value into a sorted set (no-op if already present). */
 static inline void nfa_set_add(nfa_set_t *s, uint16_t v) {
   uint16_t i = 0;
-  while (i < s->count && s->states[i] < v) i++;
-  if (i < s->count && s->states[i] == v) return;
-  if (s->count >= DFA_NFA_MAX) return;
+  while (i < s->count && s->states[i] < v)
+    i++;
+  if (i < s->count && s->states[i] == v)
+    return;
+  if (s->count >= DFA_NFA_MAX)
+    return;
   memmove(&s->states[i + 1], &s->states[i],
           (size_t)(s->count - i) * sizeof(uint16_t));
   s->states[i] = v;
@@ -1631,7 +1675,8 @@ static inline void nfa_set_add(nfa_set_t *s, uint16_t v) {
 /** Return true if the set contains v. */
 static inline bool nfa_set_contains(const nfa_set_t *s, uint16_t v) {
   for (uint16_t i = 0; i < s->count; i++)
-    if (s->states[i] == v) return true;
+    if (s->states[i] == v)
+      return true;
   return false;
 }
 
@@ -1643,9 +1688,11 @@ static inline void nfa_set_copy(nfa_set_t *dst, const nfa_set_t *src) {
 
 /** Compare two sets for equality. */
 static inline bool nfa_set_eq(const nfa_set_t *a, const nfa_set_t *b) {
-  if (a->count != b->count) return false;
+  if (a->count != b->count)
+    return false;
   for (uint16_t i = 0; i < a->count; i++)
-    if (a->states[i] != b->states[i]) return false;
+    if (a->states[i] != b->states[i])
+      return false;
   return true;
 }
 
@@ -1669,129 +1716,129 @@ static void epsilon_closure(const uint8_t *bc, size_t bc_len, uint16_t start,
     changed = false;
     for (uint16_t si = 0; si < out->count; si++) {
       uint16_t off = out->states[si];
-      if (off >= bc_len) continue;
+      if (off >= bc_len)
+        continue;
       uint8_t op = bc[off];
       size_t ip = (size_t)off;
 
       switch (op) {
 
-      case OP_JMP: {
-        /* JMP target (u32) is an epsilon transition */
-        if (ip + 5 <= bc_len) {
-          uint32_t t = search_read_u32(bc, ip + 1);
-          if (t < bc_len && !nfa_set_contains(out, (uint16_t)t)) {
-            nfa_set_add(out, (uint16_t)t);
+        case OP_JMP: {
+          /* JMP target (u32) is an epsilon transition */
+          if (ip + 5 <= bc_len) {
+            uint32_t t = search_read_u32(bc, ip + 1);
+            if (t < bc_len && !nfa_set_contains(out, (uint16_t)t)) {
+              nfa_set_add(out, (uint16_t)t);
+              changed = true;
+            }
+          }
+          break;
+        }
+
+        case OP_SPLIT: {
+          /* Both SPLIT targets are epsilon transitions */
+          if (ip + 9 <= bc_len) {
+            uint32_t a = search_read_u32(bc, ip + 1);
+            uint32_t b = search_read_u32(bc, ip + 5);
+            if (a < bc_len && !nfa_set_contains(out, (uint16_t)a)) {
+              nfa_set_add(out, (uint16_t)a);
+              changed = true;
+            }
+            if (b < bc_len && !nfa_set_contains(out, (uint16_t)b)) {
+              nfa_set_add(out, (uint16_t)b);
+              changed = true;
+            }
+          }
+          break;
+        }
+
+        /* Zero-width ops — epsilon transition to next instruction */
+        case OP_NOP:
+          if (!nfa_set_contains(out, (uint16_t)(off + 1))) {
+            nfa_set_add(out, (uint16_t)(off + 1));
             changed = true;
           }
-        }
-        break;
-      }
+          break;
 
-      case OP_SPLIT: {
-        /* Both SPLIT targets are epsilon transitions */
-        if (ip + 9 <= bc_len) {
-          uint32_t a = search_read_u32(bc, ip + 1);
-          uint32_t b = search_read_u32(bc, ip + 5);
-          if (a < bc_len && !nfa_set_contains(out, (uint16_t)a)) {
-            nfa_set_add(out, (uint16_t)a);
+        case OP_FENCE:
+          if (!nfa_set_contains(out, (uint16_t)(off + 1))) {
+            nfa_set_add(out, (uint16_t)(off + 1));
             changed = true;
           }
-          if (b < bc_len && !nfa_set_contains(out, (uint16_t)b)) {
-            nfa_set_add(out, (uint16_t)b);
-            changed = true;
-          }
-        }
-        break;
-      }
+          break;
 
-      /* Zero-width ops — epsilon transition to next instruction */
-      case OP_NOP:
-        if (!nfa_set_contains(out, (uint16_t)(off + 1))) {
-          nfa_set_add(out, (uint16_t)(off + 1));
-          changed = true;
-        }
-        break;
-
-      case OP_FENCE:
-        if (!nfa_set_contains(out, (uint16_t)(off + 1))) {
-          nfa_set_add(out, (uint16_t)(off + 1));
-          changed = true;
-        }
-        break;
-
-      case OP_LIT: {
-        /* A zero-length literal matches the empty string, consuming no input,
+        case OP_LIT: {
+          /* A zero-length literal matches the empty string, consuming no input,
          * so it is an epsilon transition to the instruction that follows it.
          * Without this, patterns such as '' never mark their start state as
          * accepting and the automaton reports no match. */
-        if (ip + 9 <= bc_len) {
-          uint32_t lit_len = search_read_u32(bc, ip + 5);
-          if (lit_len == 0 &&
-              !nfa_set_contains(out, (uint16_t)(off + 9))) {
-            nfa_set_add(out, (uint16_t)(off + 9));
+          if (ip + 9 <= bc_len) {
+            uint32_t lit_len = search_read_u32(bc, ip + 5);
+            if (lit_len == 0 && !nfa_set_contains(out, (uint16_t)(off + 9))) {
+              nfa_set_add(out, (uint16_t)(off + 9));
+              changed = true;
+            }
+          }
+          break;
+        }
+
+        case OP_ANCHOR:
+          if (ip + 2 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 2))) {
+            nfa_set_add(out, (uint16_t)(off + 2));
             changed = true;
           }
-        }
-        break;
-      }
+          break;
 
-      case OP_ANCHOR:
-        if (ip + 2 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 2))) {
-          nfa_set_add(out, (uint16_t)(off + 2));
-          changed = true;
-        }
-        break;
+        case OP_POS:
+        case OP_RPOS:
+        case OP_TAB:
+        case OP_RTAB:
+          if (ip + 5 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 5))) {
+            nfa_set_add(out, (uint16_t)(off + 5));
+            changed = true;
+          }
+          break;
 
-      case OP_POS:
-      case OP_RPOS:
-      case OP_TAB:
-      case OP_RTAB:
-        if (ip + 5 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 5))) {
-          nfa_set_add(out, (uint16_t)(off + 5));
-          changed = true;
-        }
-        break;
-
-      case OP_REPEAT_INIT:
-        /* REPEAT_INIT: the skip_target is an epsilon transition to exit
+        case OP_REPEAT_INIT:
+          /* REPEAT_INIT: the skip_target is an epsilon transition to exit
          * the loop; fall-through to the loop body is also epsilon. */
-        if (ip + 14 <= bc_len) {
-          uint32_t skip = search_read_u32(bc, ip + 9); /* after loop_id, min, max */
-          if (skip < bc_len && !nfa_set_contains(out, (uint16_t)skip)) {
-            nfa_set_add(out, (uint16_t)skip);
-            changed = true;
+          if (ip + 14 <= bc_len) {
+            uint32_t skip =
+                search_read_u32(bc, ip + 9); /* after loop_id, min, max */
+            if (skip < bc_len && !nfa_set_contains(out, (uint16_t)skip)) {
+              nfa_set_add(out, (uint16_t)skip);
+              changed = true;
+            }
+            /* Also fall-through to the next instruction (the loop body) */
+            if (!nfa_set_contains(out, (uint16_t)(off + 14))) {
+              nfa_set_add(out, (uint16_t)(off + 14));
+              changed = true;
+            }
           }
-          /* Also fall-through to the next instruction (the loop body) */
-          if (!nfa_set_contains(out, (uint16_t)(off + 14))) {
-            nfa_set_add(out, (uint16_t)(off + 14));
-            changed = true;
-          }
-        }
-        break;
+          break;
 
-      case OP_BREAK:
-        /* BREAK has an epsilon transition to the next instruction (exit).
+        case OP_BREAK:
+          /* BREAK has an epsilon transition to the next instruction (exit).
          * This means the DFA can exit BREAK without consuming a delimiter byte. */
-        if (ip + 3 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 3))) {
-          nfa_set_add(out, (uint16_t)(off + 3));
-          changed = true;
-        }
-        break;
-
-      case OP_REPEAT_STEP: {
-        /* REPEAT_STEP: epsilon to jmp_target (next iteration) */
-        if (ip + 6 <= bc_len) {
-          uint32_t jmp_tgt = search_read_u32(bc, ip + 1); /* after loop_id */
-          if (jmp_tgt < bc_len && !nfa_set_contains(out, (uint16_t)jmp_tgt)) {
-            nfa_set_add(out, (uint16_t)jmp_tgt);
+          if (ip + 3 <= bc_len && !nfa_set_contains(out, (uint16_t)(off + 3))) {
+            nfa_set_add(out, (uint16_t)(off + 3));
             changed = true;
           }
-        }
-        break;
-      }
+          break;
 
-      default:
-        break;
+        case OP_REPEAT_STEP: {
+          /* REPEAT_STEP: epsilon to jmp_target (next iteration) */
+          if (ip + 6 <= bc_len) {
+            uint32_t jmp_tgt = search_read_u32(bc, ip + 1); /* after loop_id */
+            if (jmp_tgt < bc_len && !nfa_set_contains(out, (uint16_t)jmp_tgt)) {
+              nfa_set_add(out, (uint16_t)jmp_tgt);
+              changed = true;
+            }
+          }
+          break;
+        }
+
+        default: break;
       }
     }
   }
@@ -1801,7 +1848,7 @@ static void epsilon_closure(const uint8_t *bc, size_t bc_len, uint16_t start,
  * Check if an NFA state (VM offset) contains ACCEPT.
  */
 static inline bool nfa_is_accept(const uint8_t *bc, size_t bc_len,
-                                  uint16_t off) {
+                                 uint16_t off) {
   return off < bc_len && bc[off] == OP_ACCEPT;
 }
 
@@ -1816,88 +1863,98 @@ static bool get_op_bytes(const uint8_t *bc, size_t bc_len, uint16_t off,
                          const VM *dfa_vm, uint64_t byte_set[4]) {
   memset(byte_set, 0, 4 * sizeof(uint64_t));
 
-  if (off >= bc_len) return false;
+  if (off >= bc_len)
+    return false;
   uint8_t op = bc[off];
   size_t ip = (size_t)off;
 
   switch (op) {
 
-  case OP_LIT: {
-    /* LIT matches a specific sequence of bytes.  The first byte of the
+    case OP_LIT: {
+      /* LIT matches a specific sequence of bytes.  The first byte of the
      * literal determines the consuming transition from this offset. */
-    if (ip + 9 > bc_len) return false;
-    uint32_t lit_off = search_read_u32(bc, ip + 1);
-    uint32_t lit_len = search_read_u32(bc, ip + 5);
-    if (lit_off >= bc_len || lit_len == 0) return false;
-    uint8_t b = bc[lit_off];
-    if (b < 64)       byte_set[0] |= (1ULL << b);
-    else if (b < 128) byte_set[1] |= (1ULL << (b - 64));
-    else if (b < 192) byte_set[2] |= (1ULL << (b - 128));
-    else              byte_set[3] |= (1ULL << (b - 192));
-    return true;
-  }
-
-  case OP_ANY: {
-    if (ip + 3 > bc_len) return false;
-    uint16_t set_id = search_read_u16(bc, ip + 1);
-    if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
-      return false;
-    const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
-    uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
-    if (!rp || cnt == 0) {
-      memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+      if (ip + 9 > bc_len)
+        return false;
+      uint32_t lit_off = search_read_u32(bc, ip + 1);
+      uint32_t lit_len = search_read_u32(bc, ip + 5);
+      if (lit_off >= bc_len || lit_len == 0)
+        return false;
+      uint8_t b = bc[lit_off];
+      if (b < 64)
+        byte_set[0] |= (1ULL << b);
+      else if (b < 128)
+        byte_set[1] |= (1ULL << (b - 64));
+      else if (b < 192)
+        byte_set[2] |= (1ULL << (b - 128));
+      else
+        byte_set[3] |= (1ULL << (b - 192));
       return true;
     }
-    uint64_t abm[2] = {0, 0};
-    ranges_to_ascii_bitmap(rp, cnt, abm);
-    /* Copy 128-bit ASCII bitmap into 256-bit byte_set */
-    byte_set[0] = abm[0];
-    byte_set[1] = abm[1];
-    return true;
-  }
 
-  case OP_NOTANY: {
-    if (ip + 3 > bc_len) return false;
-    uint16_t set_id = search_read_u16(bc, ip + 1);
-    if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
-      return false;
-    const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
-    uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
-    if (!rp || cnt == 0) {
-      memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+    case OP_ANY: {
+      if (ip + 3 > bc_len)
+        return false;
+      uint16_t set_id = search_read_u16(bc, ip + 1);
+      if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
+        return false;
+      const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
+      uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
+      if (!rp || cnt == 0) {
+        memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+        return true;
+      }
+      uint64_t abm[2] = {0, 0};
+      ranges_to_ascii_bitmap(rp, cnt, abm);
+      /* Copy 128-bit ASCII bitmap into 256-bit byte_set */
+      byte_set[0] = abm[0];
+      byte_set[1] = abm[1];
       return true;
     }
-    uint64_t abm[2] = {0, 0};
-    ranges_to_ascii_bitmap(rp, cnt, abm);
-    /* Invert: NOTANY matches bytes NOT in the class */
-    byte_set[0] = ~abm[0];
-    byte_set[1] = ~abm[1];
-    byte_set[2] = ~0ULL;
-    byte_set[3] = ~0ULL;
-    return true;
-  }
 
-  case OP_SPAN: {
-    /* SPAN first-byte transition: same as ANY */
-    if (ip + 3 > bc_len) return false;
-    uint16_t set_id = search_read_u16(bc, ip + 1);
-    if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
-      return false;
-    const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
-    uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
-    if (!rp || cnt == 0) {
-      memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+    case OP_NOTANY: {
+      if (ip + 3 > bc_len)
+        return false;
+      uint16_t set_id = search_read_u16(bc, ip + 1);
+      if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
+        return false;
+      const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
+      uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
+      if (!rp || cnt == 0) {
+        memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+        return true;
+      }
+      uint64_t abm[2] = {0, 0};
+      ranges_to_ascii_bitmap(rp, cnt, abm);
+      /* Invert: NOTANY matches bytes NOT in the class */
+      byte_set[0] = ~abm[0];
+      byte_set[1] = ~abm[1];
+      byte_set[2] = ~0ULL;
+      byte_set[3] = ~0ULL;
       return true;
     }
-    uint64_t abm[2] = {0, 0};
-    ranges_to_ascii_bitmap(rp, cnt, abm);
-    byte_set[0] = abm[0];
-    byte_set[1] = abm[1];
-    return true;
-  }
 
-  case OP_BREAK: {
-    /* BREAK first-byte transition: bytes NOT in the class (matches the
+    case OP_SPAN: {
+      /* SPAN first-byte transition: same as ANY */
+      if (ip + 3 > bc_len)
+        return false;
+      uint16_t set_id = search_read_u16(bc, ip + 1);
+      if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
+        return false;
+      const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
+      uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
+      if (!rp || cnt == 0) {
+        memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+        return true;
+      }
+      uint64_t abm[2] = {0, 0};
+      ranges_to_ascii_bitmap(rp, cnt, abm);
+      byte_set[0] = abm[0];
+      byte_set[1] = abm[1];
+      return true;
+    }
+
+    case OP_BREAK: {
+      /* BREAK first-byte transition: bytes NOT in the class (matches the
      * delimiter, so the transition would be triggered by a delimiter byte).
      * Actually, BREAK consumes 0+ bytes until a delimiter.  The first
      * consuming step is: if current byte IS in the class, BREAK matches
@@ -1906,35 +1963,35 @@ static bool get_op_bytes(const uint8_t *bc, size_t bc_len, uint16_t off,
      * Wait — BREAK matches 0+ bytes until a delimiter, so it consumes
      * everything up to the delimiter.  The transition from the BREAK op
      * itself is: "if not delimiter, consume one byte and stay". */
-    if (ip + 3 > bc_len) return false;
-    uint16_t set_id = search_read_u16(bc, ip + 1);
-    if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
-      return false;
-    const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
-    uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
-    if (!rp || cnt == 0) {
+      if (ip + 3 > bc_len)
+        return false;
+      uint16_t set_id = search_read_u16(bc, ip + 1);
+      if (set_id == 0 || (size_t)(set_id - 1) >= dfa_vm->range_meta_count)
+        return false;
+      const uint8_t *rp = dfa_vm->range_meta[set_id - 1].ranges_ptr;
+      uint16_t cnt = dfa_vm->range_meta[set_id - 1].count;
+      if (!rp || cnt == 0) {
+        memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
+        return true;
+      }
+      uint64_t abm[2] = {0, 0};
+      ranges_to_ascii_bitmap(rp, cnt, abm);
+      /* BREAK loop: stay in BREAK while byte is NOT in the delimiter set.
+     * The consuming transition (stay-in-loop) eats bytes outside the set. */
+      byte_set[0] = ~abm[0];
+      byte_set[1] = ~abm[1];
+      byte_set[2] = ~0ULL;
+      byte_set[3] = ~0ULL;
+      return true;
+    }
+
+    case OP_LEN: {
+      /* LEN(n): matches any byte (first byte of N). */
       memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
       return true;
     }
-    uint64_t abm[2] = {0, 0};
-    ranges_to_ascii_bitmap(rp, cnt, abm);
-    /* BREAK loop: stay in BREAK while byte is NOT in the delimiter set.
-     * The consuming transition (stay-in-loop) eats bytes outside the set. */
-    byte_set[0] = ~abm[0];
-    byte_set[1] = ~abm[1];
-    byte_set[2] = ~0ULL;
-    byte_set[3] = ~0ULL;
-    return true;
-  }
 
-  case OP_LEN: {
-    /* LEN(n): matches any byte (first byte of N). */
-    memset(byte_set, 0xFF, 4 * sizeof(uint64_t));
-    return true;
-  }
-
-  default:
-    return false; /* Not a consuming op */
+    default: return false; /* Not a consuming op */
   }
 }
 
@@ -1944,7 +2001,7 @@ static bool get_op_bytes(const uint8_t *bc, size_t bc_len, uint16_t off,
  * build_dfa so we avoid re-computing the fixed point each time.
  */
 static inline void ec_merge(const nfa_set_t *eps_closures, uint16_t off,
-                             nfa_set_t *out) {
+                            nfa_set_t *out) {
   const nfa_set_t *src = &eps_closures[off];
   for (uint16_t i = 0; i < src->count; i++)
     nfa_set_add(out, src->states[i]);
@@ -1965,7 +2022,7 @@ static uint32_t dfa_state_hash(const nfa_set_t *s) {
 
 typedef struct {
   nfa_set_t key;
-  uint16_t dfa_state;  /**< DFA state index */
+  uint16_t dfa_state; /**< DFA state index */
   bool occupied;
 } dfa_hash_entry_t;
 
@@ -1974,9 +2031,9 @@ static void dfa_hash_init(dfa_hash_entry_t *ht, size_t cap) {
 }
 
 static uint16_t dfa_hash_find_or_insert(dfa_hash_entry_t *ht, size_t cap,
-                                         const nfa_set_t *s,
-                                         uint16_t *next_id) {
-  if (s->count == 0) return SNOBOL_DFA_DEAD;
+                                        const nfa_set_t *s, uint16_t *next_id) {
+  if (s->count == 0)
+    return SNOBOL_DFA_DEAD;
   uint32_t h = dfa_state_hash(s);
   for (size_t i = 0; i < cap; i++) {
     size_t idx = (size_t)((h + i) % cap);
@@ -2009,9 +2066,9 @@ static uint16_t dfa_hash_find_or_insert(dfa_hash_entry_t *ht, size_t cap,
  * @param dfa_vm   VM with range_meta populated for charclass resolution
  * @return Allocated DFA, or NULL on failure
  */
-snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
-                        const VM *dfa_vm) {
-  if (!bc || bc_len == 0) return NULL;
+snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len, const VM *dfa_vm) {
+  if (!bc || bc_len == 0)
+    return NULL;
 
   /* ---- Pre-scan bytecode for multi-byte LIT data positions ---- */
   /* Build a table mapping each literal data byte offset to its continuation:
@@ -2025,8 +2082,10 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
   dfa_hash_entry_t *ht = NULL;
   uint16_t *queue = NULL;
   uint16_t *lit_next = (uint16_t *)snobol_calloc(bc_len, sizeof(uint16_t));
-  if (!lit_next) goto fail;
-  for (size_t i = 0; i < bc_len; i++) lit_next[i] = SNOBOL_DFA_DEAD;
+  if (!lit_next)
+    goto fail;
+  for (size_t i = 0; i < bc_len; i++)
+    lit_next[i] = SNOBOL_DFA_DEAD;
   {
     size_t ip = 0;
     while (ip < bc_len) {
@@ -2047,7 +2106,8 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
             }
           }
         }
-      } else if (op == OP_LEN && ip + 5 <= bc_len && search_read_u32(bc, ip + 1) > 1) {
+      } else if (op == OP_LEN && ip + 5 <= bc_len &&
+                 search_read_u32(bc, ip + 1) > 1) {
         /* For LEN(n > 1): we chain through virtual offsets beyond bc_len.
          * Handled during transition computation using a tracking counter. */
         next_ip = ip + 5;
@@ -2064,9 +2124,11 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
         /* no-op: advance 1 */
       } else if (op == OP_ANCHOR) {
         next_ip = ip + 2;
-      } else if (op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB) {
+      } else if (op == OP_POS || op == OP_RPOS || op == OP_TAB ||
+                 op == OP_RTAB) {
         next_ip = ip + 5;
-      } else if (op == OP_ANY || op == OP_NOTANY || op == OP_SPAN || op == OP_BREAK) {
+      } else if (op == OP_ANY || op == OP_NOTANY || op == OP_SPAN ||
+                 op == OP_BREAK) {
         next_ip = ip + 3;
       } else if (op == OP_REPEAT_INIT) {
         next_ip = ip + 14;
@@ -2083,7 +2145,8 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
 
   /* Pre-compute epsilon closure for every VM offset up to bc_len */
   eps_closures = (nfa_set_t *)snobol_calloc(bc_len, sizeof(nfa_set_t));
-  if (!eps_closures) goto fail;
+  if (!eps_closures)
+    goto fail;
 
   for (uint16_t off = 0; off < bc_len; off++) {
     uint8_t op = bc[off];
@@ -2097,20 +2160,26 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
 
   /* Allocate DFA */
   dfa = (snobol_dfa_t *)snobol_calloc(1, sizeof(snobol_dfa_t));
-  if (!dfa) goto fail;
+  if (!dfa)
+    goto fail;
 
   dfa->state_cap = 64;
-  dfa->trans = (uint16_t *)snobol_calloc(dfa->state_cap * 256, sizeof(uint16_t));
-  if (!dfa->trans) goto fail;
+  dfa->trans =
+      (uint16_t *)snobol_calloc(dfa->state_cap * 256, sizeof(uint16_t));
+  if (!dfa->trans)
+    goto fail;
   dfa->accepting = (uint8_t *)snobol_calloc((dfa->state_cap + 7) / 8, 1);
-  if (!dfa->accepting) goto fail;
+  if (!dfa->accepting)
+    goto fail;
   dfa->num_states = 0;
   dfa->start_state = SNOBOL_DFA_DEAD;
 
   /* Hash table for mapping NFA sets -> DFA states.
    * Must be heap-allocated (≈4.2 MB) to avoid stack overflow. */
-  ht = (dfa_hash_entry_t *)snobol_calloc(DFA_HASH_CAP, sizeof(dfa_hash_entry_t));
-  if (!ht) goto fail;
+  ht =
+      (dfa_hash_entry_t *)snobol_calloc(DFA_HASH_CAP, sizeof(dfa_hash_entry_t));
+  if (!ht)
+    goto fail;
   dfa_hash_init(ht, DFA_HASH_CAP);
 
   uint16_t next_dfa_id = 0;
@@ -2118,35 +2187,46 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
   /* Start state = epsilon closure of offset 0 */
   nfa_set_t start_set;
   epsilon_closure(bc, bc_len, 0, &start_set);
-  if (start_set.count == 0) goto fail;
+  if (start_set.count == 0)
+    goto fail;
 
-  dfa->start_state = dfa_hash_find_or_insert(ht, DFA_HASH_CAP, &start_set,
-                                              &next_dfa_id);
+  dfa->start_state =
+      dfa_hash_find_or_insert(ht, DFA_HASH_CAP, &start_set, &next_dfa_id);
 
   /* BFS queue of DFA states to process */
   size_t q_head = 0, q_tail = 0;
   size_t q_cap = 512;
   queue = (uint16_t *)snobol_malloc(q_cap * sizeof(uint16_t));
-  if (!queue) goto fail;
+  if (!queue)
+    goto fail;
   queue[q_tail++] = dfa->start_state;
   dfa->num_states = next_dfa_id;
 
-#define DFA_ENSURE(s) do { \
-  if ((s) >= dfa->state_cap) { \
-    uint32_t new_cap = dfa->state_cap * 2; \
-    if (new_cap > SNOBOL_DFA_MAX_STATES) new_cap = SNOBOL_DFA_MAX_STATES; \
-    if ((s) >= new_cap) goto fail; \
-    uint16_t *nt = (uint16_t *)snobol_realloc(dfa->trans, new_cap * 256 * sizeof(uint16_t)); \
-    if (!nt) goto fail; \
-    memset(nt + dfa->state_cap * 256, 0, (new_cap - dfa->state_cap) * 256 * sizeof(uint16_t)); \
-    dfa->trans = nt; \
-    uint8_t *na = (uint8_t *)snobol_realloc(dfa->accepting, (new_cap + 7) / 8); \
-    if (!na) goto fail; \
-    memset(na + (dfa->state_cap + 7) / 8, 0, ((new_cap + 7) / 8) - ((dfa->state_cap + 7) / 8)); \
-    dfa->accepting = na; \
-    dfa->state_cap = new_cap; \
-  } \
-} while(0)
+#define DFA_ENSURE(s)                                                   \
+  do {                                                                  \
+    if ((s) >= dfa->state_cap) {                                        \
+      uint32_t new_cap = dfa->state_cap * 2;                            \
+      if (new_cap > SNOBOL_DFA_MAX_STATES)                              \
+        new_cap = SNOBOL_DFA_MAX_STATES;                                \
+      if ((s) >= new_cap)                                               \
+        goto fail;                                                      \
+      uint16_t *nt = (uint16_t *)snobol_realloc(                        \
+          dfa->trans, new_cap * 256 * sizeof(uint16_t));                \
+      if (!nt)                                                          \
+        goto fail;                                                      \
+      memset(nt + dfa->state_cap * 256, 0,                              \
+             (new_cap - dfa->state_cap) * 256 * sizeof(uint16_t));      \
+      dfa->trans = nt;                                                  \
+      uint8_t *na =                                                     \
+          (uint8_t *)snobol_realloc(dfa->accepting, (new_cap + 7) / 8); \
+      if (!na)                                                          \
+        goto fail;                                                      \
+      memset(na + (dfa->state_cap + 7) / 8, 0,                          \
+             ((new_cap + 7) / 8) - ((dfa->state_cap + 7) / 8));         \
+      dfa->accepting = na;                                              \
+      dfa->state_cap = new_cap;                                         \
+    }                                                                   \
+  } while (0)
 
   while (q_head < q_tail && dfa->num_states < SNOBOL_DFA_MAX_STATES) {
     uint16_t cur_dfa = queue[q_head++];
@@ -2159,7 +2239,8 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
         break;
       }
     }
-    if (!cur_set) continue;
+    if (!cur_set)
+      continue;
 
     bool is_accepting = false;
     for (uint16_t si = 0; si < cur_set->count && !is_accepting; si++) {
@@ -2177,7 +2258,8 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
 
       for (uint16_t si = 0; si < cur_set->count; si++) {
         uint16_t off = cur_set->states[si];
-        if (off >= bc_len) continue;
+        if (off >= bc_len)
+          continue;
 
         /* LIT data byte positions — handle before opcode switch so data
          * bytes that happen to match opcode values aren't misinterpreted. */
@@ -2200,108 +2282,120 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
 
         switch (op) {
 
-        /* ---- LIT ---- */
-        case OP_LIT: {
-          if ((size_t)off + 9 > bc_len) break;
-          uint32_t lit_off = search_read_u32(bc, (size_t)off + 1);
-          uint32_t lit_len = search_read_u32(bc, (size_t)off + 5);
-          if (lit_off >= bc_len || lit_len == 0) break;
-          if (bc[lit_off] != (uint8_t)b) break;
+          /* ---- LIT ---- */
+          case OP_LIT: {
+            if ((size_t)off + 9 > bc_len)
+              break;
+            uint32_t lit_off = search_read_u32(bc, (size_t)off + 1);
+            uint32_t lit_len = search_read_u32(bc, (size_t)off + 5);
+            if (lit_off >= bc_len || lit_len == 0)
+              break;
+            if (bc[lit_off] != (uint8_t)b)
+              break;
 
-          if (lit_len == 1) {
-            /* Single-byte literal: advance past LIT + data + 1 */
-            ec_merge(eps_closures, (uint16_t)(off + 9 + 1), &next_set);
-          } else {
-            /* Multi-byte literal: transition to second byte */
-            uint16_t second_byte = (uint16_t)(lit_off + 1);
-            if (second_byte < bc_len && lit_next[second_byte] != SNOBOL_DFA_DEAD)
-              nfa_set_add(&next_set, second_byte);
-          }
-          break;
-        }
-
-        /* ---- SPAN ---- */
-        case OP_SPAN: {
-          uint64_t bs[4];
-          if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs)) break;
-          bool in_class = (b < 64)   ? (bs[0] & (1ULL << b)) != 0 :
-                          (b < 128)  ? (bs[1] & (1ULL << (b - 64))) != 0 :
-                          (b < 192)  ? (bs[2] & (1ULL << (b - 128))) != 0 :
-                                       (bs[3] & (1ULL << (b - 192))) != 0;
-          if (!in_class) break;
-          /* On a class byte: both stay in SPAN (loop) and exit to next instruction */
-          ec_merge(eps_closures, off, &next_set);           /* stay in SPAN */
-          ec_merge(eps_closures, (uint16_t)(off + 3), &next_set); /* exit SPAN */
-          break;
-        }
-
-        /* ---- ANY ---- */
-        case OP_ANY: {
-          uint64_t bs[4];
-          if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs)) break;
-          bool in_class = (b < 64)   ? (bs[0] & (1ULL << b)) != 0 :
-                          (b < 128)  ? (bs[1] & (1ULL << (b - 64))) != 0 :
-                          (b < 192)  ? (bs[2] & (1ULL << (b - 128))) != 0 :
-                                       (bs[3] & (1ULL << (b - 192))) != 0;
-          if (!in_class) break;
-          ec_merge(eps_closures, (uint16_t)(off + 3), &next_set);
-          break;
-        }
-
-        /* ---- NOTANY ---- */
-        case OP_NOTANY: {
-          uint64_t bs[4];
-          if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs)) break;
-          bool in_class = (b < 64)   ? (bs[0] & (1ULL << b)) == 0 :
-                          (b < 128)  ? (bs[1] & (1ULL << (b - 64))) == 0 :
-                          (b < 192)  ? (bs[2] & (1ULL << (b - 128))) == 0 :
-                                       (bs[3] & (1ULL << (b - 192))) == 0;
-          if (!in_class) break;
-          ec_merge(eps_closures, (uint16_t)(off + 3), &next_set);
-          break;
-        }
-
-        /* ---- BREAK ---- */
-        case OP_BREAK: {
-          uint64_t bs[4];
-          if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs)) break;
-          /* get_op_bytes for BREAK returns bytes NOT in delimiter set */
-          bool is_delim = (b < 64)   ? (bs[0] & (1ULL << b)) == 0 :
-                          (b < 128)  ? (bs[1] & (1ULL << (b - 64))) == 0 :
-                          (b < 192)  ? (bs[2] & (1ULL << (b - 128))) == 0 :
-                                       (bs[3] & (1ULL << (b - 192))) == 0;
-          if (is_delim) {
-            /* Delimiter: BREAK doesn't consume it. The epsilon exit to off+3
-             * (set in epsilon_closure) and the next instruction handle it. */
+            if (lit_len == 1) {
+              /* Single-byte literal: advance past LIT + data + 1 */
+              ec_merge(eps_closures, (uint16_t)(off + 9 + 1), &next_set);
+            } else {
+              /* Multi-byte literal: transition to second byte */
+              uint16_t second_byte = (uint16_t)(lit_off + 1);
+              if (second_byte < bc_len &&
+                  lit_next[second_byte] != SNOBOL_DFA_DEAD)
+                nfa_set_add(&next_set, second_byte);
+            }
             break;
           }
-          /* Non-delimiter: stay in BREAK loop */
-          ec_merge(eps_closures, off, &next_set);
-          break;
-        }
 
-        /* ---- LEN ---- */
-        case OP_LEN: {
-          if ((size_t)off + 5 > bc_len) break;
-          uint32_t n = search_read_u32(bc, (size_t)off + 1);
-          if (n <= 1) {
-            ec_merge(eps_closures, (uint16_t)(off + 5), &next_set);
-          } else {
-            /* n > 1: stay at LEN (consume one byte, loop back) */
-            nfa_set_add(&next_set, off);
+          /* ---- SPAN ---- */
+          case OP_SPAN: {
+            uint64_t bs[4];
+            if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs))
+              break;
+            bool in_class = (b < 64)    ? (bs[0] & (1ULL << b)) != 0
+                            : (b < 128) ? (bs[1] & (1ULL << (b - 64))) != 0
+                            : (b < 192) ? (bs[2] & (1ULL << (b - 128))) != 0
+                                        : (bs[3] & (1ULL << (b - 192))) != 0;
+            if (!in_class)
+              break;
+            /* On a class byte: both stay in SPAN (loop) and exit to next instruction */
+            ec_merge(eps_closures, off, &next_set); /* stay in SPAN */
+            ec_merge(eps_closures, (uint16_t)(off + 3),
+                     &next_set); /* exit SPAN */
+            break;
           }
-          break;
-        }
 
-        default:
-          break;
+          /* ---- ANY ---- */
+          case OP_ANY: {
+            uint64_t bs[4];
+            if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs))
+              break;
+            bool in_class = (b < 64)    ? (bs[0] & (1ULL << b)) != 0
+                            : (b < 128) ? (bs[1] & (1ULL << (b - 64))) != 0
+                            : (b < 192) ? (bs[2] & (1ULL << (b - 128))) != 0
+                                        : (bs[3] & (1ULL << (b - 192))) != 0;
+            if (!in_class)
+              break;
+            ec_merge(eps_closures, (uint16_t)(off + 3), &next_set);
+            break;
+          }
+
+          /* ---- NOTANY ---- */
+          case OP_NOTANY: {
+            uint64_t bs[4];
+            if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs))
+              break;
+            bool in_class = (b < 64)    ? (bs[0] & (1ULL << b)) == 0
+                            : (b < 128) ? (bs[1] & (1ULL << (b - 64))) == 0
+                            : (b < 192) ? (bs[2] & (1ULL << (b - 128))) == 0
+                                        : (bs[3] & (1ULL << (b - 192))) == 0;
+            if (!in_class)
+              break;
+            ec_merge(eps_closures, (uint16_t)(off + 3), &next_set);
+            break;
+          }
+
+          /* ---- BREAK ---- */
+          case OP_BREAK: {
+            uint64_t bs[4];
+            if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs))
+              break;
+            /* get_op_bytes for BREAK returns bytes NOT in delimiter set */
+            bool is_delim = (b < 64)    ? (bs[0] & (1ULL << b)) == 0
+                            : (b < 128) ? (bs[1] & (1ULL << (b - 64))) == 0
+                            : (b < 192) ? (bs[2] & (1ULL << (b - 128))) == 0
+                                        : (bs[3] & (1ULL << (b - 192))) == 0;
+            if (is_delim) {
+              /* Delimiter: BREAK doesn't consume it. The epsilon exit to off+3
+             * (set in epsilon_closure) and the next instruction handle it. */
+              break;
+            }
+            /* Non-delimiter: stay in BREAK loop */
+            ec_merge(eps_closures, off, &next_set);
+            break;
+          }
+
+          /* ---- LEN ---- */
+          case OP_LEN: {
+            if ((size_t)off + 5 > bc_len)
+              break;
+            uint32_t n = search_read_u32(bc, (size_t)off + 1);
+            if (n <= 1) {
+              ec_merge(eps_closures, (uint16_t)(off + 5), &next_set);
+            } else {
+              /* n > 1: stay at LEN (consume one byte, loop back) */
+              nfa_set_add(&next_set, off);
+            }
+            break;
+          }
+
+          default: break;
         }
       }
 
       /* Commit the transition for byte b */
       if (next_set.count > 0) {
-        uint16_t target = dfa_hash_find_or_insert(ht, DFA_HASH_CAP, &next_set,
-                                                   &next_dfa_id);
+        uint16_t target =
+            dfa_hash_find_or_insert(ht, DFA_HASH_CAP, &next_set, &next_dfa_id);
         if (target == SNOBOL_DFA_DEAD && next_dfa_id >= SNOBOL_DFA_MAX_STATES)
           goto fail;
         dfa->trans[(size_t)cur_dfa * 256 + b] = target;
@@ -2309,9 +2403,12 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
           dfa->num_states = next_dfa_id;
           if (q_tail >= q_cap) {
             size_t new_qc = q_cap * 2;
-            if (new_qc > 65536) goto fail;
-            uint16_t *nq = (uint16_t *)snobol_realloc(queue, new_qc * sizeof(uint16_t));
-            if (!nq) goto fail;
+            if (new_qc > 65536)
+              goto fail;
+            uint16_t *nq =
+                (uint16_t *)snobol_realloc(queue, new_qc * sizeof(uint16_t));
+            if (!nq)
+              goto fail;
             queue = nq;
             q_cap = new_qc;
           }
@@ -2331,22 +2428,28 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len,
   snobol_free(queue);
   snobol_free(ht);
 
-  dfa->trans = (uint16_t *)snobol_realloc(dfa->trans,
-                    dfa->num_states * 256 * sizeof(uint16_t));
-  dfa->accepting = (uint8_t *)snobol_realloc(dfa->accepting,
-                      (dfa->num_states + 7) / 8);
+  dfa->trans = (uint16_t *)snobol_realloc(dfa->trans, dfa->num_states * 256 *
+                                                          sizeof(uint16_t));
+  dfa->accepting =
+      (uint8_t *)snobol_realloc(dfa->accepting, (dfa->num_states + 7) / 8);
   dfa->state_cap = dfa->num_states;
 
   return dfa;
 
 fail:
-  if (lit_next) snobol_free(lit_next);
-  if (eps_closures) snobol_free(eps_closures);
-  if (queue) snobol_free(queue);
-  if (ht) snobol_free(ht);
+  if (lit_next)
+    snobol_free(lit_next);
+  if (eps_closures)
+    snobol_free(eps_closures);
+  if (queue)
+    snobol_free(queue);
+  if (ht)
+    snobol_free(ht);
   if (dfa) {
-    if (dfa->trans) snobol_free(dfa->trans);
-    if (dfa->accepting) snobol_free(dfa->accepting);
+    if (dfa->trans)
+      snobol_free(dfa->trans);
+    if (dfa->accepting)
+      snobol_free(dfa->accepting);
     snobol_free(dfa);
   }
   return NULL;
@@ -2367,9 +2470,8 @@ fail:
  *
  * On success, fills out_result with match start/end.
  */
-static bool search_automaton_exec(const snobol_dfa_t *dfa,
-                                  const char *subject, size_t subject_len,
-                                  size_t offset,
+static bool search_automaton_exec(const snobol_dfa_t *dfa, const char *subject,
+                                  size_t subject_len, size_t offset,
                                   snobol_search_result_t *out_result) {
   if (!dfa || dfa->num_states == 0) {
     out_result->success = false;
@@ -2450,9 +2552,12 @@ static bool search_automaton_exec(const snobol_dfa_t *dfa,
 
 /** Free a DFA allocated by build_dfa(). */
 void snobol_dfa_free(snobol_dfa_t *dfa) {
-  if (!dfa) return;
-  if (dfa->trans) snobol_free(dfa->trans);
-  if (dfa->accepting) snobol_free(dfa->accepting);
+  if (!dfa)
+    return;
+  if (dfa->trans)
+    snobol_free(dfa->trans);
+  if (dfa->accepting)
+    snobol_free(dfa->accepting);
   snobol_free(dfa);
 }
 
@@ -2461,15 +2566,17 @@ void snobol_dfa_free(snobol_dfa_t *dfa) {
  * Returns the DFA pointer if available, NULL if not.
  */
 static snobol_dfa_t *get_or_build_automaton(snobol_pattern_t *pattern,
-                                              const VM *dfa_vm) {
+                                            const VM *dfa_vm) {
   snobol_dfa_t *cached = snobol_pattern_get_automaton(pattern);
-  if (cached) return cached;
+  if (cached)
+    return cached;
 
   const snobol_search_meta_t *meta = snobol_pattern_get_meta(pattern);
-  if (!meta || !meta->automaton_eligible) return NULL;
+  if (!meta || !meta->automaton_eligible)
+    return NULL;
 
   snobol_dfa_t *dfa = build_dfa(snobol_pattern_get_bc(pattern),
-                                 snobol_pattern_get_bc_len(pattern), dfa_vm);
+                                snobol_pattern_get_bc_len(pattern), dfa_vm);
   if (dfa)
     snobol_pattern_set_automaton(pattern, dfa);
   return dfa;
@@ -2524,43 +2631,50 @@ typedef bool (*tier_fn)(VM *vm, const char *subject, size_t subject_len,
 
 /* Tier 0: BREAK/BREAKX with ASCII bitmap scan */
 static bool tier_break_scan(VM *vm, const char *subject, size_t subject_len,
-                            size_t start_offset, const snobol_search_meta_t *meta,
+                            size_t start_offset,
+                            const snobol_search_meta_t *meta,
                             const snobol_dfa_t *dfa,
                             snobol_search_result_t *out_result,
                             snobol_search_diag_t *diag, bool anchored) {
   (void)dfa;
-  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BREAK_SCAN;
-  return search_break_accelerated(vm, subject, subject_len, start_offset,
-                                  meta, out_result, diag, anchored);
+  if (diag)
+    diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BREAK_SCAN;
+  return search_break_accelerated(vm, subject, subject_len, start_offset, meta,
+                                  out_result, diag, anchored);
 }
 
 /* Tier 1: SPAN with ASCII bitmap scan */
 static bool tier_span_scan(VM *vm, const char *subject, size_t subject_len,
-                           size_t start_offset, const snobol_search_meta_t *meta,
+                           size_t start_offset,
+                           const snobol_search_meta_t *meta,
                            const snobol_dfa_t *dfa,
                            snobol_search_result_t *out_result,
                            snobol_search_diag_t *diag, bool anchored) {
   (void)dfa;
-  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_SPAN_SCAN;
-  return search_span_accelerated(vm, subject, subject_len, start_offset,
-                                 meta, out_result, diag, anchored);
+  if (diag)
+    diag->last_skip_reason = SNOBOL_SEARCH_SKIP_SPAN_SCAN;
+  return search_span_accelerated(vm, subject, subject_len, start_offset, meta,
+                                 out_result, diag, anchored);
 }
 
 /* Tier 2: Literal-only fast path (no VM needed) */
 static bool tier_literal_only(VM *vm, const char *subject, size_t subject_len,
-                              size_t start_offset, const snobol_search_meta_t *meta,
+                              size_t start_offset,
+                              const snobol_search_meta_t *meta,
                               const snobol_dfa_t *dfa,
                               snobol_search_result_t *out_result,
                               snobol_search_diag_t *diag, bool anchored) {
   (void)dfa;
-  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_LITERAL;
-  return search_literal_only(vm, subject, subject_len, start_offset,
-                             meta, out_result, diag, anchored);
+  if (diag)
+    diag->last_skip_reason = SNOBOL_SEARCH_SKIP_LITERAL;
+  return search_literal_only(vm, subject, subject_len, start_offset, meta,
+                             out_result, diag, anchored);
 }
 
 /* Tier 3: Literal prefix (memmem / memchr) */
 static bool tier_literal_prefix(VM *vm, const char *subject, size_t subject_len,
-                                size_t start_offset, const snobol_search_meta_t *meta,
+                                size_t start_offset,
+                                const snobol_search_meta_t *meta,
                                 const snobol_dfa_t *dfa,
                                 snobol_search_result_t *out_result,
                                 snobol_search_diag_t *diag, bool anchored) {
@@ -2581,21 +2695,24 @@ static bool tier_bitmap(VM *vm, const char *subject, size_t subject_len,
                         snobol_search_result_t *out_result,
                         snobol_search_diag_t *diag, bool anchored) {
   (void)dfa;
-  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BITMAP;
-  return search_bitmap_accelerated(vm, subject, subject_len, start_offset,
-                                   meta, out_result, diag, anchored);
+  if (diag)
+    diag->last_skip_reason = SNOBOL_SEARCH_SKIP_BITMAP;
+  return search_bitmap_accelerated(vm, subject, subject_len, start_offset, meta,
+                                   out_result, diag, anchored);
 }
 
 /* Tier 5: Alternation-of-literals (trie-based) */
 static bool tier_alt_literals(VM *vm, const char *subject, size_t subject_len,
-                              size_t start_offset, const snobol_search_meta_t *meta,
+                              size_t start_offset,
+                              const snobol_search_meta_t *meta,
                               const snobol_dfa_t *dfa,
                               snobol_search_result_t *out_result,
                               snobol_search_diag_t *diag, bool anchored) {
   (void)dfa;
-  if (diag) diag->last_skip_reason = SNOBOL_SEARCH_SKIP_NONE;
-  return search_alt_literals_try(vm, subject, subject_len, start_offset,
-                                 meta, out_result, anchored);
+  if (diag)
+    diag->last_skip_reason = SNOBOL_SEARCH_SKIP_NONE;
+  return search_alt_literals_try(vm, subject, subject_len, start_offset, meta,
+                                 out_result, anchored);
 }
 
 /* Tier 6: Search-VM for eligible patterns */
@@ -2636,7 +2753,7 @@ static bool tier_alt_literals(VM *vm, const char *subject, size_t subject_len,
  */
 #ifdef SNOBOL_PIKE_SCAN
 #define PIKE_THREAD_BUF 64
-#define PIKE_DEFER_BUF  64
+#define PIKE_DEFER_BUF 64
 typedef struct {
   size_t ip;
   size_t pos;
@@ -2652,13 +2769,10 @@ typedef struct {
   uint8_t max_counter_used;
 } pike_thread_t;
 
-bool pike_scan(const uint8_t *bc, size_t bc_len,
-                      const char *subject, size_t subject_len,
-                      const snobol_search_meta_t *meta,
-                      const snobol_range_meta_t *range_meta,
-                      size_t range_meta_count,
-                      VM *vm,
-                      snobol_search_result_t *out_result) {
+bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
+               size_t subject_len, const snobol_search_meta_t *meta,
+               const snobol_range_meta_t *range_meta, size_t range_meta_count,
+               VM *vm, snobol_search_result_t *out_result) {
   pike_thread_t threads[PIKE_THREAD_BUF];
   size_t thread_n = 0;
   pike_thread_t defer[PIKE_DEFER_BUF];
@@ -2681,9 +2795,11 @@ bool pike_scan(const uint8_t *bc, size_t bc_len,
     size_t work_n = 0;
     for (size_t t = 0; t < thread_n; ++t) {
       if (threads[t].pos == pos) {
-        if (work_n < PIKE_THREAD_BUF) work[work_n++] = threads[t];
+        if (work_n < PIKE_THREAD_BUF)
+          work[work_n++] = threads[t];
       } else if (threads[t].pos > pos) {
-        if (carry_n < PIKE_THREAD_BUF) carry[carry_n++] = threads[t];
+        if (carry_n < PIKE_THREAD_BUF)
+          carry[carry_n++] = threads[t];
       }
     }
     /* Spawn a fresh thread at this start position. */
@@ -2704,51 +2820,121 @@ bool pike_scan(const uint8_t *bc, size_t bc_len,
        * at the next instruction, so their `continue` re-enters this loop. */
       while (ip < bc_len) {
         uint8_t op = bc[ip];
-        if (op == OP_NOP || op == OP_FENCE) { ip++; continue; }
+        if (op == OP_NOP || op == OP_FENCE) {
+          ip++;
+          continue;
+        }
         if (op == OP_ANCHOR) {
           uint8_t at = bc[ip + 1];
-          if ((at == 0 && tp != 0) || (at == 1 && tp != subject_len)) goto pike_die;
-          ip += 2; continue;
+          if ((at == 0 && tp != 0) || (at == 1 && tp != subject_len))
+            goto pike_die;
+          ip += 2;
+          continue;
         }
-        if (op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB) { ip += 5; continue; }
+        if (op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB) {
+          ip += 5;
+          continue;
+        }
         if (op == OP_CAP_START) {
           uint8_t r = bc[ip + 1];
-          if (r < MAX_CAPS) { th.cap_start[r] = tp; if (r >= th.max_cap_used) th.max_cap_used = r + 1; }
-          ip += 2; continue;
+          if (r < MAX_CAPS) {
+            th.cap_start[r] = tp;
+            if (r >= th.max_cap_used)
+              th.max_cap_used = r + 1;
+          }
+          ip += 2;
+          continue;
         }
         if (op == OP_CAP_END) {
           uint8_t r = bc[ip + 1];
           if (r < MAX_CAPS) {
             th.cap_end[r] = tp;
-            if (r >= th.max_cap_used) th.max_cap_used = r + 1;
-            if (r < MAX_VARS) { th.var_start[r] = th.cap_start[r]; th.var_end[r] = th.cap_end[r]; if ((size_t)r+1 > th.var_count) th.var_count = (size_t)r+1; }
+            if (r >= th.max_cap_used)
+              th.max_cap_used = r + 1;
+            if (r < MAX_VARS) {
+              th.var_start[r] = th.cap_start[r];
+              th.var_end[r] = th.cap_end[r];
+              if ((size_t)r + 1 > th.var_count)
+                th.var_count = (size_t)r + 1;
+            }
           }
-          ip += 2; continue;
+          ip += 2;
+          continue;
         }
         if (op == OP_ASSIGN) {
-          uint16_t v = (uint16_t)((bc[ip+1]<<8)|bc[ip+2]); uint8_t r = bc[ip+3];
-          if (v < MAX_VARS && r < MAX_CAPS) { if (v >= th.var_count) th.var_count = (size_t)v+1; th.var_start[v] = th.cap_start[r]; th.var_end[v] = th.cap_end[r]; }
-          ip += 4; continue;
+          uint16_t v = (uint16_t)((bc[ip + 1] << 8) | bc[ip + 2]);
+          uint8_t r = bc[ip + 3];
+          if (v < MAX_VARS && r < MAX_CAPS) {
+            if (v >= th.var_count)
+              th.var_count = (size_t)v + 1;
+            th.var_start[v] = th.cap_start[r];
+            th.var_end[v] = th.cap_end[r];
+          }
+          ip += 4;
+          continue;
         }
-        if (op == OP_JMP) { uint32_t tgt = ((uint32_t)bc[ip+1]<<24)|((uint32_t)bc[ip+2]<<16)|((uint32_t)bc[ip+3]<<8)|(uint32_t)bc[ip+4]; ip = (size_t)tgt; continue; }
+        if (op == OP_JMP) {
+          uint32_t tgt = ((uint32_t)bc[ip + 1] << 24) |
+                         ((uint32_t)bc[ip + 2] << 16) |
+                         ((uint32_t)bc[ip + 3] << 8) | (uint32_t)bc[ip + 4];
+          ip = (size_t)tgt;
+          continue;
+        }
         if (op == OP_LEN) {
-          uint32_t n = ((uint32_t)bc[ip+1]<<24)|((uint32_t)bc[ip+2]<<16)|((uint32_t)bc[ip+3]<<8)|(uint32_t)bc[ip+4]; ip += 5;
-          for (uint32_t i = 0; i < n; i++) { if (tp >= subject_len) goto pike_die; uint32_t cp; int by; if (!utf8_peek_next(subject, subject_len, tp, &cp, &by)) goto pike_die; tp += by; }
+          uint32_t n = ((uint32_t)bc[ip + 1] << 24) |
+                       ((uint32_t)bc[ip + 2] << 16) |
+                       ((uint32_t)bc[ip + 3] << 8) | (uint32_t)bc[ip + 4];
+          ip += 5;
+          for (uint32_t i = 0; i < n; i++) {
+            if (tp >= subject_len)
+              goto pike_die;
+            uint32_t cp;
+            int by;
+            if (!utf8_peek_next(subject, subject_len, tp, &cp, &by))
+              goto pike_die;
+            tp += by;
+          }
           continue;
         }
         if (op == OP_SPLIT) {
-          uint32_t aa = ((uint32_t)bc[ip+1]<<24)|((uint32_t)bc[ip+2]<<16)|((uint32_t)bc[ip+3]<<8)|(uint32_t)bc[ip+4];
-          uint32_t bb = ((uint32_t)bc[ip+5]<<24)|((uint32_t)bc[ip+6]<<16)|((uint32_t)bc[ip+7]<<8)|(uint32_t)bc[ip+8];
+          uint32_t aa = ((uint32_t)bc[ip + 1] << 24) |
+                        ((uint32_t)bc[ip + 2] << 16) |
+                        ((uint32_t)bc[ip + 3] << 8) | (uint32_t)bc[ip + 4];
+          uint32_t bb = ((uint32_t)bc[ip + 5] << 24) |
+                        ((uint32_t)bc[ip + 6] << 16) |
+                        ((uint32_t)bc[ip + 7] << 8) | (uint32_t)bc[ip + 8];
           ip = (size_t)aa;
           /* Branch B runs at the same scan position (SPLIT is zero-width);
            * append it to the work queue so it is tried after branch A. */
-          if (work_n < PIKE_THREAD_BUF) { pike_thread_t nt = th; nt.ip = (size_t)bb; nt.pos = tp; work[work_n++] = nt; }
+          if (work_n < PIKE_THREAD_BUF) {
+            pike_thread_t nt = th;
+            nt.ip = (size_t)bb;
+            nt.pos = tp;
+            work[work_n++] = nt;
+          }
           continue;
         }
-        if (op == OP_REPEAT_INIT) { uint8_t lid = bc[ip+1]; if (lid < MAX_LOOPS) { th.counters[lid] = 0; th.loop_last_pos[lid] = 0; } ip += 13; continue; }
+        if (op == OP_REPEAT_INIT) {
+          uint8_t lid = bc[ip + 1];
+          if (lid < MAX_LOOPS) {
+            th.counters[lid] = 0;
+            th.loop_last_pos[lid] = 0;
+          }
+          ip += 13;
+          continue;
+        }
         if (op == OP_REPEAT_STEP) {
-          uint8_t lid = bc[ip+1]; uint32_t tgt = ((uint32_t)bc[ip+2]<<24)|((uint32_t)bc[ip+3]<<16)|((uint32_t)bc[ip+4]<<8)|(uint32_t)bc[ip+5];
-          if (lid < MAX_LOOPS) { th.counters[lid]++; th.loop_last_pos[lid] = tp; ip = (size_t)tgt; } else { ip += 6; }
+          uint8_t lid = bc[ip + 1];
+          uint32_t tgt = ((uint32_t)bc[ip + 2] << 24) |
+                         ((uint32_t)bc[ip + 3] << 16) |
+                         ((uint32_t)bc[ip + 4] << 8) | (uint32_t)bc[ip + 5];
+          if (lid < MAX_LOOPS) {
+            th.counters[lid]++;
+            th.loop_last_pos[lid] = tp;
+            ip = (size_t)tgt;
+          } else {
+            ip += 6;
+          }
           continue;
         }
         break;
@@ -2759,8 +2945,11 @@ bool pike_scan(const uint8_t *bc, size_t bc_len,
       uint8_t op = bc[ip++];
 
       if (op == OP_ACCEPT || op == OP_SUCCEED) {
-        if (!found || th.match_start < m_start || (th.match_start == m_start && tp > m_end)) {
-          found = true; m_start = th.match_start; m_end = tp;
+        if (!found || th.match_start < m_start ||
+            (th.match_start == m_start && tp > m_end)) {
+          found = true;
+          m_start = th.match_start;
+          m_end = tp;
           /* Write captures back to the VM so unanchored capture search stays
            * consistent with the full VM (mirrors search_vm_writeback_to_vm). */
           if (vm) {
@@ -2771,76 +2960,153 @@ bool pike_scan(const uint8_t *bc, size_t bc_len,
         }
         goto pike_die;
       }
-      if (op == OP_FAIL || op == OP_ABORT) goto pike_die;
+      if (op == OP_FAIL || op == OP_ABORT)
+        goto pike_die;
 
-      if (tp >= subject_len) goto pike_die;
+      if (tp >= subject_len)
+        goto pike_die;
       if (op == OP_LIT) {
-        uint32_t off = ((uint32_t)bc[ip]<<24)|((uint32_t)bc[ip+1]<<16)|((uint32_t)bc[ip+2]<<8)|(uint32_t)bc[ip+3];
-        uint32_t alen = ((uint32_t)bc[ip+4]<<24)|((uint32_t)bc[ip+5]<<16)|((uint32_t)bc[ip+6]<<8)|(uint32_t)bc[ip+7]; ip += 8;
-        if (off == ip) ip += alen; /* literal data stored inline; skip past it */
-        if (tp+alen > subject_len || memcmp(subject+tp, bc+off, alen) != 0) goto pike_die;
-        tp += alen; th.ip = ip; th.pos = tp;
-        if (tp > pos && defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        uint32_t off = ((uint32_t)bc[ip] << 24) | ((uint32_t)bc[ip + 1] << 16) |
+                       ((uint32_t)bc[ip + 2] << 8) | (uint32_t)bc[ip + 3];
+        uint32_t alen = ((uint32_t)bc[ip + 4] << 24) |
+                        ((uint32_t)bc[ip + 5] << 16) |
+                        ((uint32_t)bc[ip + 6] << 8) | (uint32_t)bc[ip + 7];
+        ip += 8;
+        if (off == ip)
+          ip += alen; /* literal data stored inline; skip past it */
+        if (tp + alen > subject_len ||
+            memcmp(subject + tp, bc + off, alen) != 0)
+          goto pike_die;
+        tp += alen;
+        th.ip = ip;
+        th.pos = tp;
+        if (tp > pos && defer_n < PIKE_DEFER_BUF)
+          defer[defer_n++] = th;
         goto pike_next;
       }
       if (op == OP_ANY) {
-        uint16_t sid = (uint16_t)((bc[ip]<<8)|bc[ip+1]); ip += 2;
+        uint16_t sid = (uint16_t)((bc[ip] << 8) | bc[ip + 1]);
+        ip += 2;
         uint16_t cnt = 0;
-        const uint8_t *rp = (sid > 0 && (size_t)(sid-1) < range_meta_count) ? range_meta[sid-1].ranges_ptr : NULL;
-        cnt = rp ? range_meta[sid-1].count : 0;
-        uint32_t cp; int by;
-        if (!utf8_peek_next(subject, subject_len, tp, &cp, &by)) goto pike_die;
-        if (!rp || !range_contains(rp, cnt, cp)) goto pike_die;
+        const uint8_t *rp = (sid > 0 && (size_t)(sid - 1) < range_meta_count)
+                                ? range_meta[sid - 1].ranges_ptr
+                                : NULL;
+        cnt = rp ? range_meta[sid - 1].count : 0;
+        uint32_t cp;
+        int by;
+        if (!utf8_peek_next(subject, subject_len, tp, &cp, &by))
+          goto pike_die;
+        if (!rp || !range_contains(rp, cnt, cp))
+          goto pike_die;
         tp += by;
-        th.ip = ip; th.pos = tp;
-        if (tp > pos && defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        th.ip = ip;
+        th.pos = tp;
+        if (tp > pos && defer_n < PIKE_DEFER_BUF)
+          defer[defer_n++] = th;
         goto pike_next;
       }
       if (op == OP_NOTANY) {
-        uint16_t sid = (uint16_t)((bc[ip]<<8)|bc[ip+1]); ip += 2;
+        uint16_t sid = (uint16_t)((bc[ip] << 8) | bc[ip + 1]);
+        ip += 2;
         uint16_t cnt = 0;
-        const uint8_t *rp = (sid > 0 && (size_t)(sid-1) < range_meta_count) ? range_meta[sid-1].ranges_ptr : NULL;
-        cnt = rp ? range_meta[sid-1].count : 0;
-        if (rp) { uint32_t cp; int by; if (utf8_peek_next(subject, subject_len, tp, &cp, &by) && range_contains(rp, cnt, cp)) goto pike_die; tp += by; }
-        else { tp++; }
-        th.ip = ip; th.pos = tp;
-        if (tp > pos && defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        const uint8_t *rp = (sid > 0 && (size_t)(sid - 1) < range_meta_count)
+                                ? range_meta[sid - 1].ranges_ptr
+                                : NULL;
+        cnt = rp ? range_meta[sid - 1].count : 0;
+        if (rp) {
+          uint32_t cp;
+          int by;
+          if (utf8_peek_next(subject, subject_len, tp, &cp, &by) &&
+              range_contains(rp, cnt, cp))
+            goto pike_die;
+          tp += by;
+        } else {
+          tp++;
+        }
+        th.ip = ip;
+        th.pos = tp;
+        if (tp > pos && defer_n < PIKE_DEFER_BUF)
+          defer[defer_n++] = th;
         goto pike_next;
       }
       if (op == OP_SPAN) {
-        uint16_t sid = (uint16_t)((bc[ip]<<8)|bc[ip+1]); ip += 2;
+        uint16_t sid = (uint16_t)((bc[ip] << 8) | bc[ip + 1]);
+        ip += 2;
         uint16_t cnt = 0;
-        const uint8_t *rp = (sid > 0 && (size_t)(sid-1) < range_meta_count) ? range_meta[sid-1].ranges_ptr : NULL;
-        cnt = rp ? range_meta[sid-1].count : 0;
+        const uint8_t *rp = (sid > 0 && (size_t)(sid - 1) < range_meta_count)
+                                ? range_meta[sid - 1].ranges_ptr
+                                : NULL;
+        cnt = rp ? range_meta[sid - 1].count : 0;
         size_t sp = tp;
-        if (rp) { while (sp < subject_len) { uint32_t cp; int by; if (!utf8_peek_next(subject, subject_len, sp, &cp, &by)) break; if (!range_contains(rp, cnt, cp)) break; sp += by; } }
-        else { sp = subject_len; } /* NULL ranges: match any (full VM compat) */
-        if (sp == tp) goto pike_die;
-        th.ip = ip; th.pos = sp;
-        if (defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        if (rp) {
+          while (sp < subject_len) {
+            uint32_t cp;
+            int by;
+            if (!utf8_peek_next(subject, subject_len, sp, &cp, &by))
+              break;
+            if (!range_contains(rp, cnt, cp))
+              break;
+            sp += by;
+          }
+        } else {
+          sp = subject_len;
+        } /* NULL ranges: match any (full VM compat) */
+        if (sp == tp)
+          goto pike_die;
+        th.ip = ip;
+        th.pos = sp;
+        if (defer_n < PIKE_DEFER_BUF)
+          defer[defer_n++] = th;
         goto pike_next;
       }
       if (op == OP_BREAK || op == OP_BREAKX) {
-        uint16_t sid = (uint16_t)((bc[ip]<<8)|bc[ip+1]); ip += 2;
+        uint16_t sid = (uint16_t)((bc[ip] << 8) | bc[ip + 1]);
+        ip += 2;
         uint16_t cnt = 0;
-        const uint8_t *rp = (sid > 0 && (size_t)(sid-1) < range_meta_count) ? range_meta[sid-1].ranges_ptr : NULL;
-        cnt = rp ? range_meta[sid-1].count : 0;
+        const uint8_t *rp = (sid > 0 && (size_t)(sid - 1) < range_meta_count)
+                                ? range_meta[sid - 1].ranges_ptr
+                                : NULL;
+        cnt = rp ? range_meta[sid - 1].count : 0;
         size_t sp = tp;
-        if (rp) { while (sp < subject_len) { uint32_t cp; int by; if (!utf8_peek_next(subject, subject_len, sp, &cp, &by)) break; if (range_contains(rp, cnt, cp)) break; sp += by; } }
-        else { sp = subject_len; }
-        if (sp >= subject_len) goto pike_die;
-        if (op == OP_BREAKX) { uint32_t bx_cp; int bx_by = 1; utf8_peek_next(subject, subject_len, sp, &bx_cp, &bx_by); if (defer_n < PIKE_DEFER_BUF) { pike_thread_t rt = th; rt.ip = ip-2; rt.pos = sp+(size_t)bx_by; defer[defer_n++] = rt; } }
-        th.ip = ip; th.pos = sp;
-        if (defer_n < PIKE_DEFER_BUF) defer[defer_n++] = th;
+        if (rp) {
+          while (sp < subject_len) {
+            uint32_t cp;
+            int by;
+            if (!utf8_peek_next(subject, subject_len, sp, &cp, &by))
+              break;
+            if (range_contains(rp, cnt, cp))
+              break;
+            sp += by;
+          }
+        } else {
+          sp = subject_len;
+        }
+        if (sp >= subject_len)
+          goto pike_die;
+        if (op == OP_BREAKX) {
+          uint32_t bx_cp;
+          int bx_by = 1;
+          utf8_peek_next(subject, subject_len, sp, &bx_cp, &bx_by);
+          if (defer_n < PIKE_DEFER_BUF) {
+            pike_thread_t rt = th;
+            rt.ip = ip - 2;
+            rt.pos = sp + (size_t)bx_by;
+            defer[defer_n++] = rt;
+          }
+        }
+        th.ip = ip;
+        th.pos = sp;
+        if (defer_n < PIKE_DEFER_BUF)
+          defer[defer_n++] = th;
         goto pike_next;
       }
       goto pike_die;
-pike_die:
+    pike_die:
       /* Thread failed/ended: discard it. */
       continue;
-pike_next:
-      /* Thread advanced and was stored in defer[] above. */
-      ;
+    pike_next:
+        /* Thread advanced and was stored in defer[] above. */
+        ;
     }
 
     /* Rebuild the thread set: carried threads (future positions) first, then
@@ -2852,23 +3118,28 @@ pike_next:
       threads[thread_n++] = defer[d];
   }
   out_result->success = found;
-  if (found) { out_result->match_start = m_start; out_result->match_end = m_end; }
+  if (found) {
+    out_result->match_start = m_start;
+    out_result->match_end = m_end;
+  }
   return found;
 }
 #endif /* SNOBOL_PIKE_SCAN */
 /* Tier 6: Search-VM for eligible patterns */
 static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
-                            size_t start_offset, const snobol_search_meta_t *meta,
-                            const snobol_dfa_t *dfa,
-                            snobol_search_result_t *out_result,
-                            snobol_search_diag_t *diag, bool anchored) {
+                           size_t start_offset,
+                           const snobol_search_meta_t *meta,
+                           const snobol_dfa_t *dfa,
+                           snobol_search_result_t *out_result,
+                           snobol_search_diag_t *diag, bool anchored) {
   (void)dfa;
 #ifdef SNOBOL_PIKE_SCAN
   /* pike_scan does not support anchored mode — it scans the full subject.
    * When anchored, fall through to the restart loop which respects the
    * anchor constraint (single position). */
   if (start_offset == 0 && !anchored) {
-    if (diag) diag->search_vm_tests++;
+    if (diag)
+      diag->search_vm_tests++;
     return pike_scan(vm->bc, vm->bc_len, subject, subject_len, meta,
                      vm->range_meta, vm->range_meta_count, vm, out_result);
   }
@@ -2909,10 +3180,9 @@ static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
       break;
     if (anchored)
       break;
-    if (meta->has_bmh_skip &&
-        offset + meta->bmh_skip_len <= subject_len) {
-      size_t adv =
-          meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+    if (meta->has_bmh_skip && offset + meta->bmh_skip_len <= subject_len) {
+      size_t adv = meta->bmh_skip[(
+          unsigned char)subject[offset + meta->bmh_skip_len - 1]];
       offset += adv > 0 ? adv : 1;
     } else {
       offset++;
@@ -2928,10 +3198,11 @@ static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
 
 /* Tier 8: General VM fallback with start-byte bitmap acceleration */
 bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
-                                  size_t start_offset, const snobol_search_meta_t *meta,
-                                  const snobol_dfa_t *dfa,
-                                  snobol_search_result_t *out_result,
-                                  snobol_search_diag_t *diag, bool anchored) {
+                           size_t start_offset,
+                           const snobol_search_meta_t *meta,
+                           const snobol_dfa_t *dfa,
+                           snobol_search_result_t *out_result,
+                           snobol_search_diag_t *diag, bool anchored) {
   (void)dfa;
   size_t offset = start_offset;
   out_result->aborted = false;
@@ -2975,10 +3246,9 @@ bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
       break;
     if (anchored)
       break;
-    if (meta->has_bmh_skip &&
-        offset + meta->bmh_skip_len <= subject_len) {
-      size_t adv =
-          meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+    if (meta->has_bmh_skip && offset + meta->bmh_skip_len <= subject_len) {
+      size_t adv = meta->bmh_skip[(
+          unsigned char)subject[offset + meta->bmh_skip_len - 1]];
       offset += adv > 0 ? adv : 1;
     } else {
       offset++;
@@ -2991,10 +3261,11 @@ bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
 
 /* Tier 7: Automaton path for eligible patterns */
 static bool tier_automaton(VM *vm, const char *subject, size_t subject_len,
-                            size_t start_offset, const snobol_search_meta_t *meta,
-                            const snobol_dfa_t *dfa,
-                            snobol_search_result_t *out_result,
-                            snobol_search_diag_t *diag, bool anchored) {
+                           size_t start_offset,
+                           const snobol_search_meta_t *meta,
+                           const snobol_dfa_t *dfa,
+                           snobol_search_result_t *out_result,
+                           snobol_search_diag_t *diag, bool anchored) {
   snobol_dfa_t *owned = NULL;
   if (!dfa) {
     owned = build_dfa(vm->bc, vm->bc_len, vm);
@@ -3010,27 +3281,28 @@ static bool tier_automaton(VM *vm, const char *subject, size_t subject_len,
       bool ok =
           search_automaton_exec(dfa, subject, subject_len, offset, out_result);
       if (ok) {
-        if (owned) snobol_dfa_free(owned);
+        if (owned)
+          snobol_dfa_free(owned);
         return true;
       }
       if (offset >= subject_len)
         break;
       if (anchored)
         break;
-      if (meta->has_bmh_skip &&
-          offset + meta->bmh_skip_len <= subject_len) {
-        size_t adv =
-            meta->bmh_skip[(unsigned char)subject[offset + meta->bmh_skip_len - 1]];
+      if (meta->has_bmh_skip && offset + meta->bmh_skip_len <= subject_len) {
+        size_t adv = meta->bmh_skip[(
+            unsigned char)subject[offset + meta->bmh_skip_len - 1]];
         offset += adv > 0 ? adv : 1;
       } else {
         offset++;
       }
     }
   }
-  if (owned) snobol_dfa_free(owned);
+  if (owned)
+    snobol_dfa_free(owned);
   /* Fall through to general VM */
-  return tier_general_fallback(vm, subject, subject_len, start_offset,
-                               meta, NULL, out_result, diag, anchored);
+  return tier_general_fallback(vm, subject, subject_len, start_offset, meta,
+                               NULL, out_result, diag, anchored);
 }
 
 /**
@@ -3043,24 +3315,24 @@ static bool tier_automaton(VM *vm, const char *subject, size_t subject_len,
  * Tier 8 uses the full SNOBOL4 VM.
  */
 static const tier_fn tier_table[TIER_COUNT] = {
-  [TIER_BREAK_SCAN] = tier_break_scan,     /* BREAK/BREAKX ASCII bitmap scan */
-  [TIER_SPAN_SCAN]  = tier_span_scan,      /* SPAN ASCII bitmap scan */
-  [TIER_LITERAL]    = tier_literal_only,   /* Literal-only (no VM) */
-  [TIER_PREFIX]     = tier_literal_prefix, /* Literal prefix (memmem/memchr) */
-  [TIER_BITMAP]     = tier_bitmap,         /* Candidate bitmap (single-char alt) */
-  [TIER_ALT_LIT]    = tier_alt_literals,   /* Alt-of-literals (trie) */
-  [TIER_SEARCH_VM]  = tier_search_vm,      /* Search-VM (backtracking NFA) */
-  [TIER_AUTOMATON]  = tier_automaton,      /* DFA automaton (O(n) scan) */
-  [TIER_GENERAL]    = tier_general_fallback,/* General VM fallback */
-  [TIER_SIMD_NFA]   = tier_simd_nfa,       /* SIMD-accelerated Thompson NFA */
+    [TIER_BREAK_SCAN] = tier_break_scan, /* BREAK/BREAKX ASCII bitmap scan */
+    [TIER_SPAN_SCAN] = tier_span_scan,   /* SPAN ASCII bitmap scan */
+    [TIER_LITERAL] = tier_literal_only,  /* Literal-only (no VM) */
+    [TIER_PREFIX] = tier_literal_prefix, /* Literal prefix (memmem/memchr) */
+    [TIER_BITMAP] = tier_bitmap,        /* Candidate bitmap (single-char alt) */
+    [TIER_ALT_LIT] = tier_alt_literals, /* Alt-of-literals (trie) */
+    [TIER_SEARCH_VM] = tier_search_vm,  /* Search-VM (backtracking NFA) */
+    [TIER_AUTOMATON] = tier_automaton,  /* DFA automaton (O(n) scan) */
+    [TIER_GENERAL] = tier_general_fallback, /* General VM fallback */
+    [TIER_SIMD_NFA] = tier_simd_nfa,        /* SIMD-accelerated Thompson NFA */
 };
 
-SNOBOL_ALIGNED(64) static bool SNOBOL_HOT
-dispatch_search_impl(VM * SNOBOL_RESTRICT vm,
-                     const char * SNOBOL_RESTRICT subject, size_t subject_len,
-                     size_t start_offset, const snobol_search_meta_t *meta,
-                     const snobol_dfa_t *dfa, snobol_search_result_t *out_result,
-                     snobol_search_diag_t *diag, bool anchored) {
+SNOBOL_ALIGNED(64)
+static bool SNOBOL_HOT dispatch_search_impl(
+    VM *SNOBOL_RESTRICT vm, const char *SNOBOL_RESTRICT subject,
+    size_t subject_len, size_t start_offset, const snobol_search_meta_t *meta,
+    const snobol_dfa_t *dfa, snobol_search_result_t *out_result,
+    snobol_search_diag_t *diag, bool anchored) {
   if (diag)
     memset(diag, 0, sizeof(*diag));
   if (out_result)
@@ -3084,9 +3356,9 @@ dispatch_search_impl(VM * SNOBOL_RESTRICT vm,
    * anchored, scanning tiers (BREAK/SPAN/PREFIX) are excluded by
    * select_tier_by_cost. */
   snobol_search_tier_t dispatch_tier =
-       select_tier_by_cost(meta, subject_len, dfa != NULL, anchored);
+      select_tier_by_cost(meta, subject_len, dfa != NULL, anchored);
 
-/* If caller provided a DFA, consider automaton acceleration.
+  /* If caller provided a DFA, consider automaton acceleration.
     * The automaton's per-offset trial loop is O(n) per position — harmless
     * when BMH skip is available (advances several bytes per try), but O(n^2)
     * when every byte is tried individually for patterns with NO literal
@@ -3136,21 +3408,21 @@ dispatch_search_impl(VM * SNOBOL_RESTRICT vm,
     vm->choices_top = 0;
   }
 
-/* Direct tier dispatch for the chosen tier.  For anchored matching each
+  /* Direct tier dispatch for the chosen tier.  For anchored matching each
    * tier handler bounds its attempt to a single position (start_offset), so a
    * successful match always begins at the anchor — no post-filter needed. */
-  return tier_table[dispatch_tier](vm, subject, subject_len, start_offset,
-                                     meta, dfa, out_result, diag, anchored);
+  return tier_table[dispatch_tier](vm, subject, subject_len, start_offset, meta,
+                                   dfa, out_result, diag, anchored);
 }
 
-SNOBOL_ALIGNED(64) bool SNOBOL_HOT snobol_search_exec(VM * SNOBOL_RESTRICT vm,
-                                                  const char * SNOBOL_RESTRICT subject,
-                          size_t subject_len,
-                          size_t start_offset,
-                          const snobol_search_meta_t *meta,
-                          const snobol_dfa_t *dfa,
-                          snobol_search_result_t *out_result,
-                          snobol_search_diag_t *diag) {
+SNOBOL_ALIGNED(64)
+bool SNOBOL_HOT snobol_search_exec(VM *SNOBOL_RESTRICT vm,
+                                   const char *SNOBOL_RESTRICT subject,
+                                   size_t subject_len, size_t start_offset,
+                                   const snobol_search_meta_t *meta,
+                                   const snobol_dfa_t *dfa,
+                                   snobol_search_result_t *out_result,
+                                   snobol_search_diag_t *diag) {
   return dispatch_search_impl(vm, subject, subject_len, start_offset, meta, dfa,
                               out_result, diag, false);
 }
@@ -3166,7 +3438,8 @@ snobol_search_tier_t snobol_search_executed_tier(
   snobol_search_tier_t dispatch_tier =
       select_tier_by_cost(meta, subject_len, dfa_available, anchored);
 
-  if (dfa_available && meta->automaton_eligible && !meta->is_alt_literals_flat &&
+  if (dfa_available && meta->automaton_eligible &&
+      !meta->is_alt_literals_flat &&
       (meta->has_bmh_skip ||
        (!meta->simd_eligible && dispatch_tier >= TIER_SEARCH_VM))) {
     dispatch_tier = TIER_AUTOMATON;
@@ -3175,13 +3448,14 @@ snobol_search_tier_t snobol_search_executed_tier(
   return dispatch_tier;
 }
 
-SNOBOL_ALIGNED(64) bool SNOBOL_HOT
-snobol_search_exec_anchored(VM * SNOBOL_RESTRICT vm,
-                            const char * SNOBOL_RESTRICT subject,
-                            size_t subject_len, const snobol_search_meta_t *meta,
-                            const snobol_dfa_t *dfa,
-                            snobol_search_result_t *out_result,
-                            snobol_search_diag_t *diag) {
+SNOBOL_ALIGNED(64)
+bool SNOBOL_HOT snobol_search_exec_anchored(VM *SNOBOL_RESTRICT vm,
+                                            const char *SNOBOL_RESTRICT subject,
+                                            size_t subject_len,
+                                            const snobol_search_meta_t *meta,
+                                            const snobol_dfa_t *dfa,
+                                            snobol_search_result_t *out_result,
+                                            snobol_search_diag_t *diag) {
   return dispatch_search_impl(vm, subject, subject_len, 0, meta, dfa,
                               out_result, diag, true);
 }

@@ -131,13 +131,13 @@ void test_alt_literals_flat_trie(void) {
   vm.bc_len = bc_len;
   snobol_search_result_t result;
   bool ok = snobol_search_exec(&vm, "I ate a banana for lunch", 23, 0, &meta,
-                                NULL, &result, NULL);
+                               NULL, &result, NULL);
   test_assert(ok, "flat alt-literals matches 'banana' via trie");
 
   /* Verify no-match case. */
   result.success = false;
   ok = snobol_search_exec(&vm, "nothing here", 12, 0, &meta, NULL, &result,
-                           NULL);
+                          NULL);
   test_assert(!ok, "flat alt-literals no match on non-matching subject");
 
   snobol_search_meta_free(&meta);
@@ -171,7 +171,7 @@ void test_alt_literals_bushy_trie(void) {
   snobol_search_meta_free(&meta);
 }
 
-/* Task 1.2: the Tier 5 scan loop applies the start-byte bitmap filter so
+/* The Tier 5 scan loop applies the start-byte bitmap filter so
  * candidate positions whose byte cannot begin any alternative are skipped.
  * Pattern 'abc'|'axy' on subject "xabc": offset 0 ('x') must be filtered,
  * the match is found at offset 1. */
@@ -185,7 +185,8 @@ void test_tier5_start_bitmap_skip(void) {
   snobol_search_derive_meta(bc, bc_len, &meta);
 
   test_assert(meta.is_alt_literals, "detected as alt-literals");
-  test_assert(!meta.is_alt_literals_flat, "bushy (first bytes differ, shared?)");
+  test_assert(!meta.is_alt_literals_flat,
+              "bushy (first bytes differ, shared?)");
   test_assert(meta.tier == TIER_ALT_LIT, "uses trie path");
   test_assert(meta.has_start_bitmap, "start-bitmap computed for alt-literals");
 
@@ -203,7 +204,7 @@ void test_tier5_start_bitmap_skip(void) {
   snobol_search_meta_free(&meta);
 }
 
-/* Task 5.2: two-byte literal prefix uses the paired-memchr fast-path and
+/* Two-byte literal prefix uses the paired-memchr fast-path and
  * produces correct results across subjects. */
 void test_2byte_prefix_memchr(void) {
   test_suite("Small-prefix: 2-byte memchr fast-path");
@@ -273,7 +274,8 @@ void test_alt_literals_bmh_skip(void) {
   test_assert(meta_b.has_bmh_skip, "has_bmh_skip set for shared prefix");
   test_assert(meta_b.bmh_skip_len == 2, "bmh_skip_len == 2 (shared 'ab')");
   test_assert(meta_b.literal_prefix_len == 2, "literal_prefix_len == 2");
-  test_assert(meta_b.literal_prefix[0] == 'a' && meta_b.literal_prefix[1] == 'b',
+  test_assert(meta_b.literal_prefix[0] == 'a' &&
+                  meta_b.literal_prefix[1] == 'b',
               "shared prefix bytes are 'ab'");
   test_assert(!meta_b.has_literal_prefix,
               "has_literal_prefix stays false (no TIER_PREFIX misroute)");
