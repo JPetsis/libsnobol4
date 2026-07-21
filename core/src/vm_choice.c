@@ -113,7 +113,14 @@ static ChoiceArenaPage *arena_new_page(size_t need) {
 uint8_t *vm_arena_alloc(ChoiceArena *a, size_t payload_len) {
   if (!a)
     return nullptr;
-  size_t footprint = payload_len + 2 * sizeof(uint32_t);
+  /* Layout: leading uint32 footprint | 4-byte align pad | aligned payload
+   *         | 4-byte align pad | trailing uint32 footprint (last 4 bytes).
+   * Payload is 8-aligned (CompactChoiceHeader / struct choice carry size_t
+   * members that require 8-byte alignment — placing them at base+4 was UB
+   * and triggered UBSan / Windows SEGV). Total footprint is a multiple of 8
+   * so the next record's payload also lands at an 8-aligned offset. */
+  size_t aligned_payload = (payload_len + 7) & ~(size_t)7;
+  size_t footprint = aligned_payload + 2 * sizeof(uint32_t) + 8;
   if (a->cur->used + footprint > a->cur->cap) {
     ChoiceArenaPage *np = arena_new_page(footprint);
     if (!np)
@@ -132,7 +139,7 @@ uint8_t *vm_arena_alloc(ChoiceArena *a, size_t payload_len) {
   if (a->total_used > a->peak_used)
     a->peak_used = a->total_used;
   a->last_rec_size = footprint;
-  return base + sizeof(uint32_t); /* payload area */
+  return base + 8; /* 8-byte aligned payload area */
 }
 
 void vm_arena_pop_last(ChoiceArena *a) {
@@ -171,6 +178,7 @@ void snobol_vm_reset(VM *vm) {
   memset(vm->loop_max, 0, sizeof(vm->loop_max));
   memset(vm->loop_last_pos, 0, sizeof(vm->loop_last_pos));
   memset(vm->loop_span_greedy, 0, sizeof(vm->loop_span_greedy));
+  vm->max_cap_used = 0;
   vm->max_counter_used = 0;
   vm->ip = 0;
   vm->pos = 0;
@@ -297,7 +305,7 @@ bool vm_pop_choice(VM *vm) {
     uint32_t footprint = *(uint32_t *)(pg->data + pg->used - sizeof(uint32_t));
     uint8_t *rec_base = pg->data + pg->used - footprint;
     CompactChoiceHeader *h =
-        (CompactChoiceHeader *)(rec_base + sizeof(uint32_t));
+        (CompactChoiceHeader *)(rec_base + 8); /* 8-aligned payload */
     vm->ip = h->ip;
     vm->pos = h->pos;
     vm->var_count = h->var_count;
@@ -312,7 +320,7 @@ bool vm_pop_choice(VM *vm) {
     ChoiceArenaPage *pg = vm->choices_arena->cur;
     uint32_t footprint = *(uint32_t *)(pg->data + pg->used - sizeof(uint32_t));
     uint8_t *rec_base = pg->data + pg->used - footprint;
-    struct choice *c = (struct choice *)(rec_base + sizeof(uint32_t));
+    struct choice *c = (struct choice *)(rec_base + 8); /* 8-aligned payload */
     vm->ip = c->ip;
     vm->pos = c->pos;
     vm->var_count = c->var_count_snapshot;

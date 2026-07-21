@@ -489,8 +489,9 @@ op_accept:
       if (!vm->keep_choices) {
         vm_arena_destroy(vm->choices_arena);
         vm->choices_arena = nullptr;
-        if (vm->use_compact_choice && vm->write_log) {
+        if (vm->use_compact_choice) {
           vm_write_log_free(vm);
+          vm_trail_free(vm); /* free the undo trail allocated in vm_run */
         }
       }
       return true;
@@ -2327,8 +2328,9 @@ op_abort:
       if (!vm->keep_choices) {
         vm_arena_destroy(vm->choices_arena);
         vm->choices_arena = nullptr;
-        if (vm->use_compact_choice && vm->write_log) {
+        if (vm->use_compact_choice) {
           vm_write_log_free(vm);
+          vm_trail_free(vm); /* free the undo trail allocated in vm_run */
         }
       }
       return false;
@@ -2348,8 +2350,9 @@ op_succeed:
       if (!vm->keep_choices) {
         vm_arena_destroy(vm->choices_arena);
         vm->choices_arena = nullptr;
-        if (vm->use_compact_choice && vm->write_log) {
+        if (vm->use_compact_choice) {
           vm_write_log_free(vm);
+          vm_trail_free(vm); /* free the undo trail allocated in vm_run */
         }
       }
       return true;
@@ -2373,8 +2376,9 @@ op_succeed:
   if (!vm->keep_choices) {
     vm_arena_destroy(vm->choices_arena);
     vm->choices_arena = nullptr;
-    if (vm->use_compact_choice && vm->write_log) {
+    if (vm->use_compact_choice) {
       vm_write_log_free(vm);
+      vm_trail_free(vm); /* free the undo trail allocated in vm_run */
     }
   }
   return false;
@@ -2382,8 +2386,9 @@ fail_ret:
   if (!vm->keep_choices) {
     vm_arena_destroy(vm->choices_arena);
     vm->choices_arena = nullptr;
-    if (vm->use_compact_choice && vm->write_log) {
+    if (vm->use_compact_choice) {
       vm_write_log_free(vm);
+      vm_trail_free(vm); /* free the undo trail allocated in vm_run */
     }
   }
   return false;
