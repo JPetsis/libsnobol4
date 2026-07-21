@@ -2635,8 +2635,8 @@ static bool tier_alt_literals(VM *vm, const char *subject, size_t subject_len,
  * ---------------------------------------------------------------------------
  */
 #ifdef SNOBOL_PIKE_SCAN
-#define PIKE_THREAD_BUF 512
-#define PIKE_DEFER_BUF  256
+#define PIKE_THREAD_BUF 64
+#define PIKE_DEFER_BUF  64
 typedef struct {
   size_t ip;
   size_t pos;
