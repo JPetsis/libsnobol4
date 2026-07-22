@@ -98,6 +98,15 @@ typedef struct snobol_auto_trie_t {
 } snobol_auto_trie_t;
 
 /* ---------------------------------------------------------------------------
+ * Cross-TU function: build NFA masks for SIMD tier, defined in search_simd.c,
+ * invoked by api.c for state-level NFA caching.
+ * --------------------------------------------------------------------------- */
+bool build_nfa_masks(struct simd_nfa *nfa, const uint8_t *bc, size_t bc_len,
+                     const VM *vm);
+struct simd_nfa *build_nfa_masks_alloc(const uint8_t *bc, size_t bc_len,
+                                       const VM *vm);
+
+/* ---------------------------------------------------------------------------
  * Cross-TU function: cost-model tier selection lives in search_meta.c but is
  * invoked by dispatch_search_impl() in search_tiers.c.
  * --------------------------------------------------------------------------- */

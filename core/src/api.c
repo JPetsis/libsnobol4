@@ -778,14 +778,15 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
     }
   }
 
-  /* Wire the cached SIMD NFA into the VM so tier_simd_nfa can reuse it. */
+  /* Build and cache the SIMD NFA on the state (not in tier_simd_nfa, which
+   * uses stack for stateless calls).  Mirrors the DFA caching pattern. */
+  if (!state->nfa && state->meta.simd_eligible)
+    state->nfa = build_nfa_masks_alloc(state->bc, state->bc_len, &state->vm);
   state->vm.simd_nfa = state->nfa;
 
   snobol_search_result_t sr;
   bool ok = snobol_search_exec(&state->vm, subject, subject_len, start_offset,
                                &state->meta, dfa, &sr, NULL);
-  /* Save back cached SIMD NFA (may have been built first time this call). */
-  state->nfa = state->vm.simd_nfa;
   state->match.success = ok;
   /* sr.match_start is already an absolute position in the subject
    * (not relative to start_offset). Do NOT add start_offset again. */

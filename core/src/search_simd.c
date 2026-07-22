@@ -160,7 +160,21 @@ bool check_simd_eligible(const uint8_t *bc, size_t bc_len) {
  * exits on delimiter bytes.
  * ---------------------------------------------------------------------------
  */
-static bool build_nfa_masks(simd_nfa_t *nfa, const uint8_t *bc, size_t bc_len,
+bool build_nfa_masks(simd_nfa_t *nfa, const uint8_t *bc, size_t bc_len,
+                     const VM *vm);
+
+struct simd_nfa *build_nfa_masks_alloc(const uint8_t *bc, size_t bc_len,
+                                        const VM *vm) {
+  struct simd_nfa *nfa = (struct simd_nfa *)snobol_malloc(sizeof(simd_nfa_t));
+  if (!nfa) return NULL;
+  if (!build_nfa_masks(nfa, bc, bc_len, vm)) {
+    snobol_free(nfa);
+    return NULL;
+  }
+  return nfa;
+}
+
+bool build_nfa_masks(simd_nfa_t *nfa, const uint8_t *bc, size_t bc_len,
                             const VM *vm) {
   memset(nfa, 0, sizeof(*nfa));
   nfa->num_states = 0;
