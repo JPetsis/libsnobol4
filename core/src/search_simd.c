@@ -668,17 +668,18 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
                    snobol_search_diag_t *diag, bool anchored) {
   (void)diag;
 
-  /* Use cached NFA if available; build once on first access. */
-  simd_nfa_t *nfa = vm->simd_nfa;
-  if (!nfa) {
-    nfa = (simd_nfa_t *)snobol_malloc(sizeof(simd_nfa_t));
+  /* Use cached NFA if available (vm->simd_nfa is set by the state API).
+   * For stateless one-shot calls, build on stack — no malloc, no leak. */
+  simd_nfa_t nfa_stack;
+  simd_nfa_t *nfa;
+  if (vm->simd_nfa) {
+    nfa = vm->simd_nfa;
+  } else {
+    nfa = &nfa_stack;
     if (!build_nfa_masks(nfa, vm->bc, vm->bc_len, vm)) {
-      snobol_free(nfa);
-      vm->simd_nfa = NULL;
       return tier_general_fallback(vm, subject, subject_len, start_offset, meta,
                                    dfa, out_result, diag, anchored);
     }
-    vm->simd_nfa = nfa;
   }
 
   /* Select the platform-specific NFA verifier at compile time. */

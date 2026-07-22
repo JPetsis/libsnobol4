@@ -1457,9 +1457,13 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
         has_split = true;
       /* Advance by opcode size */
       size_t adv = 1;
-      if (op == OP_SPLIT || op == OP_REPEAT_INIT)
+      if (op == OP_SPLIT)
         adv = 9;
-      else if (op == OP_REPEAT_STEP || op == OP_JMP || op == OP_LEN ||
+      else if (op == OP_REPEAT_INIT)
+        adv = 14;
+      else if (op == OP_REPEAT_STEP)
+        adv = 6;
+      else if (op == OP_JMP || op == OP_LEN ||
                op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB)
         adv = 5;
       else if (op == OP_ANCHOR || op == OP_CAP_START || op == OP_CAP_END)
