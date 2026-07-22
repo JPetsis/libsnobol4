@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### search-perf-levers
+
+#### Added
+
+- **Required-byte pre-filter** (`core/src/search_meta.c`, `core/src/search_tiers.c`): `snobol_search_derive_meta` identifies the rightmost literal before ACCEPT/SUCCEED along the bytecode and stores it in `meta->required_lit`/`required_lit_len`. `dispatch_search_impl` runs `memchr`/`memmem` before any tier — if the required literal is absent, returns false with `out_result->prefilter_skip = true`, bypassing all VM/tier dispatch. No-op for patterns without required literals (e.g. alternations, pure charclass ops).
+- **Diagnostic probe scenarios** (`bench/c/bench_probe.c`): new probe rows for `pike_overflow` (BREAKX over long subject), `prefilter_miss` (required-byte memchr miss), and `zero_progress` (empty-body loop guard).
+
+#### Changed
+
+- **Automaton BMH-skip gate** (`core/src/search_tiers.c`): promotion to TIER_AUTOMATON now requires `meta->has_bmh_skip`. Patterns with only 1-byte literals (no BMH skip) stay on TIER_SEARCH_VM, avoiding the O(n²) per-position trial loop. Mirrored in `snobol_search_executed_tier` for diagnostic consistency.
+- **Pike buffer hoist** (`core/src/search_tiers.c`, `core/src/api.c`): thread buffers moved from stack-per-call to state-level heap (`VM.pike_thread_buf`/`pike_defer_buf`). Allocated once on first use in pike_scan, freed in `snobol_pattern_search_state_destroy`. Stack fallback for stateless callers (vm==NULL).
+- **SIMD NFA cache** (`core/src/api.c`, `core/src/search_simd.c`): `simd_nfa_t` cached on `snobol_pattern_search_state`, built once on first `tier_simd_nfa` access, freed in state destroy. Mirrors the DFA caching pattern.
+- **SIMD vector compare** (`core/src/search_simd.c`): `simd_nfa_exec_neon` and `simd_nfa_exec_avx2` now implement real SIMD vector compare using 256-byte membership tables, replacing the scalar stubs. Tail bytes fall through to the scalar reference path.
+- **Zero-progress guard order** (`core/src/vm_exec.c`): in OP_REPEAT_STEP, `pos == loop_last_pos` is checked before `count > subject_len + 1`, so empty-body loops (e.g. `(''*)`) exit in O(1) instead of O(subject_len). The search-VM REPEAT_STEP handler already had the correct ordering.
+
+#### Fixed
+
+- **Pike overflow correctness** (`core/src/search_tiers.c`): pike_scan now tracks thread-buffer overflow at all guard points (`work_n`, `carry_n`, `defer_n`). When overflow is detected, `tier_search_vm` falls through to the per-position restart loop (which has a proper choice stack), eliminating silent false negatives for BREAKX patterns over long subjects.
+
 ### Search Engine Optimization
 
 #### Added

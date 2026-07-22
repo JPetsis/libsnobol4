@@ -51,19 +51,27 @@ PROBE_ITERS=1000000 ./build/bench/c/snobol4_probe
 
 ### Scenarios
 
-| Scenario       | Pattern              | Subject              | API                           |
-|----------------|----------------------|----------------------|-------------------------------|
-| `literal_fail` | `'pqr'`              | 1KB no `pqr`         | `snobol_pattern_match`        |
-| `literal_ok`   | `'pqr'`              | 1KB with `pqr`       | `snobol_pattern_match`        |
-| `span_comma`   | `SPAN(',')`          | 1KB CSV              | `snobol_pattern_match`        |
-| `span_search`  | `SPAN(',')`          | 1KB CSV              | `snobol_pattern_search`       |
-| `alternation`  | `'a' \| 'b' \| 'c'`  | mixed                | `snobol_pattern_match`        |
-| `alt_search`   | `'a' \| 'b' \| 'c'`  | mixed                | `snobol_pattern_search`       |
-| `tokenize`     | `' '`                | whitespace stream    | `snobol_pattern_search` loop  |
+| Scenario           | Pattern                 | Subject                    | API                           |
+|--------------------|-------------------------|----------------------------|-------------------------------|
+| `literal_fail`     | `'pqr'`                 | 1KB no `pqr`               | `snobol_pattern_match`        |
+| `literal_ok`       | `'pqr'`                 | 1KB with `pqr`             | `snobol_pattern_match`        |
+| `span_comma`       | `SPAN(',')`             | 1KB CSV                    | `snobol_pattern_match`        |
+| `span_search`      | `SPAN(',')`             | 1KB CSV                    | `snobol_pattern_search`       |
+| `alternation`      | `'a' \| 'b' \| 'c'`    | mixed                      | `snobol_pattern_match`        |
+| `alt_search`       | `'a' \| 'b' \| 'c'`    | mixed                      | `snobol_pattern_search`       |
+| `tokenize`         | `' '`                   | whitespace stream          | `snobol_pattern_search` loop  |
+| `pike_overflow`    | `BREAKX(' ')`           | 1KB + delimiter at 900     | `snobol_pattern_search`       |
+| `prefilter_miss`   | `('a'+)+ 'b'`           | 10 'a's, no 'b'            | `snobol_pattern_search`       |
+| `zero_progress`    | `('a'*) 'b'`            | 64 'a's, no 'b'            | `snobol_pattern_search`       |
 
 The `tokenize` scenario mimics the inner loop of `Pattern::searchSplit` —
 it advances one byte at a time through the subject, calling
 `snobol_pattern_search` at each position.
+
+New scenarios added in `search-perf-levers`:
+- `pike_overflow`: exercises the pike_scan thread-buffer overflow fallback to the restart loop
+- `prefilter_miss`: measures the required-byte pre-filter memchr miss path (no tier dispatch)
+- `zero_progress`: measures the O(1) zero-progress guard for empty-body loops
 
 ### Performance targets
 
@@ -83,12 +91,8 @@ for direct performance comparison.
 |----------------|-------------------------------------------|-------------------------------------|
 | `ns/iter`      | `clock_gettime` (or `mach_absolute_time`) | Wall time per match attempt         |
 | `iters`        | iteration counter                         | Match attempts executed             |
-| `jit_attempts` | `jit_method_attempts_total` delta         | Method-JIT compile attempts         |
-| `jit_ok`       | `jit_method_successes_total` delta        | Successful method-JIT compilations  |
-| `jit_fb`       | `jit_method_fallbacks_total` delta        | Patterns too complex for method JIT |
-
-When `SNOBOL_JIT` is not compiled in, all JIT columns read 0 and `ns/iter`
-measures pure interpreter cost.
+| `tier`         | `meta->tier`                              | Structural tier (pattern shape)     |
+| `exec`         | `snobol_search_executed_tier`             | Executed dispatch tier (cost model) |
 
 ### Interpreting results
 

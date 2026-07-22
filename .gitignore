@@ -37,3 +37,4 @@ core/include/snobol/version.h
 # Other common exclusions
 .env
 node_modules/
+build-asan/

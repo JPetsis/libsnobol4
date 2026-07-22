@@ -333,7 +333,7 @@ libsnobol4 is designed for high-performance string processing:
 
 - **Streaming Substitution**: Native C implementation minimizes data copying
 - **Pattern Caching**: Compiled patterns are cached for efficient reuse
-- **Multi-Tier Search Engine**: Cost-model-driven auto-selection of the optimal strategy (literal memcmp, BMH skip, cached trie for bushy alt-of-literals, DFA automaton, SIMD NFA). Flat alternations fall back to the general VM, avoiding a 125× regression on unshared-prefix alternations.
+- **Multi-Tier Search Engine**: Cost-model-driven auto-selection of the optimal strategy (literal memcmp, BMH skip, cached trie for bushy alt-of-literals, DFA automaton, SIMD NFA). Required-byte pre-filter eliminates tier dispatch entirely when a necessary literal is absent. Thread-buffer overflow fallback prevents silent false negatives in pike_scan. Zero-progress guard exits empty-body loops in O(1). Flat alternations fall back to the general VM, avoiding a 125× regression on unshared-prefix alternations.
 - **Built-in C functions**: `Text::replace` matches PHP `str_replace` within 2%; `Text::upper/lower/trim` within 4-15%
   of native PHP built-ins
 - **BREAKX optimisation**: 8.3× fewer backtrack operations vs `ARB+NOTANY` for key extraction

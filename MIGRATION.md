@@ -74,6 +74,30 @@ intermediate string objects.
 
 ---
 
+## v0.12.0 → v0.13.0 (Search-Perf-Levers)
+
+### No breaking changes
+
+Non-breaking release. No C or PHP API changes.
+
+### Engine improvements
+
+1. **Required-byte pre-filter**: Before entering any tier, a `memchr`/`memmem` scan rejects subjects that lack a literal the pattern must match. Returns `prefilter_skip=true` with zero tier dispatch cost.
+
+2. **Pike overflow fallback**: pike_scan now detects thread-buffer overflow and falls through to the per-position restart loop. `out_result->pike_overflowed` indicates overflow; silent false negatives are eliminated.
+
+3. **Zero-progress guard**: `OP_REPEAT_STEP` checks `pos == loop_last_pos` before the iteration cap. Empty-body loops (e.g. `(''*)`) exit in O(1).
+
+4. **SIMD vectorization**: `simd_nfa_exec_neon` and `simd_nfa_exec_avx2` now use real SIMD (16/32 bytes per cycle) instead of delegating to the scalar reference.
+
+5. **Pike buffer hoist**: Thread buffers moved from stack-per-call to state-level heap (allocated once, freed in destroy).
+
+6. **SIMD NFA cache**: `simd_nfa_t` cached on the search state (mirrors DFA caching).
+
+7. **Automaton BMH-skip gate**: Only patterns with `has_bmh_skip` are promoted to TIER_AUTOMATON (prevents O(n²) trial loop for 1-byte-literal patterns).
+
+---
+
 ## v0.9.0 → v0.10.0 (Multi-Architecture JIT)
 
 ---
