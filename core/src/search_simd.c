@@ -20,6 +20,7 @@
 
 #include "snobol/search.h"
 #include "snobol/simd.h"
+#include "snobol/snobol_internal.h"
 #include "snobol/vm.h"
 
 #include <stdbool.h>
@@ -61,7 +62,7 @@ typedef struct {
 } simd_nfa_trans_t;
 
 /** NFA compiled state for SIMD execution. */
-typedef struct {
+typedef struct simd_nfa {
   simd_nfa_trans_t states[SIMD_NFA_MAX_STATES];
   uint16_t num_states;
   uint16_t start_state;
@@ -474,13 +475,17 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
                    snobol_search_diag_t *diag, bool anchored) {
   (void)diag;
 
-  /* Build NFA masks from pattern bytecode; fall back to the full VM if
-   * the pattern is not a shape build_nfa_masks understands (e.g. nested
-   * alternation, control flow, captures). */
-  simd_nfa_t nfa;
-  if (!build_nfa_masks(&nfa, vm->bc, vm->bc_len, vm)) {
-    return tier_general_fallback(vm, subject, subject_len, start_offset, meta,
-                                 dfa, out_result, diag, anchored);
+  /* Use cached NFA if available; build once on first access. */
+  simd_nfa_t *nfa = vm->simd_nfa;
+  if (!nfa) {
+    nfa = (simd_nfa_t *)snobol_malloc(sizeof(simd_nfa_t));
+    if (!build_nfa_masks(nfa, vm->bc, vm->bc_len, vm)) {
+      snobol_free(nfa);
+      vm->simd_nfa = NULL;
+      return tier_general_fallback(vm, subject, subject_len, start_offset, meta,
+                                   dfa, out_result, diag, anchored);
+    }
+    vm->simd_nfa = nfa;
   }
 
   /* Select the platform-specific NFA verifier at compile time. */
@@ -503,7 +508,7 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
     if (diag)
       diag->candidates_tested++;
     snobol_search_result_t tmp;
-    if (SIMD_NFA_VERIFY(&nfa, subject, subject_len, start_offset, &tmp)) {
+    if (SIMD_NFA_VERIFY(nfa, subject, subject_len, start_offset, &tmp)) {
       out_result->success = true;
       out_result->match_start = tmp.match_start;
       out_result->match_end = tmp.match_end;
@@ -516,11 +521,11 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
   /* BREAK matches at every subject position (the empty match is always
    * available), so the leftmost match, anchored-or-not, starts at
    * start_offset.  Verify once and return; no scan loop is needed. */
-  if (nfa.is_break) {
+  if (nfa->is_break) {
     if (diag)
       diag->candidates_tested++;
     snobol_search_result_t tmp;
-    if (SIMD_NFA_VERIFY(&nfa, subject, subject_len, start_offset, &tmp)) {
+    if (SIMD_NFA_VERIFY(nfa, subject, subject_len, start_offset, &tmp)) {
       out_result->success = true;
       out_result->match_start = tmp.match_start;
       out_result->match_end = tmp.match_end;
@@ -536,7 +541,7 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
    * verifier call) and only invoke the O(1) (SIMD) NFA verifier at
    * candidate positions.  Total work per byte is O(1) -> overall O(n)
    * regardless of whether the pattern ultimately matches. */
-  const uint64_t *bmap = nfa.states[0].char_mask;
+  const uint64_t *bmap = nfa->states[0].char_mask;
   size_t offset = start_offset;
   while (offset < subject_len) {
     uint8_t c = (uint8_t)subject[offset];
@@ -554,7 +559,7 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
     if (diag)
       diag->candidates_tested++;
     snobol_search_result_t tmp;
-    if (SIMD_NFA_VERIFY(&nfa, subject, subject_len, offset, &tmp)) {
+    if (SIMD_NFA_VERIFY(nfa, subject, subject_len, offset, &tmp)) {
       out_result->success = true;
       out_result->match_start = tmp.match_start;
       out_result->match_end = tmp.match_end;

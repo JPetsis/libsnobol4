@@ -25,6 +25,11 @@
 #include <stdint.h>
 
 /* ---------------------------------------------------------------------------
+ * Forward declarations for cached state types (defined in search_simd.c).
+ * --------------------------------------------------------------------------- */
+struct simd_nfa;
+
+/* ---------------------------------------------------------------------------
  * Internal pattern accessors (implemented in api.c) — shared by both TUs.
  * --------------------------------------------------------------------------- */
 extern snobol_dfa_t *snobol_pattern_get_automaton(

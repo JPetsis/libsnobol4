@@ -20,6 +20,7 @@
 #include "snobol/snobol.h"
 #include "snobol/snobol_internal.h"
 #include "snobol/vm.h"
+#include "search_internal.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -639,6 +640,7 @@ struct snobol_pattern_search_state {
   snobol_range_meta_t *range_meta; /* owned — derived once at create time */
   size_t range_meta_count;
   snobol_dfa_t *dfa; /* cached automaton (Tier 7), built once per state */
+  struct simd_nfa *nfa; /* cached SIMD NFA (Tier 9), built once per state */
   bool vm_inited;    /* true after first search call sets it up */
   bool buf_inited;   /* true after first out_buf_init */
 };
@@ -673,6 +675,10 @@ void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
   snobol_search_meta_free(&state->meta);
   if (state->dfa)
     snobol_dfa_free(state->dfa);
+  if (state->nfa) {
+    snobol_free(state->nfa);
+    state->nfa = NULL;
+  }
   if (state->buf_inited) {
     snobol_buf_free(&state->out_buf);
   }
@@ -772,9 +778,14 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
     }
   }
 
+  /* Wire the cached SIMD NFA into the VM so tier_simd_nfa can reuse it. */
+  state->vm.simd_nfa = state->nfa;
+
   snobol_search_result_t sr;
   bool ok = snobol_search_exec(&state->vm, subject, subject_len, start_offset,
                                &state->meta, dfa, &sr, NULL);
+  /* Save back cached SIMD NFA (may have been built first time this call). */
+  state->nfa = state->vm.simd_nfa;
   state->match.success = ok;
   /* sr.match_start is already an absolute position in the subject
    * (not relative to start_offset). Do NOT add start_offset again. */

@@ -19,6 +19,7 @@ extern "C" {
 #include <stdint.h>
 
 struct snobol_pattern; /* forward decl — only used as an opaque pointer below */
+struct simd_nfa;       /* forward decl — cached NFA for Tier 9 */
 
 /** @brief Enable dynamic pattern and table support */
 #define SNOBOL_DYNAMIC_PATTERN 1
@@ -464,6 +465,12 @@ typedef struct {
    * Allocated by pike_scan on first use; freed in state-destroy. */
   void *pike_thread_buf;
   void *pike_defer_buf;
+
+  /* Cached SIMD NFA for Tier 9.  Set by the search state before dispatch;
+   * tier_simd_nfa checks/updates it.  Owned by the search state's destroy
+   * path, not by the VM.  Declared as void* to avoid header dependency on
+   * simd_nfa_t (defined in search_simd.c). */
+  struct simd_nfa *simd_nfa;
 
   // emit callback
   emit_cb emit_fn;
