@@ -1215,6 +1215,29 @@ static void test_star_span_greedy(void) {
  * Suite entry-point
  * ---------------------------------------------------------------------------
  */
+/* NFA cache: verify that 1000 searches on a state reuse the cached NFA */
+static void test_simd_nfa_cache(void) {
+  test_suite("SIMD NFA: state-level caching");
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = NULL;
+  snobol_pattern_t *p = snobol_pattern_compile(ctx, "SPAN('0-9')", 11, &err);
+  if (!p) { test_assert(false, "NFA cache: compile"); snobol_context_destroy(ctx); return; }
+  snobol_pattern_search_state_t *state =
+      snobol_pattern_search_state_create(snobol_pattern_get_bc(p),
+                                          snobol_pattern_get_bc_len(p));
+  if (!state) { test_assert(false, "NFA cache: state create"); snobol_pattern_free(p); snobol_context_destroy(ctx); return; }
+  bool all_ok = true;
+  for (int i = 0; i < 1000; i++) {
+    snobol_match_t *m = snobol_pattern_search_ex(state, "abc123def", 9, 0);
+    if (!m || !m->success || m->position != 3 || m->length != 3)
+      all_ok = false;
+  }
+  test_assert(all_ok, "NFA cache: 1000 searches correct");
+  snobol_pattern_search_state_destroy(state);
+  snobol_pattern_free(p);
+  snobol_context_destroy(ctx);
+}
+
 void test_search_simd_suite(void) {
   test_simd_eligibility();
   test_simd_tier_routing();
@@ -1228,4 +1251,5 @@ void test_search_simd_suite(void) {
   test_simd_direct_dispatch();
   test_simd_nfa_linearity();
   test_star_span_greedy();
+  test_simd_nfa_cache();
 }

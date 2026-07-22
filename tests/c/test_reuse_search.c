@@ -116,4 +116,29 @@ void test_reuse_search_suite(void) {
 
   /* No-match subject must also agree */
   diff_patterns("nomatch", "@r(SPAN('0-9'))", 15, "no digits here", 14);
+
+  /* Buffer hoist regression: 1000 searches on same state must all succeed */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    snobol_pattern_t *p = snobol_pattern_compile(ctx, "'hello' SPAN(' ')", 17, &err);
+    if (p) {
+      snobol_pattern_search_state_t *state =
+          snobol_pattern_search_state_create(snobol_pattern_get_bc(p),
+                                              snobol_pattern_get_bc_len(p));
+      if (state) {
+        bool all_ok = true;
+        for (int i = 0; i < 1000; i++) {
+          snobol_match_t *m = snobol_pattern_search_ex(
+              state, "hello world", 11, 0);
+          if (!m || !m->success)
+            all_ok = false;
+        }
+        test_assert(all_ok, "buffer hoist: 1000 searches succeed");
+        snobol_pattern_search_state_destroy(state);
+      }
+      snobol_pattern_free(p);
+    }
+    snobol_context_destroy(ctx);
+  }
 }
