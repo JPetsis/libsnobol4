@@ -120,6 +120,7 @@ typedef enum {
 #define META_SEARCH_VM_ELIGIBLE (1u << 15)
 #define META_SIMD_ELIGIBLE (1u << 16)
 #define META_IS_ALT_LITERALS_FLAT (1u << 17)
+#define META_HAS_REQUIRED_LIT (1u << 18)
 
 /* ---------------------------------------------------------------------------
  * Automaton (DFA) types
@@ -275,6 +276,16 @@ typedef struct {
    * NOT eligible. */
   bool search_vm_eligible;
 
+  /* Required-byte pre-filter ----------------------------------------------- */
+  /* The longest literal that MUST appear in the subject for a match to exist.
+   * When required_lit_len > 0, dispatch_search_impl runs a memchr/memmem
+   * scan before any tier and returns false (with prefilter_skip=true) when
+   * the literal is absent.  Derived from the rightmost literal(s) before
+   * ACCEPT/SUCCEED along all paths. */
+  bool has_required_lit;
+  uint8_t required_lit[SNOBOL_SEARCH_MAX_PREFIX];
+  size_t required_lit_len;
+
   /* Capture presence ------------------------------------------------------- */
   /* True when the bytecode contains any OP_CAP_START / OP_CAP_END (or
    * OP_EMIT_CAPTURE).  Only TIER_SEARCH_VM (6) and TIER_GENERAL (8) can record
@@ -322,6 +333,7 @@ typedef struct {
 #define snobol_meta_search_vm_eligible(m) \
   (!!((m)->flags & META_SEARCH_VM_ELIGIBLE))
 #define snobol_meta_simd_eligible(m) (!!((m)->flags & META_SIMD_ELIGIBLE))
+#define snobol_meta_has_required_lit(m) (!!((m)->flags & META_HAS_REQUIRED_LIT))
 
 /**
  * @brief Set a flag bit in metadata flags.
@@ -350,6 +362,10 @@ typedef struct {
   bool success;
   bool aborted;       /**< Set true when an OP_ABORT terminated the match,
                           signalling the caller to stop searching entirely. */
+  bool pike_overflowed; /**< Set true when pike_scan's thread buffer overflowed
+                             and the restart-loop fallback was used. */
+  bool prefilter_skip;  /**< Set true when the required-byte prefilter
+                             rejected the subject without entering any tier. */
   size_t match_start; /**< Byte offset of match start within the original
                           subject */
   size_t match_end;   /**< Byte offset just past the match end in the original
@@ -394,6 +410,7 @@ typedef struct {
   uint64_t candidates_skipped; /**< Positions skipped by candidate metadata */
   uint64_t automaton_tests;    /**< Positions tested by the automaton path */
   uint64_t search_vm_tests;    /**< Positions tested by the search-VM path */
+  bool pike_overflow;          /**< Set true when pike_scan overflowed */
   snobol_search_skip_reason_t last_skip_reason;
 } snobol_search_diag_t;
 

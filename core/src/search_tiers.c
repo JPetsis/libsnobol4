@@ -2778,6 +2778,7 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
   pike_thread_t defer[PIKE_DEFER_BUF];
   size_t defer_n = 0;
   bool found = false;
+  bool overflowed = false;
   size_t m_start = 0, m_end = 0;
 
   /* Don't seed upfront — spawn dynamically as we scan */
@@ -2797,9 +2798,13 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
       if (threads[t].pos == pos) {
         if (work_n < PIKE_THREAD_BUF)
           work[work_n++] = threads[t];
+        else
+          overflowed = true;
       } else if (threads[t].pos > pos) {
         if (carry_n < PIKE_THREAD_BUF)
           carry[carry_n++] = threads[t];
+        else
+          overflowed = true;
       }
     }
     /* Spawn a fresh thread at this start position. */
@@ -2911,6 +2916,8 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
             nt.ip = (size_t)bb;
             nt.pos = tp;
             work[work_n++] = nt;
+          } else {
+            overflowed = true;
           }
           continue;
         }
@@ -2980,8 +2987,12 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
         tp += alen;
         th.ip = ip;
         th.pos = tp;
-        if (tp > pos && defer_n < PIKE_DEFER_BUF)
-          defer[defer_n++] = th;
+        if (tp > pos) {
+          if (defer_n < PIKE_DEFER_BUF)
+            defer[defer_n++] = th;
+          else
+            overflowed = true;
+        }
         goto pike_next;
       }
       if (op == OP_ANY) {
@@ -3001,8 +3012,12 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
         tp += by;
         th.ip = ip;
         th.pos = tp;
-        if (tp > pos && defer_n < PIKE_DEFER_BUF)
-          defer[defer_n++] = th;
+        if (tp > pos) {
+          if (defer_n < PIKE_DEFER_BUF)
+            defer[defer_n++] = th;
+          else
+            overflowed = true;
+        }
         goto pike_next;
       }
       if (op == OP_NOTANY) {
@@ -3025,8 +3040,12 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
         }
         th.ip = ip;
         th.pos = tp;
-        if (tp > pos && defer_n < PIKE_DEFER_BUF)
-          defer[defer_n++] = th;
+        if (tp > pos) {
+          if (defer_n < PIKE_DEFER_BUF)
+            defer[defer_n++] = th;
+          else
+            overflowed = true;
+        }
         goto pike_next;
       }
       if (op == OP_SPAN) {
@@ -3057,6 +3076,8 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
         th.pos = sp;
         if (defer_n < PIKE_DEFER_BUF)
           defer[defer_n++] = th;
+        else
+          overflowed = true;
         goto pike_next;
       }
       if (op == OP_BREAK || op == OP_BREAKX) {
@@ -3092,12 +3113,16 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
             rt.ip = ip - 2;
             rt.pos = sp + (size_t)bx_by;
             defer[defer_n++] = rt;
+          } else {
+            overflowed = true;
           }
         }
         th.ip = ip;
         th.pos = sp;
         if (defer_n < PIKE_DEFER_BUF)
           defer[defer_n++] = th;
+        else
+          overflowed = true;
         goto pike_next;
       }
       goto pike_die;
@@ -3112,11 +3137,20 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
     /* Rebuild the thread set: carried threads (future positions) first, then
      * threads that advanced past `pos` during this pass. */
     thread_n = 0;
-    for (size_t c = 0; c < carry_n && thread_n < PIKE_THREAD_BUF; ++c)
-      threads[thread_n++] = carry[c];
-    for (size_t d = 0; d < defer_n && thread_n < PIKE_THREAD_BUF; ++d)
-      threads[thread_n++] = defer[d];
+    for (size_t c = 0; c < carry_n; ++c) {
+      if (thread_n < PIKE_THREAD_BUF)
+        threads[thread_n++] = carry[c];
+      else
+        overflowed = true;
+    }
+    for (size_t d = 0; d < defer_n; ++d) {
+      if (thread_n < PIKE_THREAD_BUF)
+        threads[thread_n++] = defer[d];
+      else
+        overflowed = true;
+    }
   }
+  out_result->pike_overflowed = overflowed;
   out_result->success = found;
   if (found) {
     out_result->match_start = m_start;
@@ -3140,8 +3174,15 @@ static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
   if (start_offset == 0 && !anchored) {
     if (diag)
       diag->search_vm_tests++;
-    return pike_scan(vm->bc, vm->bc_len, subject, subject_len, meta,
-                     vm->range_meta, vm->range_meta_count, vm, out_result);
+    bool pike_ok = pike_scan(vm->bc, vm->bc_len, subject, subject_len, meta,
+                             vm->range_meta, vm->range_meta_count, vm,
+                             out_result);
+    if (pike_ok || !out_result->pike_overflowed)
+      return pike_ok;
+    /* Overflow: fall through to the restart loop which tries each position
+     * individually.  Clear the overflow flag so readers can detect it. */
+    if (diag)
+      diag->pike_overflow = true;
   }
 #endif
   size_t offset = start_offset;
@@ -3335,8 +3376,11 @@ static bool SNOBOL_HOT dispatch_search_impl(
     snobol_search_diag_t *diag, bool anchored) {
   if (diag)
     memset(diag, 0, sizeof(*diag));
-  if (out_result)
+  if (out_result) {
     out_result->success = false;
+    out_result->pike_overflowed = false;
+    out_result->prefilter_skip = false;
+  }
   if (!vm || !subject || !out_result)
     return false;
   out_result->aborted = false;
