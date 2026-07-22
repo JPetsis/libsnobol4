@@ -1428,6 +1428,61 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   else
     out->tier = TIER_GENERAL;
 
+  /* ---- Required-byte pre-filter: find the last literal in the bytecode.
+   * Forward scan: track the last OP_LIT encountered; if we see OP_SPLIT
+   * we cancel (multiple alternative paths → no single required literal).
+   * For ('a'+)+ 'b', the last literal is 'b' → pre-filter with memchr.
+   * For SPAN/BREAK/ANY patterns there are no literals → no-op. ---- */
+  {
+    size_t scan = 0;
+    uint8_t last_lit[SNOBOL_SEARCH_MAX_PREFIX];
+    size_t last_lit_len = 0;
+    bool has_split = false;
+    while (scan < bc_len) {
+      uint8_t op = bc[scan];
+      if (op == OP_LIT && scan + 9 <= bc_len) {
+        uint32_t lit_off = search_read_u32(bc, scan + 1);
+        uint32_t lit_len = search_read_u32(bc, scan + 5);
+        if (lit_len > 0 && lit_off < bc_len &&
+            lit_off + lit_len <= bc_len) {
+          last_lit_len = (size_t)lit_len < SNOBOL_SEARCH_MAX_PREFIX
+                             ? (size_t)lit_len
+                             : SNOBOL_SEARCH_MAX_PREFIX;
+          memcpy(last_lit, bc + lit_off, last_lit_len);
+        }
+        scan += 9 + (size_t)lit_len;
+        continue;
+      }
+      if (op == OP_SPLIT)
+        has_split = true;
+      /* Advance by opcode size */
+      size_t adv = 1;
+      if (op == OP_SPLIT || op == OP_REPEAT_INIT)
+        adv = 9;
+      else if (op == OP_REPEAT_STEP || op == OP_JMP || op == OP_LEN ||
+               op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB)
+        adv = 5;
+      else if (op == OP_ANCHOR || op == OP_CAP_START || op == OP_CAP_END)
+        adv = 2;
+      else if (op == OP_ANY || op == OP_NOTANY || op == OP_SPAN ||
+               op == OP_BREAK || op == OP_BREAKX)
+        adv = 3;
+      else if (op == OP_ASSIGN)
+        adv = 4;
+      scan += adv;
+      if (adv == 0 || scan > bc_len)
+        break;
+    }
+    /* Only set required literal when there are no alternatives (SPLIT)
+     * and we found at least one literal. */
+    if (!has_split && last_lit_len > 0) {
+      out->has_required_lit = true;
+      snobol_meta_set_flag(out, META_HAS_REQUIRED_LIT);
+      memcpy(out->required_lit, last_lit, last_lit_len);
+      out->required_lit_len = last_lit_len;
+    }
+  }
+
   /* ---- Allocate BMH table separately (heap) ---- */
   if (out->has_bmh_skip && out->bmh_skip_len > 0) {
     out->bmh_skip = (uint8_t *)snobol_malloc(256);

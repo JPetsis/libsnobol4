@@ -2773,13 +2773,22 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
                size_t subject_len, const snobol_search_meta_t *meta,
                const snobol_range_meta_t *range_meta, size_t range_meta_count,
                VM *vm, snobol_search_result_t *out_result) {
-  /* Allocate thread buffers on first use; reuse across calls. */
-  if (!vm->pike_thread_buf)
-    vm->pike_thread_buf = snobol_malloc(PIKE_THREAD_BUF * sizeof(pike_thread_t));
-  if (!vm->pike_defer_buf)
-    vm->pike_defer_buf = snobol_malloc(PIKE_DEFER_BUF * sizeof(pike_thread_t));
-  pike_thread_t *threads = (pike_thread_t *)vm->pike_thread_buf;
-  pike_thread_t *defer = (pike_thread_t *)vm->pike_defer_buf;
+  /* Use heap-allocated buffers when a VM is provided (reuse across calls);
+   * fall back to stack allocation for stateless/direct pike_scan callers. */
+  pike_thread_t stack_threads[PIKE_THREAD_BUF];
+  pike_thread_t stack_defer[PIKE_DEFER_BUF];
+  pike_thread_t *threads = stack_threads;
+  pike_thread_t *defer = stack_defer;
+  if (vm) {
+    if (!vm->pike_thread_buf)
+      vm->pike_thread_buf =
+          snobol_malloc(PIKE_THREAD_BUF * sizeof(pike_thread_t));
+    if (!vm->pike_defer_buf)
+      vm->pike_defer_buf =
+          snobol_malloc(PIKE_DEFER_BUF * sizeof(pike_thread_t));
+    threads = (pike_thread_t *)vm->pike_thread_buf;
+    defer = (pike_thread_t *)vm->pike_defer_buf;
+  }
   size_t thread_n = 0;
   size_t defer_n = 0;
   bool found = false;
@@ -2927,12 +2936,15 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
           continue;
         }
         if (op == OP_REPEAT_INIT) {
+          overflowed = true; /* pike_scan cannot backtrack REPEAT_STEP; signal
+                              * fallback so tier_search_vm tries the restart
+                              * loop which has a proper choice stack. */
           uint8_t lid = bc[ip + 1];
           if (lid < MAX_LOOPS) {
             th.counters[lid] = 0;
             th.loop_last_pos[lid] = 0;
           }
-          ip += 13;
+          ip += 14;
           continue;
         }
         if (op == OP_REPEAT_STEP) {
@@ -3399,6 +3411,26 @@ static bool SNOBOL_HOT dispatch_search_impl(
     meta = &local_meta;
   }
 
+  /* Required-byte pre-filter: before entering any tier, check whether a
+   * literal that MUST appear in the subject is actually present.  When the
+   * literal is absent, return false immediately (no VM/tier invocation).
+   * For multi-byte required literals we use memmem; for single-byte, memchr. */
+  if (meta->has_required_lit && meta->required_lit_len > 0) {
+    if (meta->required_lit_len == 1) {
+      if (!memchr(subject + start_offset, meta->required_lit[0],
+                  subject_len - start_offset)) {
+        out_result->prefilter_skip = true;
+        return false;
+      }
+    } else {
+      if (!memmem(subject + start_offset, subject_len - start_offset,
+                  meta->required_lit, meta->required_lit_len)) {
+        out_result->prefilter_skip = true;
+        return false;
+      }
+    }
+  }
+
   /* Cost-model tier selection (Priority 4): refine the structural tier from
    * derive_meta using subject length and per-tier cost. Break/SPAN keep their
    * fixed tier; the automaton is handled by the DFA override below. When
@@ -3427,8 +3459,7 @@ static bool SNOBOL_HOT dispatch_search_impl(
     * automaton reroute excludes all alt-literals; only flat alternations
     * (which have no shared prefix and thus no BMH skip) can reach the DFA. */
   if (dfa && meta->automaton_eligible && !meta->is_alt_literals &&
-      (meta->has_bmh_skip ||
-       (!meta->simd_eligible && dispatch_tier >= TIER_SEARCH_VM))) {
+      meta->has_bmh_skip) {
     dispatch_tier = TIER_AUTOMATON;
   }
 
@@ -3488,9 +3519,7 @@ snobol_search_tier_t snobol_search_executed_tier(
       select_tier_by_cost(meta, subject_len, dfa_available, anchored);
 
   if (dfa_available && meta->automaton_eligible &&
-      !meta->is_alt_literals_flat &&
-      (meta->has_bmh_skip ||
-       (!meta->simd_eligible && dispatch_tier >= TIER_SEARCH_VM))) {
+      !meta->is_alt_literals_flat && meta->has_bmh_skip) {
     dispatch_tier = TIER_AUTOMATON;
   }
 

@@ -1068,10 +1068,14 @@ bool vm_run(VM *vm) {
         vm->ip = (size_t)target;
       } else if (vm->loop_max[loop_id] == (uint32_t)-1 ||
                  count < vm->loop_max[loop_id]) {
-        if (vm->loop_max[loop_id] == (uint32_t)-1 && count > vm->len + 1) {
-          /* fall through to the stop path (do not push) */
+        if (vm->loop_max[loop_id] == (uint32_t)-1 &&
+            vm->pos == vm->loop_last_pos[loop_id]) {
+          /* Zero-progress: exit immediately (no choice push).  Checked
+           * before the iteration-cap guard so empty-body loops like (''*)
+           * exit in O(1) instead of O(subject_len). */
         } else if (vm->loop_max[loop_id] == (uint32_t)-1 &&
-                   vm->pos == vm->loop_last_pos[loop_id]) {
+                   count > vm->len + 1) {
+          /* fall through to the stop path (do not push) */
         } else {
           vm_push_choice(vm, vm->ip, vm->pos);
           vm->loop_last_pos[loop_id] = vm->pos;

@@ -419,9 +419,10 @@ static void test_state_explosion_cap(void) {
 static void test_repeat_in_automaton(void) {
   test_suite("5.8  REPEAT_INIT/STEP in automaton");
 
-  /* Build bytecode: REPEAT_INIT(min=0, max=-1) { LIT 'a' } REPEAT_STEP LIT 'b' ACCEPT
-   * This is ARB('a') 'b' — matches zero or more 'a' followed by 'b' */
-  uint8_t bc[256];
+  /* Build bytecode: REPEAT_INIT(min=0, max=-1) { LIT 'ab' } REPEAT_STEP LIT 'cd' ACCEPT
+   * Uses 2-byte literals so has_bmh_skip is true, triggering the automaton
+   * override per the BMH-skip gate requirement. */
+  uint8_t bc[512];
   size_t ip = 0;
 
   /* REPEAT_INIT: opcode(1) + loop_id(1) + min(4) + max(4) + skip_target(4) = 14 bytes */
@@ -432,28 +433,28 @@ static void test_repeat_in_automaton(void) {
   emit_u32_be(bc, &ip, (uint32_t)-1); /* max = -1 (unbounded) */
   emit_u32_be(bc, &ip, 0);            /* skip_target placeholder */
 
-  /* Body: LIT 'a' */
+  /* Body: LIT 'ab' (2 bytes — ensures has_bmh_skip = true) */
   size_t body_ip = ip;
   bc[ip++] = OP_LIT;
-  emit_u32_be(bc, &ip, (uint32_t)(ip + 8)); /* data offset (after len field) */
-  emit_u32_be(bc, &ip, 1);                  /* length = 1 */
-  bc[ip++] = 'a';
+  emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
+  emit_u32_be(bc, &ip, 2);
+  bc[ip++] = 'a'; bc[ip++] = 'b';
 
   /* REPEAT_STEP: opcode(1) + loop_id(1) + jmp_target(4) = 6 bytes */
   bc[ip++] = OP_REPEAT_STEP;
-  bc[ip++] = 0; /* loop_id */
+  bc[ip++] = 0;
   emit_u32_be(bc, &ip, (uint32_t)body_ip);
 
-  /* Skip target: LIT 'b' ACCEPT */
+  /* Skip target: LIT 'cd' ACCEPT */
   size_t skip_ip = ip;
   bc[ip++] = OP_LIT;
   emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
-  emit_u32_be(bc, &ip, 1);
-  bc[ip++] = 'b';
+  emit_u32_be(bc, &ip, 2);
+  bc[ip++] = 'c'; bc[ip++] = 'd';
   bc[ip++] = OP_ACCEPT;
 
   /* Patch skip_target in REPEAT_INIT */
-  size_t patch = init_ip + 1 + 1 + 4 + 4; /* after opcode, loop_id, min, max */
+  size_t patch = init_ip + 1 + 1 + 4 + 4;
   bc[patch + 0] = (uint8_t)((skip_ip >> 24) & 0xFF);
   bc[patch + 1] = (uint8_t)((skip_ip >> 16) & 0xFF);
   bc[patch + 2] = (uint8_t)((skip_ip >> 8) & 0xFF);
@@ -472,27 +473,27 @@ static void test_repeat_in_automaton(void) {
 
   snobol_search_result_t result;
 
-  /* Test: "b" matches (zero 'a's followed by 'b') */
-  bool ok = snobol_search_exec(&vm, "b", 1, 0, &meta, dfa, &result, NULL);
-  test_assert(ok, "ARB('a') 'b' matches 'b' (zero repeats)");
-  test_assert(result.match_start == 0, "match_start == 0");
-  test_assert(result.match_end == 1, "match_end == 1");
-
-  /* Test: "ab" matches (one 'a' followed by 'b') */
-  ok = snobol_search_exec(&vm, "ab", 2, 0, &meta, dfa, &result, NULL);
-  test_assert(ok, "ARB('a') 'b' matches 'ab'");
+  /* Test: "cd" matches (zero repeats) */
+  bool ok = snobol_search_exec(&vm, "cd", 2, 0, &meta, dfa, &result, NULL);
+  test_assert(ok, "ARB('ab') 'cd' matches 'cd' (zero repeats)");
   test_assert(result.match_start == 0, "match_start == 0");
   test_assert(result.match_end == 2, "match_end == 2");
 
-  /* Test: "aaab" matches (three 'a's followed by 'b') */
-  ok = snobol_search_exec(&vm, "aaab", 4, 0, &meta, dfa, &result, NULL);
-  test_assert(ok, "ARB('a') 'b' matches 'aaab'");
+  /* Test: "abcd" matches (one repeat) */
+  ok = snobol_search_exec(&vm, "abcd", 4, 0, &meta, dfa, &result, NULL);
+  test_assert(ok, "ARB('ab') 'cd' matches 'abcd'");
   test_assert(result.match_start == 0, "match_start == 0");
   test_assert(result.match_end == 4, "match_end == 4");
 
-  /* Test: "a" does not match (no 'b') */
+  /* Test: "ababcd" matches (two repeats) */
+  ok = snobol_search_exec(&vm, "ababcd", 6, 0, &meta, dfa, &result, NULL);
+  test_assert(ok, "ARB('ab') 'cd' matches 'ababcd'");
+  test_assert(result.match_start == 0, "match_start == 0");
+  test_assert(result.match_end == 6, "match_end == 6");
+
+  /* Test: "a" does not match (no 'cd') */
   ok = snobol_search_exec(&vm, "a", 1, 0, &meta, dfa, &result, NULL);
-  test_assert(!ok, "ARB('a') 'b' does not match 'a' (no 'b')");
+  test_assert(!ok, "ARB('ab') 'cd' does not match 'a' (no 'cd')");
 
   snobol_dfa_free(dfa);
 }
