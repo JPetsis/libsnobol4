@@ -1218,7 +1218,7 @@ libsnobol4's search engine automatically selects the optimal matching strategy b
 | 6    | `SEARCH_VM`  | ★★★★☆ | Charclass + positional + captures + bounded repeat  | Lightweight VM (~424 bytes)                       |
 | 7    | `AUTOMATON`  | ★★★★☆ | Tier 6 set, ASCII-only, no captures                 | DFA via powerset construction                     |
 | 8    | `GENERAL`    | ★★☆☆☆ | Any pattern                                         | Full VM (~2.5 KB) + start-byte bitmap             |
-| 9    | `SIMD_NFA`   | ★★★★☆ | Tier 6 set, ASCII-only, no captures, SIMD available | AVX2/NEON byte-parallel NFA (cost-model selected) |
+| 9    | `SIMD_NFA`   | ★★★★☆ | Tier 6 set, ASCII-only, no captures, SIMD available | Vectorized NEON vqtbl1q_u8 / AVX2 vpshufb inner loop (cost-model selected) |
 
 ### What Triggers Each Tier
 
@@ -1228,28 +1228,31 @@ libsnobol4's search engine automatically selects the optimal matching strategy b
 - **Tier 3** — Pattern with a literal prefix (starts with one or more `OP_LIT`)
 - **Tier 4** — Pattern whose root is `OP_SPLIT` with all branches being single-character match and no captures
 - **Tier 5** — Pattern whose root is flat alternation of literal strings
-- **Tier 6** — Patterns eligible for the lightweight search-VM: charclass ops (`SPAN`/`BREAK`/`BREAKX`/`ANY`/`NOTANY`), positional ops (`POS`/`TAB`/`RPOS`/`RTAB`/`REM`/`ANCHOR`/`FENCE`), **captures** (`CAP_START`/`CAP_END`), bounded repeats (`REPEAT_INIT`/`REPEAT_STEP`), and `ARB`/`ARBNO` — i.e. the NFA-compatible subset **with captures**, provided no stateful/side-effect op (`EVAL`, `DYNAMIC`, `TABLE_*`, `ARRAY_*`, `EMIT_*`, `GOTO`/`LABEL`, `BAL`) is present.  Execution uses the Pike/TDFA single-pass scan (pike_scan) by default for O(n) matching; falls back to the per-offset restart loop for anchored-only or non-zero start offsets.
-- **Tier 7** — Tier 6-eligible pattern that is ASCII-only charclass and **capture-free**, and DFA powerset construction succeeds (< 4096 states)
+- **Pre-filter** (before any tier): A required-byte study identifies the rightmost literal before ACCEPT/SUCCEED. Before dispatching to any tier, `dispatch_search_impl` runs `memchr`/`memmem` — if the required literal is absent, returns immediately with `prefilter_skip=true`, bypassing all tiers. No-op for patterns without a provably required literal.
+- **Tier 6** — Patterns eligible for the lightweight search-VM: charclass ops (`SPAN`/`BREAK`/`BREAKX`/`ANY`/`NOTANY`), positional ops (`POS`/`TAB`/`RPOS`/`RTAB`/`REM`/`ANCHOR`/`FENCE`), **captures** (`CAP_START`/`CAP_END`), bounded repeats (`REPEAT_INIT`/`REPEAT_STEP`), and `ARB`/`ARBNO` — i.e. the NFA-compatible subset **with captures**, provided no stateful/side-effect op (`EVAL`, `DYNAMIC`, `TABLE_*`, `ARRAY_*`, `EMIT_*`, `GOTO`/`LABEL`, `BAL`) is present.  Execution uses the Pike/TDFA single-pass scan (pike_scan) by default for O(n) matching; falls back to the per-offset restart loop for anchored-only or non-zero start offsets. On thread-buffer overflow, pike_scan falls back to the restart loop (no silent false negatives).
+- **Tier 7** — Tier 6-eligible pattern that is ASCII-only charclass and **capture-free**, and DFA powerset construction succeeds (< 4096 states). Only promoted when the pattern has `has_bmh_skip` (literal prefix ≥ 2 bytes) to avoid O(n²) per-position trial loop for 1-byte literals.
 - **Tier 8** — Everything else (fallback through full VM)
-- **Tier 9** — Single charclass op (SPAN/BREAK/ANY/NOTANY) + terminator, ASCII-only charclass, **capture-free**, and platform has AVX2/NEON (or scalar fallback).  Selected by the cost-model tier selector for every simd-eligible pattern — O(n) bitmap-skip scan with O(1) scalar NFA verification at candidate positions, avoiding the per-position restart loop.
+- **Tier 9** — Single charclass op (SPAN/BREAK/ANY/NOTANY) + terminator, ASCII-only charclass, **capture-free**, and platform has AVX2/NEON.  Vectorized inner loop: NEON uses `vld1q_u8` + 256-byte membership table with `vqtbl1q_u8` lookup (16 bytes/cycle), AVX2 uses `vpshufb` + `vpmovmskb` (32 bytes/cycle). Tail bytes <16 (<32 for AVX2) fall through to scalar. Cached on the pattern search state (built once, reused across calls).
 
 ### Performance Impact
 
 ```
-Pattern Type       → Tier       → Speed (ns/iter, C probe)
-─────────────────────────────────────────────────────
-Pure literal         Tier 2       ~183 ns
-SPAN(',')            Tier 1       ~269 ns
-SPAN('a-z')          Tier 1       ~235 ns
-BREAK(':')           Tier 0       ~250 ns
-Alternation          Tier 4       ~237 ns
-Alt-of-literals      Tier 5       ~300 ns
-SIMD SPAN (hit)      Tier 9       ~600 ns
-SIMD SPAN (miss)     Tier 9       ~560 ns
-SIMD NOTANY (miss)   Tier 9       ~560 ns
-Automaton pattern    Tier 7       ~173 ns
-Tokenize (BREAKX)    Tier 0       ~397 ns
-General pattern      Tier 8       ~500-1500 ns
+Pattern Type           → Tier       → Speed (ns/iter, C probe)
+───────────────────────────────────────────────────────────
+Pure literal             Tier 2       ~183 ns
+SPAN(',')                Tier 0–1     ~269 ns
+SPAN('a-z') hit          Tier 9       ~740 ns
+SPAN('a-z') miss         Tier 9       ~610 ns
+SIMD NOTANY miss         Tier 9       ~600 ns
+BREAK(':')               Tier 0       ~250 ns
+Alternation              Tier 4       ~237 ns
+Alt-of-literals          Tier 5       ~610 ns
+Automaton pattern        Tier 7       ~173 ns
+Tokenize (BREAKX)        Tier 0–6     ~160 ns (reuse)
+Required-byte miss (prefilter) —       ~200 ns
+Pike overflow (BREAKX)   Tier 0–6     ~890 ns
+Zero-progress guard      Tier 6       ~200 ns
+General pattern          Tier 8       ~500-1500 ns
 ```
 
 For the PHP binding, add ~50–300 ns overhead for the extension bridge, depending on call frequency.
