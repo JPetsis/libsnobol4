@@ -749,6 +749,89 @@ static void run_pcre2_span_simd_miss(int64_t iters, probe_result_t *r) {
 #endif /* HAVE_PCRE2 */
 
 /* ---------------------------------------------------------------------------
+ * 9.x  New search-perf-levers scenarios
+ * --------------------------------------------------------------------------- */
+
+/* pike_overflow: BREAKX(' ') over 1KB subject with delimiter at position 900.
+ * Forces pike_scan thread-buffer overflow + restart-loop fallback. */
+static void run_pike_overflow(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "BREAKX(' ')", 11);
+    char subj[1025];
+    memset(subj, 'x', 900);
+    subj[900] = ' ';
+    subj[901] = '\0';
+
+    capture_tiers(pat, 901, r);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, subj, 901);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+/* prefilter_miss: ('a'+)+ 'b' on 10 'a's — required-byte prefilter memchr
+ * rejects the subject without entering any tier. */
+static void run_prefilter_miss(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "('a'+)+ 'b'", 12);
+    char subj[11];
+    memset(subj, 'a', 10);
+    subj[10] = '\0';
+
+    capture_tiers(pat, 10, r);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, subj, 10);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+/* zero_progress: ('a'*) 'b' on 64-byte subject of 'a's — zero-progress guard
+ * should make the loop O(1) instead of O(n). */
+static void run_zero_progress(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "('a'*) 'b'", 10);
+    char subj[65];
+    memset(subj, 'a', 64);
+    subj[64] = '\0';
+
+    capture_tiers(pat, 64, r);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_match_t *m = snobol_pattern_search(pat, subj, 64);
+        snobol_match_free(m);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+/* ---------------------------------------------------------------------------
  * Output
  * --------------------------------------------------------------------------- */
 
@@ -958,8 +1041,8 @@ int main(void) {
     printf("Tokenize uses %" PRId64 " outer iters (multi-pass of subject).\n\n",
            tokenize_iters);
 
-    /* Total scenarios: 11 snobol + 9 PCRE2 (when available) = 20 */
-    probe_result_t results[20];
+    /* Total scenarios: 14 snobol + 9 PCRE2 (when available) = 23 */
+    probe_result_t results[23];
     memset(results, 0, sizeof(results));
 
     /* Run each scenario */
@@ -986,6 +1069,9 @@ int main(void) {
         { "residue_repeat",        run_residue_repeat,       iters            },
         { "residue_zero_width",    run_residue_zero_width,   iters            },
         { "residue_catastrophic",  run_residue_catastrophic, 1000             },
+        { "pike_overflow",         run_pike_overflow,        iters            },
+        { "prefilter_miss",        run_prefilter_miss,       iters            },
+        { "zero_progress",         run_zero_progress,        iters            },
 #ifdef HAVE_PCRE2
         { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            },
         { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters            },
