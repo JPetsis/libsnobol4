@@ -1437,10 +1437,12 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     size_t scan = 0;
     uint8_t last_lit[SNOBOL_SEARCH_MAX_PREFIX];
     size_t last_lit_len = 0;
-    bool has_split = false;
+    size_t last_lit_off = 0;
+    bool lit_bypassed = false;
     while (scan < bc_len) {
       uint8_t op = bc[scan];
       if (op == OP_LIT && scan + 9 <= bc_len) {
+        last_lit_off = scan;
         uint32_t lit_off = search_read_u32(bc, scan + 1);
         uint32_t lit_len = search_read_u32(bc, scan + 5);
         if (lit_len > 0 && lit_off < bc_len &&
@@ -1453,8 +1455,37 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
         scan += 9 + (size_t)lit_len;
         continue;
       }
-      if (op == OP_SPLIT)
-        has_split = true;
+      if (op == OP_SPLIT && scan + 9 <= bc_len) {
+        /* Check if any SPLIT branch bypasses the last literal.  Read both
+         * branch targets.  If a branch's first instruction is LIT followed
+         * by a JMP that jumps PAST the last literal, that branch skips it.
+         * For 'a'|'b', branch A has LIT 'a' + JMP exit, and exit > last_lit
+         * (LIT 'b'), so LIT 'b' is not required.  For ('a'+)+ 'b', the
+         * SPLIT branches either go to the loop body (no JMP past 'b') or
+         * to the exit (which IS 'b'), so 'b' is required. */
+        uint32_t ta = search_read_u32(bc, scan + 1);
+        uint32_t tb = search_read_u32(bc, scan + 5);
+        if (last_lit_len > 0) {
+          uint32_t check[2] = {ta, tb};
+          for (int bi = 0; bi < 2; bi++) {
+            uint32_t b_off = check[bi];
+            /* Skip past the branch's first instruction (if LIT = 9+lit_len,
+             * if JMP = 5, otherwise assume 1) */
+            if (b_off >= bc_len) continue;
+            uint8_t b_op = bc[b_off];
+            size_t b_skip = 1;
+            if (b_op == OP_LIT && b_off + 9 <= bc_len)
+              b_skip = 9 + (size_t)search_read_u32(bc, b_off + 5);
+            else if (b_op == OP_JMP)
+              b_skip = 5;
+            size_t jmp_off = b_off + b_skip;
+            if (jmp_off + 5 <= bc_len && bc[jmp_off] == OP_JMP) {
+              uint32_t jt = search_read_u32(bc, jmp_off + 1);
+              if (jt > last_lit_off) { lit_bypassed = true; break; }
+            }
+          }
+        }
+      }
       /* Advance by opcode size */
       size_t adv = 1;
       if (op == OP_SPLIT)
@@ -1477,9 +1508,10 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
       if (adv == 0 || scan > bc_len)
         break;
     }
-    /* Only set required literal when there are no alternatives (SPLIT)
-     * and we found at least one literal. */
-    if (!has_split && last_lit_len > 0) {
+    /* Set required literal when it was found and is NOT bypassed by any
+     * SPLIT branch (no alternative ending).  Also skip alt-literals
+     * patterns (trie-based — the bytecode has no SPLIT). */
+    if (!lit_bypassed && !out->is_alt_literals && last_lit_len > 0) {
       out->has_required_lit = true;
       snobol_meta_set_flag(out, META_HAS_REQUIRED_LIT);
       memcpy(out->required_lit, last_lit, last_lit_len);

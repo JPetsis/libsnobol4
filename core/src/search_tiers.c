@@ -3412,26 +3412,6 @@ static bool SNOBOL_HOT dispatch_search_impl(
     meta = &local_meta;
   }
 
-  /* Required-byte pre-filter: before entering any tier, check whether a
-   * literal that MUST appear in the subject is actually present.  When the
-   * literal is absent, return false immediately (no VM/tier invocation).
-   * For multi-byte required literals we use memmem; for single-byte, memchr. */
-  if (meta->has_required_lit && meta->required_lit_len > 0) {
-    if (meta->required_lit_len == 1) {
-      if (!memchr(subject + start_offset, meta->required_lit[0],
-                  subject_len - start_offset)) {
-        out_result->prefilter_skip = true;
-        return false;
-      }
-    } else {
-      if (!memmem(subject + start_offset, subject_len - start_offset,
-                  meta->required_lit, meta->required_lit_len)) {
-        out_result->prefilter_skip = true;
-        return false;
-      }
-    }
-  }
-
   /* Cost-model tier selection (Priority 4): refine the structural tier from
    * derive_meta using subject length and per-tier cost. Break/SPAN keep their
    * fixed tier; the automaton is handled by the DFA override below. When
@@ -3504,8 +3484,30 @@ bool SNOBOL_HOT snobol_search_exec(VM *SNOBOL_RESTRICT vm,
                                    const snobol_dfa_t *dfa,
                                    snobol_search_result_t *out_result,
                                    snobol_search_diag_t *diag) {
+  /* Required-byte pre-filter: before entering any tier or DFA setup, check
+   * whether a literal that MUST appear in the subject is present.  When the
+   * literal is absent, return false immediately — no VM/tier/DFA invocation.
+   * This is hoisted here (not inside dispatch_search_impl) so callers like
+   * snobol_pattern_search can skip DFA building when the prefilter rejects. */
+  if (meta && meta->has_required_lit && meta->required_lit_len > 0) {
+    if (meta->required_lit_len == 1) {
+      if (!memchr(subject + start_offset, meta->required_lit[0],
+                  subject_len - start_offset)) {
+        out_result->success = false;
+        out_result->prefilter_skip = true;
+        return false;
+      }
+    } else {
+      if (!memmem(subject + start_offset, subject_len - start_offset,
+                  meta->required_lit, meta->required_lit_len)) {
+        out_result->success = false;
+        out_result->prefilter_skip = true;
+        return false;
+      }
+    }
+  }
   return dispatch_search_impl(vm, subject, subject_len, start_offset, meta, dfa,
-                              out_result, diag, false);
+                               out_result, diag, false);
 }
 
 snobol_search_tier_t snobol_search_executed_tier(

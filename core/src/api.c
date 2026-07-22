@@ -471,6 +471,26 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
     snobol_search_derive_meta(pattern->bc, pattern->bc_len, &meta);
   }
 
+  /* Required-byte prefilter: before DFA building or tier dispatch, reject
+   * subjects that lack a provably required literal. */
+  if (meta.has_required_lit && meta.required_lit_len > 0) {
+    bool found;
+    if (meta.required_lit_len == 1)
+      found = memchr(subject, meta.required_lit[0], len) != NULL;
+    else
+      found = memmem(subject, len, meta.required_lit, meta.required_lit_len) != NULL;
+    if (!found) {
+      m->success = false;
+      m->position = 0;
+      m->length = 0;
+      m->output = NULL;
+      m->output_len = 0;
+      m->var_count = 0;
+      snobol_buf_free(&out_buf);
+      return m;
+    }
+  }
+
   /* Build and cache DFA for eligible patterns (lazy: reuse cached) */
   snobol_dfa_t *dfa = NULL;
   if (meta.automaton_eligible) {
