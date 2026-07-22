@@ -279,6 +279,7 @@ void test_search_anchored_suite(void);
 #ifdef SNOBOL_PIKE_SCAN
 void test_pike_scan_suite(void);
 #endif
+void test_search_prefilter_suite(void);
 void test_lexer_suite(void);
 void test_parser_suite(void);
 void test_ast_suite(void);
@@ -373,6 +374,7 @@ int main(void) {
 #ifdef SNOBOL_PIKE_SCAN
   RUN_SUITE("Search: Pike Scan", test_pike_scan_suite);
 #endif
+  RUN_SUITE("Search: Required-Byte Prefilter", test_search_prefilter_suite);
 
   /* Lexer / Parser / AST */
   RUN_SUITE("Lexer", test_lexer_suite);

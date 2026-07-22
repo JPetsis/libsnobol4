@@ -64,6 +64,7 @@ add_executable(snobol4_tests
     test_break_grammar.c
     test_compiler.c
     test_property_based.c
+    test_search_prefilter.c
 )
 
 # Link against core library

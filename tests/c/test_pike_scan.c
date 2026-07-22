@@ -180,6 +180,51 @@ static void pike_test_ci_cyrillic(void) {
   snobol_context_destroy(ctx);
 }
 
+/* Overflow scenario: BREAKX(' ') over 1KB subject exercises overflow
+ * fallback via tier_search_vm when pike_scan's thread buffer fills up.
+ * Uses snobol_search_exec so the dispatch tier handles routing. */
+static void pike_test_overflow_long(void) {
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = NULL;
+  snobol_pattern_t *p = snobol_pattern_compile(ctx, "BREAKX(' ')", 11, &err);
+  if (!p) { pike_assert(false, "overflow long compile"); snobol_context_destroy(ctx); return; }
+  const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+  char subject[1024];
+  memset(subject, 'x', 900);
+  subject[900] = ' ';
+  subject[901] = '\0';
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  vm.bc = (uint8_t *)snobol_pattern_get_bc(p);
+  vm.bc_len = snobol_pattern_get_bc_len(p);
+  snobol_search_result_t r;
+  bool ok = snobol_search_exec(&vm, subject, 901, 0, meta, NULL, &r, NULL);
+  pike_assert(ok, "overflow long: BREAKX finds space");
+  snobol_pattern_free(p);
+  snobol_context_destroy(ctx);
+}
+
+/* Same pattern over short subject works normally */
+static void pike_test_overflow_short(void) {
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = NULL;
+  snobol_pattern_t *p = snobol_pattern_compile(ctx, "BREAKX(' ')", 11, &err);
+  if (!p) { pike_assert(false, "overflow short compile"); snobol_context_destroy(ctx); return; }
+  const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+  char subject[] = "hello world";
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  vm.bc = (uint8_t *)snobol_pattern_get_bc(p);
+  vm.bc_len = snobol_pattern_get_bc_len(p);
+  snobol_search_result_t r;
+  bool ok = snobol_search_exec(&vm, subject, 11, 0, meta, NULL, &r, NULL);
+  pike_assert(ok, "overflow short: BREAKX finds space");
+  pike_assert(r.match_start == 0, "overflow short: match_start == 0");
+  pike_assert(r.match_end == 5, "overflow short: match_end == 5");
+  snobol_pattern_free(p);
+  snobol_context_destroy(ctx);
+}
+
 void test_pike_scan_suite(void) {
   test_suite("Search: Pike Scan");
   pike_test_count = 0;
@@ -190,6 +235,8 @@ void test_pike_scan_suite(void) {
   pike_test_notany();
   pike_test_multi_capture_alt();
   pike_test_ci_cyrillic();
+  pike_test_overflow_long();
+  pike_test_overflow_short();
   test_assert(pike_test_pass == pike_test_count, "pike scan: all tests pass");
 }
 

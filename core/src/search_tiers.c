@@ -3197,7 +3197,8 @@ static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
     if (pike_ok || !out_result->pike_overflowed)
       return pike_ok;
     /* Overflow: fall through to the restart loop which tries each position
-     * individually.  Clear the overflow flag so readers can detect it. */
+     * individually.  Set the result flag so callers can detect overflow. */
+    out_result->pike_overflowed = true;
     if (diag)
       diag->pike_overflow = true;
   }
