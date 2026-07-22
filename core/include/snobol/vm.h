@@ -459,6 +459,12 @@ typedef struct {
   // output buffer
   snobol_buf *out;
 
+  /* Pike thread buffers: heap-allocated once, reused across calls.
+   * Sized to PIKE_THREAD_BUF and PIKE_DEFER_BUF respectively.
+   * Allocated by pike_scan on first use; freed in state-destroy. */
+  void *pike_thread_buf;
+  void *pike_defer_buf;
+
   // emit callback
   emit_cb emit_fn;
   void *emit_udata;

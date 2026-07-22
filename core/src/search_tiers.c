@@ -2773,9 +2773,14 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
                size_t subject_len, const snobol_search_meta_t *meta,
                const snobol_range_meta_t *range_meta, size_t range_meta_count,
                VM *vm, snobol_search_result_t *out_result) {
-  pike_thread_t threads[PIKE_THREAD_BUF];
+  /* Allocate thread buffers on first use; reuse across calls. */
+  if (!vm->pike_thread_buf)
+    vm->pike_thread_buf = snobol_malloc(PIKE_THREAD_BUF * sizeof(pike_thread_t));
+  if (!vm->pike_defer_buf)
+    vm->pike_defer_buf = snobol_malloc(PIKE_DEFER_BUF * sizeof(pike_thread_t));
+  pike_thread_t *threads = (pike_thread_t *)vm->pike_thread_buf;
+  pike_thread_t *defer = (pike_thread_t *)vm->pike_defer_buf;
   size_t thread_n = 0;
-  pike_thread_t defer[PIKE_DEFER_BUF];
   size_t defer_n = 0;
   bool found = false;
   bool overflowed = false;

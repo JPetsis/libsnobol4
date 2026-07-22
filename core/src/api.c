@@ -680,6 +680,14 @@ void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
   if (state->vm.choices_arena)
     vm_arena_destroy(state->vm.choices_arena);
   state->vm.choices_arena = nullptr;
+  if (state->vm.pike_thread_buf) {
+    snobol_free(state->vm.pike_thread_buf);
+    state->vm.pike_thread_buf = NULL;
+  }
+  if (state->vm.pike_defer_buf) {
+    snobol_free(state->vm.pike_defer_buf);
+    state->vm.pike_defer_buf = NULL;
+  }
   if (state->range_meta)
     snobol_free(state->range_meta);
   if (state->match.output) {
