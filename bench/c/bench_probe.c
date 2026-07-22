@@ -687,11 +687,10 @@ static void run_residue_catastrophic(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     /* Equivalent SNOBOL pattern to PCRE2 (a+)+b: one-or-more 'a', repeated,
      * then 'b'. 'b' is absent, so it fails — but bounded, not exponentially.
-     * Uses the full 128-'a' residue subject to demonstrate linearity at scale
-     * where PCRE2 would be exponential. */
+     * Uses SUBJECT_CAT (10 'a's) matching the PCRE2 catastrophic test. */
     snobol_pattern_t *pat = compile_or_die(ctx, "('a'+)+ 'b'",
                                           strlen("('a'+)+ 'b'"));
-    size_t slen = strlen(SUBJECT_RESIDUE);
+    size_t slen = strlen(SUBJECT_CAT);
 
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {

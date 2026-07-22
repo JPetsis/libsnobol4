@@ -19,6 +19,10 @@ static void test_prefilter_miss(void) {
   vm.bc = (uint8_t *)snobol_pattern_get_bc(p);
   vm.bc_len = snobol_pattern_get_bc_len(p);
   const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+  fprintf(stderr, "  prefilter miss: has_required_lit=%d required_lit_len=%zu "
+          "has_literal_prefix=%d tier=%d\n",
+          meta->has_required_lit, meta->required_lit_len,
+          meta->has_literal_prefix, meta->tier);
   snobol_search_result_t r;
   bool ok = snobol_search_exec(&vm, "aaaaaaaaaa", 10, 0, meta, NULL, &r, NULL);
   test_assert(!ok, "prefilter miss: no match on a-only");
