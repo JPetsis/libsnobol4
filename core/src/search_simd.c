@@ -398,17 +398,119 @@ static bool simd_nfa_exec_scalar(const simd_nfa_t *nfa, const char *subject,
 #include <immintrin.h>
 
 /**
- * AVX2 implementation — delegate to scalar verification.  The real SIMD
- * acceleration lives in tier_simd_nfa()'s O(n) bitmap-skip scan loop; the
- * per-candidate verification is O(1) for the 2-state NFA and does not
- * benefit from SIMD byte-batch processing.  (The original AVX2/NEON byte-
- * loop approach was removed because the byte-loop itself
- * defeated the SIMD advantage — this delegation is both correct and fast.)
+ * AVX2 implementation — process 32 bytes per window via vpcmpeqb + vpmovmskb.
+ *
+ * Builds a 256-byte class membership table from the NFA start state's
+ * char_mask, then tests 32 bytes at a time: for each byte we compute
+ * table[byte] where 1 = class member.  The first non-class byte for SPAN
+ * (or first class byte for BREAK) is found via tzcnt on the inverted mask.
+ * Tail bytes < 32 fall through to the scalar path.
  */
 static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
                                size_t subject_len, size_t offset,
                                snobol_search_result_t *out_result) {
-  return simd_nfa_exec_scalar(nfa, subject, subject_len, offset, out_result);
+  size_t start = offset;
+
+  /* Build 256-byte membership table from char_mask bitmap */
+  const uint64_t *bmap = nfa->states[0].char_mask;
+  alignas(32) uint8_t table[256];
+  for (int i = 0; i < 256; i++) {
+    unsigned w = (unsigned)i >> 6;
+    table[i] = (uint8_t)((bmap[w] >> ((unsigned)i & 63u)) & 1ull);
+  }
+  __m256i table256 = _mm256_loadu_si256((const __m256i *)table);
+
+  /* For ANY/NOTANY: single byte check, no SIMD benefit */
+  if (nfa->is_any) {
+    goto tail;
+  }
+
+  size_t i = offset;
+  if (nfa->is_span) {
+    /* SPAN: find first byte NOT in class */
+    while (i + 32 <= subject_len) {
+      __m256i data = _mm256_loadu_si256((const __m256i *)(subject + i));
+      /* Compute table[byte] for each byte using vpshufb.
+       * vpshufb(y, x) uses the low nibble of each x byte as an index into
+       * y's 16 entries (bytes 0-15).  For bytes >= 16 it returns 0.
+       * We split into high/low halves:
+       *   lo_result = vpshufb(table_lo, data & 0x0F)
+       *   hi_selector = (data >> 4) & 0x0F
+       * Each hi_selector value selects a 16-byte block in the table.
+       * For each of the 16 possible hi values we blend the lo result. */
+      __m256i lo = _mm256_and_si256(data, _mm256_set1_epi8(0x0F));
+      __m256i hi = _mm256_and_si256(
+          _mm256_srli_epi32(data, 4), _mm256_set1_epi8(0x0F));
+      /* Look up low nibble in each 16-byte sub-table and blend by hi value */
+      __m256i result = _mm256_setzero_si256();
+      for (int g = 0; g < 16; g++) {
+        __m256i sub = _mm256_loadu_si256(
+            (const __m256i *)(table + g * 16));
+        __m256i tbl = _mm256_shuffle_epi8(sub, lo);
+        __m256i mask = _mm256_cmpeq_epi8(hi, _mm256_set1_epi8((char)g));
+        result = _mm256_blendv_epi8(result, tbl, mask);
+      }
+      /* result byte is 1 for class byte, 0 for non-class.
+       * For SPAN we want the first 0: compute bitmask of inverted result. */
+      int class_mask = _mm256_movemask_epi8(
+          _mm256_cmpeq_epi8(result, _mm256_set1_epi8(1)));
+      int non_class_mask = (~class_mask) & 0xFFFFFFFF;
+      if (non_class_mask) {
+        unsigned first = (unsigned)__builtin_ctz(non_class_mask);
+        i += first;
+        goto found_span_match;
+      }
+      i += 32;
+    }
+  } else if (nfa->is_break) {
+    /* BREAK: find first byte IN class (delimiter) */
+    while (i + 32 <= subject_len) {
+      __m256i data = _mm256_loadu_si256((const __m256i *)(subject + i));
+      __m256i lo = _mm256_and_si256(data, _mm256_set1_epi8(0x0F));
+      __m256i hi = _mm256_and_si256(
+          _mm256_srli_epi32(data, 4), _mm256_set1_epi8(0x0F));
+      __m256i result = _mm256_setzero_si256();
+      for (int g = 0; g < 16; g++) {
+        __m256i sub = _mm256_loadu_si256(
+            (const __m256i *)(table + g * 16));
+        __m256i tbl = _mm256_shuffle_epi8(sub, lo);
+        __m256i mask = _mm256_cmpeq_epi8(hi, _mm256_set1_epi8((char)g));
+        result = _mm256_blendv_epi8(result, tbl, mask);
+      }
+      /* For BREAK, we want the first 1 (delimiter byte) */
+      int delim_mask = _mm256_movemask_epi8(
+          _mm256_cmpeq_epi8(result, _mm256_set1_epi8(1)));
+      if (delim_mask) {
+        unsigned first = (unsigned)__builtin_ctz(delim_mask);
+        i += first;
+        goto found_break_match;
+      }
+      i += 32;
+    }
+  }
+
+tail:
+  /* Fall through to scalar for tail/non-optimized paths */
+  return simd_nfa_exec_scalar(nfa, subject, subject_len, start, out_result);
+
+found_span_match: {
+    /* SPAN matched up to position i (first non-class byte) */
+    if (i > start) {
+      out_result->success = true;
+      out_result->match_start = start;
+      out_result->match_end = i;
+      return true;
+    }
+    return false;
+  }
+
+found_break_match: {
+    /* BREAK matched up to position i (first delimiter byte) */
+    out_result->success = true;
+    out_result->match_start = start;
+    out_result->match_end = i;
+    return true;
+  }
 }
 #endif /* SNOBOL_HAS_AVX2 */
 
@@ -416,15 +518,106 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
 #include <arm_neon.h>
 
 /**
- * NEON implementation — process 16 bytes per window via vqtbl1q_u8.
- *
- * Uses the 256-byte class table as two 128-entry tables (low/high halves)
- * and indexes all 16 bytes in parallel via vqtbl1q_u8.
+ * NEON implementation — process 16 bytes per window via vld1q_u8 + table
+ * lookup. Builds a 256-byte membership table and uses vtbl1q_u8 to classify
+ * all bytes in parallel.
  */
 static bool simd_nfa_exec_neon(const simd_nfa_t *nfa, const char *subject,
                                size_t subject_len, size_t offset,
                                snobol_search_result_t *out_result) {
-  return simd_nfa_exec_scalar(nfa, subject, subject_len, offset, out_result);
+  size_t start = offset;
+
+  /* Build 256-byte membership table from char_mask bitmap */
+  const uint64_t *bmap = nfa->states[0].char_mask;
+  uint8_t table[256];
+  for (int i = 0; i < 256; i++) {
+    unsigned w = (unsigned)i >> 6;
+    table[i] = (uint8_t)((bmap[w] >> ((unsigned)i & 63u)) & 1ull);
+  }
+
+  /* For ANY/NOTANY: single byte check, no SIMD benefit */
+  if (nfa->is_any) {
+    goto tail;
+  }
+
+  size_t i = offset;
+  if (nfa->is_span) {
+    /* SPAN: find first byte NOT in class */
+    while (i + 16 <= subject_len) {
+      uint8x16_t data = vld1q_u8((const uint8_t *)(subject + i));
+      uint8x16_t lo = vandq_u8(data, vdupq_n_u8(0x0F));
+      uint8x16_t hi = vshrq_n_u8(data, 4);
+      /* Classify each byte: lookup table[byte] */
+      uint8x16_t result = vdupq_n_u8(0);
+      for (int g = 0; g < 16; g++) {
+        uint8x16_t sub_tbl = vld1q_u8(table + g * 16);
+        uint8x16_t tbl_res = vqtbl1q_u8(sub_tbl, lo);
+        uint8x16_t mask = vceqq_u8(hi, vdupq_n_u8((uint8_t)g));
+        result = vbslq_u8(mask, tbl_res, result);
+      }
+      /* Find first byte where result == 0 (non-class).  Use min to detect. */
+      uint8_t min_val = vminvq_u8(result);
+      if (min_val == 0) {
+        /* At least one non-class byte — find its position */
+        for (int j = 0; j < 16; j++) {
+          uint8_t d = ((const uint8_t *)subject)[i + j];
+          unsigned ww = (unsigned)d >> 6;
+          if (!((bmap[ww] >> ((unsigned)d & 63u)) & 1ull)) {
+            i += j;
+            goto found_span_match;
+          }
+        }
+      }
+      i += 16;
+    }
+  } else if (nfa->is_break) {
+    /* BREAK: find first byte IN class (delimiter) */
+    while (i + 16 <= subject_len) {
+      uint8x16_t data = vld1q_u8((const uint8_t *)(subject + i));
+      uint8x16_t lo = vandq_u8(data, vdupq_n_u8(0x0F));
+      uint8x16_t hi = vshrq_n_u8(data, 4);
+      uint8x16_t result = vdupq_n_u8(0);
+      for (int g = 0; g < 16; g++) {
+        uint8x16_t sub_tbl = vld1q_u8(table + g * 16);
+        uint8x16_t tbl_res = vqtbl1q_u8(sub_tbl, lo);
+        uint8x16_t mask = vceqq_u8(hi, vdupq_n_u8((uint8_t)g));
+        result = vbslq_u8(mask, tbl_res, result);
+      }
+      /* Find first byte where result != 0 (delimiter) */
+      uint8_t max_val = vmaxvq_u8(result);
+      if (max_val != 0) {
+        for (int j = 0; j < 16; j++) {
+          uint8_t d = ((const uint8_t *)subject)[i + j];
+          unsigned ww = (unsigned)d >> 6;
+          if ((bmap[ww] >> ((unsigned)d & 63u)) & 1ull) {
+            i += j;
+            goto found_break_match;
+          }
+        }
+      }
+      i += 16;
+    }
+  }
+
+tail:
+  return simd_nfa_exec_scalar(nfa, subject, subject_len, start, out_result);
+
+found_span_match: {
+    if (i > start) {
+      out_result->success = true;
+      out_result->match_start = start;
+      out_result->match_end = i;
+      return true;
+    }
+    return false;
+  }
+
+found_break_match: {
+    out_result->success = true;
+    out_result->match_start = start;
+    out_result->match_end = i;
+    return true;
+  }
 }
 #endif /* SNOBOL_HAS_NEON */
 
