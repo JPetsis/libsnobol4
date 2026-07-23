@@ -425,9 +425,12 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
                                snobol_search_result_t *out_result) {
   size_t start = offset;
 
-  /* Build 256-byte membership table from char_mask bitmap */
+  /* Build membership table from char_mask bitmap.
+   * 272 bytes (256 for byte values + 16 padding) so the AVX2
+   * _mm256_loadu_si256 in the SPAN/BREAK loops never overreads. */
   const uint64_t *bmap = nfa->states[0].char_mask;
-  alignas(32) uint8_t table[256];
+  alignas(32) uint8_t table[272];
+  memset(table, 0, sizeof(table));
   for (int i = 0; i < 256; i++) {
     unsigned w = (unsigned)i >> 6;
     table[i] = (uint8_t)((bmap[w] >> ((unsigned)i & 63u)) & 1ull);
