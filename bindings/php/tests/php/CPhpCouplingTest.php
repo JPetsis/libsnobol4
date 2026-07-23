@@ -38,12 +38,14 @@ class CPhpCouplingTest extends TestCase
             return null;
         }
 
+        /* Set PROBE_ITERS in the environment so shell_exec() child inherits it,
+         * and also pass it as a shell variable for robustness. */
+        putenv(self::ITER_ENV . '=' . self::ITER_DEFAULT);
         $cmd = sprintf(
-            '%s %s %s=%d',
+            'PROBE_ITERS=%d %s %s',
+            self::ITER_DEFAULT,
             escapeshellarg(PHP_BINARY),
-            escapeshellarg($probe),
-            self::ITER_ENV,
-            self::ITER_DEFAULT
+            escapeshellarg($probe)
         );
         $out = shell_exec($cmd);
         if ($out === null) {
@@ -63,11 +65,11 @@ class CPhpCouplingTest extends TestCase
             return null;
         }
 
+        putenv(self::ITER_ENV . '=' . self::ITER_DEFAULT);
         $cmd = sprintf(
-            '%s %s=%d',
-            escapeshellarg($probe),
-            self::ITER_ENV,
-            self::ITER_DEFAULT
+            'PROBE_ITERS=%d %s',
+            self::ITER_DEFAULT,
+            escapeshellarg($probe)
         );
         $out = shell_exec($cmd);
         if ($out === null) {
