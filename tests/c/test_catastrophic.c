@@ -1,4 +1,6 @@
+#ifndef SNOBOL_PROFILE
 #define SNOBOL_PROFILE
+#endif
 #include "snobol/vm.h"
 #include <stdbool.h>
 #include <stdio.h>

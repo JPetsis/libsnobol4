@@ -54,6 +54,7 @@ static void assert_same_match(snobol_match_t *got, snobol_match_t *ref,
 
 static void diff_patterns(const char *label, const char *pattern, size_t plen,
                           const char *subject, size_t slen) {
+  (void)plen;
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
   snobol_pattern_t *pat =

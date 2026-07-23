@@ -2773,6 +2773,7 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
                size_t subject_len, const snobol_search_meta_t *meta,
                const snobol_range_meta_t *range_meta, size_t range_meta_count,
                VM *vm, snobol_search_result_t *out_result) {
+  (void)meta;
   /* Use heap-allocated buffers when a VM is provided (reuse across calls);
    * fall back to stack allocation for stateless/direct pike_scan callers. */
   pike_thread_t stack_threads[PIKE_THREAD_BUF];

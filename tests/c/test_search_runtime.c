@@ -1159,7 +1159,7 @@ static void test_search_vm_reset_fields(void) {
   vm.counters[1] = 99;
   vm.max_counter_used = 2;
 
-  snobol_search_exec(&vm, "x", 1, 0, &meta, NULL, &result, NULL);
+  (void)snobol_search_exec(&vm, "x", 1, 0, &meta, NULL, &result, NULL);
 
   /* After search, counters should be preserved (search_vm_t doesn't touch them) */
   test_assert(vm.counters[0] == 42, "counters[0] preserved after search");
