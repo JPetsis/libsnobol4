@@ -425,18 +425,17 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
                                snobol_search_result_t *out_result) {
   size_t start = offset;
 
-  /* Build membership table from char_mask bitmap.
-   * 272 bytes (256 for byte values + 16 padding) so the AVX2
-   * _mm256_loadu_si256 in the SPAN/BREAK loops never overreads. */
+  /* Build membership table from char_mask bitmap.  256 bytes for all
+   * possible byte values (0x00-0xFF).  Each SPAN/BREAK iteration loads a
+   * 16-byte sub-table and broadcasts it to both AVX2 lanes via
+   * _mm256_broadcastsi128_si256. */
   const uint64_t *bmap = nfa->states[0].char_mask;
-  alignas(32) uint8_t table[272];
+  alignas(32) uint8_t table[256];
   memset(table, 0, sizeof(table));
   for (int i = 0; i < 256; i++) {
     unsigned w = (unsigned)i >> 6;
     table[i] = (uint8_t)((bmap[w] >> ((unsigned)i & 63u)) & 1ull);
   }
-  __m256i table256 = _mm256_loadu_si256((const __m256i *)table);
-
   /* For ANY/NOTANY: single byte check, no SIMD benefit */
   if (nfa->is_any) {
     goto tail;
@@ -458,11 +457,14 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
       __m256i lo = _mm256_and_si256(data, _mm256_set1_epi8(0x0F));
       __m256i hi = _mm256_and_si256(
           _mm256_srli_epi32(data, 4), _mm256_set1_epi8(0x0F));
-      /* Look up low nibble in each 16-byte sub-table and blend by hi value */
+      /* Look up low nibble in each 16-byte sub-table and blend by hi value.
+       * vpshufb operates on two independent 16-byte lanes, so we must
+       * broadcast the 16-byte sub-table to both lanes — a plain 32-byte
+       * load would put (g+1)'s entries in the high lane. */
       __m256i result = _mm256_setzero_si256();
       for (int g = 0; g < 16; g++) {
-        __m256i sub = _mm256_loadu_si256(
-            (const __m256i *)(table + g * 16));
+        __m256i sub = _mm256_broadcastsi128_si256(
+            _mm_loadu_si128((const __m128i *)(table + g * 16)));
         __m256i tbl = _mm256_shuffle_epi8(sub, lo);
         __m256i mask = _mm256_cmpeq_epi8(hi, _mm256_set1_epi8((char)g));
         result = _mm256_blendv_epi8(result, tbl, mask);
@@ -488,8 +490,8 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
           _mm256_srli_epi32(data, 4), _mm256_set1_epi8(0x0F));
       __m256i result = _mm256_setzero_si256();
       for (int g = 0; g < 16; g++) {
-        __m256i sub = _mm256_loadu_si256(
-            (const __m256i *)(table + g * 16));
+        __m256i sub = _mm256_broadcastsi128_si256(
+            _mm_loadu_si128((const __m128i *)(table + g * 16)));
         __m256i tbl = _mm256_shuffle_epi8(sub, lo);
         __m256i mask = _mm256_cmpeq_epi8(hi, _mm256_set1_epi8((char)g));
         result = _mm256_blendv_epi8(result, tbl, mask);
