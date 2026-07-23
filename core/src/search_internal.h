@@ -23,6 +23,32 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+
+/* ---------------------------------------------------------------------------
+ * Portable memmem — not available in MSVC or some other non-GNU environments.
+ * Placed here so every search TU (search_tiers.c, search_meta.c, api.c, …)
+ * gets the same portable implementation.
+ * ---------------------------------------------------------------------------
+ */
+#if defined(_WIN32) || !defined(__GLIBC__)
+static const void *snobol_memmem(const void *hay, size_t hlen,
+                                 const void *needle, size_t nlen) {
+  if (nlen == 0)
+    return hay;
+  if (hlen < nlen)
+    return nullptr;
+  const char *h = (const char *)hay;
+  const char *n = (const char *)needle;
+  size_t limit = hlen - nlen;
+  for (size_t i = 0; i <= limit; i++) {
+    if (memcmp(h + i, n, nlen) == 0)
+      return h + i;
+  }
+  return nullptr;
+}
+#define memmem snobol_memmem
+#endif
 
 /* ---------------------------------------------------------------------------
  * Forward declarations for cached state types (defined in search_simd.c).

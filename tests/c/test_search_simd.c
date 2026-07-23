@@ -332,6 +332,7 @@ static void test_simd_span(void) {
   if (rm)
     free((void *)rm);
   snobol_search_meta_free(&m);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -399,6 +400,7 @@ static void test_simd_break(void) {
   if (rm)
     free((void *)rm);
   snobol_search_meta_free(&m);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -451,6 +453,7 @@ static void test_simd_any(void) {
   if (rm)
     free((void *)rm);
   snobol_search_meta_free(&m);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -493,6 +496,7 @@ static void test_simd_notany(void) {
   if (rm)
     free((void *)rm);
   snobol_search_meta_free(&m);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -586,6 +590,7 @@ static void test_simd_tail(void) {
   if (rm)
     free((void *)rm);
   snobol_search_meta_free(&m);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -641,6 +646,7 @@ static void test_simd_utf8_range(void) {
   if (rm)
     free((void *)rm);
   snobol_search_meta_free(&m);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -683,6 +689,7 @@ static void test_simd_offset(void) {
   if (rm)
     free((void *)rm);
   snobol_search_meta_free(&m);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------

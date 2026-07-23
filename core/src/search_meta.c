@@ -1552,6 +1552,23 @@ void snobol_search_meta_free(snobol_search_meta_t *meta) {
   }
 }
 
+void snobol_search_vm_cleanup(VM *vm) {
+  if (!vm)
+    return;
+  if (vm->pike_thread_buf) {
+    snobol_free(vm->pike_thread_buf);
+    vm->pike_thread_buf = NULL;
+  }
+  if (vm->pike_defer_buf) {
+    snobol_free(vm->pike_defer_buf);
+    vm->pike_defer_buf = NULL;
+  }
+  if (vm->choices_arena) {
+    vm_arena_destroy(vm->choices_arena);
+    vm->choices_arena = NULL;
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * Cost-model tier selection (Priority 4)
  *

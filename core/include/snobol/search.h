@@ -434,7 +434,7 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
                                snobol_search_meta_t *out);
 
 /**
- * @brief Free heap-allocated fields in a metadata struct.
+ * Free heap-allocated fields in a metadata struct.
  *
  * Must be called when a metadata struct is no longer needed and was
  * populated by snobol_search_derive_meta(). Currently frees the
@@ -443,6 +443,17 @@ void snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
  * @param meta  Metadata struct to clean up (NULL is safe).
  */
 void snobol_search_meta_free(snobol_search_meta_t *meta);
+
+/**
+ * Free heap-allocated fields in a VM used by the search runtime.
+ *
+ * Releases the Pike thread/defer buffers and choice arena that may have
+ * been allocated during snobol_search_exec() or snobol_search_exec_anchored().
+ * Safe to call on a zero-initialised or already-cleaned VM (fields are NULL).
+ *
+ * @param vm  VM struct to clean up (NULL is safe).
+ */
+void snobol_search_vm_cleanup(VM *vm);
 
 /**
  * @brief Print the cost-model tier coefficients used by select_tier_by_cost().

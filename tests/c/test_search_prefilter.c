@@ -29,6 +29,7 @@ static void test_prefilter_miss(void) {
   test_assert(r.prefilter_skip, "prefilter miss: prefilter_skip set");
   snobol_pattern_free(p);
   snobol_context_destroy(ctx);
+  snobol_search_vm_cleanup(&vm);
 }
 
 static void test_prefilter_hit(void) {
@@ -48,6 +49,7 @@ static void test_prefilter_hit(void) {
   test_assert(r.match_start <= 5 && r.match_end > 5, "prefilter hit: match contains 'b'");
   snobol_pattern_free(p);
   snobol_context_destroy(ctx);
+  snobol_search_vm_cleanup(&vm);
 }
 
 static void test_prefilter_noop(void) {
@@ -68,6 +70,7 @@ static void test_prefilter_noop(void) {
   test_assert(!r.prefilter_skip, "prefilter noop: no prefilter_skip");
   snobol_pattern_free(p);
   snobol_context_destroy(ctx);
+  snobol_search_vm_cleanup(&vm);
 }
 
 void test_search_prefilter_suite(void) {

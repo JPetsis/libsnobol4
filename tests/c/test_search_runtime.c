@@ -141,7 +141,9 @@ static int run_search(const uint8_t *bc, size_t bc_len, const char *subject,
   bool ok = snobol_search_exec(&vm, subject, strlen(subject), start_offset,
                                &meta, NULL, &result, NULL);
   snobol_search_meta_free(&meta);
-  return ok ? (int)result.match_start : -1;
+  int ret = ok ? (int)result.match_start : -1;
+  snobol_search_vm_cleanup(&vm);
+  return ret;
 }
 
 /* Same, returning the match_end */
@@ -160,7 +162,9 @@ static int run_search_end(const uint8_t *bc, size_t bc_len, const char *subject,
   bool ok = snobol_search_exec(&vm, subject, strlen(subject), start_offset,
                                &meta, NULL, &result, NULL);
   snobol_search_meta_free(&meta);
-  return ok ? (int)result.match_end : -1;
+  int ret = ok ? (int)result.match_end : -1;
+  snobol_search_vm_cleanup(&vm);
+  return ret;
 }
 
 /* ---------------------------------------------------------------------------
@@ -399,6 +403,7 @@ static void test_search_diagnostics(void) {
   /* For a literal search, positions 0-2 are skipped by memmem/memchr */
   test_assert(diag.candidates_skipped + diag.candidates_tested >= 4,
               "diagnostics: skipped + tested >= subject length");
+  snobol_search_vm_cleanup(&vm);
 }
 
 /**
@@ -485,6 +490,7 @@ static void test_automaton_search_semantics(void) {
       snobol_search_exec(&vm, "xybz", 4, 0, &auto_meta, NULL, &result, NULL);
   test_assert(ok, "automaton search finds 'b' in 'xybz'");
   test_assert(result.match_start == 2, "automaton match_start == 2");
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -542,6 +548,7 @@ static void test_alt_literals_search_simple(void) {
   /* No match */
   ok = snobol_search_exec(&vm, "xxxxxxx", 7, 0, &meta, NULL, &result, NULL);
   test_assert(!ok, "alt-literals: no match for 'xxxxxxx'");
+  snobol_search_vm_cleanup(&vm);
 }
 
 static void test_alt_literals_multiple_alternatives(void) {
@@ -632,6 +639,7 @@ static void test_alt_literals_tier3a_path(void) {
   ok = snobol_search_exec(&vm, "...dog", 6, 0, &m, NULL, &result, NULL);
   test_assert(ok, "alt-literals Tier3a: 'dog' at end");
   test_assert(result.match_start == 3, "alt-literals Tier3a: 'dog' at pos 3");
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ===================================================================
@@ -821,6 +829,7 @@ static void test_search_vm_correctness(void) {
     test_assert(r.match_start == 2, "search-vm: match_start == 2");
     test_assert(d.search_vm_tests == 0,
                 "search-vm: LIT+ACCEPT handled by Tier 2, not Tier 7");
+    snobol_search_vm_cleanup(&vm);
   }
 
   /* LEN(3) + ACCEPT — NOT literal-only, not prefix, not break/span,
@@ -851,6 +860,7 @@ static void test_search_vm_correctness(void) {
     test_assert(d.search_vm_tests > 0,
                 "search-vm: LEN+ACCEPT routed through Tier 7");
     free(vm.choices);
+    snobol_search_vm_cleanup(&vm);
   }
 
   /* ANY + ACCEPT (digit) — Tier 3 bitmap captures this before Tier 7 */
@@ -894,6 +904,7 @@ static void test_search_vm_correctness(void) {
 
     if (rm)
       free((void *)rm);
+    snobol_search_vm_cleanup(&vm);
   }
 
   /* NOTANY + ACCEPT — not literal-only, search-VM eligible */
@@ -938,6 +949,7 @@ static void test_search_vm_correctness(void) {
     if (rm)
       free((void *)rm);
     free(vm.choices);
+    snobol_search_vm_cleanup(&vm);
   }
 
   /* LIT + LIT + ACCEPT — not literal-only (two LITs), has prefix,
@@ -976,6 +988,7 @@ static void test_search_vm_correctness(void) {
     test_assert(ok, "search-vm: LIT+LIT matches 'cats'");
     test_assert(d.search_vm_tests == 0,
                 "search-vm: LIT+LIT routed through Tier 3, not Tier 7");
+    snobol_search_vm_cleanup(&vm);
   }
 }
 
@@ -1025,6 +1038,7 @@ static void test_literal_only_path(void) {
               "literal-only path: anchored no-match");
   snobol_match_free(mt);
   snobol_pattern_free(pat);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ===================================================================
@@ -1167,6 +1181,7 @@ static void test_search_vm_reset_fields(void) {
 
   snobol_pattern_free(p);
   snobol_context_destroy(ctx);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ===================================================================
@@ -1277,6 +1292,7 @@ static void test_dispatch_order(void) {
                 "dispatch: Tier 3 literal prefix path used");
     snobol_search_meta_free(&m);
   }
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1320,6 +1336,7 @@ static void test_w1b_start_bitmap_after_zero_width(void) {
       test_assert(diag.candidates_skipped > 0,
                   "w1b: ^SPAN skips non-digit positions via bitmap");
       snobol_pattern_free(pat);
+      snobol_search_vm_cleanup(&vm);
     }
   }
 
@@ -1378,6 +1395,7 @@ static void test_w1b_start_bitmap_after_zero_width(void) {
       test_assert(diag.candidates_skipped > 0,
                   "w1b: 'id:' SPAN skips via literal prefix");
       snobol_pattern_free(pat);
+      snobol_search_vm_cleanup(&vm);
     }
   }
 

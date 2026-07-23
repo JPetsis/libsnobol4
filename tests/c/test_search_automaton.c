@@ -297,6 +297,7 @@ static void test_dfa_exec_match_offset_zero(void) {
   test_assert(result.match_end == 3, "match_end == 3");
 
   snobol_dfa_free(dfa);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -334,6 +335,7 @@ static void test_dfa_exec_match_nonzero_offset(void) {
   test_assert(result.match_start == 6, "match_start == 6 (second 'xyz')");
 
   snobol_dfa_free(dfa);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -360,6 +362,7 @@ static void test_dfa_exec_no_match(void) {
   test_assert(!result.success, "result.success is false");
 
   snobol_dfa_free(dfa);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -388,6 +391,7 @@ static void test_non_eligible_fallback(void) {
   test_assert(result.match_end == 1, "BREAKX match_end == 1 (before ',')");
 
   snobol_search_meta_free(&meta);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -496,6 +500,7 @@ static void test_repeat_in_automaton(void) {
   test_assert(!ok, "ARB('ab') 'cd' does not match 'a' (no 'cd')");
 
   snobol_dfa_free(dfa);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------
@@ -550,6 +555,7 @@ static void test_dfa_lifecycle(void) {
     snobol_pattern_free(pat);
   }
   free(err);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* ---------------------------------------------------------------------------

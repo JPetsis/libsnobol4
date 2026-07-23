@@ -132,6 +132,8 @@ static void assert_captures_match(const char *pattern_str, const char *subject,
 
   snobol_pattern_free(pat);
   snobol_context_destroy(ctx);
+  snobol_search_vm_cleanup(&svm);
+  snobol_search_vm_cleanup(&fvm);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

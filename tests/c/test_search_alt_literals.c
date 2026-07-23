@@ -141,6 +141,7 @@ void test_alt_literals_flat_trie(void) {
   test_assert(!ok, "flat alt-literals no match on non-matching subject");
 
   snobol_search_meta_free(&meta);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* Sanity: bushy alternation (shared prefix) keeps the trie path. */
@@ -169,6 +170,7 @@ void test_alt_literals_bushy_trie(void) {
   test_assert(result.match_start == 3, "match at offset 3");
 
   snobol_search_meta_free(&meta);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* The Tier 5 scan loop applies the start-byte bitmap filter so
@@ -202,6 +204,7 @@ void test_tier5_start_bitmap_skip(void) {
   test_assert(result.match_end == 4, "match length is 3");
 
   snobol_search_meta_free(&meta);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* Two-byte literal prefix uses the paired-memchr fast-path and
@@ -309,6 +312,7 @@ void test_alt_literals_bmh_skip(void) {
   test_assert(!meta_f.has_bmh_skip,
               "has_bmh_skip NOT set for flat (no shared prefix)");
   snobol_search_meta_free(&meta_f);
+  snobol_search_vm_cleanup(&vm);
 }
 
 void test_search_alt_literals_suite(void) {

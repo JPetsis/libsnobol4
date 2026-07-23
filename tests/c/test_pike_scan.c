@@ -202,6 +202,7 @@ static void pike_test_overflow_long(void) {
   pike_assert(ok, "overflow long: BREAKX finds space");
   snobol_pattern_free(p);
   snobol_context_destroy(ctx);
+  snobol_search_vm_cleanup(&vm);
 }
 
 /* Same pattern over short subject works normally */
@@ -223,6 +224,7 @@ static void pike_test_overflow_short(void) {
   pike_assert(r.match_end == 5, "overflow short: match_end == 5");
   snobol_pattern_free(p);
   snobol_context_destroy(ctx);
+  snobol_search_vm_cleanup(&vm);
 }
 
 void test_pike_scan_suite(void) {
