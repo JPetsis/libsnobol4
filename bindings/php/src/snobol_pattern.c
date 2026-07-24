@@ -375,6 +375,17 @@ PHP_METHOD(Snobol_Pattern, match) {
                 add_assoc_long(return_value, "_match_len",
                     (zend_long)lit_len);
                 add_assoc_string(return_value, "_output", "");
+                if (opts.metrics) {
+                    zval metrics;
+                    array_init(&metrics);
+                    add_assoc_long(&metrics, "choice_push_count", 0);
+                    add_assoc_long(&metrics, "choice_allocated", 0);
+                    add_assoc_long(&metrics, "choice_peak_depth", 0);
+                    add_assoc_long(&metrics, "choice_peak_memory", 0);
+                    snobol_assoc_zval(return_value, "_metrics", 8,
+                                      &metrics);
+                    zval_ptr_dtor(&metrics);
+                }
                 return;
             }
             RETURN_FALSE;
