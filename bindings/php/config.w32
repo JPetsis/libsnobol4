@@ -16,6 +16,7 @@ if (PHP_SNOBOL != "no") {
         src/snobol_builder_php.c \
         src/snobol_pattern_cache_php.c \
         src/snobol_pattern_helper_php.c \
+        src/snobol_search_iterator_php.c \
         core_amalgam.c";
 
     // MSVC accepts forward slashes in /I arguments.
@@ -29,5 +30,7 @@ if (PHP_SNOBOL != "no") {
 
     // C23 for nullptr / constexpr variables / [[attributes]] (matches config.m4).
     // MSVC 17.10+ (shipped with VS2022 on windows-latest) understands /std:c23.
+    // MSVC 17.12+ (VS2022 17.12) ignores /std:c23 and uses its own C11 mode;
+    // nullptr is provided by a compat #define in the core headers.
     EXTENSION("snobol", sources, null, "/std:c23 " + cflags);
 }
