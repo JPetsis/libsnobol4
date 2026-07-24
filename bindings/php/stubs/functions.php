@@ -11,7 +11,6 @@
  * file when the C extension is already active does not cause redeclaration
  * errors.
  */
-}
 
 if (!function_exists('snobol_get_api_version')) {
     /**
