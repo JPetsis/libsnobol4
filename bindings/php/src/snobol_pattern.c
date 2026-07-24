@@ -1474,21 +1474,17 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
 #undef PHP_SNOBOL_PRESIZE_THRESHOLD
 }
 
+void php_snobol_create_search_iterator(zval *return_value,
+                                        snobol_pattern_t *pattern,
+                                        const char *subject,
+                                        size_t subject_len);
+
 /**
  * Pattern::searchAllGenerator(string $subject): Generator
  *
- * Returns a Generator that yields match results one at a time — the C
- * search loop is suspended between yields.  Callers that iterate only
- * the first N matches pay zero cost for the rest.
- *
- * This is the lazy counterpart of searchAll().  Each yielded array has
- * the same shape as a searchAll() per-match result.
- *
- * TODO: This currently returns the flat result array directly (see P5).
- * Replace with true zend_generator C-level coroutine that stores
- * snobol_pattern_search_state_t in the generator execute data and
- * calls zend_generator_yield() per match.  The full generator design
- * is documented in design.md P7 and specs/php-search-generator/spec.md.
+ * Returns a SearchIterator that lazily yields match results — the C
+ * search loop advances only when the caller iterates.  Callers that
+ * break after N matches pay zero cost for the remaining matches.
  */
 PHP_METHOD(Snobol_Pattern, searchAllGenerator) {
     zend_string *subject;
@@ -1502,13 +1498,8 @@ PHP_METHOD(Snobol_Pattern, searchAllGenerator) {
         RETURN_FALSE;
     }
 
-    /* Build flat result (cheapest full-materialization path). */
-    php_snobol_match_options_t opts;
-    opts.metrics  = false;
-    opts.captures = PHP_SNOBOL_CAPTURES_STRINGS;
-    opts.result   = PHP_SNOBOL_RESULT_FLAT;
-    php_snobol_do_search_all(intern, ZSTR_VAL(subject), ZSTR_LEN(subject),
-                             return_value, &opts);
+    php_snobol_create_search_iterator(return_value, intern,
+                                       ZSTR_VAL(subject), ZSTR_LEN(subject));
 }
 
 ZEND_BEGIN_ARG_INFO_EX(ai_searchSplitCuts, 0, 0, 1)

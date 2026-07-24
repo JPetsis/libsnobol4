@@ -266,4 +266,60 @@ class BindingOptimizationTest extends TestCase
             );
         }
     }
+
+    /* ============================================================
+     *  7. SearchIterator lazy iteration (P7)
+     * ============================================================ */
+
+    public function testSearchIteratorReturnsSearchIterator(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = $p->searchAllGenerator("aba");
+        $this->assertInstanceOf(\Snobol\SearchIterator::class, $it);
+    }
+
+    public function testSearchIteratorIteratesAllMatches(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $flat = $p->searchAll("abacad", ['result' => 'flat']);
+        $it = $p->searchAllGenerator("abacad");
+        $count = 0;
+        foreach ($it as $match) {
+            $this->assertEquals($flat['match_start'][$count], $match['_match_start']);
+            $this->assertEquals($flat['match_len'][$count], $match['_match_len']);
+            $count++;
+        }
+        $this->assertEquals(count($flat['match_start']), $count);
+    }
+
+    public function testSearchIteratorNoMatches(): void
+    {
+        $p = Pattern::fromString("'xyz'");
+        $it = $p->searchAllGenerator("hello world");
+        $count = 0;
+        foreach ($it as $match) {
+            $count++;
+        }
+        $this->assertEquals(0, $count);
+    }
+
+    public function testSearchIteratorWithCaptures(): void
+    {
+        $ast = Builder::concat([
+            Builder::cap(0, Builder::span("a-z")),
+            Builder::lit("="),
+            Builder::cap(1, Builder::span("0-9")),
+        ]);
+        $p = Pattern::compileFromAst($ast);
+        $flat = $p->searchAll("x=1 y=2", ['result' => 'flat']);
+        $it = $p->searchAllGenerator("x=1 y=2");
+        $count = 0;
+        foreach ($it as $match) {
+            $this->assertArrayHasKey('v0', $match);
+            $this->assertArrayHasKey('v1', $match);
+            $this->assertEquals($flat['captures']['v0'][$count], $match['v0']);
+            $count++;
+        }
+        $this->assertEquals(2, $count);
+    }
 }

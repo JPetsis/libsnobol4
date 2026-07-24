@@ -51,6 +51,8 @@ class Pattern
     /** @param string $subject @param string $replacement @param array $options @return string */
     public function searchReplace(string $subject, string $replacement, array $options = []): string { return ''; }
 
-    /** @param string $subject @return \Generator */
-    public function searchAllGenerator(string $subject): \Generator { yield from []; }
+    /** @param string $subject @return SearchIterator */
+    public function searchAllGenerator(string $subject): SearchIterator {
+        return new SearchIterator($this, $subject);
+    }
 }

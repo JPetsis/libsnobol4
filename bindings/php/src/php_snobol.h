@@ -71,6 +71,13 @@ enum {
 void php_snobol_parse_match_options(zval *options_zv,
                                      php_snobol_match_options_t *opts);
 
+/* Create a SearchIterator instance for lazy match iteration.
+ * Used by Pattern::searchAllGenerator(). */
+void php_snobol_create_search_iterator(zval *return_value,
+                                        snobol_pattern_t *pattern,
+                                        const char *subject,
+                                        size_t subject_len);
+
 /* Core search loop used by Pattern::searchAll and PatternHelper::matchAll */
 void php_snobol_do_search_all(snobol_pattern_t *intern,
                                const char *subject_val, size_t subject_len,

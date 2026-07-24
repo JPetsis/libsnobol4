@@ -68,6 +68,9 @@ void snobol_pattern_cache_php_minit(void);
 /* Extern declaration from snobol_pattern_helper_php.c */
 void snobol_pattern_helper_php_minit(void);
 
+/* Extern declaration from snobol_search_iterator_php.c */
+void snobol_search_iterator_minit(void);
+
 PHP_MINFO_FUNCTION(snobol);
 
 PHP_MINFO_FUNCTION(snobol) {
@@ -105,6 +108,7 @@ PHP_MINIT_FUNCTION(snobol) {
     snobol_builder_php_minit();
     snobol_pattern_cache_php_minit();
     snobol_pattern_helper_php_minit();
+    snobol_search_iterator_minit();
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): DONE");
     return SUCCESS;
 }
