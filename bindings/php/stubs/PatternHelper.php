@@ -15,33 +15,33 @@ namespace Snobol;
 
 class PatternHelper
 {
-    /** @param string $source @return static */
-    public static function fromString($source): static { return new static(); }
+    /** @param string $pattern @return static */
+    public static function fromString(string $pattern, ?array $options = null): static { return new static(); }
 
-    /** @param mixed $ast @return static */
-    public static function fromAst($ast): static { return new static(); }
+    /** @param array $ast @return static */
+    public static function fromAst(array $ast, ?array $options = null): static { return new static(); }
 
-    /** @param mixed $pattern @param string $subject @return array|null */
-    public static function matchOnce($pattern, $subject): ?array { return null; }
+    /** @param Pattern|array|string $patternOrAst @param string $subject @return array|null */
+    public static function matchOnce($patternOrAst, string $subject, ?array $options = null): ?array { return null; }
 
-    /** @param mixed $pattern @param string $subject @return array */
-    public static function matchAll($pattern, $subject): array { return []; }
+    /** @param Pattern|array|string $patternOrAst @param string $subject @return array */
+    public static function matchAll($patternOrAst, string $subject, ?array $options = null): array { return []; }
 
-    /** @param string $subject @param mixed $pattern @param int $limit @return array */
-    public static function split($subject, $pattern, $limit = -1): array { return []; }
+    /** @param Pattern|array|string $patternOrAst @param string $subject @return array */
+    public static function split($patternOrAst, string $subject, ?array $options = null): array { return []; }
 
-    /** @param string $subject @param mixed $pattern @param string $replacement @return string */
-    public static function replace($subject, $pattern, $replacement): string { return ''; }
+    /** @param Pattern|array|string $patternOrAst @param string $replacement @param string $subject @return string */
+    public static function replace($patternOrAst, string $replacement, string $subject, ?array $options = null): string { return ''; }
 
     /** @return void */
     public static function clearCache(): void {}
 
-    /** @param string $subject @param string $pattern @return mixed */
-    public static function evalPattern($subject, $pattern): mixed { return null; }
+    /** @param string $patternExpr @param string $subject @return mixed */
+    public static function evalPattern(string $patternExpr, string $subject, ?array $options = null): mixed { return null; }
 
-    /** @param string $subject @param mixed $table @return string */
-    public static function tableSubst($subject, $table): string { return ''; }
+    /** @param Table $table @param string $keyPattern @param string $template @param string $subject @return string */
+    public static function tableSubst(Table $table, string $keyPattern, string $template, string $subject): string { return ''; }
 
-    /** @param string $subject @param mixed $pattern @param mixed ...$args @return string */
-    public static function formattedSubst($subject, $pattern, ...$args): string { return ''; }
+    /** @param Pattern|array|string $patternOrAst @param string $template @param string $subject @return string */
+    public static function formattedSubst($patternOrAst, string $template, string $subject, ?array $options = null): string { return ''; }
 }

@@ -5,48 +5,12 @@
  *
  * This file serves as a type hint and documentation stub for IDEs and static
  * analysis tools. The actual implementations are provided by the native C
- * extension (snobol4-php/php_snobol.c) and are only available when the
- * extension is built with SNOBOL_JIT support.
+ * extension (bindings/php/src/php_snobol.c).
  *
  * Each declaration is guarded with function_exists() so that loading this
  * file when the C extension is already active does not cause redeclaration
  * errors.
  */
-
-if (!function_exists('snobol_get_jit_stats')) {
-    /**
-     * Retrieve current JIT statistics counters.
-     *
-     * Returns an associative array of cumulative counters collected by the
-     * micro-JIT engine since the last call to snobol_reset_jit_stats() (or
-     * since the extension was loaded).
-     *
-     * Available keys:
-     *   - jit_compilations_total       Number of bytecode→native compilations
-     *   - jit_cache_hits_total         Number of times a cached trace was reused
-     *   - jit_entries_total            Number of times JIT-compiled code was entered
-     *   - jit_exits_total              Number of times execution left JIT code
-     *   - jit_bailouts_total           Total bailouts (all reasons combined)
-     *   - jit_time_ns_total            Total nanoseconds spent in JIT code
-     *   - choice_push_total            Number of choice-point pushes (SPLIT ops)
-     *   - choice_pop_total             Number of choice-point pops (backtrack steps)
-     *   - choice_bytes_total           Total bytes allocated for choice points
-     *   - jit_compile_time_ns_total    Nanoseconds spent compiling traces
-     *   - jit_exec_time_ns_total       Nanoseconds spent executing JIT traces
-     *   - jit_interp_time_ns_total     Nanoseconds spent in the interpreter fallback
-     *   - jit_skipped_cold_total       Compilations skipped (pattern not hot enough)
-     *   - jit_skipped_exit_rate_total  Compilations skipped (exit rate too high)
-     *   - jit_skipped_budget_total     Compilations skipped (budget exhausted)
-     *   - jit_bailout_match_fail_total Bailouts caused by a match failure
-     *   - jit_bailout_partial_total    Bailouts caused by a partial/incomplete match
-     *
-     * @return array<string, int> Associative array of JIT counter values
-     */
-    function snobol_get_jit_stats(): array
-    {
-        // Native implementation in C extension
-        return [];
-    }
 }
 
 if (!function_exists('snobol_get_api_version')) {
@@ -111,20 +75,6 @@ if (!function_exists('snobol_get_choice_stats')) {
     }
 }
 
-if (!function_exists('snobol_reset_jit_stats')) {
-    /**
-     * Reset all JIT statistics counters to zero.
-     *
-     * Resets every counter returned by snobol_get_jit_stats() back to 0.
-     * Useful for isolating the statistics of a specific code section.
-     *
-     * @return void
-     */
-    function snobol_reset_jit_stats(): void
-    {
-        // Native implementation in C extension
-    }
-}
 
 if (!function_exists('snobol_table_create')) {
     /**

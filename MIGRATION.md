@@ -9,8 +9,9 @@ monorepo structure.
 
 ### No breaking changes
 
-This is a non-breaking release. There are **no C API changes** and **no PHP API changes**.
-All existing consumers require no code changes.
+This is a non-breaking release. There are **no C API changes**.
+The PHP binding has **new optional parameters** but no breaking changes — all existing
+code continues to work unchanged.
 
 ### Behaviour changes consumers should be aware of
 
@@ -70,7 +71,10 @@ intermediate string objects.
    - snobol_get_jit_stats(&stats);
    ```
 
-3. **No PHP code changes needed** — the PHP binding API is unchanged.
+3. **No PHP code changes needed** — the PHP binding API is backward-compatible.
+   New optional `$options` parameters were added to `match()`, `searchAll()`,
+   `searchSplit()`, `searchSplitOffsets()`, and `searchReplace()` — existing
+   callers without options continue to work identically.
 
 ---
 
@@ -78,7 +82,8 @@ intermediate string objects.
 
 ### No breaking changes
 
-Non-breaking release. No C or PHP API changes.
+Non-breaking release. No C API changes. PHP binding adds optional
+`$options` parameters (backward-compatible — existing callers unchanged).
 
 ### Engine improvements
 

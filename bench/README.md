@@ -18,22 +18,11 @@ make bench              # run PHP benchmarks (tokenize, replace, dates, backtrac
 php bench/compare_pcre2.php   # snobol4 vs PCRE2 comparison via PHP API
 ```
 
-## JIT timing counters
-
-After a JIT-enabled run, `snobol_get_jit_stats()` returns:
-
-| Counter                      | Unit  | Meaning                             |
-|------------------------------|-------|-------------------------------------|
-| `jit_method_attempts_total`  | count | Method JIT compilation attempts     |
-| `jit_method_successes_total` | count | Successful method JIT compilations  |
-| `jit_method_fallbacks_total` | count | Patterns too complex for method JIT |
-| `jit_method_evictions_total` | count | Method JIT cache evictions          |
-
 ## Diagnostic Probe
 
 A standalone C tool (`bench/c/bench_probe.c`) that measures per-scenario
-timing and JIT stat deltas without modifying `core/`. Use it to attribute
-per-iteration cost between the interpreter and JIT-compiled paths.
+timing without modifying `core/`. Use it to attribute per-iteration cost
+across the multi-tier search engine (Tiers 0-9).
 
 ### Building and running
 
@@ -120,16 +109,16 @@ The PHP probe emits a JSON block on stderr that the coupling test parses.
 
 ## C/PHP coupling test
 
-`bindings/php/tests/php/JitCPhpCouplingTest.php` runs both probes and
-asserts they move together. A regression guard: if a JIT change improves
-the C path but the PHP path stays the same, this test fails.
+`bindings/php/tests/php/CPhpCouplingTest.php` runs both probes and
+asserts they move together. A regression guard: if an engine change
+improves the C path but the PHP path stays the same, this test fails.
 
 ```bash
 # In ddev:
-ddev test --filter JitCPhpCouplingTest
+ddev test --filter CPhpCouplingTest
 ```
 
-The test is intentionally loose (PHP/C ratio ≤ 500x for the `tokenize`
+The test is intentionally loose (PHP/C ratio ≤ 50x for the `alt_literals`
 scenario) so it doesn't fail on legitimate architectural differences.
-The goal is to catch the case where a JIT optimization is implemented
+The goal is to catch the case where an optimization is implemented
 in the C engine but the PHP binding doesn't see it.
