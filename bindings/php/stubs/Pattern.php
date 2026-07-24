@@ -16,35 +16,41 @@ namespace Snobol;
 class Pattern
 {
     /** @param mixed $ast @return static */
-    public static function compileFromAst($ast): static { return new static(); }
+    public static function compileFromAst($ast, ?array $options = null): static { return new static(); }
 
     /** @param string $source @return static */
-    public static function fromString($source): static { return new static(); }
+    public static function fromString(string $source, ?array $options = null): static { return new static(); }
 
-    /** @param string $subject @param int|null $start @return array */
-    public function match($subject, $start = null): array { return []; }
+    /** @param string $subject @param array $options @return array */
+    public function match(string $subject, array $options = []): array|false { return []; }
 
     /** @param string $subject @param string $replacement @return string */
-    public function subst($subject, $replacement): string { return ''; }
+    public function subst(string $subject, string $replacement): string { return ''; }
 
     /** @param mixed ...$callbacks @return static */
     public function setEvalCallbacks(...$callbacks): static { return $this; }
 
     /** @param bool $enabled @return static */
-    public function setJit($enabled): static { return $this; }
+    public function setJit(bool $enabled): static { return $this; }
 
-    /** @param string $subject @return array */
-    public function searchAll($subject): array { return []; }
+    /** @param string $subject @param array $options @return array */
+    public function searchAll(string $subject, array $options = []): array { return []; }
 
     /** @param string $subject @return array|null */
-    public function matchLiteral($subject): ?array { return null; }
+    public function matchLiteral(string $subject): ?array { return null; }
 
-    /** @param string $subject @param int $limit @return array */
-    public function searchSplit($subject, $limit = -1): array { return []; }
+    /** @param string $subject @param array $options @return array */
+    public function searchSplit(string $subject, array $options = []): array { return []; }
 
-    /** @param string $subject @param int $limit @return array */
-    public function searchSplitOffsets($subject, $limit = -1): array { return []; }
+    /** @param string $subject @param array $options @return array */
+    public function searchSplitOffsets(string $subject, array $options = []): array { return []; }
 
-    /** @param string $subject @param string $replacement @return string */
-    public function searchReplace($subject, $replacement): string { return ''; }
+    /** @param string $subject @return array */
+    public function searchSplitCuts(string $subject): array { return []; }
+
+    /** @param string $subject @param string $replacement @param array $options @return string */
+    public function searchReplace(string $subject, string $replacement, array $options = []): string { return ''; }
+
+    /** @param string $subject @return \Generator */
+    public function searchAllGenerator(string $subject): \Generator { yield from []; }
 }

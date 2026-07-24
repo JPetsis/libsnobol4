@@ -52,9 +52,29 @@ static inline snobol_pattern_t* php_snobol_fetch(zend_object *obj) {
     return (snobol_pattern_t *)((char *)(obj) - XtOffsetOf(snobol_pattern_t, std));
 }
 
+/* Match/search options struct */
+typedef struct php_snobol_match_options {
+    bool   metrics;    /* true to include _metrics hash */
+    int    captures;   /* 0='strings', 1='offsets'      */
+    int    result;     /* 0='arrays', 1='flat'          */
+} php_snobol_match_options_t;
+
+enum {
+    PHP_SNOBOL_CAPTURES_STRINGS = 0,
+    PHP_SNOBOL_CAPTURES_OFFSETS = 1,
+    PHP_SNOBOL_RESULT_ARRAYS    = 0,
+    PHP_SNOBOL_RESULT_FLAT      = 1,
+};
+
+/* Parse the $options array into a php_snobol_match_options_t.
+ * Fields not present in the array keep their legacy default. */
+void php_snobol_parse_match_options(zval *options_zv,
+                                     php_snobol_match_options_t *opts);
+
 /* Core search loop used by Pattern::searchAll and PatternHelper::matchAll */
 void php_snobol_do_search_all(snobol_pattern_t *intern,
                                const char *subject_val, size_t subject_len,
-                               zval *result);
+                               zval *result,
+                               const php_snobol_match_options_t *opts);
 
 #endif /* PHP_SNOBOL_H */

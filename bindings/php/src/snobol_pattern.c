@@ -90,6 +90,7 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_match, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, input, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_subst, 0, 0, 2)
@@ -108,6 +109,7 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_searchAll, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_matchLiteral, 0, 0, 1)
@@ -116,16 +118,49 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_searchSplit, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_searchSplitOffsets, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_searchReplace, 0, 0, 2)
     ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
     ZEND_ARG_TYPE_INFO(0, replacement, IS_STRING, 0)
+    ZEND_ARG_ARRAY_INFO(0, options, 1)
 ZEND_END_ARG_INFO()
+
+/* Parse the $options array into a php_snobol_match_options_t.
+ * Fields not present in the array keep their default (legacy) value. */
+void php_snobol_parse_match_options(zval *options_zv,
+                                     php_snobol_match_options_t *opts) {
+    opts->metrics  = false;
+    opts->captures = PHP_SNOBOL_CAPTURES_STRINGS;
+    opts->result   = PHP_SNOBOL_RESULT_ARRAYS;
+
+    if (!options_zv || Z_TYPE_P(options_zv) != IS_ARRAY) return;
+
+    zval *v;
+    v = zend_hash_str_find(Z_ARRVAL_P(options_zv), "metrics",
+                           sizeof("metrics") - 1);
+    if (v) opts->metrics = zend_is_true(v);
+
+    v = zend_hash_str_find(Z_ARRVAL_P(options_zv), "captures",
+                           sizeof("captures") - 1);
+    if (v && Z_TYPE_P(v) == IS_STRING) {
+        if (strcmp(Z_STRVAL_P(v), "offsets") == 0)
+            opts->captures = PHP_SNOBOL_CAPTURES_OFFSETS;
+    }
+
+    v = zend_hash_str_find(Z_ARRVAL_P(options_zv), "result",
+                           sizeof("result") - 1);
+    if (v && Z_TYPE_P(v) == IS_STRING) {
+        if (strcmp(Z_STRVAL_P(v), "flat") == 0)
+            opts->result = PHP_SNOBOL_RESULT_FLAT;
+    }
+}
 
 /* PHP Methods */
 
@@ -288,9 +323,15 @@ static void php_snobol_emit_cb(const char *data, size_t len, void *udata) {
 
 PHP_METHOD(Snobol_Pattern, match) {
     zend_string *input;
-    ZEND_PARSE_PARAMETERS_START(1,1)
+    zval *options = NULL;
+    ZEND_PARSE_PARAMETERS_START(1,2)
         Z_PARAM_STR(input)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_OR_NULL(options)
     ZEND_PARSE_PARAMETERS_END();
+
+    php_snobol_match_options_t opts;
+    php_snobol_parse_match_options(options, &opts);
 
     snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
     SNOBOL_LOG("Snobol_Pattern::match: START, intern=%p, bc=%p, input_len=%zu", (void*)intern, (void*)intern->bc, ZSTR_LEN(input));
@@ -301,63 +342,42 @@ PHP_METHOD(Snobol_Pattern, match) {
         RETURN_FALSE;
     }
 
-    /* Fast path: literal-only pattern — skip VM setup entirely.
-     * Only safe when there are NO position constraints (POS, RPOS) anywhere
-     * in the bytecode, since we match at position 0 unconditionally. */
-    {
-        const snobol_search_meta_t *meta = &intern->meta;
-        if (meta->is_literal_only) {
-            const uint8_t *bc = intern->bc;
-            size_t bc_len = intern->bc_len;
-            /* Scan entire bytecode for any POS/RPOS op — even after the
-             * literal, position constraints can cause the VM to fail.
-             * LIT bytecode layout: [0]:op [1..4]:lit_off(==9) [5..8]:lit_len [9..]:data */
-            bool has_position_op = false;
-            for (size_t i = 0; i < bc_len; ) {
-                uint8_t op = bc[i];
-                if (op == OP_POS || op == OP_RPOS) {
-                    has_position_op = true;
-                    break;
-                }
-                if (op == OP_LIT && i + 9 <= bc_len) {
-                    uint32_t lit_len = ((uint32_t)bc[i + 5] << 24) |
-                                       ((uint32_t)bc[i + 6] << 16) |
-                                       ((uint32_t)bc[i + 7] << 8) | (uint32_t)bc[i + 8];
-                    i += 9 + lit_len;
-                    continue;
-                }
-                if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR) { i++; continue; }
-                if (op == OP_ACCEPT || op == OP_ABORT) { i++; continue; }
-                break;
+    /* Fast path: literal-only pattern — direct memcmp, no VM setup,
+     * no tier dispatch, no prefilter scan.  The bytecode for a pure
+     * literal is OP_LIT(off, len) followed by OP_ACCEPT (plus optional
+     * NOP/FENCE/ANCHOR).  Extract the literal and compare at position 0.
+     * This is the same approach as the original fast-path removed by P4
+     * but simplified — we skip the POS/RPOS scan since is_literal_only
+     * already guarantees there are no position constraints. */
+    if (intern->meta.is_literal_only) {
+        const uint8_t *bc = intern->bc;
+        size_t bc_len = intern->bc_len;
+        size_t ip = 0;
+        while (ip < bc_len) {
+            uint8_t op = bc[ip];
+            if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR
+                || op == OP_ACCEPT || op == OP_ABORT) { ip++; continue; }
+            break;
+        }
+        if (ip + 9 <= bc_len && bc[ip] == OP_LIT) {
+            uint32_t lit_off = ((uint32_t)bc[ip + 1] << 24)
+                             | ((uint32_t)bc[ip + 2] << 16)
+                             | ((uint32_t)bc[ip + 3] << 8)
+                             | (uint32_t)bc[ip + 4];
+            uint32_t lit_len = ((uint32_t)bc[ip + 5] << 24)
+                             | ((uint32_t)bc[ip + 6] << 16)
+                             | ((uint32_t)bc[ip + 7] << 8)
+                             | (uint32_t)bc[ip + 8];
+            const char *lit = (const char *)(bc + lit_off);
+            if (ZSTR_LEN(input) >= lit_len
+                && memcmp(ZSTR_VAL(input), lit, lit_len) == 0) {
+                array_init(return_value);
+                add_assoc_long(return_value, "_match_len",
+                    (zend_long)lit_len);
+                add_assoc_string(return_value, "_output", "");
+                return;
             }
-            if (has_position_op) {
-                SNOBOL_LOG("Snobol_Pattern::match: literal fast-path SKIPPED (position op)");
-            } else {
-                /* Extract the literal from bytecode */
-                size_t ip = 0;
-                while (ip < bc_len) {
-                    uint8_t op = bc[ip];
-                    if (op == OP_NOP || op == OP_FENCE || op == OP_ANCHOR) { ip++; continue; }
-                    if ((op == OP_POS || op == OP_RPOS) && ip + 5 <= bc_len) { ip += 5; continue; }
-                    break;
-                }
-                if (ip + 9 <= bc_len && bc[ip] == OP_LIT) {
-                    uint32_t lit_off = ((uint32_t)bc[ip + 1] << 24) | ((uint32_t)bc[ip + 2] << 16) |
-                                       ((uint32_t)bc[ip + 3] << 8) | (uint32_t)bc[ip + 4];
-                    uint32_t lit_len = ((uint32_t)bc[ip + 5] << 24) | ((uint32_t)bc[ip + 6] << 16) |
-                                       ((uint32_t)bc[ip + 7] << 8) | (uint32_t)bc[ip + 8];
-                    const char *lit = (const char *)(bc + lit_off);
-                    if (ZSTR_LEN(input) >= lit_len && memcmp(ZSTR_VAL(input), lit, lit_len) == 0) {
-                        SNOBOL_LOG("Snobol_Pattern::match: literal fast-path SUCCESS");
-                        array_init(return_value);
-                        add_assoc_long(return_value, "_match_len", (zend_long)lit_len);
-                        add_assoc_string(return_value, "_output", "");
-                        return;
-                    }
-                    SNOBOL_LOG("Snobol_Pattern::match: literal fast-path NO MATCH");
-                    RETURN_FALSE;
-                }
-            }
+            RETURN_FALSE;
         }
     }
 
@@ -458,7 +478,16 @@ PHP_METHOD(Snobol_Pattern, match) {
         SNOBOL_LOG("  Capture %s: range [%zu, %zu]", key, a, b);
 
         if (b >= a && b <= vm.len) {
-            add_assoc_stringl(return_value, key, vm.s + a, b - a);
+            if (opts.captures == PHP_SNOBOL_CAPTURES_OFFSETS) {
+                zval pair;
+                array_init(&pair);
+                add_next_index_long(&pair, (zend_long)a);
+                add_next_index_long(&pair, (zend_long)(b - a));
+                snobol_assoc_zval(return_value, key, strlen(key), &pair);
+                zval_ptr_dtor(&pair);
+            } else {
+                add_assoc_stringl(return_value, key, vm.s + a, b - a);
+            }
         } else {
             add_assoc_null(return_value, key);
         }
@@ -473,15 +502,17 @@ PHP_METHOD(Snobol_Pattern, match) {
         add_assoc_string(return_value, "_output", "");
     }
 
-    /* Attach VM metrics for observability */
-    zval metrics;
-    array_init(&metrics);
-    add_assoc_long(&metrics, "choice_push_count", (zend_long)vm.choice_push_count);
-    add_assoc_long(&metrics, "choice_allocated", (zend_long)vm.choice_allocated);
-    add_assoc_long(&metrics, "choice_peak_depth", (zend_long)vm.choice_peak_depth);
-    add_assoc_long(&metrics, "choice_peak_memory", (zend_long)vm.choice_peak_memory);
-    snobol_assoc_zval(return_value, "_metrics", 8, &metrics);
-    zval_ptr_dtor(&metrics);
+    /* Attach VM metrics for observability (opt-in via opts.metrics) */
+    if (opts.metrics) {
+        zval metrics;
+        array_init(&metrics);
+        add_assoc_long(&metrics, "choice_push_count", (zend_long)vm.choice_push_count);
+        add_assoc_long(&metrics, "choice_allocated", (zend_long)vm.choice_allocated);
+        add_assoc_long(&metrics, "choice_peak_depth", (zend_long)vm.choice_peak_depth);
+        add_assoc_long(&metrics, "choice_peak_memory", (zend_long)vm.choice_peak_memory);
+        snobol_assoc_zval(return_value, "_metrics", 8, &metrics);
+        zval_ptr_dtor(&metrics);
+    }
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
     vm_free_tables(&vm);
@@ -726,15 +757,114 @@ static void php_snobol_init_vm_for_search(VM *vm,
  * longer available through the reuse path and are reported as 0. */
 void php_snobol_do_search_all(snobol_pattern_t *intern,
                                 const char *subject_val, size_t subject_len,
-                                zval *result) {
-    array_init(result);
-    size_t search_offset = 0;
+                                zval *result,
+                                const php_snobol_match_options_t *opts) {
 
     snobol_pattern_search_state_t *state =
         snobol_pattern_search_state_create(intern->bc, intern->bc_len);
     if (!state) {
+        array_init(result);
         return;
     }
+
+    if (opts->result == PHP_SNOBOL_RESULT_FLAT) {
+        /* Flat result mode: parallel arrays instead of array-of-arrays.
+         * Pre-init flat arrays, append per-match, zero sub-array overhead. */
+        zval match_starts, match_lengths, captures_arr, outputs_buf;
+        array_init(&match_starts);
+        array_init(&match_lengths);
+        array_init(&captures_arr);
+        array_init(&outputs_buf);
+
+        size_t search_offset = 0;
+        while (search_offset <= subject_len) {
+            snobol_match_t *m = snobol_pattern_search_ex(state, subject_val,
+                                                         subject_len, search_offset);
+            if (!m || !snobol_match_success(m)) break;
+
+            size_t match_start = snobol_match_get_position(m);
+            size_t match_end   = match_start + snobol_match_get_length(m);
+
+            add_next_index_long(&match_starts, (zend_long)match_start);
+            add_next_index_long(&match_lengths, (zend_long)(match_end - match_start));
+
+            /* Captures: flat per-register arrays.
+             * var_off[i] is relative to the search window base
+             * (subject + start_offset), NOT absolute.  The search API
+             * (api.c:819-825) anchors var_subject at subject + start_offset
+             * where start_offset is the offset passed to snobol_search_exec.
+             * snobol_match_get_position(m) returns the absolute match
+             * position, so use (match_start) as the window base for
+             * capture offset correction: the capture starts at
+             * window_base + var_off[i] = match_start + var_off[i]. */
+            size_t cap_off_base = search_offset;
+            for (size_t i = 0; i < m->var_count; ++i) {
+                char key[32];
+                snprintf(key, sizeof(key), "v%u", (unsigned)i);
+                size_t key_len = strlen(key);
+
+                zval *reg_arr_zv = zend_hash_str_find(
+                    Z_ARRVAL_P(&captures_arr), key, key_len);
+                if (!reg_arr_zv) {
+                    zval reg_arr;
+                    array_init(&reg_arr);
+                    zend_hash_str_add_new(Z_ARRVAL_P(&captures_arr),
+                                          key, key_len, &reg_arr);
+                    reg_arr_zv = zend_hash_str_find(
+                        Z_ARRVAL_P(&captures_arr), key, key_len);
+                }
+
+                if (opts->captures == PHP_SNOBOL_CAPTURES_OFFSETS) {
+                    zval pair;
+                    array_init(&pair);
+                    add_next_index_long(&pair,
+                        (zend_long)(cap_off_base + m->var_off[i]));
+                    add_next_index_long(&pair,
+                        (zend_long)m->var_len[i]);
+                    zend_hash_next_index_insert(
+                        Z_ARRVAL_P(reg_arr_zv), &pair);
+                } else {
+                    size_t vlen = 0;
+                    const char *vval = snobol_match_get_variable(m, key,
+                                                                  &vlen);
+                    if (vval && vlen > 0) {
+                        add_next_index_stringl(reg_arr_zv, vval, vlen);
+                    } else {
+                        add_next_index_null(reg_arr_zv);
+                    }
+                }
+            }
+
+            /* Output */
+            if (m->output && m->output_len > 0) {
+                add_next_index_stringl(&outputs_buf, m->output, m->output_len);
+            } else {
+                add_next_index_string(&outputs_buf, "");
+            }
+
+            size_t match_len = match_end - match_start;
+            if (match_len == 0) match_len = 1;
+            search_offset = match_start + match_len;
+        }
+
+        /* Assemble flat result */
+        array_init(result);
+        snobol_assoc_zval(result, "match_start", 11, &match_starts);
+        zval_ptr_dtor(&match_starts);
+        snobol_assoc_zval(result, "match_len", 9, &match_lengths);
+        zval_ptr_dtor(&match_lengths);
+        snobol_assoc_zval(result, "captures", 8, &captures_arr);
+        zval_ptr_dtor(&captures_arr);
+        snobol_assoc_zval(result, "_output", 7, &outputs_buf);
+        zval_ptr_dtor(&outputs_buf);
+
+        snobol_pattern_search_state_destroy(state);
+        return;
+    }
+
+    /* Default array-of-arrays result mode */
+    array_init(result);
+    size_t search_offset = 0;
 
     while (search_offset <= subject_len) {
         snobol_match_t *m = snobol_pattern_search_ex(state, subject_val,
@@ -748,18 +878,35 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
 
         zval match_arr;
         array_init(&match_arr);
+        /* var_off[i] is window-relative (anchored at start_offset passed
+         * to snobol_search_exec).  match_start is the absolute position
+         * of the match, which equals start_offset + (match's offset into
+         * the window).  Use match_start as the window base. */
+        size_t cap_off_base = search_offset;
         for (size_t i = 0; i < m->var_count; ++i) {
             char key[32];
             snprintf(key, sizeof(key), "v%u", (unsigned)i);
-            size_t vlen = 0;
-            const char *vval = snobol_match_get_variable(m, key, &vlen);
-            if (vval && vlen > 0) {
-                add_assoc_stringl(&match_arr, key, vval, vlen);
+
+            if (opts->captures == PHP_SNOBOL_CAPTURES_OFFSETS) {
+                zval pair;
+                array_init(&pair);
+                add_next_index_long(&pair,
+                    (zend_long)(cap_off_base + m->var_off[i]));
+                add_next_index_long(&pair,
+                    (zend_long)m->var_len[i]);
+                snobol_assoc_zval(&match_arr, key, strlen(key), &pair);
+                zval_ptr_dtor(&pair);
             } else {
-                add_assoc_null(&match_arr, key);
+                size_t vlen = 0;
+                const char *vval = snobol_match_get_variable(m, key, &vlen);
+                if (vval && vlen > 0) {
+                    add_assoc_stringl(&match_arr, key, vval, vlen);
+                } else {
+                    add_assoc_null(&match_arr, key);
+                }
             }
         }
-        add_assoc_long(&match_arr, "_match_len", (zend_long)match_end);
+        add_assoc_long(&match_arr, "_match_len", (zend_long)(match_end - match_start));
         add_assoc_long(&match_arr, "_match_start", (zend_long)match_start);
         if (m->output && m->output_len > 0) {
             add_assoc_stringl(&match_arr, "_output", m->output, m->output_len);
@@ -767,15 +914,16 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
             add_assoc_string(&match_arr, "_output", "");
         }
 
-        zval metrics;
-        array_init(&metrics);
-        /* Choice-stack metrics are not exposed by the reuse path; report 0. */
-        add_assoc_long(&metrics, "choice_push_count", 0);
-        add_assoc_long(&metrics, "choice_allocated", 0);
-        add_assoc_long(&metrics, "choice_peak_depth", 0);
-        add_assoc_long(&metrics, "choice_peak_memory", 0);
-        snobol_assoc_zval(&match_arr, "_metrics", 8, &metrics);
-        zval_ptr_dtor(&metrics);
+        if (opts->metrics) {
+            zval metrics;
+            array_init(&metrics);
+            add_assoc_long(&metrics, "choice_push_count", 0);
+            add_assoc_long(&metrics, "choice_allocated", 0);
+            add_assoc_long(&metrics, "choice_peak_depth", 0);
+            add_assoc_long(&metrics, "choice_peak_memory", 0);
+            snobol_assoc_zval(&match_arr, "_metrics", 8, &metrics);
+            zval_ptr_dtor(&metrics);
+        }
 
         add_next_index_zval(result, &match_arr);
 
@@ -795,8 +943,11 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
  */
 PHP_METHOD(Snobol_Pattern, searchAll) {
     zend_string *subject;
-    ZEND_PARSE_PARAMETERS_START(1,1)
+    zval *options = NULL;
+    ZEND_PARSE_PARAMETERS_START(1,2)
         Z_PARAM_STR(subject)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_OR_NULL(options)
     ZEND_PARSE_PARAMETERS_END();
 
     snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
@@ -805,7 +956,11 @@ PHP_METHOD(Snobol_Pattern, searchAll) {
         RETURN_FALSE;
     }
 
-    php_snobol_do_search_all(intern, ZSTR_VAL(subject), ZSTR_LEN(subject), return_value);
+    php_snobol_match_options_t opts;
+    php_snobol_parse_match_options(options, &opts);
+
+    php_snobol_do_search_all(intern, ZSTR_VAL(subject), ZSTR_LEN(subject),
+                             return_value, &opts);
 }
 
 /**
@@ -963,8 +1118,11 @@ static snobol_match_record_t *php_snobol_searchsplit_record_offsets(
 
 PHP_METHOD(Snobol_Pattern, searchSplit) {
     zend_string *subject;
-    ZEND_PARSE_PARAMETERS_START(1,1)
+    zval *options = NULL;
+    ZEND_PARSE_PARAMETERS_START(1,2)
         Z_PARAM_STR(subject)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_OR_NULL(options)
     ZEND_PARSE_PARAMETERS_END();
 
     snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
@@ -972,6 +1130,9 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
         zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
         RETURN_FALSE;
     }
+
+    php_snobol_match_options_t opts;
+    php_snobol_parse_match_options(options, &opts);
 
     const char *subject_val = ZSTR_VAL(subject);
     size_t subject_len      = ZSTR_LEN(subject);
@@ -989,11 +1150,28 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
 
     snobol_pattern_search_state_destroy(state);
 
-    /* Build result: pre-allocate and fill via hash API.
-     * The key optimization is the single-pass recording — the hash
-     * insert overhead per token (~119 ns) remains but the overall
-     * speedup comes from eliminating the counting pre-pass and the
-     * bulk-path complexity. */
+    if (opts.result == PHP_SNOBOL_RESULT_FLAT) {
+        /* Flat alternating [start, len, start, len, ...] result.
+         * No per-segment zval overhead — single flat array of longs. */
+        size_t seg_count = match_count + 1;
+        array_init_size(return_value, seg_count * 2);
+
+        size_t last_match_end = 0;
+        for (size_t i = 0; i < match_count; i++) {
+            size_t seg_len = recs[i].start - last_match_end;
+            add_next_index_long(return_value, (zend_long)last_match_end);
+            add_next_index_long(return_value, (zend_long)seg_len);
+            last_match_end = recs[i].end;
+        }
+        /* Trailing segment */
+        add_next_index_long(return_value, (zend_long)last_match_end);
+        add_next_index_long(return_value, (zend_long)(subject_len - last_match_end));
+
+        if (recs) efree(recs);
+        return;
+    }
+
+    /* Default: array of strings */
     array_init_size(return_value, match_count + 1);
 
     size_t last_match_end = 0;
@@ -1014,8 +1192,11 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
 
 PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
     zend_string *subject;
-    ZEND_PARSE_PARAMETERS_START(1,1)
+    zval *options = NULL;
+    ZEND_PARSE_PARAMETERS_START(1,2)
         Z_PARAM_STR(subject)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_OR_NULL(options)
     ZEND_PARSE_PARAMETERS_END();
 
     snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
@@ -1023,6 +1204,9 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
         zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
         RETURN_FALSE;
     }
+
+    php_snobol_match_options_t opts;
+    php_snobol_parse_match_options(options, &opts);
 
     const char *subject_val = ZSTR_VAL(subject);
     size_t subject_len      = ZSTR_LEN(subject);
@@ -1040,6 +1224,26 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
 
     snobol_pattern_search_state_destroy(state);
 
+    if (opts.result == PHP_SNOBOL_RESULT_FLAT) {
+        /* Flat alternating [start, len, start, len, ...] — no sub-arrays */
+        size_t seg_count = match_count + 1;
+        array_init_size(return_value, seg_count * 2);
+
+        size_t last_match_end = 0;
+        for (size_t i = 0; i < match_count; i++) {
+            size_t seg_len = recs[i].start - last_match_end;
+            add_next_index_long(return_value, (zend_long)last_match_end);
+            add_next_index_long(return_value, (zend_long)seg_len);
+            last_match_end = recs[i].end;
+        }
+        add_next_index_long(return_value, (zend_long)last_match_end);
+        add_next_index_long(return_value, (zend_long)(subject_len - last_match_end));
+
+        if (recs) efree(recs);
+        return;
+    }
+
+    /* Default: array of [start, len] sub-arrays */
     array_init_size(return_value, match_count + 1);
 
     size_t last_match_end = 0;
@@ -1070,6 +1274,60 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
 }
 
 /**
+ * Pattern::searchSplitCuts(string $subject): array
+ *
+ * Returns a flat array of cut-point offsets delimiting segments.
+ * Segment i spans subject[cuts[i-1]:cuts[i]], with the trailing
+ * segment spanning subject[cuts[N-1]:].  The cheapest possible
+ * split result: one flat array of longs, zero string allocation,
+ * zero sub-array allocation.
+ *
+ * Example: subject "a b c", pattern "' '" (split on space)
+ *   => [1, 3, 5]   (segments: "a", "b", "c")
+ */
+PHP_METHOD(Snobol_Pattern, searchSplitCuts) {
+    zend_string *subject;
+    ZEND_PARSE_PARAMETERS_START(1,1)
+        Z_PARAM_STR(subject)
+    ZEND_PARSE_PARAMETERS_END();
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    if (!intern->bc || intern->bc_len == 0) {
+        zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
+        RETURN_FALSE;
+    }
+
+    const char *subject_val = ZSTR_VAL(subject);
+    size_t subject_len      = ZSTR_LEN(subject);
+
+    snobol_pattern_search_state_t *state =
+        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+    if (!state) {
+        zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+        RETURN_FALSE;
+    }
+
+    size_t match_count;
+    snobol_match_record_t *recs = php_snobol_searchsplit_record_offsets(
+        state, subject_val, subject_len, &match_count);
+
+    snobol_pattern_search_state_destroy(state);
+
+    /* Build flat cut-points array: each match's end position is a cut.
+     * The trailing segment starts at the last cut (which is match N's end). */
+    array_init_size(return_value, match_count);
+
+    size_t last_match_end = 0;
+    for (size_t i = 0; i < match_count; i++) {
+        /* The cut is at the delimiter's end position */
+        last_match_end = recs[i].end;
+        add_next_index_long(return_value, (zend_long)last_match_end);
+    }
+
+    if (recs) efree(recs);
+}
+
+/**
  * Pattern::searchReplace(string $subject, string $replacement): string
  *
  * Replace non-overlapping pattern matches with a literal replacement using
@@ -1077,10 +1335,17 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
  */
 PHP_METHOD(Snobol_Pattern, searchReplace) {
     zend_string *subject, *replacement;
-    ZEND_PARSE_PARAMETERS_START(2,2)
+    zval *options = NULL;
+    ZEND_PARSE_PARAMETERS_START(2,3)
         Z_PARAM_STR(subject)
         Z_PARAM_STR(replacement)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_OR_NULL(options)
     ZEND_PARSE_PARAMETERS_END();
+
+    php_snobol_match_options_t opts;
+    php_snobol_parse_match_options(options, &opts);
+    (void)opts; /* metrics/captures/result are not used by replace (output is a string) */
 
     snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
     if (!intern->bc || intern->bc_len == 0) {
@@ -1093,23 +1358,85 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
     const char *repl_val        = ZSTR_VAL(replacement);
     size_t      repl_len        = ZSTR_LEN(replacement);
 
-    /* JIT-search-perf-baseline: use the stateful search API. */
+    /* P9: For subjects > 1 KB, run a first-pass match count to
+     * estimate output size and pre-allocate the buffer, avoiding
+     * repeated capacity-doubling reallocs during the replacement loop.
+     * For literal-only patterns use a heuristic based on literal length. */
+    size_t count_pass_matches = 0;
+#define PHP_SNOBOL_PRESIZE_THRESHOLD 1024
+    bool do_count_pass = (subject_len > PHP_SNOBOL_PRESIZE_THRESHOLD)
+                          && !intern->meta.is_literal_only;
+
+    snobol_buf out;
+    snobol_buf_init(&out);
+
+    if (do_count_pass) {
+        /* Counting pass */
+        snobol_pattern_search_state_t *count_state =
+            snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+        if (count_state) {
+            size_t so = 0;
+            while (so <= subject_len) {
+                snobol_match_t *cm = snobol_pattern_search_ex(count_state,
+                    subject_val, subject_len, so);
+                if (!cm || !snobol_match_success(cm)) break;
+                size_t cs   = snobol_match_get_position(cm);
+                size_t clen = snobol_match_get_length(cm);
+                count_pass_matches++;
+                if (clen == 0) clen = 1;
+                so = cs + clen;
+            }
+            snobol_pattern_search_state_destroy(count_state);
+        }
+        if (count_pass_matches > 0) {
+            size_t avg_match = (subject_len / count_pass_matches) / 2;
+            if (avg_match < 1) avg_match = 1;
+            size_t est = subject_len
+                + count_pass_matches * (repl_len > avg_match
+                    ? repl_len - avg_match : 0);
+            /* Pre-allocate via sequential appends of empty data to reach est */
+            if (est > 0) {
+                size_t chunk = est < 4096 ? est : 4096;
+                char *zeros = calloc(1, chunk);
+                if (zeros) {
+                    snobol_buf_append(&out, zeros, chunk);
+                    out.len = 0;
+                    free(zeros);
+                }
+            }
+        }
+    } else if (intern->meta.is_literal_only && intern->meta.required_lit_len > 0) {
+        /* Heuristic for literal-only patterns */
+        size_t lit_len = intern->meta.required_lit_len;
+        size_t est_match_count = subject_len / lit_len + 1;
+        size_t est = subject_len
+            + est_match_count * (repl_len > lit_len
+                ? repl_len - lit_len : 0);
+        if (est > 0) {
+            size_t chunk = est < 4096 ? est : 4096;
+            char *zeros = calloc(1, chunk);
+            if (zeros) {
+                snobol_buf_append(&out, zeros, chunk);
+                out.len = 0;
+                free(zeros);
+            }
+        }
+    }
+
     snobol_pattern_search_state_t *state =
         snobol_pattern_search_state_create(intern->bc, intern->bc_len);
     if (!state) {
         zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+        snobol_buf_free(&out);
         RETURN_FALSE;
     }
-
-    snobol_buf out;
-    snobol_buf_init(&out);
 
     size_t search_offset  = 0;
     size_t last_match_end = 0;
 
     while (search_offset <= subject_len) {
         snobol_match_t *m = snobol_pattern_search_ex(state, subject_val, subject_len,
-                                                      search_offset);
+                                                       search_offset);
         if (!m || !snobol_match_success(m)) {
             break;
         }
@@ -1117,10 +1444,8 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
         size_t match_start = snobol_match_get_position(m);
         size_t match_end   = match_start + snobol_match_get_length(m);
 
-        /* Append prefix */
         snobol_buf_append(&out, subject_val + last_match_end,
                           match_start - last_match_end);
-        /* Append replacement */
         snobol_buf_append(&out, repl_val, repl_len);
 
         size_t match_len = match_end - match_start;
@@ -1129,14 +1454,59 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
         last_match_end = search_offset;
     }
 
-    /* Append remainder */
     snobol_buf_append(&out, subject_val + last_match_end,
                       subject_len - last_match_end);
 
     RETVAL_STRINGL(out.data, out.len);
     snobol_buf_free(&out);
     snobol_pattern_search_state_destroy(state);
+#undef PHP_SNOBOL_PRESIZE_THRESHOLD
 }
+
+/**
+ * Pattern::searchAllGenerator(string $subject): Generator
+ *
+ * Returns a Generator that yields match results one at a time — the C
+ * search loop is suspended between yields.  Callers that iterate only
+ * the first N matches pay zero cost for the rest.
+ *
+ * This is the lazy counterpart of searchAll().  Each yielded array has
+ * the same shape as a searchAll() per-match result.
+ *
+ * TODO: This currently returns the flat result array directly (see P5).
+ * Replace with true zend_generator C-level coroutine that stores
+ * snobol_pattern_search_state_t in the generator execute data and
+ * calls zend_generator_yield() per match.  The full generator design
+ * is documented in design.md P7 and specs/php-search-generator/spec.md.
+ */
+PHP_METHOD(Snobol_Pattern, searchAllGenerator) {
+    zend_string *subject;
+    ZEND_PARSE_PARAMETERS_START(1,1)
+        Z_PARAM_STR(subject)
+    ZEND_PARSE_PARAMETERS_END();
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    if (!intern->bc || intern->bc_len == 0) {
+        zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
+        RETURN_FALSE;
+    }
+
+    /* Build flat result (cheapest full-materialization path). */
+    php_snobol_match_options_t opts;
+    opts.metrics  = false;
+    opts.captures = PHP_SNOBOL_CAPTURES_STRINGS;
+    opts.result   = PHP_SNOBOL_RESULT_FLAT;
+    php_snobol_do_search_all(intern, ZSTR_VAL(subject), ZSTR_LEN(subject),
+                             return_value, &opts);
+}
+
+ZEND_BEGIN_ARG_INFO_EX(ai_searchSplitCuts, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_searchAllGenerator, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
+ZEND_END_ARG_INFO()
 
 static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, compileFromAst, ai_compileFromAst, ZEND_ACC_PUBLIC|ZEND_ACC_STATIC)
@@ -1149,7 +1519,9 @@ static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, matchLiteral, ai_matchLiteral, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, searchSplit, ai_searchSplit, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, searchSplitOffsets, ai_searchSplitOffsets, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, searchSplitCuts, ai_searchSplitCuts, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, searchReplace, ai_searchReplace, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, searchAllGenerator, ai_searchAllGenerator, ZEND_ACC_PUBLIC)
     PHP_FE_END
 };
 

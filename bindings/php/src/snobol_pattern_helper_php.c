@@ -366,8 +366,12 @@ PHP_METHOD(Snobol_PatternHelper, matchAll) {
         return;
     }
 
+    php_snobol_match_options_t helper_opts;
+    helper_opts.metrics  = true;
+    helper_opts.captures = 0; /* strings */
+    helper_opts.result   = 0; /* arrays */
     zval search_ret;
-    php_snobol_do_search_all(intern, subject, subject_len, &search_ret);
+    php_snobol_do_search_all(intern, subject, subject_len, &search_ret, &helper_opts);
 
     array_init(return_value);
     zval *entry;
