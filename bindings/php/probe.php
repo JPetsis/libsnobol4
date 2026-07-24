@@ -319,6 +319,18 @@ function run_alt_literals_search(int $iters): array
 }
 
 /** @return array{iters:int,total_ns:int} */
+function run_alt_literals_search_flat(int $iters): array
+{
+    $p = PatternHelper::fromString("'cat' | 'dog' | 'fox'");
+    for ($i = 0; $i < 100; $i++) { $p->searchAll($GLOBALS['SUBJECT_ALTLIT'], ['result' => 'flat']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->searchAll($GLOBALS['SUBJECT_ALTLIT'], ['result' => 'flat']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+/** @return array{iters:int,total_ns:int} */
 function run_automatons(int $iters): array
 {
     $p = PatternHelper::fromString("SPAN('abc') 'd'");
@@ -350,6 +362,24 @@ function run_tokenize_php(int $outer_iters): array
 }
 
 /** @return array{iters:int,total_ns:int} */
+function run_tokenize_php_flat(int $outer_iters): array
+{
+    $p = PatternHelper::fromString("' '");
+    for ($i = 0; $i < 10; $i++) { $p->searchSplit($GLOBALS['SUBJECT_WHITESPACE'], ['result' => 'flat']); }
+
+    $total_search_calls = 0;
+    $start = now_ns();
+    for ($i = 0; $i < $outer_iters; $i++) {
+        $tokens = $p->searchSplit($GLOBALS['SUBJECT_WHITESPACE'], ['result' => 'flat']);
+        $total_search_calls += 1;
+    }
+    return [
+        'iters' => $total_search_calls,
+        'total_ns' => now_ns() - $start,
+    ];
+}
+
+/** @return array{iters:int,total_ns:int} */
 function run_tokenize_php_offsets(int $outer_iters): array
 {
     $p = PatternHelper::fromString("' '");
@@ -359,6 +389,24 @@ function run_tokenize_php_offsets(int $outer_iters): array
     $start = now_ns();
     for ($i = 0; $i < $outer_iters; $i++) {
         $offsets = $p->searchSplitOffsets($GLOBALS['SUBJECT_WHITESPACE']);
+        $total_search_calls += 1;
+    }
+    return [
+        'iters' => $total_search_calls,
+        'total_ns' => now_ns() - $start,
+    ];
+}
+
+/** @return array{iters:int,total_ns:int} */
+function run_tokenize_php_offsets_flat(int $outer_iters): array
+{
+    $p = PatternHelper::fromString("' '");
+    for ($i = 0; $i < 10; $i++) { $p->searchSplitOffsets($GLOBALS['SUBJECT_WHITESPACE'], ['result' => 'flat']); }
+
+    $total_search_calls = 0;
+    $start = now_ns();
+    for ($i = 0; $i < $outer_iters; $i++) {
+        $offsets = $p->searchSplitOffsets($GLOBALS['SUBJECT_WHITESPACE'], ['result' => 'flat']);
         $total_search_calls += 1;
     }
     return [
@@ -386,16 +434,19 @@ echo "Iterations per scenario: $iters (override with PROBE_ITERS)\n";
 echo "Tokenize uses $tokenize_iters outer iters (one searchSplit call each).\n\n";
 
 $scenarios = [
-    ['name' => 'literal_fail',        'run' => 'run_literal_fail',        'iter' => $iters],
-    ['name' => 'literal_ok',          'run' => 'run_literal_ok',          'iter' => $iters],
-    ['name' => 'span_comma',          'run' => 'run_span_comma',          'iter' => $iters],
-    ['name' => 'break_comma',         'run' => 'run_break',               'iter' => $iters],
-    ['name' => 'alternation',         'run' => 'run_alternation',         'iter' => $iters],
-    ['name' => 'alt_literals',        'run' => 'run_alt_literals',        'iter' => $iters],
-    ['name' => 'alt_literals_search', 'run' => 'run_alt_literals_search', 'iter' => $iters],
-    ['name' => 'automata',             'run' => 'run_automatons',         'iter' => $iters],
-    ['name' => 'tokenize_php',        'run' => 'run_tokenize_php',        'iter' => $tokenize_iters],
-    ['name' => 'tokenize_php_offsets','run' => 'run_tokenize_php_offsets', 'iter' => $tokenize_iters],
+    ['name' => 'literal_fail',           'run' => 'run_literal_fail',           'iter' => $iters],
+    ['name' => 'literal_ok',             'run' => 'run_literal_ok',             'iter' => $iters],
+    ['name' => 'span_comma',             'run' => 'run_span_comma',             'iter' => $iters],
+    ['name' => 'break_comma',            'run' => 'run_break',                  'iter' => $iters],
+    ['name' => 'alternation',            'run' => 'run_alternation',            'iter' => $iters],
+    ['name' => 'alt_literals',           'run' => 'run_alt_literals',           'iter' => $iters],
+    ['name' => 'alt_literals_search',    'run' => 'run_alt_literals_search',    'iter' => $iters],
+    ['name' => 'alt_literals_search_flat','run' => 'run_alt_literals_search_flat','iter' => $iters],
+    ['name' => 'automata',               'run' => 'run_automatons',            'iter' => $iters],
+    ['name' => 'tokenize_php',           'run' => 'run_tokenize_php',           'iter' => $tokenize_iters],
+    ['name' => 'tokenize_php_flat',      'run' => 'run_tokenize_php_flat',      'iter' => $tokenize_iters],
+    ['name' => 'tokenize_php_offsets',   'run' => 'run_tokenize_php_offsets',   'iter' => $tokenize_iters],
+    ['name' => 'tokenize_php_offsets_flat','run' => 'run_tokenize_php_offsets_flat','iter' => $tokenize_iters],
 ];
 
 $results = [];

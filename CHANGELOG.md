@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### PHP Binding Overhead Optimizations
+
+#### Added
+
+- **Opt-in `_metrics` hash** (`bindings/php/src/snobol_pattern.c`): `Pattern::match()` and `searchAll()` no longer build the `_metrics` hash by default. Pass `$options['metrics' => true]` to include it. Saves ~50 ns per call.
+- **Capture-as-offsets mode** (`bindings/php/src/snobol_pattern.c`): `match()`, `searchAll()`, `searchSplit()` accept `$options['captures' => 'offsets']` to return capture values as `[start, length]` integer pairs instead of substring copies. Zero string allocation for callers that only need positions.
+- **Flat result mode for searchAll** (`bindings/php/src/snobol_pattern.c`): `$options['result' => 'flat']` returns parallel arrays (`match_start`, `match_len`, `captures`) instead of array-of-arrays. Eliminates per-match zval array overhead.
+- **Flat offset mode for searchSplit** (`bindings/php/src/snobol_pattern.c`): `$options['result' => 'flat']` on `searchSplit()`/`searchSplitOffsets()` returns alternating `[start, len, start, len, ...]` flat arrays, replacing per-segment sub-arrays.
+- **`Pattern::searchSplitCuts()`** (`bindings/php/src/snobol_pattern.c`): Returns flat cut-point offset array — the cheapest possible split result. Zero string allocation, zero sub-array allocation.
+- **`Pattern::searchAllGenerator()`** (`bindings/php/src/snobol_pattern.c`, `bindings/php/src/snobol_search_iterator_php.c`): Lazy iteration over matches via `Snobol\SearchIterator` (implements PHP `Iterator`). First match in ~1 µs. Callers that break early pay zero for remaining matches.
+- **`$options` parameter on all search methods** (`bindings/php/src/snobol_pattern.c`): `searchAll()`, `searchSplit()`, `searchSplitOffsets()`, `searchReplace()` now accept `array $options = []` for uniform control of `metrics`, `captures`, and `result`.
+- **Pre-sized output buffer in searchReplace** (`bindings/php/src/snobol_pattern.c`): For subjects > 1 KB, `searchReplace()` runs a counting pass to estimate output size and pre-allocate the buffer, avoiding reallocation during long replacement loops.
+- **JIT configuration for DDEV** (`bindings/php/.ddev/php/snobol-jit.ini`): Enables `opcache.jit = tracing` for benchmark accuracy.
+
+#### Changed
+
+- **Literal fast-path restored** (`bindings/php/src/snobol_pattern.c`): The direct-`memcmp` literal fast-path in `match()` was restored (previously removed as "redundant" in P4). The C-core Tier 2 dispatcher is correct but adds ~300 ns due to `search_reset_vm` + prefilter overhead. The direct path returns in ~20 ns.
+- **`Pattern::match()` signature** (`bindings/php/src/snobol_pattern.c`): Accepts optional `array $options = []` parameter.
+- **All probe metrics under 500 ns** (`bench/BENCHMARKS.md`), verified with `opcache.jit` enabled.
+
+#### Fixed
+
+- **Literal fast-path bypass** (`bindings/php/src/snobol_pattern.c`): Literal fast-path now respects `$options['metrics' => true]` and emits the `_metrics` hash when requested.
+
 ### search-perf-levers
 
 #### Added

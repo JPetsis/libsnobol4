@@ -765,22 +765,43 @@ Caputred text **preserves original subject case** (not folded).
 
 `match()` is the **anchored** entry point: it runs the *selected* tier once at offset 0 (via `snobol_search_exec_anchored`) rather than restarting the full VM from every position. Because of the tier dispatcher (§14), a recognizing-and-capturing pattern such as `lit("id:") + cap(span("0-9"))` is executed by the lightweight Tier-6 search-VM, not the full VM — so `match()` is typically far faster than an equivalent `^…$` PCRE match.
 
+**Signature:**
+```php
+$p->match(string $subject, array $options = []): array|false
+```
+
+**Options:**
+
+| Option     | Type      | Default     | Description                                     |
+|------------|-----------|-------------|-------------------------------------------------|
+| `metrics`  | `bool`    | `false`     | Include `_metrics` hash in result               |
+| `captures` | `string`  | `'strings'` | `'strings'` = substring copies, `'offsets'` = `[start, len]` pairs |
+
 ```php
 $p = Pattern::fromString("'hello'");
-$res = $p->match("hello world");
+$res = $p->match("hello world");     // metrics absent
+$res = $p->match("hello", ['metrics' => true]);  // includes _metrics
 ```
 
 **Returns:** `array|false`
 
 **Success result keys:**
 
-| Key            | Type           | Description                                        |
-|----------------|----------------|----------------------------------------------------|
-| `_match_len`   | `int`          | Byte length of match                               |
-| `_match_start` | `int`          | Start position (always 0 for anchored match)       |
-| `_output`      | `string`       | Output buffer from `OP_EMIT_*`                     |
-| `_metrics`     | `array`        | Choice-point push/peak depth/memory stats          |
-| `v0`..`v63`    | `string\|null` | Capture register values (present only if captured) |
+| Key            | Type                     | Description                                        |
+|----------------|--------------------------|----------------------------------------------------|
+| `_match_len`   | `int`                    | Byte length of match                               |
+| `_match_start` | `int`                    | Start position (always 0 for anchored match)       |
+| `_output`      | `string`                 | Output buffer from `OP_EMIT_*`                     |
+| `_metrics`     | `array` (opt-in)         | Choice-point push/peak depth/memory stats          |
+| `v0`..`v63`    | `string\|null\|array`    | Capture values — string or `[start, len]` pair     |
+
+When `captures => 'offsets'`, capture registers return `[start, length]` integer pairs instead of substring copies, avoiding string allocation:
+
+```php
+$p = Pattern::compileFromAst(Builder::cap(0, Builder::lit("hello")));
+$res = $p->match("hello world", ['captures' => 'offsets']);
+// $res['v0'] = [0, 5]   (start=0, length=5)
+```
 
 ```php
 $res = $p->match("hello world");
@@ -866,6 +887,14 @@ Convenience wrapper for `Pattern::subst()`.
 
 Search operations find matches **anywhere** in the subject (unanchored), not just at position 0.
 
+All search methods accept an optional `$options` array:
+
+| Option      | Type      | Default     | Description                                        |
+|-------------|-----------|-------------|----------------------------------------------------|
+| `metrics`   | `bool`    | `false`     | Include `_metrics` in per-match results            |
+| `captures`  | `string`  | `'strings'` | `'strings'` or `'offsets'` (`[start, len]` pairs) |
+| `result`    | `string`  | `'arrays'`  | `'arrays'` or `'flat'` (flat parallel arrays)      |
+
 ### `Pattern::searchAll()`
 
 Find all non-overlapping matches.
@@ -874,7 +903,38 @@ Find all non-overlapping matches.
 $p = Pattern::fromString("SPAN('0-9')");
 $matches = $p->searchAll("abc 123 def 4567");
 // Returns array of match-result arrays
+
+// Flat result mode — parallel arrays, no per-match zval overhead:
+$flat = $p->searchAll("abc 123 def 4567", ['result' => 'flat']);
+// $flat = [
+//   'match_start' => [4, 12],
+//   'match_len'   => [3, 4],
+//   'captures'    => ['v0' => ['123', '4567']],
+//   '_output'     => ['', ''],
+// ]
+// Flat mode is ~1.1x faster than arrays-of-arrays (bulk of time
+// is the C search loop; true speedup requires the batch-search API).
+
+// Capture offsets:
+$off = $p->searchAll("abc 123 def 4567", ['captures' => 'offsets']);
+// Each capture register returns [start, len] instead of substring
 ```
+
+### `Pattern::searchAllGenerator()` — Lazy Iteration
+
+Returns a `Snobol\SearchIterator` that lazily yields matches one at a time. The C search loop advances only when the caller iterates — callers that break after N matches pay zero cost for the remaining matches.
+
+```php
+$p = Pattern::fromString("'a'");
+$it = $p->searchAllGenerator("abacad");
+foreach ($it as $match) {
+    echo $match['_match_start'];  // 0, then 2, then 4
+    // break after first 2 matches — the 3rd is never computed
+    if (++$count >= 2) break;
+}
+```
+
+The SearchIterator is ideal for "find first N" patterns. For full iteration, the flat array mode of `searchAll()` is faster because it avoids per-match PHP dispatch overhead.
 
 ### `Pattern::searchSplit()`
 
@@ -884,19 +944,42 @@ Split subject at matches, returning non-matching segments.
 $p = Pattern::fromString("SPAN('0-9')");
 $segments = $p->searchSplit("abc123def456ghi");
 // Returns ["abc", "def", "ghi"]
+
+// Flat offset mode — alternating [start, len, start, len, ...]:
+$flat = $p->searchSplit("abc123def456ghi", ['result' => 'flat']);
+// Returns [0, 3, 6, 3, 9, 3]  →  seg0: [0,3]="abc", seg1: [6,3]="def", ...
 ```
 
 **PHP equivalent:** `preg_split('/[0-9]+/', "abc123def456ghi")`
 
+### `Pattern::searchSplitCuts()`
+
+Return cut-point offsets — the cheapest possible split result. One flat array of longs, zero string allocation, zero sub-array allocation. Each segment `i` spans `subject[cuts[i-1]:cuts[i]]` (with `cuts[-1]` = 0).
+
+```php
+$p = Pattern::fromString("' '");
+$cuts = $p->searchSplitCuts("a b c d");
+// Returns [2, 4, 6]
+// seg0 = subject[0:2] = "a "
+// seg1 = subject[2:4] = "b "
+// seg2 = subject[4:6] = "c "
+// seg3 = subject[6:]  = "d"
+// Note: cuts are delimiter-end positions; segments include delimiters.
+```
+
 ### `Pattern::searchSplitOffsets()`
 
-Return match positions as `[offset, length]` pairs instead of segment strings. Zero zend_string allocation — useful when you need positions for further processing without creating intermediate string objects.
+Return match positions as `[offset, length]` pairs instead of segment strings. Zero zend_string allocation.
 
 ```php
 $p = Pattern::fromString("SPAN('0-9')");
 $offsets = $p->searchSplitOffsets("abc123def456ghi");
 // Returns [[3, 3], [9, 3]]
 //           ^offset ^len  ^offset ^len
+
+// Flat mode:
+$flat = $p->searchSplitOffsets("abc123def456ghi", ['result' => 'flat']);
+// Returns [3, 3, 9, 3]  —  alternating [start, len, start, len, ...]
 ```
 
 **PHP equivalent:** `preg_match_all('/[0-9]+/', "abc123def456ghi", $m, PREG_OFFSET_CAPTURE)`
@@ -925,9 +1008,15 @@ Replace all matches.
 $p = Pattern::fromString("SPAN('0-9')");
 $result = $p->searchReplace("abc123def456ghi", "[digits]");
 // Returns "abc[digits]def[digits]ghi"
+
+// Options are accepted but only metrics/captures/result affect
+// replace output indirectly; the result is always a string.
+$res = $p->searchReplace("foo bar", "X", ['metrics' => true]);
 ```
 
 **PHP equivalent:** `preg_replace('/[0-9]+/', '[digits]', "abc123def456ghi")`
+
+For subjects > 1 KB, `searchReplace()` runs a counting pass to pre-size the output buffer, avoiding reallocation during long replacement loops.
 
 ### `PatternHelper::split()`
 
@@ -945,6 +1034,31 @@ $segments = PatternHelper::split($p, "a,b,c");
 $p = Builder::lit("old");
 $result = PatternHelper::replace($p, "new", "old text with old words");
 // Returns "new text with new words"
+```
+
+### `Snobol\SearchIterator` — Lazy Match Iteration
+
+`SearchIterator` implements PHP's `Iterator` interface for lazy iteration over search matches. Created implicitly by `Pattern::searchAllGenerator()`.
+
+```php
+class SearchIterator implements Iterator {
+    public static function fromPattern(Pattern $pattern, string $subject): SearchIterator;
+    public function current(): mixed;
+    public function key(): mixed;
+    public function next(): void;
+    public function valid(): bool;
+    public function rewind(): void;
+}
+```
+
+The iterator stores a `snobol_pattern_search_state_t` internally. Each `current()` call runs `snobol_pattern_search_ex()` once to find the next match. `foreach` works naturally:
+
+```php
+$it = SearchIterator::fromPattern($pattern, $subject);
+foreach ($it as $i => $match) {
+    // process match $i
+    if ($i >= 10) break;  // only 10 matches computed
+}
 ```
 
 ### Reusable search state (performance)
