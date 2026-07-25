@@ -1,0 +1,68 @@
+
+libsnobol4 diagnostic probe — per-scenario timing
+=================================================
+PCRE2 comparison: ENABLED (pcre2_* scenarios)
+
+Iterations per scenario: 100000 (override with PROBE_ITERS)
+Tokenize uses 10000 outer iters (multi-pass of subject).
+
+scenario            ns/iter    iters tier exec
+-------             -------    ----- ---- ----
+literal_fail           6750   100000    0    0
+literal_ok              153   100000    0    0
+span_comma              570   100000    1    9
+break_comma             217   100000    0    6
+alternation             419   100000    4    9
+alt_literals            181   100000    5    5
+automaton               195   100000    1    6
+alt_literals_conv        459   100000    5    5
+alt_literals_search        442   100000    0    0
+span_simd             12571   100000    1    9
+span_simd_miss         1567   100000    1    9
+notany_simd_miss       1572   100000    9    9
+tokenize_conv           397  5200000    0    0
+tokenize_reuse          305  5210000    2    3
+residue_repeat          189   100000    6    6
+residue_zero_width        187   100000    6    6
+residue_catastrophic        184     1000    3    3
+pike_overflow          2761   100000    0    0
+prefilter_miss          181   100000    3    3
+zero_progress           184   100000    6    6
+pcre2_literal_fail         57   100000    0    0
+pcre2_literal_ok         38   100000    0    0
+pcre2_span_comma         30   100000    0    0
+pcre2_alternation         31   100000    0    0
+pcre2_alt_literals         38   100000    0    0
+pcre2_span_simd         496   100000    0    0
+pcre2_span_simd_miss        539   100000    0    0
+pcre2_tokenize           35  5210000    0    0
+pcre2_catastrophic        250        1    0    0
+
+Legend:
+  ns/iter  : wall time per match attempt (lower = faster)
+  iters    : match attempts executed in the scenario
+  tier     : structural tier (meta->tier, pattern shape)
+  exec     : executed dispatch tier (cost model + DFA override)
+
+cost-model coefficients (cost_ns = setup_ns + subject_len / per_byte_div):
+  tier=BREAK_SCAN  setup_ns=20   per_byte_div=8   
+  tier=SPAN_SCAN   setup_ns=20   per_byte_div=8   
+  tier=LITERAL     setup_ns=10   per_byte_div=16  
+  tier=PREFIX      setup_ns=30   per_byte_div=32  
+  tier=BITMAP      setup_ns=25   per_byte_div=12  
+  tier=ALT_LIT     setup_ns=12   per_byte_div=20  
+  tier=SEARCH_VM   setup_ns=50   per_byte_div=10  
+  tier=GENERAL     setup_ns=100  per_byte_div=5   
+  tier=SIMD_NFA    setup_ns=15   per_byte_div=16  
+note: TIER_ALT_LIT setup recalibrated to 12 ns post trie-cache.
+
+Recalibration suggestion (short-subject ns/iter -> candidate setup_ns):
+  literal_fail     measured=6750 ns/iter -> suggest setup_ns ~= 6750
+  literal_ok       measured=153 ns/iter -> suggest setup_ns ~= 153
+  span_comma       measured=570 ns/iter -> suggest setup_ns ~= 570
+  break_comma      measured=217 ns/iter -> suggest setup_ns ~= 217
+  alternation      measured=419 ns/iter -> suggest setup_ns ~= 419
+  alt_literals     measured=181 ns/iter -> suggest setup_ns ~= 181
+  alt_literals_conv measured=459 ns/iter -> suggest setup_ns ~= 459
+(Apply by editing k_tier_cost in core/src/search_meta.c; the authoritative
+ table is printed above. Keep per_byte_div for per-byte throughput.)

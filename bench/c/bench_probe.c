@@ -219,6 +219,15 @@ static const char *SUBJECT_ALTLIT =
     "the cat went dog walking fox jumped cat over dog near fox "
     "the cat went dog walking fox jumped cat over dog near fox ";
 
+/* ~260 bytes of "xyzabcd" repeated for automaton pattern SPAN('abc') 'd'.
+ * The first three bytes "xyz" are not in the span class, then "abcd" matches
+ * SPAN('abc') with literal 'd'. */
+static const char *SUBJECT_AUTOMATON =
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabc";
+
 /* 1KB subject: all digits except last byte → SPAN('0-9') scans 1023 bytes */
 static char SUBJECT_SIMD_SPAN[1024];
 static void init_simd_subjects(void) {
@@ -365,6 +374,106 @@ static void run_alt_literals_search(int64_t iters, probe_result_t *r) {
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
+}
+
+/* ---------------------------------------------------------------------------
+ * Anchored-match scenarios using snobol_search_exec_anchored() directly
+ *
+ * Mirrors PHP's Pattern::match(): no context create/destroy per call, no
+ * search state — just a stack-allocated VM + tier dispatch.
+ * --------------------------------------------------------------------------- */
+
+/* Run anchored match with a minimal stack VM.  Compiles pattern once, then
+ * in the loop sets s/len on a reused VM, calls snobol_vm_reset() between
+ * iterations, and calls snobol_search_exec_anchored().  No context
+ * create/destroy per iteration, no search state allocation. */
+static void run_anchored_scenario(const char *pattern_src, size_t pat_len,
+                                   const char *subject, size_t subject_len,
+                                   int64_t iters, probe_result_t *r,
+                                   bool capture_tier_info) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, pattern_src, pat_len);
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+
+    const uint8_t *bc = snobol_pattern_get_bc(pat);
+    size_t bc_len = snobol_pattern_get_bc_len(pat);
+
+    size_t range_count = 0;
+    const snobol_range_meta_t *range_meta =
+        snobol_pattern_get_range_meta(pat, &range_count);
+
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = bc_len;
+    vm.range_meta = range_meta;
+    vm.range_meta_count = range_count;
+
+    snobol_search_result_t result;
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        vm.s = subject;
+        vm.len = subject_len;
+        snobol_vm_reset(&vm);
+
+        memset(&result, 0, sizeof(result));
+
+        (void)snobol_search_exec_anchored(&vm, subject, subject_len, meta, NULL,
+                                           &result, NULL);
+    }
+    int64_t end = bench_ns();
+
+    snobol_search_vm_cleanup(&vm);
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    if (capture_tier_info) {
+        r->tier = (int)meta->tier;
+        bool dfa = snobol_pattern_automaton_available(pat);
+        r->exec_tier = (int)snobol_search_executed_tier(meta, dfa,
+                                                         subject_len, true);
+    }
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+static void run_literal_fail_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("'pqr'", 5, SUBJECT_NO_PQR,
+                          strlen(SUBJECT_NO_PQR), iters, r, false);
+}
+
+static void run_literal_ok_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("'pqr'", 5, SUBJECT_WITH_PQR,
+                          strlen(SUBJECT_WITH_PQR), iters, r, false);
+}
+
+static void run_span_comma_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("SPAN(',')", 9, SUBJECT_CSV,
+                          strlen(SUBJECT_CSV), iters, r, true);
+}
+
+static void run_break_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("BREAK(',') ','", 14, SUBJECT_CSV,
+                          strlen(SUBJECT_CSV), iters, r, true);
+}
+
+static void run_alternation_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("'a' | 'b' | 'c'", 15, SUBJECT_MIXED,
+                          strlen(SUBJECT_MIXED), iters, r, true);
+}
+
+static void run_alt_literals_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("'cat' | 'dog' | 'fox'", 20, SUBJECT_ALTLIT,
+                          strlen(SUBJECT_ALTLIT), iters, r, true);
+}
+
+static void run_automaton_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("SPAN('abc') 'd'", 15, SUBJECT_AUTOMATON,
+                          strlen(SUBJECT_AUTOMATON), iters, r, true);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1040,8 +1149,8 @@ int main(void) {
     printf("Tokenize uses %" PRId64 " outer iters (multi-pass of subject).\n\n",
            tokenize_iters);
 
-    /* Total scenarios: 14 snobol + 9 PCRE2 (when available) = 23 */
-    probe_result_t results[23];
+    /* Total scenarios: 20 snobol + 9 PCRE2 (when available) = 29 */
+    probe_result_t results[29];
     memset(results, 0, sizeof(results));
 
     /* Run each scenario */
@@ -1050,27 +1159,28 @@ int main(void) {
         void (*run)(int64_t, probe_result_t *);
         int64_t iter_count;
     } scenarios[] = {
-        /* { "literal_fail",        run_literal_fail,        iters            }, */
-        /* { "literal_ok",          run_literal_ok,          iters            }, */
-        /* { "span_comma",          run_span_comma,          iters            }, */
-        /* { "span_search",         run_span_search,         iters            }, */
-        /* { "cap_search",          run_cap_match,           iters            }, */
-        /* { "alternation",         run_alternation,         iters            }, */
-        /* { "alt_search",          run_alt_search,          iters            }, */
-        { "alt_literals",        run_alt_literals,        iters            },
-        { "alt_literals_search", run_alt_literals_search, iters            },
-        /* { "automaton",           run_automaton,           iters            }, */
-        { "span_simd",           run_span_simd,           iters            },
-        { "span_simd_miss",      run_span_simd_miss,      iters            },
-        { "notany_simd_miss",    run_notany_simd_miss,    iters            },
-        { "tokenize_conv",        run_tokenize_convenience, tokenize_iters   },
-        { "tokenize_reuse",        run_tokenize,             tokenize_iters   },
-        { "residue_repeat",        run_residue_repeat,       iters            },
-        { "residue_zero_width",    run_residue_zero_width,   iters            },
-        { "residue_catastrophic",  run_residue_catastrophic, 1000             },
-        { "pike_overflow",         run_pike_overflow,        iters            },
-        { "prefilter_miss",        run_prefilter_miss,       iters            },
-        { "zero_progress",         run_zero_progress,        iters            },
+        /* Anchored scenarios (stack VM, no search state) */
+        { "literal_fail",        run_literal_fail_anchored,        iters   },
+        { "literal_ok",          run_literal_ok_anchored,          iters   },
+        { "span_comma",          run_span_comma_anchored,          iters   },
+        { "break_comma",         run_break_anchored,               iters   },
+        { "alternation",         run_alternation_anchored,         iters   },
+        { "alt_literals",        run_alt_literals_anchored,        iters   },
+        { "automaton",           run_automaton_anchored,           iters   },
+        /* Convenience / search scenarios */
+        { "alt_literals_conv",   run_alt_literals,                iters   },
+        { "alt_literals_search", run_alt_literals_search,         iters   },
+        { "span_simd",           run_span_simd,                   iters   },
+        { "span_simd_miss",      run_span_simd_miss,              iters   },
+        { "notany_simd_miss",    run_notany_simd_miss,            iters   },
+        { "tokenize_conv",        run_tokenize_convenience,       tokenize_iters },
+        { "tokenize_reuse",        run_tokenize,                   tokenize_iters },
+        { "residue_repeat",        run_residue_repeat,             iters          },
+        { "residue_zero_width",    run_residue_zero_width,         iters          },
+        { "residue_catastrophic",  run_residue_catastrophic,       1000           },
+        { "pike_overflow",         run_pike_overflow,              iters          },
+        { "prefilter_miss",        run_prefilter_miss,             iters          },
+        { "zero_progress",         run_zero_progress,              iters          },
 #ifdef HAVE_PCRE2
         { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            },
         { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters            },
@@ -1103,16 +1213,16 @@ int main(void) {
         if (ns <= 0)
             continue;
         const char *tier = NULL;
-        if (strcmp(results[i].name, "alt_literals") == 0)
+        if (strcmp(results[i].name, "alt_literals") == 0 ||
+            strcmp(results[i].name, "alt_literals_conv") == 0)
             tier = "ALT_LIT";
         else if (strcmp(results[i].name, "literal_ok") == 0 ||
                  strcmp(results[i].name, "literal_fail") == 0)
             tier = "LITERAL";
         else if (strcmp(results[i].name, "span_comma") == 0 ||
-                 strcmp(results[i].name, "span_search") == 0)
+                 strcmp(results[i].name, "break_comma") == 0)
             tier = "SPAN_SCAN";
-        else if (strcmp(results[i].name, "alternation") == 0 ||
-                 strcmp(results[i].name, "alt_search") == 0)
+        else if (strcmp(results[i].name, "alternation") == 0)
             tier = "PREFIX/ALT_LIT";
         if (tier)
             printf("  %-16s measured=%" PRId64 " ns/iter -> suggest setup_ns ~= %d\n",

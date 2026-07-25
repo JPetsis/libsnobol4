@@ -1,0 +1,162 @@
+
+libsnobol4 diagnostic probe (PHP binding)
+==========================================
+Iterations per scenario: 100000 (override with PROBE_ITERS)
+Tokenize uses 10000 outer iters (one searchSplit call each).
+
+scenario                ns/iter      iters
+-------                 -------      -----
+literal_fail                 15     100000
+literal_ok                   15     100000
+span_comma                  192     100000
+break_comma                 234     100000
+alternation                 189     100000
+alt_literals                106     100000
+alt_literals_search       93975     100000
+alt_literals_search_flat      78612     100000
+automata                    146     100000
+span_simd                   582     100000
+span_simd_miss              196     100000
+notany_simd_miss            200     100000
+tokenize_php             223639      10000
+tokenize_php_flat        228615      10000
+tokenize_php_offsets     235056      10000
+tokenize_php_offsets_flat     227611      10000
+residue_repeat           105701       1000
+residue_zero_width       116466       1000
+pike_overflow              1056       1000
+prefilter_miss           123300       1000
+zero_progress            123053       1000
+
+Legend: see bench/c/bench_probe.c for column definitions.
+PHP probe measures the full user-facing path (binding cost included).
+Run bench/c/bench_probe.c to compare against the pure C path.
+
+[
+    {
+        "name": "literal_fail",
+        "iters": 100000,
+        "total_ns": 1505024,
+        "ns_per_iter": 15
+    },
+    {
+        "name": "literal_ok",
+        "iters": 100000,
+        "total_ns": 1580032,
+        "ns_per_iter": 15
+    },
+    {
+        "name": "span_comma",
+        "iters": 100000,
+        "total_ns": 19299072,
+        "ns_per_iter": 192
+    },
+    {
+        "name": "break_comma",
+        "iters": 100000,
+        "total_ns": 23472896,
+        "ns_per_iter": 234
+    },
+    {
+        "name": "alternation",
+        "iters": 100000,
+        "total_ns": 18964992,
+        "ns_per_iter": 189
+    },
+    {
+        "name": "alt_literals",
+        "iters": 100000,
+        "total_ns": 10617088,
+        "ns_per_iter": 106
+    },
+    {
+        "name": "alt_literals_search",
+        "iters": 100000,
+        "total_ns": 9397549056,
+        "ns_per_iter": 93975
+    },
+    {
+        "name": "alt_literals_search_flat",
+        "iters": 100000,
+        "total_ns": 7861219072,
+        "ns_per_iter": 78612
+    },
+    {
+        "name": "automata",
+        "iters": 100000,
+        "total_ns": 14635008,
+        "ns_per_iter": 146
+    },
+    {
+        "name": "span_simd",
+        "iters": 100000,
+        "total_ns": 58255872,
+        "ns_per_iter": 582
+    },
+    {
+        "name": "span_simd_miss",
+        "iters": 100000,
+        "total_ns": 19601920,
+        "ns_per_iter": 196
+    },
+    {
+        "name": "notany_simd_miss",
+        "iters": 100000,
+        "total_ns": 20050944,
+        "ns_per_iter": 200
+    },
+    {
+        "name": "tokenize_php",
+        "iters": 10000,
+        "total_ns": 2236395776,
+        "ns_per_iter": 223639
+    },
+    {
+        "name": "tokenize_php_flat",
+        "iters": 10000,
+        "total_ns": 2286151168,
+        "ns_per_iter": 228615
+    },
+    {
+        "name": "tokenize_php_offsets",
+        "iters": 10000,
+        "total_ns": 2350569216,
+        "ns_per_iter": 235056
+    },
+    {
+        "name": "tokenize_php_offsets_flat",
+        "iters": 10000,
+        "total_ns": 2276118016,
+        "ns_per_iter": 227611
+    },
+    {
+        "name": "residue_repeat",
+        "iters": 1000,
+        "total_ns": 105701120,
+        "ns_per_iter": 105701
+    },
+    {
+        "name": "residue_zero_width",
+        "iters": 1000,
+        "total_ns": 116466944,
+        "ns_per_iter": 116466
+    },
+    {
+        "name": "pike_overflow",
+        "iters": 1000,
+        "total_ns": 1056768,
+        "ns_per_iter": 1056
+    },
+    {
+        "name": "prefilter_miss",
+        "iters": 1000,
+        "total_ns": 123300864,
+        "ns_per_iter": 123300
+    },
+    {
+        "name": "zero_progress",
+        "iters": 1000,
+        "total_ns": 123053056,
+        "ns_per_iter": 123053
+    }
+]

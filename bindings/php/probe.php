@@ -415,6 +415,127 @@ function run_tokenize_php_offsets_flat(int $outer_iters): array
     ];
 }
 
+// C-core residue/Vm scenarios
+$SUBJECT_RESIDUE = str_repeat("a", 128);
+$SUBJECT_CAT = str_repeat("a", 10);
+
+function run_span_simd(int $iters): array
+{
+    $p = PatternHelper::fromString("SPAN('0-9')");
+    $subj = str_repeat("0", 1023) . "x";
+    for ($i = 0; $i < 100; $i++) { $p->match($subj); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($subj);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_span_simd_miss(int $iters): array
+{
+    $p = PatternHelper::fromString("SPAN('0-9')");
+    for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_NO_PQR']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($GLOBALS['SUBJECT_NO_PQR']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_notany_simd_miss(int $iters): array
+{
+    $p = PatternHelper::fromString("NOTANY('0')");
+    $subj = str_repeat("0", 1024);
+    for ($i = 0; $i < 100; $i++) { $p->match($subj); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($subj);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_residue_repeat(int $iters): array
+{
+    $p = Pattern::compileFromAst(
+        Builder::concat([Builder::arbno(Builder::lit("a")), Builder::lit("b")])
+    );
+    for ($i = 0; $i < 100; $i++) { $p->searchAll($GLOBALS['SUBJECT_RESIDUE']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->searchAll($GLOBALS['SUBJECT_RESIDUE']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_residue_zero_width(int $iters): array
+{
+    $ast = Builder::concat([Builder::arbno(Builder::lit("")), Builder::lit("b")]);
+    $p = Pattern::compileFromAst($ast);
+    for ($i = 0; $i < 100; $i++) { $p->searchAll($GLOBALS['SUBJECT_RESIDUE']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->searchAll($GLOBALS['SUBJECT_RESIDUE']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_residue_catastrophic(int $iters): array
+{
+    $ast = Builder::concat([
+        Builder::arbno(Builder::repeat(Builder::lit("a"), 1, -1)),
+        Builder::lit("b")
+    ]);
+    $p = Pattern::compileFromAst($ast);
+    for ($i = 0; $i < 10; $i++) { $p->searchAll($GLOBALS['SUBJECT_CAT']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->searchAll($GLOBALS['SUBJECT_CAT']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_pike_overflow(int $iters): array
+{
+    $ast = Builder::concat([Builder::breakx(" "), Builder::lit(" ")]);
+    $p = Pattern::compileFromAst($ast);
+    $subj = str_repeat("x", 900) . " ";
+    for ($i = 0; $i < 100; $i++) { $p->searchAll($subj); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->searchAll($subj);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_prefilter_miss(int $iters): array
+{
+    $ast = Builder::concat([
+        Builder::arbno(Builder::repeat(Builder::lit("a"), 1, -1)),
+        Builder::lit("b")
+    ]);
+    $p = Pattern::compileFromAst($ast);
+    $subj = str_repeat("a", 10);
+    for ($i = 0; $i < 100; $i++) { $p->searchAll($subj); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->searchAll($subj);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_zero_progress(int $iters): array
+{
+    $ast = Builder::concat([Builder::arbno(Builder::lit("a")), Builder::lit("b")]);
+    $p = Pattern::compileFromAst($ast);
+    $subj = str_repeat("a", 64);
+    for ($i = 0; $i < 100; $i++) { $p->searchAll($subj); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->searchAll($subj);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -426,6 +547,7 @@ if ($env_iters !== false && $env_iters !== '') {
     if ($v > 0) $iters = $v;
 }
 $tokenize_iters = max(1, (int)($iters / 10));
+$heavy_iters = max(1, (int)($iters / 100));  // for slow scenarios
 
 echo "\n";
 echo "libsnobol4 diagnostic probe (PHP binding)\n";
@@ -443,10 +565,18 @@ $scenarios = [
     ['name' => 'alt_literals_search',    'run' => 'run_alt_literals_search',    'iter' => $iters],
     ['name' => 'alt_literals_search_flat','run' => 'run_alt_literals_search_flat','iter' => $iters],
     ['name' => 'automata',               'run' => 'run_automatons',            'iter' => $iters],
+    ['name' => 'span_simd',              'run' => 'run_span_simd',              'iter' => $iters],
+    ['name' => 'span_simd_miss',         'run' => 'run_span_simd_miss',         'iter' => $iters],
+    ['name' => 'notany_simd_miss',       'run' => 'run_notany_simd_miss',       'iter' => $iters],
     ['name' => 'tokenize_php',           'run' => 'run_tokenize_php',           'iter' => $tokenize_iters],
     ['name' => 'tokenize_php_flat',      'run' => 'run_tokenize_php_flat',      'iter' => $tokenize_iters],
     ['name' => 'tokenize_php_offsets',   'run' => 'run_tokenize_php_offsets',   'iter' => $tokenize_iters],
     ['name' => 'tokenize_php_offsets_flat','run' => 'run_tokenize_php_offsets_flat','iter' => $tokenize_iters],
+    ['name' => 'residue_repeat',         'run' => 'run_residue_repeat',         'iter' => $heavy_iters],
+    ['name' => 'residue_zero_width',     'run' => 'run_residue_zero_width',     'iter' => $heavy_iters],
+    ['name' => 'pike_overflow',          'run' => 'run_pike_overflow',          'iter' => $heavy_iters],
+    ['name' => 'prefilter_miss',         'run' => 'run_prefilter_miss',         'iter' => $heavy_iters],
+    ['name' => 'zero_progress',          'run' => 'run_zero_progress',          'iter' => $heavy_iters],
 ];
 
 $results = [];
