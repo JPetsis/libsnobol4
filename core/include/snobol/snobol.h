@@ -132,6 +132,66 @@ typedef struct snobol_pattern snobol_pattern_t;
 #define SNOBOL_API_MAX_VARS 64
 
 /**
+ * @brief Result from snobol_pattern_search_batch().
+ *
+ * Contains all non-overlapping matches found in a single pass, stored as
+ * flat C arrays.  All array memory is allocated with snobol_malloc; the
+ * caller must free via snobol_batch_result_free().
+ *
+ * When no captures are present, var_count is 0 and captures is NULL.
+ * outputs is NULL when no match produced EMIT output.  Each output segment
+ * is NUL-terminated; the final segment is followed by an empty-string sentinel
+ * so callers can iterate outputs without needing output_lens.
+ */
+typedef struct snobol_batch_result {
+  size_t match_count;      /**< Number of matches found (0 when return false). */
+  size_t *positions;       /**< [match_count] match start offsets. */
+  size_t *lengths;         /**< [match_count] match byte lengths. */
+  size_t var_count;        /**< Number of capture registers (0 = no captures). */
+  size_t **captures;       /**< [var_count][match_count * 2]: each row stores
+                                [start0, len0, start1, len1, ...]. */
+  char *outputs;           /**< Concatenated NUL-terminated output strings,
+                                one per match, final sentinel is empty. */
+  size_t *output_lens;     /**< [match_count] byte length of each output. */
+} snobol_batch_result_t;
+
+/**
+ * @brief Find all non-overlapping matches in a single pass.
+ *
+ * Runs the search engine's main loop once, collecting every match's
+ * position, length, captures, and EMIT output into flat arrays in a
+ * single result struct.  The caller must free the result arrays with
+ * snobol_batch_result_free().
+ *
+ * Patterns with side-effect ops (EVAL, ASSIGN, DYNAMIC) are not supported
+ * and return false immediately (caller falls back to per-call loop).
+ *
+ * @param bc       Compiled bytecode buffer (must outlive the call).
+ * @param bc_len   Bytecode length.
+ * @param subject  Subject string (must outlive the call — captures reference
+ *                 offsets into it).
+ * @param len      Subject byte length.
+ * @param meta     Pre-derived search metadata (from snobol_search_derive_meta
+ *                 or snobol_pattern_get_meta()).
+ * @param out      Output struct (caller-allocated, zero-initialised).
+ * @return true when at least one match was found; false otherwise.
+ *         On false, out->match_count is 0 and all arrays are NULL (or empty
+ *         for ineligible patterns).
+ */
+bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
+                                 const char *subject, size_t len,
+                                 const snobol_search_meta_t *meta,
+                                 snobol_batch_result_t *out);
+
+/**
+ * @brief Free all arrays owned by a batch result struct.  NULL-safe.
+ *
+ * Releases positions, lengths, captures, outputs, and output_lens arrays.
+ * Does NOT free the struct itself (caller-allocated).
+ */
+void snobol_batch_result_free(snobol_batch_result_t *out);
+
+/**
  * @brief Match result object.
  *
  * Contains the result of a successful pattern match,

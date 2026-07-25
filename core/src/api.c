@@ -829,6 +829,272 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
 }
 
 /* ---------------------------------------------------------------------------
+ * Batch-search API
+ *
+ * Finds all non-overlapping matches in a single pass by inlining the search
+ * loop — calls snobol_search_exec() directly (no wrapper), resets only VM
+ * fields between matches, and collects positions/lengths/captures/outputs
+ * into flat arrays allocated with snobol_malloc.
+ *
+ * Returns false for non-search-VM-eligible patterns (EVAL, ASSIGN, DYNAMIC)
+ * so the caller can fall back to the per-call loop.
+ * ---------------------------------------------------------------------------
+ */
+
+bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
+                                 const char *subject, size_t len,
+                                 const snobol_search_meta_t *meta,
+                                 snobol_batch_result_t *out) {
+  /* Zero the output struct so partial failure cleanup is safe */
+  memset(out, 0, sizeof(*out));
+
+  if (!bc || !subject || !meta)
+    return false;
+
+  /* Non-search-VM-eligible patterns (EVAL, ASSIGN, DYNAMIC) must fall back
+   * to per-call loop — each match's side effects affect the next. */
+  if (!snobol_meta_search_vm_eligible(meta))
+    return false;
+
+  /* ---- One-time setup ---- */
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  vm.bc = bc;
+  vm.bc_len = bc_len;
+
+  snobol_range_meta_t *range_meta = NULL;
+  size_t range_meta_count = 0;
+  snobol_build_range_meta(bc, bc_len, &range_meta, &range_meta_count);
+  vm.range_meta = range_meta;
+  vm.range_meta_count = range_meta_count;
+
+  snobol_buf out_buf;
+  snobol_buf_init(&out_buf);
+  vm.out = &out_buf;
+
+  /* Lazily build DFA for automaton-eligible patterns */
+  snobol_dfa_t *dfa = NULL;
+  if (meta->automaton_eligible) {
+    dfa = build_dfa(bc, bc_len, &vm);
+  }
+
+  /* ---- Allocate result arrays ---- */
+  size_t cap = 64;
+  size_t *positions = (size_t *)snobol_malloc(cap * sizeof(size_t));
+  size_t *lengths   = (size_t *)snobol_malloc(cap * sizeof(size_t));
+  size_t *output_lens = (size_t *)snobol_malloc(cap * sizeof(size_t));
+  /* Buffer for concatenated output strings: initial page */
+  size_t outbuf_cap = 1024;
+  char *outbuf_data = (char *)snobol_malloc(outbuf_cap);
+
+  if (!positions || !lengths || !output_lens || !outbuf_data) {
+    snobol_free(positions);
+    snobol_free(lengths);
+    snobol_free(output_lens);
+    snobol_free(outbuf_data);
+    if (range_meta) snobol_free(range_meta);
+    if (dfa) snobol_dfa_free(dfa);
+    snobol_buf_free(&out_buf);
+    return false;
+  }
+
+  /* Capture arrays: allocate rows for MAX_VARS lazily */
+  bool has_caps = meta->has_capture;
+  size_t **captures = NULL;
+  if (has_caps) {
+    captures = (size_t **)snobol_calloc((size_t)MAX_VARS, sizeof(size_t *));
+    if (!captures) {
+      snobol_free(positions);
+      snobol_free(lengths);
+      snobol_free(output_lens);
+      snobol_free(outbuf_data);
+      if (range_meta) snobol_free(range_meta);
+      if (dfa) snobol_dfa_free(dfa);
+      snobol_buf_free(&out_buf);
+      return false;
+    }
+  }
+
+  /* ---- Main search loop ---- */
+  size_t count = 0;
+  size_t offset = 0;
+  size_t out_pos = 0; /* write cursor into outbuf_data */
+  size_t max_var_count = 0;
+
+  while (offset <= len) {
+    /* Set subject pointers before each call */
+    vm.s = subject;
+    vm.len = len;
+
+    snobol_search_result_t sr;
+    bool ok = snobol_search_exec(&vm, subject, len, offset, meta, dfa,
+                                  &sr, NULL);
+    if (!ok || sr.aborted)
+      break;
+
+    /* Grow position/length/output_len arrays if needed */
+    if (count >= cap) {
+      size_t new_cap = cap * 2;
+      size_t *np = (size_t *)snobol_realloc(positions, new_cap * sizeof(size_t));
+      size_t *nl = (size_t *)snobol_realloc(lengths, new_cap * sizeof(size_t));
+      size_t *no = (size_t *)snobol_realloc(output_lens, new_cap * sizeof(size_t));
+      if (!np || !nl || !no) {
+        snobol_free(np ? np : positions);
+        snobol_free(nl ? nl : lengths);
+        snobol_free(no ? no : output_lens);
+        positions = lengths = NULL;
+        output_lens = NULL;
+        count = 0; /* signal error to cleanup below */
+        break;
+      }
+      positions = np;
+      lengths = nl;
+      output_lens = no;
+      cap = new_cap;
+    }
+
+    size_t mstart = sr.match_start;
+    size_t mlen   = sr.match_end - sr.match_start;
+
+    positions[count] = mstart;
+    lengths[count]   = mlen;
+    output_lens[count] = 0;
+
+    /* Collect captures */
+    if (has_caps && captures) {
+      int nv = (int)vm.var_count;
+      if (nv > (int)max_var_count)
+        max_var_count = (size_t)nv;
+      if (nv > MAX_VARS)
+        nv = MAX_VARS;
+      for (int ri = 0; ri < nv; ri++) {
+        if (!captures[ri]) {
+          captures[ri] = (size_t *)snobol_calloc(cap, 2 * sizeof(size_t));
+          if (!captures[ri])
+            continue;
+        } else if (count >= cap) {
+          /* realloc capture row if needed (same cap growth) */
+          size_t *new_row = (size_t *)snobol_realloc(
+              captures[ri], cap * 2 * sizeof(size_t));
+          if (!new_row)
+            continue;
+          captures[ri] = new_row;
+          /* zero the new half */
+          memset(captures[ri] + (cap / 2) * 2, 0,
+                 (cap / 2) * 2 * sizeof(size_t));
+        }
+        size_t vs = vm.var_start[ri];
+        size_t ve = vm.var_end[ri];
+        captures[ri][count * 2]     = vs;
+        captures[ri][count * 2 + 1] = (ve > vs) ? (ve - vs) : 0;
+      }
+    }
+
+    /* Collect output (EMIT ops) */
+    if (out_buf.len > 0) {
+      /* Ensure room: NUL terminator + 1 byte for this output */
+      size_t needed = out_pos + out_buf.len + 2;
+      if (needed > outbuf_cap) {
+        while (outbuf_cap < needed)
+          outbuf_cap *= 2;
+        char *new_data = (char *)snobol_realloc(outbuf_data, outbuf_cap);
+        if (!new_data) {
+          /* output collection failure — continue without output */
+        } else {
+          outbuf_data = new_data;
+        }
+      }
+      if (outbuf_data) {
+        memcpy(outbuf_data + out_pos, out_buf.data, out_buf.len);
+        out_pos += out_buf.len;
+        outbuf_data[out_pos] = '\0';
+        out_pos++;
+        output_lens[count] = out_buf.len;
+      }
+      /* Clear output buffer for next match (keep capacity) */
+      out_buf.len = 0;
+      if (out_buf.cap > 0 && out_buf.data)
+        out_buf.data[0] = '\0';
+    } else {
+      output_lens[count] = 0;
+    }
+
+    count++;
+
+    /* Advance past this match.  For zero-length matches, advance by 1 byte
+     * to avoid infinite loop (SNOBOL4 semantics). */
+    offset = mstart + (mlen > 0 ? mlen : 1);
+  }
+
+  /* ---- Finalise output buffer: append empty-string sentinel ---- */
+  if (count > 0 && outbuf_data && out_pos > 0) {
+    /* Ensure sentinel fits */
+    if (out_pos + 1 > outbuf_cap) {
+      char *new_data = (char *)snobol_realloc(outbuf_data, out_pos + 2);
+      if (new_data)
+        outbuf_data = new_data;
+    }
+    if (outbuf_data) {
+      outbuf_data[out_pos] = '\0';
+      out_pos++;
+    }
+  }
+
+  /* ---- Clean up VM resources ---- */
+  snobol_buf_free(&out_buf);
+  vm_free_labels(&vm);
+  snobol_search_vm_cleanup(&vm);
+  if (range_meta) {
+    snobol_free(range_meta);
+    range_meta = NULL;
+  }
+  /* DFA ownership: if we built one and it is not associated with a pattern,
+   * we must free it here.  Only free DFA when we allocated it (no pattern
+   * association).  For now we always free locally-built DFAs. */
+  if (dfa)
+    snobol_dfa_free(dfa);
+
+  /* ---- Populate output struct ---- */
+  if (count == 0 || !positions || !lengths) {
+    snobol_free(positions);
+    snobol_free(lengths);
+    snobol_free(output_lens);
+    snobol_free(outbuf_data);
+    if (captures) {
+      for (int i = 0; i < MAX_VARS; i++)
+        snobol_free(captures[i]);
+      snobol_free(captures);
+    }
+    return false;
+  }
+
+  out->match_count = count;
+  out->positions   = positions;
+  out->lengths     = lengths;
+  out->var_count   = max_var_count;
+  out->captures    = captures; /* may be NULL when no captures */
+  out->outputs     = (out_pos > 0) ? outbuf_data : NULL;
+  out->output_lens = output_lens;
+
+  return true;
+}
+
+void snobol_batch_result_free(snobol_batch_result_t *out) {
+  if (!out)
+    return;
+  snobol_free(out->positions);
+  snobol_free(out->lengths);
+  snobol_free(out->output_lens);
+  snobol_free(out->outputs);
+  if (out->captures) {
+    for (size_t i = 0; i < MAX_VARS; i++)
+      snobol_free(out->captures[i]);
+    snobol_free(out->captures);
+  }
+  memset(out, 0, sizeof(*out));
+}
+
+/* ---------------------------------------------------------------------------
  * Match result access
  * ---------------------------------------------------------------------------
  */
