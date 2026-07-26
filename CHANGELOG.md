@@ -50,6 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Pike overflow correctness** (`core/src/search_tiers.c`): pike_scan now tracks thread-buffer overflow at all guard points (`work_n`, `carry_n`, `defer_n`). When overflow is detected, `tier_search_vm` falls through to the per-position restart loop (which has a proper choice stack), eliminating silent false negatives for BREAKX patterns over long subjects.
 
+### Core Batch-Search API
+
+#### Added
+
+- **`snobol_batch_result_t` struct** (`core/include/snobol/snobol.h`): Result struct with flat arrays for match positions, lengths, per-register capture offset pairs, and concatenated output strings.
+- **`snobol_pattern_search_batch()`** (`core/include/snobol/snobol.h`, `core/src/api.c`): Single-pass batch search that calls `snobol_search_exec()` directly in a loop, collecting all results into growable flat arrays. Returns false for non-search-VM-eligible patterns (EVAL, ASSIGN, DYNAMIC), enabling transparent per-call fallback.
+- **`snobol_batch_result_free()`** (`core/src/api.c`): Releases all arrays owned by a batch result struct.
+- **Batch-search integration in PHP binding** (`bindings/php/src/snobol_pattern.c`): `searchAll()`, `searchSplit()`, `searchSplitOffsets()`, `searchSplitCuts()`, and `searchReplace()` try the batch API first; fall back to per-call loop for ineligible patterns. Eligible patterns complete in a single C pass with no per-match API overhead.
+- **C test suite** (`tests/c/test_search_batch.c`): 49 assertions verifying batch results match per-call loop results for literal, SPAN, BREAK, alternation, zero-length, no-match, and EVAL patterns.
+- **PHP test suite** (`bindings/php/tests/php/BatchSearchTest.php`): 17 tests covering searchAll, searchSplit, searchReplace, captures, and edge cases on both eligible and ineligible patterns.
+
 ### Search Engine Optimization
 
 #### Added

@@ -887,6 +887,12 @@ Convenience wrapper for `Pattern::subst()`.
 
 Search operations find matches **anywhere** in the subject (unanchored), not just at position 0.
 
+All search methods use the **batch-search API** internally when the pattern is eligible
+(no EVAL, ASSIGN, or DYNAMIC side effects).  For eligible patterns, the C engine
+collects all match positions, lengths, captures, and output in a single pass —
+eliminating per-match API boundary crossing.  Ineligible patterns fall back to the
+per-call loop transparently.
+
 All search methods accept an optional `$options` array:
 
 | Option      | Type      | Default     | Description                                        |
@@ -913,7 +919,7 @@ $flat = $p->searchAll("abc 123 def 4567", ['result' => 'flat']);
 //   '_output'     => ['', ''],
 // ]
 // Flat mode is ~1.1x faster than arrays-of-arrays (bulk of time
-// is the C search loop; true speedup requires the batch-search API).
+// is the C search loop; the batch API eliminates per-match overhead).
 
 // Capture offsets:
 $off = $p->searchAll("abc 123 def 4567", ['captures' => 'offsets']);
@@ -1063,7 +1069,9 @@ foreach ($it as $i => $match) {
 
 ### Reusable search state (performance)
 
-`Pattern::searchSplit`, `searchSplitOffsets`, `searchAll`, and `searchReplace` reuse a single search state across every match within a call — the state is created once and reset (not re-`malloc`'d or re-derived) between matches. This makes repeated searching over a fixed subject materially cheaper than calling `Pattern::match` in a loop: in the diagnostic probe the reuse path runs **~40–45% faster** per search call than the one-shot convenience path (`tokenize_reuse` ≈ 198–204 ns vs `tokenize_conv` ≈ 320–360 ns). For tight tokenization loops, prefer the `search*` family over repeated `match` calls; the zero-length-allocation `searchSplitOffsets` variant is the cheapest when you only need positions.
+`Pattern::searchSplit`, `searchSplitOffsets`, `searchAll`, and `searchReplace` reuse a single search state across every match within a call — the state is created once and reset (not re-`malloc`'d or re-derived) between matches. For eligible patterns (no EVAL/ASSIGN/DYNAMIC side effects), the **batch-search API** eliminates the per-match reset entirely by collecting all results in a single pass through the C engine.  Ineligible patterns fall back to the per-call loop transparently.
+
+This makes repeated searching over a fixed subject materially cheaper than calling `Pattern::match` in a loop: in the diagnostic probe the reuse path runs **~40–45% faster** per search call than the one-shot convenience path (`tokenize_reuse` ≈ 198–204 ns vs `tokenize_conv` ≈ 320–360 ns). For tight tokenization loops, prefer the `search*` family over repeated `match` calls; the zero-length-allocation `searchSplitOffsets` variant is the cheapest when you only need positions.
 
 **PHP equivalent:** `str_replace("old", "new", "old text with old words")`
 
