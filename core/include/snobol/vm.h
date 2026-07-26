@@ -18,8 +18,9 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-struct snobol_pattern; /* forward decl — only used as an opaque pointer below */
-struct simd_nfa;       /* forward decl — cached NFA for Tier 9 */
+struct snobol_pattern;      /* forward decl — only used as an opaque pointer below */
+struct simd_nfa;            /* forward decl — cached NFA for Tier 9 */
+struct snobol_auto_trie_t;  /* forward decl — pre-built alt-lit trie for Tier 5 */
 
 /** @brief Enable dynamic pattern and table support */
 #define SNOBOL_DYNAMIC_PATTERN 1
@@ -471,6 +472,13 @@ typedef struct {
    * path, not by the VM.  Declared as void* to avoid header dependency on
    * simd_nfa_t (defined in search_simd.c). */
   struct simd_nfa *simd_nfa;
+
+  /* Pre-built alt-literals trie for Tier 5.  Set by the PHP binding (or other
+   * host) before calling snobol_search_exec().  When non-NULL,
+   * search_alt_literals_try() uses this instead of reading from vm->pattern
+   * (which may point to a struct with different layout offsets).  Owned by
+   * the PHP pattern object; never freed by VM cleanup. */
+  struct snobol_auto_trie_t *trie_cache;
 
   // emit callback
   emit_cb emit_fn;

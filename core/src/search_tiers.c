@@ -159,11 +159,13 @@ static bool SNOBOL_HOT search_alt_literals_try(
   const snobol_auto_trie_t *trie = NULL;
   snobol_auto_trie_t local; /* built only on a cache miss */
 
-  /* Reuse the cached trie attached to the owning pattern on a cache hit.
-   * We read it directly by pointer: copying the full ~6 KB pool on every
-   * search would cost more than rebuilding the (tiny) trie, turning the
-   * cache into a net loss. */
-  if (pat)
+  /* Check for a pre-built trie on the VM first.  The PHP binding sets
+   * vm->trie_cache directly to avoid the struct-offset problem: the PHP
+   * snobol_pattern_t layout differs from the core struct, so calling
+   * snobol_pattern_get_trie_cache() on a PHP pattern reads garbage. */
+  if (vm->trie_cache)
+    trie = vm->trie_cache;
+  else if (pat)
     trie = snobol_pattern_get_trie_cache(pat);
 
   if (!trie) {
