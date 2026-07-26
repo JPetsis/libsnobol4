@@ -757,6 +757,193 @@ static void php_snobol_init_vm_for_search(VM *vm,
     }
 }
 
+/* ---------------------------------------------------------------------------
+ * Shared helper: try the batch-search API.  Returns true when the batch was
+ * used and the PHP result has been fully built (return_value populated).
+ * Returns false when the pattern is not batch-eligible; caller falls through
+ * to the per-call loop.
+ *
+ * For flat mode (PHP_SNOBOL_RESULT_FLAT), builds parallel arrays directly
+ * from the batch flat arrays.  For array mode, builds per-match zval arrays.
+ * --------------------------------------------------------------------------- */
+static bool php_snobol_try_batch(
+    snobol_pattern_t *intern,
+    const char *subject_val, size_t subject_len,
+    zval *result,
+    const php_snobol_match_options_t *opts)
+{
+    const snobol_search_meta_t *meta = &intern->meta;
+
+    snobol_batch_result_t batch;
+    memset(&batch, 0, sizeof(batch));
+    bool batch_ok = snobol_pattern_search_batch(
+        intern->bc, intern->bc_len,
+        subject_val, subject_len,
+        meta, &batch);
+
+    if (!batch_ok && batch.match_count == 0) {
+        snobol_batch_result_free(&batch);
+        return false; /* no matches or ineligible — fall through */
+    }
+
+    size_t match_count = batch.match_count;
+
+    if (opts->result == PHP_SNOBOL_RESULT_FLAT) {
+        /* Flat result mode: parallel arrays */
+        zval match_starts, match_lengths, captures_arr, outputs_buf;
+        array_init(&match_starts);
+        array_init(&match_lengths);
+        array_init(&captures_arr);
+        array_init(&outputs_buf);
+
+        for (size_t mi = 0; mi < match_count; mi++) {
+            size_t match_start = batch.positions[mi];
+            size_t match_len   = batch.lengths[mi];
+
+            add_next_index_long(&match_starts, (zend_long)match_start);
+            add_next_index_long(&match_lengths, (zend_long)match_len);
+
+            /* Captures: flat per-register arrays */
+            for (size_t ri = 0; ri < batch.var_count && ri < MAX_VARS; ri++) {
+                char key[32];
+                size_t key_len = snprintf(key, sizeof(key), "v%u", (unsigned)ri);
+
+                size_t *cap_row = batch.captures ? batch.captures[ri] : NULL;
+                if (!cap_row) continue;
+
+                zval *reg_arr_zv = zend_hash_str_find(
+                    Z_ARRVAL_P(&captures_arr), key, key_len);
+                if (!reg_arr_zv) {
+                    zval reg_arr;
+                    array_init(&reg_arr);
+                    zend_hash_str_add_new(Z_ARRVAL_P(&captures_arr),
+                                          key, key_len, &reg_arr);
+                    reg_arr_zv = zend_hash_str_find(
+                        Z_ARRVAL_P(&captures_arr), key, key_len);
+                }
+
+                if (opts->captures == PHP_SNOBOL_CAPTURES_OFFSETS) {
+                    zval pair;
+                    array_init(&pair);
+                    add_next_index_long(&pair, (zend_long)cap_row[mi * 2]);
+                    add_next_index_long(&pair, (zend_long)cap_row[mi * 2 + 1]);
+                    zend_hash_next_index_insert(Z_ARRVAL_P(reg_arr_zv), &pair);
+                } else {
+                    size_t coff = cap_row[mi * 2];
+                    size_t clen = cap_row[mi * 2 + 1];
+                    if (clen > 0 && coff + clen <= subject_len) {
+                        add_next_index_stringl(reg_arr_zv,
+                            subject_val + coff, clen);
+                    } else {
+                        add_next_index_null(reg_arr_zv);
+                    }
+                }
+            }
+
+            /* Output */
+            if (batch.outputs) {
+                const char *op = batch.outputs;
+                /* Advance to the mi-th output string */
+                for (size_t oi = 0; oi < mi; oi++) {
+                    op += strlen(op) + 1;
+                }
+                size_t olen = strlen(op);
+                if (olen > 0) {
+                    add_next_index_stringl(&outputs_buf, op, olen);
+                } else {
+                    add_next_index_string(&outputs_buf, "");
+                }
+            } else {
+                add_next_index_string(&outputs_buf, "");
+            }
+        }
+
+        array_init(result);
+        snobol_assoc_zval(result, "match_start", 11, &match_starts);
+        zval_ptr_dtor(&match_starts);
+        snobol_assoc_zval(result, "match_len", 9, &match_lengths);
+        zval_ptr_dtor(&match_lengths);
+        snobol_assoc_zval(result, "captures", 8, &captures_arr);
+        zval_ptr_dtor(&captures_arr);
+        snobol_assoc_zval(result, "_output", 7, &outputs_buf);
+        zval_ptr_dtor(&outputs_buf);
+
+        snobol_batch_result_free(&batch);
+        return true;
+    }
+
+    /* Default array-of-arrays result mode */
+    array_init(result);
+
+    for (size_t mi = 0; mi < match_count; mi++) {
+        size_t match_start = batch.positions[mi];
+        size_t match_len   = batch.lengths[mi];
+
+        zval match_arr;
+        array_init(&match_arr);
+
+        for (size_t ri = 0; ri < batch.var_count && ri < MAX_VARS; ri++) {
+            char key[32];
+            size_t key_len = snprintf(key, sizeof(key), "v%u", (unsigned)ri);
+
+            size_t *cap_row = batch.captures ? batch.captures[ri] : NULL;
+            if (!cap_row) continue;
+
+            if (opts->captures == PHP_SNOBOL_CAPTURES_OFFSETS) {
+                zval pair;
+                array_init(&pair);
+                add_next_index_long(&pair, (zend_long)cap_row[mi * 2]);
+                add_next_index_long(&pair, (zend_long)cap_row[mi * 2 + 1]);
+                snobol_assoc_zval(&match_arr, key, key_len, &pair);
+                zval_ptr_dtor(&pair);
+            } else {
+                size_t coff = cap_row[mi * 2];
+                size_t clen = cap_row[mi * 2 + 1];
+                if (clen > 0 && coff + clen <= subject_len) {
+                    add_assoc_stringl(&match_arr, key,
+                        subject_val + coff, clen);
+                } else {
+                    add_assoc_null(&match_arr, key);
+                }
+            }
+        }
+
+        add_assoc_long(&match_arr, "_match_len", (zend_long)match_len);
+        add_assoc_long(&match_arr, "_match_start", (zend_long)match_start);
+
+        if (batch.outputs) {
+            const char *op = batch.outputs;
+            for (size_t oi = 0; oi < mi; oi++) {
+                op += strlen(op) + 1;
+            }
+            size_t olen = strlen(op);
+            if (olen > 0) {
+                add_assoc_stringl(&match_arr, "_output", op, olen);
+            } else {
+                add_assoc_string(&match_arr, "_output", "");
+            }
+        } else {
+            add_assoc_string(&match_arr, "_output", "");
+        }
+
+        if (opts->metrics) {
+            zval metrics;
+            array_init(&metrics);
+            add_assoc_long(&metrics, "choice_push_count", 0);
+            add_assoc_long(&metrics, "choice_allocated", 0);
+            add_assoc_long(&metrics, "choice_peak_depth", 0);
+            add_assoc_long(&metrics, "choice_peak_memory", 0);
+            snobol_assoc_zval(&match_arr, "_metrics", 8, &metrics);
+            zval_ptr_dtor(&metrics);
+        }
+
+        add_next_index_zval(result, &match_arr);
+    }
+
+    snobol_batch_result_free(&batch);
+    return true;
+}
+
 /* Core search loop shared by Pattern::searchAll and PatternHelper::matchAll.
  * Returns an array of match-result arrays (each with _match_len, _match_start, _output, _metrics).
  * The caller must pass a valid compiled pattern internals.
@@ -765,11 +952,18 @@ static void php_snobol_init_vm_for_search(VM *vm,
  * API so the VM, output buffer, and cached DFA are reused across iterations
  * instead of re-derived/re-allocated on every call. Captures are read lazily
  * via snobol_match_get_variable(); the per-call choice-stack metrics are no
- * longer available through the reuse path and are reported as 0. */
+ * longer available through the reuse path and are reported as 0.
+ *
+ * Batch-search fast path: for eligible patterns, snobol_pattern_search_batch()
+ * collects all matches in a single pass, eliminating per-match API overhead. */
 void php_snobol_do_search_all(snobol_pattern_t *intern,
                                 const char *subject_val, size_t subject_len,
                                 zval *result,
                                 const php_snobol_match_options_t *opts) {
+
+    /* Batch-search fast path: single-pass for eligible patterns */
+    if (php_snobol_try_batch(intern, subject_val, subject_len, result, opts))
+        return;
 
     snobol_pattern_search_state_t *state =
         snobol_pattern_search_state_create(intern->bc, intern->bc_len);
@@ -1088,8 +1282,37 @@ static snobol_match_record_t *php_snobol_searchsplit_record_offsets(
     snobol_pattern_search_state_t *state,
     const char *subject_val,
     size_t subject_len,
-    size_t *out_count)
+    size_t *out_count,
+    const uint8_t *bc, size_t bc_len,
+    const snobol_search_meta_t *meta)
 {
+    /* Try batch API first: single-pass for eligible patterns */
+    if (bc && meta && bc_len > 0) {
+        snobol_batch_result_t batch;
+        memset(&batch, 0, sizeof(batch));
+        bool batch_ok = snobol_pattern_search_batch(
+            bc, bc_len, subject_val, subject_len, meta, &batch);
+
+        if (batch_ok && batch.match_count > 0) {
+            size_t n = batch.match_count;
+            snobol_match_record_t *recs = emalloc(n * sizeof(snobol_match_record_t));
+            for (size_t i = 0; i < n; i++) {
+                recs[i].start = batch.positions[i];
+                recs[i].end   = batch.positions[i] + batch.lengths[i];
+            }
+            snobol_batch_result_free(&batch);
+            *out_count = n;
+            return recs;
+        }
+        snobol_batch_result_free(&batch);
+        if (batch_ok) {
+            /* batch_ok but match_count == 0 — no matches */
+            *out_count = 0;
+            return NULL;
+        }
+        /* batch returned false (ineligible) — fall through to per-call loop */
+    }
+
     size_t rec_cap   = 16;
     snobol_match_record_t *recs = emalloc(rec_cap * sizeof(snobol_match_record_t));
     size_t                 rec_count = 0;
@@ -1157,7 +1380,8 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
 
     size_t match_count;
     snobol_match_record_t *recs = php_snobol_searchsplit_record_offsets(
-        state, subject_val, subject_len, &match_count);
+        state, subject_val, subject_len, &match_count,
+        intern->bc, intern->bc_len, &intern->meta);
 
     snobol_pattern_search_state_destroy(state);
 
@@ -1231,7 +1455,8 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
 
     size_t match_count;
     snobol_match_record_t *recs = php_snobol_searchsplit_record_offsets(
-        state, subject_val, subject_len, &match_count);
+        state, subject_val, subject_len, &match_count,
+        intern->bc, intern->bc_len, &intern->meta);
 
     snobol_pattern_search_state_destroy(state);
 
@@ -1320,7 +1545,8 @@ PHP_METHOD(Snobol_Pattern, searchSplitCuts) {
 
     size_t match_count;
     snobol_match_record_t *recs = php_snobol_searchsplit_record_offsets(
-        state, subject_val, subject_len, &match_count);
+        state, subject_val, subject_len, &match_count,
+        intern->bc, intern->bc_len, &intern->meta);
 
     snobol_pattern_search_state_destroy(state);
 
@@ -1369,6 +1595,47 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
     const char *repl_val        = ZSTR_VAL(replacement);
     size_t      repl_len        = ZSTR_LEN(replacement);
 
+    snobol_buf out;
+    snobol_buf_init(&out);
+
+    /* Try batch API first: single-pass for eligible patterns.
+     * Gets all match positions at once, then runs a single replacement pass. */
+    {
+        snobol_batch_result_t batch;
+        memset(&batch, 0, sizeof(batch));
+        const snobol_search_meta_t *meta = &intern->meta;
+        bool batch_ok = snobol_pattern_search_batch(
+            intern->bc, intern->bc_len,
+            subject_val, subject_len,
+            meta, &batch);
+
+        if (batch_ok) {
+            /* Single replacement pass from batch positions */
+            size_t last_match_end = 0;
+            for (size_t mi = 0; mi < batch.match_count; mi++) {
+                size_t match_start = batch.positions[mi];
+                size_t match_end   = match_start + batch.lengths[mi];
+
+                snobol_buf_append(&out, subject_val + last_match_end,
+                                  match_start - last_match_end);
+                snobol_buf_append(&out, repl_val, repl_len);
+
+                size_t match_len = match_end - match_start;
+                if (match_len == 0) match_len = 1;
+                last_match_end = match_start + match_len;
+            }
+            snobol_buf_append(&out, subject_val + last_match_end,
+                              subject_len - last_match_end);
+
+            snobol_batch_result_free(&batch);
+            RETVAL_STRINGL(out.data, out.len);
+            snobol_buf_free(&out);
+            return;
+        }
+        snobol_batch_result_free(&batch);
+        /* Fall through to per-call loop (ineligible pattern or no matches) */
+    }
+
     /* P9: For subjects > 1 KB, run a first-pass match count to
      * estimate output size and pre-allocate the buffer, avoiding
      * repeated capacity-doubling reallocs during the replacement loop.
@@ -1377,9 +1644,6 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
 #define PHP_SNOBOL_PRESIZE_THRESHOLD 1024
     bool do_count_pass = (subject_len > PHP_SNOBOL_PRESIZE_THRESHOLD)
                           && !intern->meta.is_literal_only;
-
-    snobol_buf out;
-    snobol_buf_init(&out);
 
     if (do_count_pass) {
         /* Counting pass */
@@ -1405,7 +1669,6 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
             size_t est = subject_len
                 + count_pass_matches * (repl_len > avg_match
                     ? repl_len - avg_match : 0);
-            /* Pre-allocate via sequential appends of empty data to reach est */
             if (est > 0) {
                 size_t chunk = est < 4096 ? est : 4096;
                 char *zeros = calloc(1, chunk);
@@ -1417,7 +1680,6 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
             }
         }
     } else if (intern->meta.is_literal_only && intern->meta.required_lit_len > 0) {
-        /* Heuristic for literal-only patterns */
         size_t lit_len = intern->meta.required_lit_len;
         size_t est_match_count = subject_len / lit_len + 1;
         size_t est = subject_len

@@ -960,7 +960,9 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
     lengths[count]   = mlen;
     output_lens[count] = 0;
 
-    /* Collect captures */
+    /* Collect captures. VM stores offsets relative to the search window
+     * (start_offset), so add `offset` (the window base) to get absolute
+     * subject positions. */
     if (has_caps && captures) {
       int nv = (int)vm.var_count;
       if (nv > (int)max_var_count)
@@ -973,71 +975,52 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
           if (!captures[ri])
             continue;
         } else if (count >= cap) {
-          /* realloc capture row if needed (same cap growth) */
           size_t *new_row = (size_t *)snobol_realloc(
               captures[ri], cap * 2 * sizeof(size_t));
           if (!new_row)
             continue;
           captures[ri] = new_row;
-          /* zero the new half */
           memset(captures[ri] + (cap / 2) * 2, 0,
                  (cap / 2) * 2 * sizeof(size_t));
         }
         size_t vs = vm.var_start[ri];
         size_t ve = vm.var_end[ri];
-        captures[ri][count * 2]     = vs;
+        captures[ri][count * 2]     = offset + vs;
         captures[ri][count * 2 + 1] = (ve > vs) ? (ve - vs) : 0;
       }
     }
 
-    /* Collect output (EMIT ops) */
-    if (out_buf.len > 0) {
-      /* Ensure room: NUL terminator + 1 byte for this output */
-      size_t needed = out_pos + out_buf.len + 2;
-      if (needed > outbuf_cap) {
-        while (outbuf_cap < needed)
-          outbuf_cap *= 2;
-        char *new_data = (char *)snobol_realloc(outbuf_data, outbuf_cap);
-        if (!new_data) {
-          /* output collection failure — continue without output */
-        } else {
-          outbuf_data = new_data;
-        }
-      }
-      if (outbuf_data) {
-        memcpy(outbuf_data + out_pos, out_buf.data, out_buf.len);
-        out_pos += out_buf.len;
-        outbuf_data[out_pos] = '\0';
-        out_pos++;
-        output_lens[count] = out_buf.len;
-      }
-      /* Clear output buffer for next match (keep capacity) */
-      out_buf.len = 0;
-      if (out_buf.cap > 0 && out_buf.data)
-        out_buf.data[0] = '\0';
+    /* Collect output (EMIT ops). Always store a NUL-terminated entry per
+     * match — including empty-string entries for matches without output —
+     * so that PHP iteration can index into the concatenated buffer directly. */
+    size_t out_len = out_buf.len > 0 ? out_buf.len : 0;
+    size_t needed = out_pos + out_len + 1; /* data + NUL */
+    if (needed > outbuf_cap) {
+      while (outbuf_cap < needed)
+        outbuf_cap *= 2;
+      char *new_data = (char *)snobol_realloc(outbuf_data, outbuf_cap);
+      if (new_data)
+        outbuf_data = new_data;
+    }
+    if (outbuf_data) {
+      if (out_len > 0)
+        memcpy(outbuf_data + out_pos, out_buf.data, out_len);
+      outbuf_data[out_pos + out_len] = '\0';
+      out_pos += out_len + 1;
+      output_lens[count] = out_len;
     } else {
       output_lens[count] = 0;
     }
+    /* Clear output buffer for next match (keep capacity) */
+    out_buf.len = 0;
+    if (out_buf.cap > 0 && out_buf.data)
+      out_buf.data[0] = '\0';
 
     count++;
 
     /* Advance past this match.  For zero-length matches, advance by 1 byte
      * to avoid infinite loop (SNOBOL4 semantics). */
     offset = mstart + (mlen > 0 ? mlen : 1);
-  }
-
-  /* ---- Finalise output buffer: append empty-string sentinel ---- */
-  if (count > 0 && outbuf_data && out_pos > 0) {
-    /* Ensure sentinel fits */
-    if (out_pos + 1 > outbuf_cap) {
-      char *new_data = (char *)snobol_realloc(outbuf_data, out_pos + 2);
-      if (new_data)
-        outbuf_data = new_data;
-    }
-    if (outbuf_data) {
-      outbuf_data[out_pos] = '\0';
-      out_pos++;
-    }
   }
 
   /* ---- Clean up VM resources ---- */
