@@ -58,6 +58,14 @@ static void php_snobol_pattern_dtor(zend_object *object) {
         snobol_free(intern->range_meta);
         intern->range_meta = NULL;
     }
+    if (intern->dfa) {
+        snobol_dfa_free(intern->dfa);
+        intern->dfa = NULL;
+    }
+    if (intern->trie_cache) {
+        snobol_auto_trie_free(intern->trie_cache);
+        intern->trie_cache = NULL;
+    }
 
     zend_object_std_dtor(object);
     SNOBOL_LOG("php_snobol_pattern_dtor: done");
@@ -69,7 +77,9 @@ static zend_object *snobol_pattern_create(zend_class_entry *ce) {
     
     intern->bc = NULL;
     intern->bc_len = 0;
-    
+    intern->dfa = NULL;
+    intern->trie_cache = NULL;
+
     zend_object_std_init(&intern->std, ce);
     object_properties_init(&intern->std, ce);
     intern->std.handlers = &snobol_pattern_object_handlers;

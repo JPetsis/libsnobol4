@@ -45,6 +45,14 @@ typedef struct snobol_pattern {
     /* Cached charclass range metadata */
     snobol_range_meta_t *range_meta;
     size_t range_meta_count;
+    /* Cached DFA for automaton-eligible patterns (Tier 7).
+     * Built lazily on first Pattern::match() call; freed in dtor.
+     * Independent of core struct snobol_pattern — never accessed via
+     * snobol_pattern_get_automaton() which reads at wrong offsets. */
+    snobol_dfa_t *dfa;
+    /* Cached alt-literals trie for 'cat'|'dog'|'fox' patterns (Tier 5).
+     * Built lazily on first searchAll/searchSplit call; freed in dtor. */
+    snobol_auto_trie_t *trie_cache;
     zend_object std;
 } snobol_pattern_t;
 
