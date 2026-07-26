@@ -65,6 +65,7 @@ add_executable(snobol4_tests
     test_compiler.c
     test_property_based.c
     test_search_prefilter.c
+    test_search_batch.c
 )
 
 # Link against core library
