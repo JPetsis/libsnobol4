@@ -535,6 +535,49 @@ class PatternTest extends TestCase
         $this->assertSame([0, 1], $result[0]);
     }
 
+    public function testDfaCache(): void
+    {
+        // Automaton-eligible pattern with 2+ byte literal prefix (has_bmh_skip),
+        // but NOT literal-only (has ANY after the literal).
+        $pattern = PatternHelper::fromString("'hello' ANY('xyz')");
+        $subject = 'hellox';
+
+        // First match: DFA built and cached
+        $r1 = $pattern->match($subject);
+        $this->assertNotFalse($r1);
+        $this->assertArrayHasKey('_match_len', $r1);
+
+        // Second match: cached DFA reused (should still produce correct result)
+        $r2 = $pattern->match($subject);
+        $this->assertNotFalse($r2);
+        $this->assertEquals($r1['_match_len'], $r2['_match_len']);
+    }
+
+    public function testTrieCache(): void
+    {
+        // Alt-literals pattern: bushy alternation with shared prefix
+        $ast = Builder::alt(
+            Builder::alt(Builder::lit('cat'), Builder::lit('car')),
+            Builder::lit('cab')
+        );
+        $pattern = PatternHelper::fromAst($ast);
+        $subject = 'xxx car yyy';
+
+        // First search: trie built and cached
+        $r1 = $pattern->searchAll($subject);
+        $this->assertCount(1, $r1);
+        $this->assertArrayHasKey(0, $r1);
+        $this->assertArrayHasKey('_match_len', $r1[0]);
+
+        // Second search: cached trie reused
+        $r2 = $pattern->searchAll($subject);
+        $this->assertCount(1, $r2);
+        $this->assertEquals(
+            $r1[0]['_match_start'],
+            $r2[0]['_match_start']
+        );
+    }
+
     protected function setUp(): void
     {
         parent::setUp();

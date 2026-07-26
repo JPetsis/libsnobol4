@@ -827,6 +827,14 @@ $res2 = $p2->matchLiteral("abc");
 
 Use `matchLiteral()` when you know the pattern is a simple string — it avoids all VM setup (~50–100 ns faster). Falls through to VM for non-literal patterns.
 
+### DFA Caching in `match()`
+
+`match()` automatically detects automaton-eligible patterns (ASCII-only character classes, literals, and concat — no EVAL/ASSIGN side effects) and builds a **Deterministic Finite Automaton (DFA)** on the first call. The DFA is cached on the `Pattern` object and reused on subsequent calls, enabling **Tier 7 (AUTOMATON)** dispatch which runs in O(n) single-pass linear time over the subject.
+
+This accelerates repeated matching of patterns like `SPAN('abc') 'd'` or `'hello' ANY('xyz')` — the second `match()` call reuses the cached DFA, avoiding VM setup and powerset construction.
+
+Patterns with position constraints (POS, RPOS, ANCHOR) are excluded from automaton eligibility — they fall through to the search-VM or general VM which handle the constraints correctly.
+
 ### `Pattern::subst()` — Match + Replace Template
 
 Run the pattern against subject and produce a string from the template.
@@ -925,6 +933,12 @@ $flat = $p->searchAll("abc 123 def 4567", ['result' => 'flat']);
 $off = $p->searchAll("abc 123 def 4567", ['captures' => 'offsets']);
 // Each capture register returns [start, len] instead of substring
 ```
+
+### Trie Caching in Search Methods
+
+When a pattern is a flat alternation of literals (e.g. `'cat' | 'car' | 'cab'`), the search engine uses a **Tier 5 trie-based** matcher. The trie (~7 KB) is built once from the SPLIT/LIT bytecode and cached on the `Pattern` object. On repeated `searchAll()`, `searchSplit()`, `searchSplitOffsets()`, or `searchReplace()` calls, the cached trie is passed to the search state via `vm->trie_cache`, avoiding per-call trie rebuild.
+
+Alt-literals patterns with a shared prefix (bushy tries) benefit from the cache — the trie structure is reused across calls, eliminating the ~7 KB stack-local rebuild each time.
 
 ### `Pattern::searchAllGenerator()` — Lazy Iteration
 

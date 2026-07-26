@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`$options` parameter on all search methods** (`bindings/php/src/snobol_pattern.c`): `searchAll()`, `searchSplit()`, `searchSplitOffsets()`, `searchReplace()` now accept `array $options = []` for uniform control of `metrics`, `captures`, and `result`.
 - **Pre-sized output buffer in searchReplace** (`bindings/php/src/snobol_pattern.c`): For subjects > 1 KB, `searchReplace()` runs a counting pass to estimate output size and pre-allocate the buffer, avoiding reallocation during long replacement loops.
 - **JIT configuration for DDEV** (`bindings/php/.ddev/php/snobol-jit.ini`): Enables `opcache.jit = tracing` for benchmark accuracy.
+- **DFA caching in `Pattern::match()`** (`bindings/php/src/snobol_pattern.c`, `core/src/search_meta.c`): Builds and caches a DFA on the `Pattern` object for automaton-eligible patterns. Enables Tier 7 (AUTOMATON) O(n) single-pass dispatch on repeated `match()` calls.
+- **Trie caching in search methods** (`bindings/php/src/snobol_pattern.c`, `core/src/search_tiers.c`, `core/src/api.c`): Pre-builds the alt-literals trie on the `Pattern` object and passes it to the search state via `vm->trie_cache`, avoiding per-call trie rebuild for `searchAll()`, `searchSplit()`, `searchSplitOffsets()`, and `searchReplace()`.
+- **`snobol_build_alt_trie()` public API** (`core/include/snobol/search.h`, `core/src/search_tiers.c`): New function to build an alt-literals trie from SPLIT/LIT bytecode, usable by any host binding.
 
 #### Changed
 
