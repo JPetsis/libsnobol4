@@ -539,7 +539,9 @@ ddev logs
 1. **Use compiled patterns**: Patterns are cached by default. Use `['cache' => false]` to disable.
 2. **Prefer Builder API**: The Builder API produces optimized AST structures.
 3. **Literal patterns are fastest**: Pure-literal patterns (e.g., `"'abc'"`) trigger a zero-allocation fast-path in `Pattern::match()`, bypassing VM setup entirely. Use `Pattern::matchLiteral()` when you only need anchored literal matching.
-4. **Minimize captures**: Only capture what you need; captures have overhead.
+4. **Call `match()` repeatedly**: Automaton-eligible patterns build a DFA on the first `match()` call and cache it on the `Pattern` object. Subsequent calls use Tier 7 (O(n) single-pass) dispatch instead of Tier 6 (search-VM).
+5. **Call search methods repeatedly**: Alt-literals patterns (`'cat'|'car'|'cab'`) build a trie on the first `searchAll()`/`searchSplit()` call and cache it. Subsequent calls pass the cached trie to the search state, avoiding per-call ~7 KB rebuild.
+6. **Minimize captures**: Only capture what you need; captures have overhead.
 
 ## License
 
