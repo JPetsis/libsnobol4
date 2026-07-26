@@ -3520,3 +3520,58 @@ bool SNOBOL_HOT snobol_search_exec_anchored(VM *SNOBOL_RESTRICT vm,
   return dispatch_search_impl(vm, subject, subject_len, 0, meta, dfa,
                               out_result, diag, true);
 }
+
+/* ---------------------------------------------------------------------------
+ * Public API: build an alt-literals trie from SPLIT/LIT bytecode.
+ *
+ * Walks the bytecode SPLIT tree, collects OP_LIT leaves, and builds a
+ * trie.  Returns NULL on allocation failure or when the bytecode is not
+ * a valid alt-literals SPLIT tree.  The caller owns the returned trie.
+ * --------------------------------------------------------------------------- */
+snobol_auto_trie_t *snobol_build_alt_trie(const uint8_t *bc, size_t bc_len) {
+  if (!bc || bc_len < 2)
+    return NULL;
+  snobol_auto_trie_t *trie =
+      (snobol_auto_trie_t *)snobol_malloc(sizeof(snobol_auto_trie_t));
+  if (!trie)
+    return NULL;
+  trie->node_count = 1; /* root node (index 0) */
+  trie->edge_count = 0;
+  trie->nodes[0].first_edge = SNOBOL_AUTO_NULL;
+  trie->nodes[0].is_end = false;
+
+  bool all_ok = true;
+  size_t stack[64];
+  int sp = 0;
+  stack[sp++] = 0;
+
+  while (sp > 0 && all_ok) {
+    size_t ip = stack[--sp];
+    if (ip + 2 > bc_len) { all_ok = false; break; }
+    uint8_t op = bc[ip];
+    if (op == OP_LIT) {
+      if (ip + 10 > bc_len) { all_ok = false; break; }
+      uint32_t off = search_read_u32(bc, ip + 1);
+      uint32_t len = search_read_u32(bc, ip + 5);
+      if (off >= bc_len || off + len > bc_len) { all_ok = false; break; }
+      if (!trie_insert(trie, bc + off, len)) { all_ok = false; break; }
+    } else if (op == OP_SPLIT) {
+      if (ip + 9 > bc_len) { all_ok = false; break; }
+      uint32_t a = search_read_u32(bc, ip + 1);
+      uint32_t b = search_read_u32(bc, ip + 5);
+      if (a >= bc_len || b >= bc_len) { all_ok = false; break; }
+      if (sp + 2 > 64) { all_ok = false; break; }
+      stack[sp++] = b;
+      stack[sp++] = a;
+    } else {
+      all_ok = false;
+      break;
+    }
+  }
+
+  if (!all_ok) {
+    snobol_free(trie);
+    return NULL;
+  }
+  return trie;
+}

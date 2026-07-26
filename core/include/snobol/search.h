@@ -590,6 +590,17 @@ bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,
                    snobol_search_diag_t *diag, bool anchored);
 
 /**
+ * Build an alt-literals trie from SPLIT/LIT bytecode.
+ *
+ * Walks the bytecode starting at offset 0, following SPLIT branches and
+ * collecting OP_LIT leaves into a trie (stack-allocated ~7 KB pool).
+ * Returns NULL on allocation failure or if the bytecode is not a valid
+ * alt-literals SPLIT tree.  The caller owns the returned trie and must
+ * free it with snobol_auto_trie_free().
+ */
+snobol_auto_trie_t *snobol_build_alt_trie(const uint8_t *bc, size_t bc_len);
+
+/**
  * Free a DFA allocated by build_dfa().
  * Called from snobol_pattern_free() in api.c.
  */

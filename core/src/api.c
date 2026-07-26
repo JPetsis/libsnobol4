@@ -715,6 +715,12 @@ void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
   snobol_free(state);
 }
 
+void snobol_pattern_search_state_set_trie_cache(
+    snobol_pattern_search_state_t *state, snobol_auto_trie_t *trie) {
+  if (state)
+    state->vm.trie_cache = trie;
+}
+
 snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
                                          const char *subject,
                                          size_t subject_len,

@@ -458,6 +458,20 @@ void snobol_pattern_search_state_set_pattern(
     snobol_pattern_search_state_t *state, snobol_pattern_t *pattern);
 
 /**
+ * Set a pre-built alt-literals trie on the search state's VM.
+ *
+ * The trie is used by the Tier 5 alt-literals dispatch instead of
+ * rebuilding it on every search call.  The caller owns the trie and
+ * must keep it alive until the state is destroyed (the state does
+ * not take ownership).
+ *
+ * @param[in] state  Search state created by snobol_pattern_search_state_create().
+ * @param[in] trie   Pre-built trie, or NULL to clear.
+ */
+void snobol_pattern_search_state_set_trie_cache(
+    snobol_pattern_search_state_t *state, snobol_auto_trie_t *trie);
+
+/**
  * @brief Destroy a search state object. NULL-safe.
  *
  * Releases the cached VM, output buffer, match result, and the

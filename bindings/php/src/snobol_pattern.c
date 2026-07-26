@@ -995,6 +995,16 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
         return;
     }
 
+    /* Pre-build and cache the alt-literals trie so it's reused across
+     * search calls instead of being rebuilt every time by the tier
+     * dispatch (which would build it on a stack-local buffer). */
+    if (intern->meta.is_alt_literals && !intern->trie_cache) {
+        intern->trie_cache = snobol_build_alt_trie(intern->bc, intern->bc_len);
+    }
+    if (intern->trie_cache) {
+        snobol_pattern_search_state_set_trie_cache(state, intern->trie_cache);
+    }
+
     if (opts->result == PHP_SNOBOL_RESULT_FLAT) {
         /* Flat result mode: parallel arrays instead of array-of-arrays.
          * Pre-init flat arrays, append per-match, zero sub-array overhead. */
@@ -1401,6 +1411,15 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
         RETURN_FALSE;
     }
 
+    /* Cache the alt-literals trie on the pattern so the tier dispatch
+     * can find it via state->vm.trie_cache instead of rebuilding. */
+    if (intern->meta.is_alt_literals && !intern->trie_cache) {
+        intern->trie_cache = snobol_build_alt_trie(intern->bc, intern->bc_len);
+    }
+    if (intern->trie_cache) {
+        snobol_pattern_search_state_set_trie_cache(state, intern->trie_cache);
+    }
+
     size_t match_count;
     snobol_match_record_t *recs = php_snobol_searchsplit_record_offsets(
         state, subject_val, subject_len, &match_count,
@@ -1474,6 +1493,15 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
     if (!state) {
         zend_throw_exception(zend_ce_exception, "Out of memory", 0);
         RETURN_FALSE;
+    }
+
+    /* Cache the alt-literals trie on the pattern so the tier dispatch
+     * can find it via state->vm.trie_cache instead of rebuilding. */
+    if (intern->meta.is_alt_literals && !intern->trie_cache) {
+        intern->trie_cache = snobol_build_alt_trie(intern->bc, intern->bc_len);
+    }
+    if (intern->trie_cache) {
+        snobol_pattern_search_state_set_trie_cache(state, intern->trie_cache);
     }
 
     size_t match_count;
@@ -1564,6 +1592,15 @@ PHP_METHOD(Snobol_Pattern, searchSplitCuts) {
     if (!state) {
         zend_throw_exception(zend_ce_exception, "Out of memory", 0);
         RETURN_FALSE;
+    }
+
+    /* Cache the alt-literals trie on the pattern so the tier dispatch
+     * can find it via state->vm.trie_cache instead of rebuilding. */
+    if (intern->meta.is_alt_literals && !intern->trie_cache) {
+        intern->trie_cache = snobol_build_alt_trie(intern->bc, intern->bc_len);
+    }
+    if (intern->trie_cache) {
+        snobol_pattern_search_state_set_trie_cache(state, intern->trie_cache);
     }
 
     size_t match_count;
