@@ -455,16 +455,29 @@ PHP_METHOD(Snobol_Pattern, match) {
     }
 #endif
 
+    /* Build the DFA lazily on first match() call for automaton-eligible
+     * patterns.  build_dfa() only reads bc/bc_len from the VM — the rest
+     * of the fields are unused.  On subsequent calls the cached DFA is
+     * reused, enabling Tier 7 (AUTOMATON) dispatch instead of Tier 6
+     * (SEARCH_VM). */
+    if (intern->meta.automaton_eligible && !intern->dfa) {
+        VM tmp_vm;
+        memset(&tmp_vm, 0, sizeof(tmp_vm));
+        tmp_vm.bc = intern->bc;
+        tmp_vm.bc_len = intern->bc_len;
+        intern->dfa = build_dfa(intern->bc, intern->bc_len, &tmp_vm);
+    }
+
     /* Anchored match entry (Group 4): route through the tiered offload so
-     * anchored matching uses the lightweight tiers (search-VM, literal,
-     * bitmap, automaton, ...) instead of always the full VM.  Captures,
-     * _output and _metrics are written back into the VM exactly as vm_exec
-     * does, and the result is anchored to offset 0. */
+      * anchored matching uses the lightweight tiers (search-VM, literal,
+      * bitmap, automaton, ...) instead of always the full VM.  Captures,
+      * _output and _metrics are written back into the VM exactly as vm_exec
+      * does, and the result is anchored to offset 0. */
     snobol_search_result_t match_result;
     memset(&match_result, 0, sizeof(match_result));
     bool ok = snobol_search_exec_anchored(&vm, ZSTR_VAL(input), ZSTR_LEN(input),
-                                          &intern->meta, NULL, &match_result,
-                                          NULL);
+                                          &intern->meta, intern->dfa,
+                                          &match_result, NULL);
 
     SNOBOL_LOG("Snobol_Pattern::match: anchored returned %d, match_start=%zu, "
                "match_end=%zu, var_count=%zu",

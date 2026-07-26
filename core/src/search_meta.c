@@ -654,13 +654,15 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
         ip += 4;
         break;
       /* Position-dependent zero-width ops: excluded from DFA because they
-     * require runtime position constraint checking.  The search-VM
-     * handles them correctly. */
+      * require runtime position constraint checking.  The search-VM
+      * handles them correctly.  ANCHOR is included here because the DFA
+      * builder treats it as an unconditional epsilon — the DFA cannot
+      * enforce start/end position constraints. */
       case OP_POS:
       case OP_RPOS:
       case OP_TAB:
-      case OP_RTAB: return false;
-      case OP_ANCHOR:
+      case OP_RTAB:
+      case OP_ANCHOR: return false;
       case OP_CAP_START:
       case OP_CAP_END:
       case OP_FENCE:
