@@ -66,6 +66,10 @@ static void php_snobol_pattern_dtor(zend_object *object) {
         snobol_auto_trie_free(intern->trie_cache);
         intern->trie_cache = NULL;
     }
+    if (intern->search_state) {
+        snobol_pattern_search_state_destroy(intern->search_state);
+        intern->search_state = NULL;
+    }
 
     zend_object_std_dtor(object);
     SNOBOL_LOG("php_snobol_pattern_dtor: done");
@@ -797,16 +801,55 @@ static bool php_snobol_try_batch(
 {
     const snobol_search_meta_t *meta = &intern->meta;
 
+    /* Lazy-create persistent search state so caches (DFA, range_meta, trie)
+     * are built once and reused across calls even for the batch fast path. */
+    if (!intern->search_state) {
+        intern->search_state =
+            snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+        if (!intern->search_state) {
+            return false;
+        }
+    }
+    snobol_pattern_search_state_t *state = intern->search_state;
+
+    /* Pre-build and cache the alt-literals trie so the batch path can use it. */
+    if (intern->meta.is_alt_literals && !intern->trie_cache) {
+        intern->trie_cache = snobol_build_alt_trie(intern->bc, intern->bc_len);
+    }
+    if (intern->trie_cache) {
+        snobol_pattern_search_state_set_trie_cache(state, intern->trie_cache);
+    }
+
     snobol_batch_result_t batch;
     memset(&batch, 0, sizeof(batch));
-    bool batch_ok = snobol_pattern_search_batch(
-        intern->bc, intern->bc_len,
-        subject_val, subject_len,
-        meta, &batch);
+    bool batch_ok = snobol_pattern_search_batch_ex(
+        state, subject_val, subject_len, &batch);
 
-    if (!batch_ok && batch.match_count == 0) {
+    if (!batch_ok) {
+        if (batch.eligible) {
+            /* Zero matches, batch-eligible — DONE, no fallback.
+             * Return the correct empty result shape for the requested mode. */
+            snobol_batch_result_free(&batch);
+            if (opts->result == PHP_SNOBOL_RESULT_FLAT) {
+                zval ms, ml, ca, ob;
+                array_init(&ms); array_init(&ml);
+                array_init(&ca); array_init(&ob);
+                array_init(result);
+                snobol_assoc_zval(result, "match_start", 11, &ms);
+                zval_ptr_dtor(&ms);
+                snobol_assoc_zval(result, "match_len", 9, &ml);
+                zval_ptr_dtor(&ml);
+                snobol_assoc_zval(result, "captures", 8, &ca);
+                zval_ptr_dtor(&ca);
+                snobol_assoc_zval(result, "_output", 7, &ob);
+                zval_ptr_dtor(&ob);
+            } else {
+                array_init(result);
+            }
+            return true;
+        }
         snobol_batch_result_free(&batch);
-        return false; /* no matches or ineligible — fall through */
+        return false; /* ineligible — fall through */
     }
 
     size_t match_count = batch.match_count;
@@ -988,12 +1031,16 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
     if (php_snobol_try_batch(intern, subject_val, subject_len, result, opts))
         return;
 
-    snobol_pattern_search_state_t *state =
-        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
-    if (!state) {
-        array_init(result);
-        return;
+    /* Lazy-create persistent search state (reused across calls on this pattern). */
+    if (!intern->search_state) {
+        intern->search_state =
+            snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+        if (!intern->search_state) {
+            array_init(result);
+            return;
+        }
     }
+    snobol_pattern_search_state_t *state = intern->search_state;
 
     /* Pre-build and cache the alt-literals trie so it's reused across
      * search calls instead of being rebuilt every time by the tier
@@ -1096,7 +1143,6 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
         snobol_assoc_zval(result, "_output", 7, &outputs_buf);
         zval_ptr_dtor(&outputs_buf);
 
-        snobol_pattern_search_state_destroy(state);
         return;
     }
 
@@ -1169,8 +1215,7 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
         if (match_len == 0) match_len = 1;
         search_offset = match_start + match_len;
     }
-
-    snobol_pattern_search_state_destroy(state);
+    /* Persistent state kept alive for the pattern's lifetime. */
 }
 
 /**
@@ -1338,12 +1383,12 @@ static snobol_match_record_t *php_snobol_searchsplit_record_offsets(
             return recs;
         }
         snobol_batch_result_free(&batch);
-        if (batch_ok) {
-            /* batch_ok but match_count == 0 — no matches */
+        if (batch.eligible) {
+            /* eligible — zero matches: DONE */
             *out_count = 0;
             return NULL;
         }
-        /* batch returned false (ineligible) — fall through to per-call loop */
+        /* not eligible — fall through to per-call loop */
     }
 
     size_t rec_cap   = 16;
@@ -1404,15 +1449,16 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
     const char *subject_val = ZSTR_VAL(subject);
     size_t subject_len      = ZSTR_LEN(subject);
 
-    snobol_pattern_search_state_t *state =
-        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
-    if (!state) {
-        zend_throw_exception(zend_ce_exception, "Out of memory", 0);
-        RETURN_FALSE;
+    if (!intern->search_state) {
+        intern->search_state =
+            snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+        if (!intern->search_state) {
+            zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+            RETURN_FALSE;
+        }
     }
+    snobol_pattern_search_state_t *state = intern->search_state;
 
-    /* Cache the alt-literals trie on the pattern so the tier dispatch
-     * can find it via state->vm.trie_cache instead of rebuilding. */
     if (intern->meta.is_alt_literals && !intern->trie_cache) {
         intern->trie_cache = snobol_build_alt_trie(intern->bc, intern->bc_len);
     }
@@ -1424,8 +1470,6 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
     snobol_match_record_t *recs = php_snobol_searchsplit_record_offsets(
         state, subject_val, subject_len, &match_count,
         intern->bc, intern->bc_len, &intern->meta);
-
-    snobol_pattern_search_state_destroy(state);
 
     if (opts.result == PHP_SNOBOL_RESULT_FLAT) {
         /* Flat alternating [start, len, start, len, ...] result.
@@ -1488,15 +1532,16 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
     const char *subject_val = ZSTR_VAL(subject);
     size_t subject_len      = ZSTR_LEN(subject);
 
-    snobol_pattern_search_state_t *state =
-        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
-    if (!state) {
-        zend_throw_exception(zend_ce_exception, "Out of memory", 0);
-        RETURN_FALSE;
+    if (!intern->search_state) {
+        intern->search_state =
+            snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+        if (!intern->search_state) {
+            zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+            RETURN_FALSE;
+        }
     }
+    snobol_pattern_search_state_t *state = intern->search_state;
 
-    /* Cache the alt-literals trie on the pattern so the tier dispatch
-     * can find it via state->vm.trie_cache instead of rebuilding. */
     if (intern->meta.is_alt_literals && !intern->trie_cache) {
         intern->trie_cache = snobol_build_alt_trie(intern->bc, intern->bc_len);
     }
@@ -1508,8 +1553,6 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
     snobol_match_record_t *recs = php_snobol_searchsplit_record_offsets(
         state, subject_val, subject_len, &match_count,
         intern->bc, intern->bc_len, &intern->meta);
-
-    snobol_pattern_search_state_destroy(state);
 
     if (opts.result == PHP_SNOBOL_RESULT_FLAT) {
         /* Flat alternating [start, len, start, len, ...] — no sub-arrays */
@@ -1587,15 +1630,16 @@ PHP_METHOD(Snobol_Pattern, searchSplitCuts) {
     const char *subject_val = ZSTR_VAL(subject);
     size_t subject_len      = ZSTR_LEN(subject);
 
-    snobol_pattern_search_state_t *state =
-        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
-    if (!state) {
-        zend_throw_exception(zend_ce_exception, "Out of memory", 0);
-        RETURN_FALSE;
+    if (!intern->search_state) {
+        intern->search_state =
+            snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+        if (!intern->search_state) {
+            zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+            RETURN_FALSE;
+        }
     }
+    snobol_pattern_search_state_t *state = intern->search_state;
 
-    /* Cache the alt-literals trie on the pattern so the tier dispatch
-     * can find it via state->vm.trie_cache instead of rebuilding. */
     if (intern->meta.is_alt_literals && !intern->trie_cache) {
         intern->trie_cache = snobol_build_alt_trie(intern->bc, intern->bc_len);
     }
@@ -1607,8 +1651,6 @@ PHP_METHOD(Snobol_Pattern, searchSplitCuts) {
     snobol_match_record_t *recs = php_snobol_searchsplit_record_offsets(
         state, subject_val, subject_len, &match_count,
         intern->bc, intern->bc_len, &intern->meta);
-
-    snobol_pattern_search_state_destroy(state);
 
     /* Build flat cut-points array: each match's end position is a cut.
      * The trailing segment starts at the last cut (which is match N's end). */
@@ -1693,7 +1735,13 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
             return;
         }
         snobol_batch_result_free(&batch);
-        /* Fall through to per-call loop (ineligible pattern or no matches) */
+        if (batch.eligible) {
+            /* Zero matches — return subject unchanged */
+            RETVAL_STRINGL(subject_val, subject_len);
+            snobol_buf_free(&out);
+            return;
+        }
+        /* Fall through to per-call loop (ineligible pattern) */
     }
 
     /* P9: For subjects > 1 KB, run a first-pass match count to
@@ -1705,23 +1753,30 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
     bool do_count_pass = (subject_len > PHP_SNOBOL_PRESIZE_THRESHOLD)
                           && !intern->meta.is_literal_only;
 
-    if (do_count_pass) {
-        /* Counting pass */
-        snobol_pattern_search_state_t *count_state =
+    /* Lazy-create persistent search state (reused for counting pass and main loop). */
+    if (!intern->search_state) {
+        intern->search_state =
             snobol_pattern_search_state_create(intern->bc, intern->bc_len);
-        if (count_state) {
-            size_t so = 0;
-            while (so <= subject_len) {
-                snobol_match_t *cm = snobol_pattern_search_ex(count_state,
-                    subject_val, subject_len, so);
-                if (!cm || !snobol_match_success(cm)) break;
-                size_t cs   = snobol_match_get_position(cm);
-                size_t clen = snobol_match_get_length(cm);
-                count_pass_matches++;
-                if (clen == 0) clen = 1;
-                so = cs + clen;
-            }
-            snobol_pattern_search_state_destroy(count_state);
+        if (!intern->search_state) {
+            zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+            snobol_buf_free(&out);
+            RETURN_FALSE;
+        }
+    }
+    snobol_pattern_search_state_t *state = intern->search_state;
+
+    if (do_count_pass) {
+        /* Counting pass (reuses persistent state — no extra alloc). */
+        size_t so = 0;
+        while (so <= subject_len) {
+            snobol_match_t *cm = snobol_pattern_search_ex(state,
+                subject_val, subject_len, so);
+            if (!cm || !snobol_match_success(cm)) break;
+            size_t cs   = snobol_match_get_position(cm);
+            size_t clen = snobol_match_get_length(cm);
+            count_pass_matches++;
+            if (clen == 0) clen = 1;
+            so = cs + clen;
         }
         if (count_pass_matches > 0) {
             size_t avg_match = (subject_len / count_pass_matches) / 2;
@@ -1756,14 +1811,6 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
         }
     }
 
-    snobol_pattern_search_state_t *state =
-        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
-    if (!state) {
-        zend_throw_exception(zend_ce_exception, "Out of memory", 0);
-        snobol_buf_free(&out);
-        RETURN_FALSE;
-    }
-
     size_t search_offset  = 0;
     size_t last_match_end = 0;
 
@@ -1792,7 +1839,6 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
 
     RETVAL_STRINGL(out.data, out.len);
     snobol_buf_free(&out);
-    snobol_pattern_search_state_destroy(state);
 #undef PHP_SNOBOL_PRESIZE_THRESHOLD
 }
 

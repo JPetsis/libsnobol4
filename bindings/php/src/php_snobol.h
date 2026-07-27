@@ -11,6 +11,9 @@
 /* Forward declare AST type to avoid circular dependency */
 typedef struct ast_node ast_node_t;
 
+/* Forward declare search state type; the full definition is in snobol.h. */
+typedef struct snobol_pattern_search_state snobol_pattern_search_state_t;
+
 extern zend_module_entry snobol_module_entry;
 #define phpext_snobol_ptr &snobol_module_entry
 
@@ -53,6 +56,9 @@ typedef struct snobol_pattern {
     /* Cached alt-literals trie for 'cat'|'dog'|'fox' patterns (Tier 5).
      * Built lazily on first searchAll/searchSplit call; freed in dtor. */
     snobol_auto_trie_t *trie_cache;
+    /* Persistent search state reused across calls, avoiding per-call
+     * state create/destroy and DFA rebuild.  Lazily created. */
+    snobol_pattern_search_state_t *search_state;
     zend_object std;
 } snobol_pattern_t;
 
