@@ -847,49 +847,49 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
  * ---------------------------------------------------------------------------
  */
 
-bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
-                                 const char *subject, size_t len,
-                                 const snobol_search_meta_t *meta,
-                                 snobol_batch_result_t *out) {
-  /* Zero the output struct so partial failure cleanup is safe */
-  memset(out, 0, sizeof(*out));
+/* Core batch search loop, shared by the stateless and stateful batch entry
+ * points. Reuses the caches already on `state` (range_meta, out_buf, and — for
+ * automaton-eligible patterns — the DFA, trie, and SIMD NFA), building them
+ * lazily on first use and reusing them on every subsequent call. Result arrays
+ * are allocated fresh per call and returned in `out` (caller-owned, freed via
+ * snobol_batch_result_free). The caller must zero `out` and set out->eligible
+ * before calling; this function returns the match status but never touches
+ * out->eligible. */
+static bool batch_run(snobol_pattern_search_state_t *state,
+                      const char *subject, size_t len,
+                      snobol_batch_result_t *out) {
+  VM *vm = &state->vm;
+  const snobol_search_meta_t *meta = &state->meta;
 
-  if (!bc || !subject || !meta)
-    return false;
+  if (!state->vm_inited) {
+    memset(vm, 0, sizeof(VM));
+    vm->bc = (uint8_t *)state->bc;
+    vm->bc_len = state->bc_len;
+    vm->pattern = state->pattern;
+    vm->range_meta = state->range_meta;
+    vm->range_meta_count = state->range_meta_count;
+    state->vm_inited = true;
+  }
+  if (!state->buf_inited) {
+    snobol_buf_init(&state->out_buf);
+    state->buf_inited = true;
+  }
+  snobol_buf *out_buf = &state->out_buf;
+  vm->out = out_buf;
 
-  /* Non-search-VM-eligible patterns (EVAL, ASSIGN, DYNAMIC) must fall back
-   * to per-call loop — each match's side effects affect the next. */
-  if (!snobol_meta_search_vm_eligible(meta))
-    return false;
-
-  /* ---- One-time setup ---- */
-  VM vm;
-  memset(&vm, 0, sizeof(vm));
-  vm.bc = bc;
-  vm.bc_len = bc_len;
-
-  snobol_range_meta_t *range_meta = NULL;
-  size_t range_meta_count = 0;
-  snobol_build_range_meta(bc, bc_len, &range_meta, &range_meta_count);
-  vm.range_meta = range_meta;
-  vm.range_meta_count = range_meta_count;
-
-  snobol_buf out_buf;
-  snobol_buf_init(&out_buf);
-  vm.out = &out_buf;
-
-  /* Lazily build DFA for automaton-eligible patterns */
+  /* Lazily build DFA for automaton-eligible patterns (once per state). */
   snobol_dfa_t *dfa = NULL;
   if (meta->automaton_eligible) {
-    dfa = build_dfa(bc, bc_len, &vm);
+    if (!state->dfa)
+      state->dfa = build_dfa(state->bc, state->bc_len, vm);
+    dfa = state->dfa;
   }
 
-  /* ---- Allocate result arrays ---- */
+  /* ---- Allocate result arrays (caller-owned, fresh per call) ---- */
   size_t cap = 64;
   size_t *positions = (size_t *)snobol_malloc(cap * sizeof(size_t));
   size_t *lengths   = (size_t *)snobol_malloc(cap * sizeof(size_t));
   size_t *output_lens = (size_t *)snobol_malloc(cap * sizeof(size_t));
-  /* Buffer for concatenated output strings: initial page */
   size_t outbuf_cap = 1024;
   char *outbuf_data = (char *)snobol_malloc(outbuf_cap);
 
@@ -898,9 +898,6 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
     snobol_free(lengths);
     snobol_free(output_lens);
     snobol_free(outbuf_data);
-    if (range_meta) snobol_free(range_meta);
-    if (dfa) snobol_dfa_free(dfa);
-    snobol_buf_free(&out_buf);
     return false;
   }
 
@@ -914,9 +911,6 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
       snobol_free(lengths);
       snobol_free(output_lens);
       snobol_free(outbuf_data);
-      if (range_meta) snobol_free(range_meta);
-      if (dfa) snobol_dfa_free(dfa);
-      snobol_buf_free(&out_buf);
       return false;
     }
   }
@@ -929,12 +923,12 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
 
   while (offset <= len) {
     /* Set subject pointers before each call */
-    vm.s = subject;
-    vm.len = len;
+    vm->s = subject;
+    vm->len = len;
 
     snobol_search_result_t sr;
-    bool ok = snobol_search_exec(&vm, subject, len, offset, meta, dfa,
-                                  &sr, NULL);
+    bool ok = snobol_search_exec(vm, subject, len, offset, meta, dfa,
+                                 &sr, NULL);
     if (!ok || sr.aborted)
       break;
 
@@ -970,7 +964,7 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
      * (start_offset), so add `offset` (the window base) to get absolute
      * subject positions. */
     if (has_caps && captures) {
-      int nv = (int)vm.var_count;
+      int nv = (int)vm->var_count;
       if (nv > (int)max_var_count)
         max_var_count = (size_t)nv;
       if (nv > MAX_VARS)
@@ -989,8 +983,8 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
           memset(captures[ri] + (cap / 2) * 2, 0,
                  (cap / 2) * 2 * sizeof(size_t));
         }
-        size_t vs = vm.var_start[ri];
-        size_t ve = vm.var_end[ri];
+        size_t vs = vm->var_start[ri];
+        size_t ve = vm->var_end[ri];
         captures[ri][count * 2]     = offset + vs;
         captures[ri][count * 2 + 1] = (ve > vs) ? (ve - vs) : 0;
       }
@@ -999,7 +993,7 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
     /* Collect output (EMIT ops). Always store a NUL-terminated entry per
      * match — including empty-string entries for matches without output —
      * so that PHP iteration can index into the concatenated buffer directly. */
-    size_t out_len = out_buf.len > 0 ? out_buf.len : 0;
+    size_t out_len = out_buf->len > 0 ? out_buf->len : 0;
     size_t needed = out_pos + out_len + 1; /* data + NUL */
     if (needed > outbuf_cap) {
       while (outbuf_cap < needed)
@@ -1010,7 +1004,7 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
     }
     if (outbuf_data) {
       if (out_len > 0)
-        memcpy(outbuf_data + out_pos, out_buf.data, out_len);
+        memcpy(outbuf_data + out_pos, out_buf->data, out_len);
       outbuf_data[out_pos + out_len] = '\0';
       out_pos += out_len + 1;
       output_lens[count] = out_len;
@@ -1018,9 +1012,9 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
       output_lens[count] = 0;
     }
     /* Clear output buffer for next match (keep capacity) */
-    out_buf.len = 0;
-    if (out_buf.cap > 0 && out_buf.data)
-      out_buf.data[0] = '\0';
+    out_buf->len = 0;
+    if (out_buf->cap > 0 && out_buf->data)
+      out_buf->data[0] = '\0';
 
     count++;
 
@@ -1029,19 +1023,11 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
     offset = mstart + (mlen > 0 ? mlen : 1);
   }
 
-  /* ---- Clean up VM resources ---- */
-  snobol_buf_free(&out_buf);
-  vm_free_labels(&vm);
-  snobol_search_vm_cleanup(&vm);
-  if (range_meta) {
-    snobol_free(range_meta);
-    range_meta = NULL;
-  }
-  /* DFA ownership: if we built one and it is not associated with a pattern,
-   * we must free it here.  Only free DFA when we allocated it (no pattern
-   * association).  For now we always free locally-built DFAs. */
-  if (dfa)
-    snobol_dfa_free(dfa);
+  /* Reset reusable VM working state. State-owned caches (range_meta, out_buf,
+   * dfa, trie, simd nfa) are intentionally preserved for the next call. */
+  out_buf->len = 0;
+  vm_free_labels(vm);
+  snobol_search_vm_cleanup(vm);
 
   /* ---- Populate output struct ---- */
   if (count == 0 || !positions || !lengths) {
@@ -1066,6 +1052,54 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
   out->output_lens = output_lens;
 
   return true;
+}
+
+bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
+                                 const char *subject, size_t len,
+                                 const snobol_search_meta_t *meta,
+                                 snobol_batch_result_t *out) {
+  /* Zero the output struct so partial failure cleanup is safe */
+  memset(out, 0, sizeof(*out));
+
+  if (!bc || !subject || !meta)
+    return false;
+
+  /* Non-search-VM-eligible patterns (EVAL, ASSIGN, DYNAMIC) must fall back
+   * to per-call loop — each match's side effects affect the next. */
+  if (!snobol_meta_search_vm_eligible(meta))
+    return false;
+
+  /* Eligible patterns keep eligible == true even on zero matches, so callers
+   * can distinguish "done, no matches" from "not batchable, fall back". */
+  out->eligible = true;
+
+  /* Delegate to a temporary state: metadata, range_meta and (for
+   * automaton-eligible patterns) the DFA are derived/built once for this call.
+   * The stateful snobol_pattern_search_batch_ex() reuses a persistent state to
+   * amortise that cost across calls. */
+  snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(bc, bc_len);
+  if (!st)
+    return false;
+  bool ok = batch_run(st, subject, len, out);
+  snobol_pattern_search_state_destroy(st);
+  return ok;
+}
+
+bool snobol_pattern_search_batch_ex(snobol_pattern_search_state_t *state,
+                                    const char *subject, size_t len,
+                                    snobol_batch_result_t *out) {
+  /* Zero the output struct so partial failure cleanup is safe */
+  memset(out, 0, sizeof(*out));
+
+  if (!state || !subject)
+    return false;
+
+  /* Non-search-VM-eligible patterns must fall back to the per-call loop. */
+  if (!snobol_meta_search_vm_eligible(&state->meta))
+    return false;
+
+  out->eligible = true;
+  return batch_run(state, subject, len, out);
 }
 
 void snobol_batch_result_free(snobol_batch_result_t *out) {

@@ -142,6 +142,14 @@ typedef struct snobol_pattern snobol_pattern_t;
  * outputs is NULL when no match produced EMIT output.  Each output segment
  * is NUL-terminated; the final segment is followed by an empty-string sentinel
  * so callers can iterate outputs without needing output_lens.
+ *
+ * eligible distinguishes "no matches but the pattern was batch-eligible"
+ * (true, zero matches) from "the pattern was not batch-eligible" (false).
+ * Callers must check eligible: a false return with eligible == true means the
+ * search completed with zero matches (DONE) — do NOT re-run the search.  A
+ * false return with eligible == false means the pattern must fall back to the
+ * per-call loop.  eligible is set true for every batch-eligible pattern
+ * regardless of match count, and false (the safe default) for early-outs.
  */
 typedef struct snobol_batch_result {
   size_t match_count;      /**< Number of matches found (0 when return false). */
@@ -149,10 +157,12 @@ typedef struct snobol_batch_result {
   size_t *lengths;         /**< [match_count] match byte lengths. */
   size_t var_count;        /**< Number of capture registers (0 = no captures). */
   size_t **captures;       /**< [var_count][match_count * 2]: each row stores
-                                [start0, len0, start1, len1, ...]. */
+                                 [start0, len0, start1, len1, ...]. */
   char *outputs;           /**< Concatenated NUL-terminated output strings,
-                                one per match, final sentinel is empty. */
+                                 one per match, final sentinel is empty. */
   size_t *output_lens;     /**< [match_count] byte length of each output. */
+  bool eligible;           /**< True when the pattern was batch-eligible
+                                 (zero matches still sets this). */
 } snobol_batch_result_t;
 
 /**
@@ -164,7 +174,13 @@ typedef struct snobol_batch_result {
  * snobol_batch_result_free().
  *
  * Patterns with side-effect ops (EVAL, ASSIGN, DYNAMIC) are not supported
- * and return false immediately (caller falls back to per-call loop).
+ * and return false immediately (out->eligible == false; caller falls back to
+ * the per-call loop).
+ *
+ * For batch-eligible patterns the search runs once and out->eligible is set
+ * true.  When zero matches are found the function returns false but
+ * out->eligible stays true — the caller must treat that as DONE (no fallback),
+ * not as a request to re-run the search via the per-call loop.
  *
  * @param bc       Compiled bytecode buffer (must outlive the call).
  * @param bc_len   Bytecode length.
@@ -176,7 +192,9 @@ typedef struct snobol_batch_result {
  * @param out      Output struct (caller-allocated, zero-initialised).
  * @return true when at least one match was found; false otherwise.
  *         On false, out->match_count is 0 and all arrays are NULL (or empty
- *         for ineligible patterns).
+ *         for ineligible patterns).  Check out->eligible to tell zero-match
+ *         (eligible == true, DONE) from ineligible (eligible == false, fall
+ *         back to per-call loop).
  */
 bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
                                  const char *subject, size_t len,
@@ -505,6 +523,32 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
                                          const char *subject,
                                          size_t subject_len,
                                          size_t start_offset);
+
+/**
+ * @brief Stateful batch search that reuses VM, range_meta, and (for
+ *        automaton-eligible patterns) the DFA/trie/SIMD-NFA caches across
+ *        calls.
+ *
+ * Behaves identically to snobol_pattern_search_batch() but reuses the caches
+ * already built on @p state, building them lazily on first use and reusing
+ * them on every subsequent call. This avoids re-deriving metadata and
+ * rebuilding the DFA per call. The stateless snobol_pattern_search_batch()
+ * delegates to a temporary state internally, so both share one
+ * implementation.
+ *
+ * @param[in,out] state  Search state created by
+ *                       snobol_pattern_search_state_create().
+ * @param[in]     subject Subject string (UTF-8, must outlive the call).
+ * @param[in]     len     Byte length of @p subject.
+ * @param[out]    out     Output struct (caller-allocated, zero-initialised).
+ * @return Same tri-state contract as snobol_pattern_search_batch(): true when
+ *         at least one match was found; false otherwise. On false, check
+ *         out->eligible to tell zero-match (eligible == true, DONE) from
+ *         ineligible (eligible == false, fall back to per-call loop).
+ */
+bool snobol_pattern_search_batch_ex(snobol_pattern_search_state_t *state,
+                                    const char *subject, size_t len,
+                                    snobol_batch_result_t *out);
 
 /**
  * @brief Get the absolute offset where the match started within the subject.

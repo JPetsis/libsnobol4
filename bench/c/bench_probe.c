@@ -426,11 +426,15 @@ static void run_search_all_scenario(const char *pattern_src, size_t pat_len,
     const uint8_t *bc = snobol_pattern_get_bc(pat);
     size_t bc_len = snobol_pattern_get_bc_len(pat);
 
+    /* Reuse one search state across iterations so the DFA/range_meta caches
+     * are built once, mirroring the PHP binding's persistent-state fix. */
+    snobol_pattern_search_state_t *st =
+        snobol_pattern_search_state_create(bc, bc_len);
+
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters; i++) {
         snobol_batch_result_t batch;
-        (void)snobol_pattern_search_batch(bc, bc_len, subject, subject_len,
-                                          meta, &batch);
+        (void)snobol_pattern_search_batch_ex(st, subject, subject_len, &batch);
         snobol_batch_result_free(&batch);
     }
     int64_t end = bench_ns();
@@ -441,6 +445,7 @@ static void run_search_all_scenario(const char *pattern_src, size_t pat_len,
 
     capture_tiers(pat, subject_len, r);
 
+    snobol_pattern_search_state_destroy(st);
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
 }
