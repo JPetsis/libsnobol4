@@ -21,6 +21,7 @@
 /* Per-scenario result */
 typedef struct {
     const char *name;       /* scenario id */
+    const char *unit;       /* what one iteration measures: match|pass|call */
     int64_t iters;          /* iterations executed */
     int64_t total_ns;       /* wall time for the loop */
     int64_t ns_per_iter;    /* total_ns / iters */
@@ -113,6 +114,17 @@ static const char *SUBJECT_WITH_PQR =
     "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
     "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
     "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz";
+
+/* Subject that STARTS with 'pqr' (anchored literal_ok succeeds at offset 0).
+ * Total length matches SUBJECT_WITH_PQR (2080 bytes) so timing is comparable. */
+static char SUBJECT_PQR_AT_0[2081];
+static void init_literal_subjects(void) {
+    memset(SUBJECT_PQR_AT_0, 'z', 2080);
+    SUBJECT_PQR_AT_0[0] = 'p';
+    SUBJECT_PQR_AT_0[1] = 'q';
+    SUBJECT_PQR_AT_0[2] = 'r';
+    SUBJECT_PQR_AT_0[2080] = '\0';
+}
 
 /* 1KB subject with NO 'pqr' */
 static const char *SUBJECT_NO_PQR =
@@ -219,14 +231,15 @@ static const char *SUBJECT_ALTLIT =
     "the cat went dog walking fox jumped cat over dog near fox "
     "the cat went dog walking fox jumped cat over dog near fox ";
 
-/* ~260 bytes of "xyzabcd" repeated for automaton pattern SPAN('abc') 'd'.
- * The first three bytes "xyz" are not in the span class, then "abcd" matches
- * SPAN('abc') with literal 'd'. */
+/* Canonical automaton subject for pattern SPAN('abc') 'd': "xyzabcd" x 32
+ * = 224 bytes.  The first three bytes "xyz" are not in the span class, then
+ * "abcd" matches SPAN('abc') with literal 'd'.  MUST stay byte-identical to
+ * $SUBJECT_AUTOMATON in bindings/php/probe.php. */
 static const char *SUBJECT_AUTOMATON =
-    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
-    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
-    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
-    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabc";
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd"
+    "xyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcdxyzabcd";
 
 /* 1KB subject: all digits except last byte → SPAN('0-9') scans 1023 bytes */
 static char SUBJECT_SIMD_SPAN[1024];
@@ -258,13 +271,15 @@ static snobol_pattern_t *compile_or_die(snobol_context_t *ctx,
 /* Convenience-path baseline for P1.7: same tokenize loop as run_tokenize but
  * using the one-shot snobol_pattern_search (re-derives state per call) instead
  * of the reusable search state.  This is the "before" number the reuse API is
- * measured against. */
+ * measured against.  Reports ns per FULL PASS (one complete split of the
+ * subject) so it shares the unit of the PHP tokenize rows. */
 static void run_tokenize_convenience(int64_t iters, probe_result_t *r) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "' '", 3);
     size_t slen = strlen(SUBJECT_WHITESPACE);
 
     int64_t total_search_calls = 0;
+    int64_t passes = 0;
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters && total_search_calls < (int64_t)1e9; i++) {
         size_t pos = 0;
@@ -281,31 +296,37 @@ static void run_tokenize_convenience(int64_t iters, probe_result_t *r) {
             pos += snobol_match_get_position(m) + snobol_match_get_length(m);
             snobol_match_free(m);
         }
+        passes++;
     }
     int64_t end = bench_ns();
 
-    r->iters = total_search_calls;
+    r->iters = passes;
     r->total_ns = end - start;
-    r->ns_per_iter = (total_search_calls > 0) ? (r->total_ns / total_search_calls) : 0;
+    r->ns_per_iter = (passes > 0) ? (r->total_ns / passes) : 0;
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
 }
 
-/* Mimics what Pattern::searchSplit does: loop snobol_pattern_search at
- * advancing offsets, advance by match length. Counts inner iterations
- * (search calls) as `iters` (one per token boundary). */
-static void run_tokenize(int64_t iters, probe_result_t *r) {
+/* Shared tokenize loop (mimics Pattern::searchSplit): loop
+ * snobol_pattern_search_ex at advancing offsets, advance by match length.
+ * Writes both units into *r depending on `per_pass`:
+ *  - per_pass true  → ns per full split pass  (pairs with PHP tokenize rows)
+ *  - per_pass false → ns per search call      (engine-level cost)
+ */
+static void run_tokenize_common(int64_t iters, probe_result_t *r,
+                                bool per_pass) {
     snobol_context_t *ctx = snobol_context_create();
     snobol_pattern_t *pat = compile_or_die(ctx, "' '", 3);
     size_t slen = strlen(SUBJECT_WHITESPACE);
-    
+
     /* Create search state for efficient repeated searches */
     const uint8_t *bc = snobol_pattern_get_bc(pat);
     size_t bc_len = snobol_pattern_get_bc_len(pat);
     snobol_pattern_search_state_t *state = snobol_pattern_search_state_create(bc, bc_len);
 
     int64_t total_search_calls = 0;
+    int64_t passes = 0;
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters && total_search_calls < (int64_t)1e9; i++) {
         /* one full pass of the subject, splitting on ' ' */
@@ -319,18 +340,30 @@ static void run_tokenize(int64_t iters, probe_result_t *r) {
             /* advance past the match (single space → len 1) */
             pos = snobol_match_get_position(m) + snobol_match_get_length(m);
         }
+        passes++;
     }
     int64_t end = bench_ns();
 
-    r->iters = total_search_calls;  /* report actual search calls, not outer iters */
+    int64_t units = per_pass ? passes : total_search_calls;
+    r->iters = units;
     r->total_ns = end - start;
-    r->ns_per_iter = (total_search_calls > 0) ? (r->total_ns / total_search_calls) : 0;
+    r->ns_per_iter = (units > 0) ? (r->total_ns / units) : 0;
 
     capture_tiers(pat, slen, r);
 
     snobol_pattern_search_state_destroy(state);
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
+}
+
+/* Primary tokenize row: ns per full pass (unit-compatible with PHP probe). */
+static void run_tokenize(int64_t iters, probe_result_t *r) {
+    run_tokenize_common(iters, r, true);
+}
+
+/* Secondary engine-level row: ns per individual search call. */
+static void run_tokenize_call(int64_t iters, probe_result_t *r) {
+    run_tokenize_common(iters, r, false);
 }
 
 static void run_alt_literals(int64_t iters, probe_result_t *r) {
@@ -374,6 +407,47 @@ static void run_alt_literals_search(int64_t iters, probe_result_t *r) {
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
+}
+
+/* ---------------------------------------------------------------------------
+ * All-matches scenarios (*_all)
+ *
+ * Enumerate EVERY non-overlapping match per iteration via the batch API —
+ * the same engine entry point Pattern::searchAll() uses for eligible
+ * patterns.  One iteration == one full all-matches pass over the subject,
+ * so these rows pair unit-for-unit with the PHP probe's searchAll rows.
+ * --------------------------------------------------------------------------- */
+static void run_search_all_scenario(const char *pattern_src, size_t pat_len,
+                                    const char *subject, size_t subject_len,
+                                    int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, pattern_src, pat_len);
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+    const uint8_t *bc = snobol_pattern_get_bc(pat);
+    size_t bc_len = snobol_pattern_get_bc_len(pat);
+
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters; i++) {
+        snobol_batch_result_t batch;
+        (void)snobol_pattern_search_batch(bc, bc_len, subject, subject_len,
+                                          meta, &batch);
+        snobol_batch_result_free(&batch);
+    }
+    int64_t end = bench_ns();
+
+    r->iters = iters;
+    r->total_ns = end - start;
+    r->ns_per_iter = (iters > 0) ? (r->total_ns / iters) : 0;
+
+    capture_tiers(pat, subject_len, r);
+
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
+static void run_alt_literals_search_all(int64_t iters, probe_result_t *r) {
+    run_search_all_scenario("'cat' | 'dog' | 'fox'", 20, SUBJECT_ALTLIT,
+                            strlen(SUBJECT_ALTLIT), iters, r);
 }
 
 /* ---------------------------------------------------------------------------
@@ -446,7 +520,16 @@ static void run_literal_fail_anchored(int64_t iters, probe_result_t *r) {
                           strlen(SUBJECT_NO_PQR), iters, r, false);
 }
 
+/* Anchored success: literal at offset 0 — the match succeeds every iteration. */
 static void run_literal_ok_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("'pqr'", 5, SUBJECT_PQR_AT_0,
+                          strlen(SUBJECT_PQR_AT_0), iters, r, false);
+}
+
+/* Anchored reject: literal present only at offset 16 — anchored match fails
+ * every iteration.  Measures the anchored-rejection cost when the literal
+ * exists later in the subject. */
+static void run_literal_late_anchored(int64_t iters, probe_result_t *r) {
     run_anchored_scenario("'pqr'", 5, SUBJECT_WITH_PQR,
                           strlen(SUBJECT_WITH_PQR), iters, r, false);
 }
@@ -541,6 +624,18 @@ static void run_residue_zero_width(int64_t iters, probe_result_t *r) {
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
+}
+
+/* All-matches counterparts of the residue scenarios (pair with the PHP
+ * probe's searchAll-based rows). */
+static void run_residue_repeat_all(int64_t iters, probe_result_t *r) {
+    run_search_all_scenario("@r('a'*) 'b'", strlen("@r('a'*) 'b'"),
+                            SUBJECT_RESIDUE, strlen(SUBJECT_RESIDUE), iters, r);
+}
+
+static void run_residue_zero_width_all(int64_t iters, probe_result_t *r) {
+    run_search_all_scenario("(''*) 'b'", strlen("(''*) 'b'"),
+                            SUBJECT_RESIDUE, strlen(SUBJECT_RESIDUE), iters, r);
 }
 
 /* ---------------------------------------------------------------------------
@@ -735,6 +830,7 @@ static void run_pcre2_alt_literals(int64_t iters, probe_result_t *r) {
     pcre2_code_free(re);
 }
 
+/* PCRE2 tokenize: ns per FULL PASS (same unit as tokenize_reuse). */
 static void run_pcre2_tokenize(int64_t iters, probe_result_t *r) {
     /* Splitting on space → PCRE2: \x20 (literal space) */
     pcre2_code *re = pcre2_compile_or_die("\\x20", 0);
@@ -742,6 +838,7 @@ static void run_pcre2_tokenize(int64_t iters, probe_result_t *r) {
     size_t slen = strlen(SUBJECT_WHITESPACE);
 
     int64_t total_search_calls = 0;
+    int64_t passes = 0;
     int64_t start = bench_ns();
     for (int64_t i = 0; i < iters && total_search_calls < (int64_t)1e9; i++) {
         size_t pos = 0;
@@ -754,12 +851,13 @@ static void run_pcre2_tokenize(int64_t iters, probe_result_t *r) {
             PCRE2_SIZE *ovector = pcre2_get_ovector_pointer(md);
             pos = ovector[1];  /* end of match */
         }
+        passes++;
     }
     int64_t end = bench_ns();
 
-    r->iters = total_search_calls;
+    r->iters = passes;
     r->total_ns = end - start;
-    r->ns_per_iter = (total_search_calls > 0) ? (r->total_ns / total_search_calls) : 0;
+    r->ns_per_iter = (passes > 0) ? (r->total_ns / passes) : 0;
 
     pcre2_match_data_free(md);
     pcre2_code_free(re);
@@ -887,6 +985,15 @@ static void run_pike_overflow(int64_t iters, probe_result_t *r) {
     snobol_context_destroy(ctx);
 }
 
+/* pike_overflow_all: same pattern/subject, all-matches per iteration. */
+static void run_pike_overflow_all(int64_t iters, probe_result_t *r) {
+    char subj[1025];
+    memset(subj, 'x', 900);
+    subj[900] = ' ';
+    subj[901] = '\0';
+    run_search_all_scenario("BREAKX(' ')", 11, subj, 901, iters, r);
+}
+
 /* prefilter_miss: ('a'+)+ 'b' on 10 'a's — required-byte prefilter memchr
  * rejects the subject without entering any tier. */
 static void run_prefilter_miss(int64_t iters, probe_result_t *r) {
@@ -911,6 +1018,14 @@ static void run_prefilter_miss(int64_t iters, probe_result_t *r) {
 
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);
+}
+
+/* prefilter_miss_all: same pattern/subject, all-matches per iteration. */
+static void run_prefilter_miss_all(int64_t iters, probe_result_t *r) {
+    char subj[11];
+    memset(subj, 'a', 10);
+    subj[10] = '\0';
+    run_search_all_scenario("('a'+)+ 'b'", 12, subj, 10, iters, r);
 }
 
 /* zero_progress: ('a'*) 'b' on 64-byte subject of 'a's — zero-progress guard
@@ -939,6 +1054,14 @@ static void run_zero_progress(int64_t iters, probe_result_t *r) {
     snobol_context_destroy(ctx);
 }
 
+/* zero_progress_all: same pattern/subject, all-matches per iteration. */
+static void run_zero_progress_all(int64_t iters, probe_result_t *r) {
+    char subj[65];
+    memset(subj, 'a', 64);
+    subj[64] = '\0';
+    run_search_all_scenario("('a'*) 'b'", 10, subj, 64, iters, r);
+}
+
 /* ---------------------------------------------------------------------------
  * Output
  * --------------------------------------------------------------------------- */
@@ -956,26 +1079,37 @@ static void print_header(void) {
 }
 
 static void print_table(const probe_result_t *results, size_t n) {
-    printf("%-16s %10s %8s %4s %4s\n",
-            "scenario", "ns/iter", "iters", "tier", "exec");
-    printf("%-16s %10s %8s %4s %4s\n",
-            "-------", "-------", "-----", "----", "----");
+    printf("%-24s %10s %8s %-5s %4s %4s\n",
+            "scenario", "ns/iter", "iters", "unit", "tier", "exec");
+    printf("%-24s %10s %8s %-5s %4s %4s\n",
+            "-------", "-------", "-----", "----", "----", "----");
 
     for (size_t i = 0; i < n; i++) {
         const probe_result_t *r = &results[i];
-        printf("%-16s %10" PRId64 " %8" PRId64 " %4d %4d\n",
+        printf("%-24s %10" PRId64 " %8" PRId64 " %-5s %4d %4d\n",
                 r->name,
                 r->ns_per_iter,
                 r->iters,
+                r->unit ? r->unit : "-",
                 r->tier,
                 r->exec_tier);
     }
     printf("\n");
     printf("Legend:\n");
-    printf("  ns/iter  : wall time per match attempt (lower = faster)\n");
-    printf("  iters    : match attempts executed in the scenario\n");
+    printf("  ns/iter  : wall time per unit of work (lower = faster)\n");
+    printf("  iters    : units of work executed in the scenario\n");
+    printf("  unit     : what one iteration measures —\n");
+    printf("             match = one match attempt (first match / anchored)\n");
+    printf("             pass  = one full all-matches or split pass of the subject\n");
+    printf("             call  = one individual search call inside a pass\n");
     printf("  tier     : structural tier (meta->tier, pattern shape)\n");
     printf("  exec     : executed dispatch tier (cost model + DFA override)\n");
+    printf("\n");
+    printf("Only rows with the same unit are comparable across the C and PHP\n");
+    printf("probes.  pcre2_* rows are UNANCHORED-SEARCH CONTEXT: PCRE2's\n");
+    printf("pcre2_match() scans the subject, while the snobol literal_* and\n");
+    printf("anchored rows are anchored — do not read pcre2_* vs anchored rows\n");
+    printf("as a head-to-head comparison.\n");
     printf("\n");
 }
 
@@ -1142,15 +1276,16 @@ int main(void) {
     if (tokenize_iters < 1) tokenize_iters = 1;
 
     init_simd_subjects();
+    init_literal_subjects();
 
     print_header();
     printf("Iterations per scenario: %" PRId64 " (override with PROBE_ITERS)\n",
            iters);
-    printf("Tokenize uses %" PRId64 " outer iters (multi-pass of subject).\n\n",
+    printf("Tokenize uses %" PRId64 " outer iters (one full pass each).\n\n",
            tokenize_iters);
 
-    /* Total scenarios: 20 snobol + 9 PCRE2 (when available) = 29 */
-    probe_result_t results[29];
+    /* Total scenarios: 28 snobol + 9 PCRE2 (when available) = 37 */
+    probe_result_t results[37];
     memset(results, 0, sizeof(results));
 
     /* Run each scenario */
@@ -1158,45 +1293,58 @@ int main(void) {
         const char *name;
         void (*run)(int64_t, probe_result_t *);
         int64_t iter_count;
+        const char *unit;  /* match | pass | call */
     } scenarios[] = {
         /* Anchored scenarios (stack VM, no search state) */
-        { "literal_fail",        run_literal_fail_anchored,        iters   },
-        { "literal_ok",          run_literal_ok_anchored,          iters   },
-        { "span_comma",          run_span_comma_anchored,          iters   },
-        { "break_comma",         run_break_anchored,               iters   },
-        { "alternation",         run_alternation_anchored,         iters   },
-        { "alt_literals",        run_alt_literals_anchored,        iters   },
-        { "automaton",           run_automaton_anchored,           iters   },
-        /* Convenience / search scenarios */
-        { "alt_literals_conv",   run_alt_literals,                iters   },
-        { "alt_literals_search", run_alt_literals_search,         iters   },
-        { "span_simd",           run_span_simd,                   iters   },
-        { "span_simd_miss",      run_span_simd_miss,              iters   },
-        { "notany_simd_miss",    run_notany_simd_miss,            iters   },
-        { "tokenize_conv",        run_tokenize_convenience,       tokenize_iters },
-        { "tokenize_reuse",        run_tokenize,                   tokenize_iters },
-        { "residue_repeat",        run_residue_repeat,             iters          },
-        { "residue_zero_width",    run_residue_zero_width,         iters          },
-        { "residue_catastrophic",  run_residue_catastrophic,       1000           },
-        { "pike_overflow",         run_pike_overflow,              iters          },
-        { "prefilter_miss",        run_prefilter_miss,             iters          },
-        { "zero_progress",         run_zero_progress,              iters          },
+        { "literal_fail",        run_literal_fail_anchored,        iters, "match" },
+        { "literal_ok",          run_literal_ok_anchored,          iters, "match" },
+        { "literal_late",        run_literal_late_anchored,        iters, "match" },
+        { "span_comma",          run_span_comma_anchored,          iters, "match" },
+        { "break_comma",         run_break_anchored,               iters, "match" },
+        { "alternation",         run_alternation_anchored,         iters, "match" },
+        { "alt_literals",        run_alt_literals_anchored,        iters, "match" },
+        { "automaton",           run_automaton_anchored,           iters, "match" },
+        /* Convenience / search scenarios (first match per iteration) */
+        { "alt_literals_conv",   run_alt_literals,                iters, "match" },
+        { "alt_literals_search", run_alt_literals_search,         iters, "match" },
+        { "span_simd",           run_span_simd,                   iters, "match" },
+        { "span_simd_miss",      run_span_simd_miss,              iters, "match" },
+        { "notany_simd_miss",    run_notany_simd_miss,            iters, "match" },
+        /* All-matches scenarios (batch API; pair with PHP searchAll rows) */
+        { "alt_literals_search_all", run_alt_literals_search_all, iters, "pass" },
+        { "residue_repeat_all",      run_residue_repeat_all,      iters, "pass" },
+        { "residue_zero_width_all",  run_residue_zero_width_all,  iters, "pass" },
+        { "pike_overflow_all",       run_pike_overflow_all,       iters, "pass" },
+        { "prefilter_miss_all",      run_prefilter_miss_all,      iters, "pass" },
+        { "zero_progress_all",       run_zero_progress_all,       iters, "pass" },
+        /* Tokenize: primary rows are per full pass; _call is per search call */
+        { "tokenize_conv",        run_tokenize_convenience,       tokenize_iters, "pass" },
+        { "tokenize_reuse",        run_tokenize,                   tokenize_iters, "pass" },
+        { "tokenize_reuse_call",   run_tokenize_call,              tokenize_iters, "call" },
+        { "residue_repeat",        run_residue_repeat,             iters,  "match" },
+        { "residue_zero_width",    run_residue_zero_width,         iters,  "match" },
+        { "residue_catastrophic",  run_residue_catastrophic,       1000,   "match" },
+        { "pike_overflow",         run_pike_overflow,              iters,  "match" },
+        { "prefilter_miss",        run_prefilter_miss,             iters,  "match" },
+        { "zero_progress",         run_zero_progress,              iters,  "match" },
 #ifdef HAVE_PCRE2
-        { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters            },
-        { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters            },
-        { "pcre2_span_comma",    run_pcre2_span_comma,    iters            },
-        { "pcre2_alternation",   run_pcre2_alternation,   iters            },
-        { "pcre2_alt_literals",  run_pcre2_alt_literals,  iters            },
-        { "pcre2_span_simd",     run_pcre2_span_simd,     iters            },
-        { "pcre2_span_simd_miss",run_pcre2_span_simd_miss, iters           },
-        { "pcre2_tokenize",      run_pcre2_tokenize,      tokenize_iters   },
-        { "pcre2_catastrophic",  run_pcre2_catastrophic,  1                 },
+        /* PCRE2 rows: UNANCHORED-SEARCH CONTEXT (see legend) */
+        { "pcre2_literal_fail",  run_pcre2_literal_fail,  iters,           "match" },
+        { "pcre2_literal_ok",    run_pcre2_literal_ok,    iters,           "match" },
+        { "pcre2_span_comma",    run_pcre2_span_comma,    iters,           "match" },
+        { "pcre2_alternation",   run_pcre2_alternation,   iters,           "match" },
+        { "pcre2_alt_literals",  run_pcre2_alt_literals,  iters,           "match" },
+        { "pcre2_span_simd",     run_pcre2_span_simd,     iters,           "match" },
+        { "pcre2_span_simd_miss",run_pcre2_span_simd_miss, iters,          "match" },
+        { "pcre2_tokenize",      run_pcre2_tokenize,      tokenize_iters,  "pass" },
+        { "pcre2_catastrophic",  run_pcre2_catastrophic,  1,               "match" },
 #endif
     };
     size_t n = sizeof(scenarios) / sizeof(scenarios[0]);
 
     for (size_t i = 0; i < n; i++) {
         results[i].name = scenarios[i].name;
+        results[i].unit = scenarios[i].unit;
         scenarios[i].run(scenarios[i].iter_count, &results[i]);
     }
 
