@@ -1,33 +1,483 @@
 {
-  "schema_version": 2,
-  "captured_at": "2026-07-02T00:00:00Z",
-  "captured_before_optimization": false,
-  "probe_iterations": 100000,
-  "tokenize_outer_iterations": 10000,
+  "schema_version": 3,
+  "captured_at": "2026-07-27T00:00:00Z",
+  "captured_before_optimization": true,
+  "probe_iterations": 20000,
+  "tokenize_outer_iterations": 2000,
+  "note": "Aligned C/PHP probe baseline captured BEFORE engine fixes (tasks 3-5). Scenario names and units match across probes; per-pass vs per-call vs per-match are explicit. pcre2_* rows are unanchored-search context. Will be regenerated post-fix.",
   "c_probe": {
-    "literal_fail":        { "ns_per_iter": 447, "iters": 100000, "total_ns": 44700000 },
-    "literal_ok":          { "ns_per_iter": 284, "iters": 100000, "total_ns": 28400000 },
-    "span_comma":          { "ns_per_iter": 250, "iters": 100000, "total_ns": 25000000 },
-    "span_search":         { "ns_per_iter": 283, "iters": 100000, "total_ns": 28300000 },
-    "alternation":         { "ns_per_iter": 265, "iters": 100000, "total_ns": 26500000 },
-    "alt_search":          { "ns_per_iter": 325, "iters": 100000, "total_ns": 32500000 },
-    "alt_literals":        { "ns_per_iter": 354, "iters": 100000, "total_ns": 35400000 },
-    "alt_literals_search": { "ns_per_iter": 1100, "iters": 100000, "total_ns": 110000000 },
-    "tokenize":            { "ns_per_iter": 282, "iters": 10410000, "total_ns": 2935620000 },
-    "pcre2_literal_fail":  { "ns_per_iter": 58,  "iters": 100000, "total_ns": 5800000 },
-    "pcre2_literal_ok":    { "ns_per_iter": 37,  "iters": 100000, "total_ns": 3700000 },
-    "pcre2_span_comma":    { "ns_per_iter": 31,  "iters": 100000, "total_ns": 3100000 },
-    "pcre2_alternation":   { "ns_per_iter": 30,  "iters": 100000, "total_ns": 3000000 },
-    "pcre2_alt_literals":  { "ns_per_iter": 38,  "iters": 100000, "total_ns": 3800000 },
-    "pcre2_tokenize":      { "ns_per_iter": 31,  "iters": 10410000, "total_ns": 322710000 }
+    "literal_fail": {
+      "ns_per_iter": 5600,
+      "iters": 20000,
+      "total_ns": 112000000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "literal_ok": {
+      "ns_per_iter": 26,
+      "iters": 20000,
+      "total_ns": 520000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "literal_late": {
+      "ns_per_iter": 71,
+      "iters": 20000,
+      "total_ns": 1420000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "span_comma": {
+      "ns_per_iter": 84,
+      "iters": 20000,
+      "total_ns": 1680000,
+      "unit": "match",
+      "tier": 1,
+      "exec": 9
+    },
+    "break_comma": {
+      "ns_per_iter": 71,
+      "iters": 20000,
+      "total_ns": 1420000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 6
+    },
+    "alternation": {
+      "ns_per_iter": 62,
+      "iters": 20000,
+      "total_ns": 1240000,
+      "unit": "match",
+      "tier": 4,
+      "exec": 9
+    },
+    "alt_literals": {
+      "ns_per_iter": 39,
+      "iters": 20000,
+      "total_ns": 780000,
+      "unit": "match",
+      "tier": 5,
+      "exec": 5
+    },
+    "automaton": {
+      "ns_per_iter": 68,
+      "iters": 20000,
+      "total_ns": 1360000,
+      "unit": "match",
+      "tier": 1,
+      "exec": 6
+    },
+    "alt_literals_conv": {
+      "ns_per_iter": 232,
+      "iters": 20000,
+      "total_ns": 4640000,
+      "unit": "match",
+      "tier": 5,
+      "exec": 5
+    },
+    "alt_literals_search": {
+      "ns_per_iter": 223,
+      "iters": 20000,
+      "total_ns": 4460000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "span_simd": {
+      "ns_per_iter": 492,
+      "iters": 20000,
+      "total_ns": 9840000,
+      "unit": "match",
+      "tier": 1,
+      "exec": 9
+    },
+    "span_simd_miss": {
+      "ns_per_iter": 564,
+      "iters": 20000,
+      "total_ns": 11280000,
+      "unit": "match",
+      "tier": 1,
+      "exec": 9
+    },
+    "notany_simd_miss": {
+      "ns_per_iter": 548,
+      "iters": 20000,
+      "total_ns": 10960000,
+      "unit": "match",
+      "tier": 9,
+      "exec": 9
+    },
+    "alt_literals_search_all": {
+      "ns_per_iter": 82505,
+      "iters": 20000,
+      "total_ns": 1650100000,
+      "unit": "pass",
+      "tier": 5,
+      "exec": 5
+    },
+    "residue_repeat_all": {
+      "ns_per_iter": 251,
+      "iters": 20000,
+      "total_ns": 5020000,
+      "unit": "pass",
+      "tier": 6,
+      "exec": 6
+    },
+    "residue_zero_width_all": {
+      "ns_per_iter": 97286,
+      "iters": 20000,
+      "total_ns": 1945720000,
+      "unit": "pass",
+      "tier": 6,
+      "exec": 6
+    },
+    "pike_overflow_all": {
+      "ns_per_iter": 1152,
+      "iters": 20000,
+      "total_ns": 23040000,
+      "unit": "pass",
+      "tier": 0,
+      "exec": 0
+    },
+    "prefilter_miss_all": {
+      "ns_per_iter": 99470,
+      "iters": 20000,
+      "total_ns": 1989400000,
+      "unit": "pass",
+      "tier": 3,
+      "exec": 3
+    },
+    "zero_progress_all": {
+      "ns_per_iter": 101003,
+      "iters": 20000,
+      "total_ns": 2020060000,
+      "unit": "pass",
+      "tier": 6,
+      "exec": 6
+    },
+    "tokenize_conv": {
+      "ns_per_iter": 140272,
+      "iters": 2000,
+      "total_ns": 280544000,
+      "unit": "pass",
+      "tier": 0,
+      "exec": 0
+    },
+    "tokenize_reuse": {
+      "ns_per_iter": 81836,
+      "iters": 2000,
+      "total_ns": 163672000,
+      "unit": "pass",
+      "tier": 2,
+      "exec": 3
+    },
+    "tokenize_reuse_call": {
+      "ns_per_iter": 210,
+      "iters": 1042000,
+      "total_ns": 218820000,
+      "unit": "call",
+      "tier": 2,
+      "exec": 3
+    },
+    "residue_repeat": {
+      "ns_per_iter": 136,
+      "iters": 20000,
+      "total_ns": 2720000,
+      "unit": "match",
+      "tier": 6,
+      "exec": 6
+    },
+    "residue_zero_width": {
+      "ns_per_iter": 133,
+      "iters": 20000,
+      "total_ns": 2660000,
+      "unit": "match",
+      "tier": 6,
+      "exec": 6
+    },
+    "residue_catastrophic": {
+      "ns_per_iter": 137,
+      "iters": 1000,
+      "total_ns": 137000,
+      "unit": "match",
+      "tier": 3,
+      "exec": 3
+    },
+    "pike_overflow": {
+      "ns_per_iter": 898,
+      "iters": 20000,
+      "total_ns": 17960000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "prefilter_miss": {
+      "ns_per_iter": 129,
+      "iters": 20000,
+      "total_ns": 2580000,
+      "unit": "match",
+      "tier": 3,
+      "exec": 3
+    },
+    "zero_progress": {
+      "ns_per_iter": 137,
+      "iters": 20000,
+      "total_ns": 2740000,
+      "unit": "match",
+      "tier": 6,
+      "exec": 6
+    },
+    "pcre2_literal_fail": {
+      "ns_per_iter": 61,
+      "iters": 20000,
+      "total_ns": 1220000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "pcre2_literal_ok": {
+      "ns_per_iter": 51,
+      "iters": 20000,
+      "total_ns": 1020000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "pcre2_span_comma": {
+      "ns_per_iter": 32,
+      "iters": 20000,
+      "total_ns": 640000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "pcre2_alternation": {
+      "ns_per_iter": 33,
+      "iters": 20000,
+      "total_ns": 660000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "pcre2_alt_literals": {
+      "ns_per_iter": 39,
+      "iters": 20000,
+      "total_ns": 780000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "pcre2_span_simd": {
+      "ns_per_iter": 528,
+      "iters": 20000,
+      "total_ns": 10560000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "pcre2_span_simd_miss": {
+      "ns_per_iter": 590,
+      "iters": 20000,
+      "total_ns": 11800000,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    },
+    "pcre2_tokenize": {
+      "ns_per_iter": 20537,
+      "iters": 2000,
+      "total_ns": 41074000,
+      "unit": "pass",
+      "tier": 0,
+      "exec": 0
+    },
+    "pcre2_catastrophic": {
+      "ns_per_iter": 292,
+      "iters": 1,
+      "total_ns": 292,
+      "unit": "match",
+      "tier": 0,
+      "exec": 0
+    }
   },
-  "c_bench": {
-    "literal_substring_pqr": { "snobol4_ns": 44037875, "search_ns": 36195667, "pcre2_ns": 3604917, "ratio_snobol4_vs_pcre2": 12.22 },
-    "span_delimiter_csv":    { "snobol4_ns": 25171041, "search_ns": 27233375, "pcre2_ns": 3225583, "ratio_snobol4_vs_pcre2": 7.80 },
-    "tokenization":          { "snobol4_ns": 26060875, "search_ns": 102497000, "pcre2_ns": 1769250, "ratio_snobol4_vs_pcre2": 14.73 },
-    "search_replace_fox":    { "snobol4_ns": 24336750, "search_ns": 32948125, "pcre2_ns": 2461545750, "ratio_snobol4_vs_pcre2": 0.01 },
-    "http_request_line":     { "snobol4_ns": 33697250, "search_ns": 205416917, "pcre2_ns": 6369917, "ratio_snobol4_vs_pcre2": 5.29 },
-    "delimiter_heavy_span":  { "snobol4_ns": 21347567708, "search_ns": 23483457417, "pcre2_ns": 2343694250, "ratio_snobol4_vs_pcre2": 9.11 }
+  "php_probe": {
+    "literal_fail": {
+      "ns_per_iter": 13,
+      "iters": 20000,
+      "total_ns": 279296,
+      "unit": "match"
+    },
+    "literal_ok": {
+      "ns_per_iter": 54,
+      "iters": 20000,
+      "total_ns": 1086976,
+      "unit": "match"
+    },
+    "literal_late": {
+      "ns_per_iter": 13,
+      "iters": 20000,
+      "total_ns": 268032,
+      "unit": "match"
+    },
+    "span_comma": {
+      "ns_per_iter": 200,
+      "iters": 20000,
+      "total_ns": 4012032,
+      "unit": "match"
+    },
+    "break_comma": {
+      "ns_per_iter": 266,
+      "iters": 20000,
+      "total_ns": 5327872,
+      "unit": "match"
+    },
+    "alternation": {
+      "ns_per_iter": 201,
+      "iters": 20000,
+      "total_ns": 4030208,
+      "unit": "match"
+    },
+    "alt_literals": {
+      "ns_per_iter": 109,
+      "iters": 20000,
+      "total_ns": 2188800,
+      "unit": "match"
+    },
+    "alt_literals_search": {
+      "ns_per_iter": 110,
+      "iters": 20000,
+      "total_ns": 2210048,
+      "unit": "match"
+    },
+    "automaton": {
+      "ns_per_iter": 136,
+      "iters": 20000,
+      "total_ns": 2723072,
+      "unit": "match"
+    },
+    "span_simd": {
+      "ns_per_iter": 590,
+      "iters": 20000,
+      "total_ns": 11815168,
+      "unit": "match"
+    },
+    "span_simd_miss": {
+      "ns_per_iter": 197,
+      "iters": 20000,
+      "total_ns": 3947008,
+      "unit": "match"
+    },
+    "notany_simd_miss": {
+      "ns_per_iter": 193,
+      "iters": 20000,
+      "total_ns": 3869952,
+      "unit": "match"
+    },
+    "alt_literals_search_all": {
+      "ns_per_iter": 79873,
+      "iters": 20000,
+      "total_ns": 1597468160,
+      "unit": "pass"
+    },
+    "residue_repeat_all": {
+      "ns_per_iter": 770,
+      "iters": 200,
+      "total_ns": 154112,
+      "unit": "pass"
+    },
+    "residue_zero_width_all": {
+      "ns_per_iter": 179669,
+      "iters": 200,
+      "total_ns": 35933952,
+      "unit": "pass"
+    },
+    "pike_overflow_all": {
+      "ns_per_iter": 1410,
+      "iters": 200,
+      "total_ns": 282112,
+      "unit": "pass"
+    },
+    "prefilter_miss_all": {
+      "ns_per_iter": 187275,
+      "iters": 200,
+      "total_ns": 37455104,
+      "unit": "pass"
+    },
+    "zero_progress_all": {
+      "ns_per_iter": 187864,
+      "iters": 200,
+      "total_ns": 37572864,
+      "unit": "pass"
+    },
+    "residue_repeat": {
+      "ns_per_iter": 13095,
+      "iters": 200,
+      "total_ns": 2619136,
+      "unit": "match"
+    },
+    "residue_zero_width": {
+      "ns_per_iter": 400,
+      "iters": 200,
+      "total_ns": 80128,
+      "unit": "match"
+    },
+    "residue_catastrophic": {
+      "ns_per_iter": 158360,
+      "iters": 1000,
+      "total_ns": 158360064,
+      "unit": "match"
+    },
+    "pike_overflow": {
+      "ns_per_iter": 5015,
+      "iters": 200,
+      "total_ns": 1003008,
+      "unit": "match"
+    },
+    "prefilter_miss": {
+      "ns_per_iter": 157360,
+      "iters": 200,
+      "total_ns": 31472128,
+      "unit": "match"
+    },
+    "zero_progress": {
+      "ns_per_iter": 6740,
+      "iters": 200,
+      "total_ns": 1348096,
+      "unit": "match"
+    },
+    "tokenize_reuse": {
+      "ns_per_iter": 189273,
+      "iters": 2000,
+      "total_ns": 378547968,
+      "unit": "pass"
+    },
+    "alt_literals_search_flat": {
+      "ns_per_iter": 89096,
+      "iters": 20000,
+      "total_ns": 1781924096,
+      "unit": "pass"
+    },
+    "tokenize_php_flat": {
+      "ns_per_iter": 156841,
+      "iters": 2000,
+      "total_ns": 313682176,
+      "unit": "pass"
+    },
+    "tokenize_php_offsets": {
+      "ns_per_iter": 178205,
+      "iters": 2000,
+      "total_ns": 356410112,
+      "unit": "pass"
+    },
+    "tokenize_php_offsets_flat": {
+      "ns_per_iter": 179189,
+      "iters": 2000,
+      "total_ns": 358378752,
+      "unit": "pass"
+    }
   },
-  "notes": "Post engine-consolidation (JIT removed). Baseline for search-tier optimization (automaton, entry-point skip loop). Probe now includes PCRE2 comparison scenarios (pcre2_*). C bench includes PCRE2 comparison ratio."
+  "c_bench": {}
 }

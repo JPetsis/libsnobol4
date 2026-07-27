@@ -113,6 +113,9 @@ $SUBJECT_WITH_PQR =
     . "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
     . "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz";
 
+$SUBJECT_PQR_AT_0 =
+    "pqr" . str_repeat("z", 2077);
+
 $SUBJECT_NO_PQR =
     "abcdefghijklmnorstuvwxyzabcdefghijklmnorstuvwxyz"
     . "abcdefghijklmnorstuvwxyzabcdefghijklmnorstuvwxyz"
@@ -248,6 +251,20 @@ function run_literal_fail(int $iters): array
 /** @return array{iters:int,total_ns:int} */
 function run_literal_ok(int $iters): array
 {
+    // Anchored literal SUCCESS: subject starts with "pqr" (offset 0).
+    $p = PatternHelper::fromString("'pqr'");
+    for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_PQR_AT_0']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($GLOBALS['SUBJECT_PQR_AT_0']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+/** @return array{iters:int,total_ns:int} */
+function run_literal_late(int $iters): array
+{
+    // Anchored literal REJECTION: "pqr" is at offset 16, anchored at 0.
     $p = PatternHelper::fromString("'pqr'");
     for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_WITH_PQR']); }
     $start = now_ns();
@@ -309,6 +326,20 @@ function run_alt_literals(int $iters): array
 /** @return array{iters:int,total_ns:int} */
 function run_alt_literals_search(int $iters): array
 {
+    // FIRST match (pairs C alt_literals_search, unit=match).
+    $p = PatternHelper::fromString("'cat' | 'dog' | 'fox'");
+    for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_ALTLIT']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($GLOBALS['SUBJECT_ALTLIT']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+/** @return array{iters:int,total_ns:int} */
+function run_alt_literals_search_all(int $iters): array
+{
+    // ALL matches per iteration (pairs C alt_literals_search_all, unit=pass).
     $p = PatternHelper::fromString("'cat' | 'dog' | 'fox'");
     for ($i = 0; $i < 100; $i++) { $p->searchAll($GLOBALS['SUBJECT_ALTLIT']); }
     $start = now_ns();
@@ -454,11 +485,25 @@ function run_notany_simd_miss(int $iters): array
     return ['iters' => $iters, 'total_ns' => now_ns() - $start];
 }
 
+/* All residue/pike/prefilter/zero_progress scenarios use the EXACT C probe
+ * pattern sources via PatternHelper::fromString (no Builder-AST divergence),
+ * and are split into a first-match (unit=match) and an all-matches
+ * (unit=pass) variant so they pair 1:1 with the C probe's rows. */
+
 function run_residue_repeat(int $iters): array
 {
-    $p = Pattern::compileFromAst(
-        Builder::concat([Builder::arbno(Builder::lit("a")), Builder::lit("b")])
-    );
+    $p = PatternHelper::fromString("@r('a'*) 'b'");
+    for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_RESIDUE']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($GLOBALS['SUBJECT_RESIDUE']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_residue_repeat_all(int $iters): array
+{
+    $p = PatternHelper::fromString("@r('a'*) 'b'");
     for ($i = 0; $i < 100; $i++) { $p->searchAll($GLOBALS['SUBJECT_RESIDUE']); }
     $start = now_ns();
     for ($i = 0; $i < $iters; $i++) {
@@ -469,8 +514,18 @@ function run_residue_repeat(int $iters): array
 
 function run_residue_zero_width(int $iters): array
 {
-    $ast = Builder::concat([Builder::arbno(Builder::lit("")), Builder::lit("b")]);
-    $p = Pattern::compileFromAst($ast);
+    $p = PatternHelper::fromString("(''*) 'b'");
+    for ($i = 0; $i < 100; $i++) { $p->match($GLOBALS['SUBJECT_RESIDUE']); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($GLOBALS['SUBJECT_RESIDUE']);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_residue_zero_width_all(int $iters): array
+{
+    $p = PatternHelper::fromString("(''*) 'b'");
     for ($i = 0; $i < 100; $i++) { $p->searchAll($GLOBALS['SUBJECT_RESIDUE']); }
     $start = now_ns();
     for ($i = 0; $i < $iters; $i++) {
@@ -481,23 +536,31 @@ function run_residue_zero_width(int $iters): array
 
 function run_residue_catastrophic(int $iters): array
 {
-    $ast = Builder::concat([
-        Builder::arbno(Builder::repeat(Builder::lit("a"), 1, -1)),
-        Builder::lit("b")
-    ]);
-    $p = Pattern::compileFromAst($ast);
-    for ($i = 0; $i < 10; $i++) { $p->searchAll($GLOBALS['SUBJECT_CAT']); }
+    $p = PatternHelper::fromString("('a'+)+ 'b'");
+    $subj = str_repeat("a", 10);
+    for ($i = 0; $i < 10; $i++) { $p->match($subj); }
     $start = now_ns();
     for ($i = 0; $i < $iters; $i++) {
-        $p->searchAll($GLOBALS['SUBJECT_CAT']);
+        $p->match($subj);
     }
     return ['iters' => $iters, 'total_ns' => now_ns() - $start];
 }
 
 function run_pike_overflow(int $iters): array
 {
-    $ast = Builder::concat([Builder::breakx(" "), Builder::lit(" ")]);
-    $p = Pattern::compileFromAst($ast);
+    $p = PatternHelper::fromString("BREAKX(' ')");
+    $subj = str_repeat("x", 900) . " ";
+    for ($i = 0; $i < 100; $i++) { $p->match($subj); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($subj);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_pike_overflow_all(int $iters): array
+{
+    $p = PatternHelper::fromString("BREAKX(' ')");
     $subj = str_repeat("x", 900) . " ";
     for ($i = 0; $i < 100; $i++) { $p->searchAll($subj); }
     $start = now_ns();
@@ -509,11 +572,19 @@ function run_pike_overflow(int $iters): array
 
 function run_prefilter_miss(int $iters): array
 {
-    $ast = Builder::concat([
-        Builder::arbno(Builder::repeat(Builder::lit("a"), 1, -1)),
-        Builder::lit("b")
-    ]);
-    $p = Pattern::compileFromAst($ast);
+    $p = PatternHelper::fromString("('a'+)+ 'b'");
+    $subj = str_repeat("a", 10);
+    for ($i = 0; $i < 100; $i++) { $p->match($subj); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($subj);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_prefilter_miss_all(int $iters): array
+{
+    $p = PatternHelper::fromString("('a'+)+ 'b'");
     $subj = str_repeat("a", 10);
     for ($i = 0; $i < 100; $i++) { $p->searchAll($subj); }
     $start = now_ns();
@@ -525,8 +596,19 @@ function run_prefilter_miss(int $iters): array
 
 function run_zero_progress(int $iters): array
 {
-    $ast = Builder::concat([Builder::arbno(Builder::lit("a")), Builder::lit("b")]);
-    $p = Pattern::compileFromAst($ast);
+    $p = PatternHelper::fromString("('a'*) 'b'");
+    $subj = str_repeat("a", 64);
+    for ($i = 0; $i < 100; $i++) { $p->match($subj); }
+    $start = now_ns();
+    for ($i = 0; $i < $iters; $i++) {
+        $p->match($subj);
+    }
+    return ['iters' => $iters, 'total_ns' => now_ns() - $start];
+}
+
+function run_zero_progress_all(int $iters): array
+{
+    $p = PatternHelper::fromString("('a'*) 'b'");
     $subj = str_repeat("a", 64);
     for ($i = 0; $i < 100; $i++) { $p->searchAll($subj); }
     $start = now_ns();
@@ -556,27 +638,40 @@ echo "Iterations per scenario: $iters (override with PROBE_ITERS)\n";
 echo "Tokenize uses $tokenize_iters outer iters (one searchSplit call each).\n\n";
 
 $scenarios = [
-    ['name' => 'literal_fail',           'run' => 'run_literal_fail',           'iter' => $iters],
-    ['name' => 'literal_ok',             'run' => 'run_literal_ok',             'iter' => $iters],
-    ['name' => 'span_comma',             'run' => 'run_span_comma',             'iter' => $iters],
-    ['name' => 'break_comma',            'run' => 'run_break',                  'iter' => $iters],
-    ['name' => 'alternation',            'run' => 'run_alternation',            'iter' => $iters],
-    ['name' => 'alt_literals',           'run' => 'run_alt_literals',           'iter' => $iters],
-    ['name' => 'alt_literals_search',    'run' => 'run_alt_literals_search',    'iter' => $iters],
-    ['name' => 'alt_literals_search_flat','run' => 'run_alt_literals_search_flat','iter' => $iters],
-    ['name' => 'automata',               'run' => 'run_automatons',            'iter' => $iters],
-    ['name' => 'span_simd',              'run' => 'run_span_simd',              'iter' => $iters],
-    ['name' => 'span_simd_miss',         'run' => 'run_span_simd_miss',         'iter' => $iters],
-    ['name' => 'notany_simd_miss',       'run' => 'run_notany_simd_miss',       'iter' => $iters],
-    ['name' => 'tokenize_php',           'run' => 'run_tokenize_php',           'iter' => $tokenize_iters],
-    ['name' => 'tokenize_php_flat',      'run' => 'run_tokenize_php_flat',      'iter' => $tokenize_iters],
-    ['name' => 'tokenize_php_offsets',   'run' => 'run_tokenize_php_offsets',   'iter' => $tokenize_iters],
-    ['name' => 'tokenize_php_offsets_flat','run' => 'run_tokenize_php_offsets_flat','iter' => $tokenize_iters],
-    ['name' => 'residue_repeat',         'run' => 'run_residue_repeat',         'iter' => $heavy_iters],
-    ['name' => 'residue_zero_width',     'run' => 'run_residue_zero_width',     'iter' => $heavy_iters],
-    ['name' => 'pike_overflow',          'run' => 'run_pike_overflow',          'iter' => $heavy_iters],
-    ['name' => 'prefilter_miss',         'run' => 'run_prefilter_miss',         'iter' => $heavy_iters],
-    ['name' => 'zero_progress',          'run' => 'run_zero_progress',          'iter' => $heavy_iters],
+    /* Anchored first-match scenarios (unit=match) */
+    ['name' => 'literal_fail',           'run' => 'run_literal_fail',           'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'literal_ok',             'run' => 'run_literal_ok',             'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'literal_late',           'run' => 'run_literal_late',           'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'span_comma',             'run' => 'run_span_comma',             'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'break_comma',            'run' => 'run_break',                  'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'alternation',            'run' => 'run_alternation',            'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'alt_literals',           'run' => 'run_alt_literals',           'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'alt_literals_search',    'run' => 'run_alt_literals_search',    'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'automaton',              'run' => 'run_automatons',             'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'span_simd',              'run' => 'run_span_simd',              'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'span_simd_miss',         'run' => 'run_span_simd_miss',         'iter' => $iters, 'unit' => 'match'],
+    ['name' => 'notany_simd_miss',       'run' => 'run_notany_simd_miss',       'iter' => $iters, 'unit' => 'match'],
+    /* All-matches scenarios (unit=pass) — pair with C *_all rows */
+    ['name' => 'alt_literals_search_all', 'run' => 'run_alt_literals_search_all', 'iter' => $iters, 'unit' => 'pass'],
+    ['name' => 'residue_repeat_all',     'run' => 'run_residue_repeat_all',     'iter' => $heavy_iters, 'unit' => 'pass'],
+    ['name' => 'residue_zero_width_all', 'run' => 'run_residue_zero_width_all', 'iter' => $heavy_iters, 'unit' => 'pass'],
+    ['name' => 'pike_overflow_all',      'run' => 'run_pike_overflow_all',      'iter' => $heavy_iters, 'unit' => 'pass'],
+    ['name' => 'prefilter_miss_all',     'run' => 'run_prefilter_miss_all',     'iter' => $heavy_iters, 'unit' => 'pass'],
+    ['name' => 'zero_progress_all',      'run' => 'run_zero_progress_all',      'iter' => $heavy_iters, 'unit' => 'pass'],
+    /* First-match residue/pike/prefilter/zero_progress (unit=match) */
+    ['name' => 'residue_repeat',         'run' => 'run_residue_repeat',         'iter' => $heavy_iters, 'unit' => 'match'],
+    ['name' => 'residue_zero_width',     'run' => 'run_residue_zero_width',     'iter' => $heavy_iters, 'unit' => 'match'],
+    ['name' => 'residue_catastrophic',   'run' => 'run_residue_catastrophic',   'iter' => 1000,         'unit' => 'match'],
+    ['name' => 'pike_overflow',          'run' => 'run_pike_overflow',          'iter' => $heavy_iters, 'unit' => 'match'],
+    ['name' => 'prefilter_miss',         'run' => 'run_prefilter_miss',         'iter' => $heavy_iters, 'unit' => 'match'],
+    ['name' => 'zero_progress',          'run' => 'run_zero_progress',          'iter' => $heavy_iters, 'unit' => 'match'],
+    /* Tokenize: per full pass (pairs C tokenize_reuse, unit=pass) */
+    ['name' => 'tokenize_reuse',         'run' => 'run_tokenize_php',           'iter' => $tokenize_iters, 'unit' => 'pass'],
+    /* PHP-specific binding variants (no C counterpart) */
+    ['name' => 'alt_literals_search_flat','run' => 'run_alt_literals_search_flat','iter' => $iters, 'unit' => 'pass'],
+    ['name' => 'tokenize_php_flat',      'run' => 'run_tokenize_php_flat',      'iter' => $tokenize_iters, 'unit' => 'pass'],
+    ['name' => 'tokenize_php_offsets',   'run' => 'run_tokenize_php_offsets',   'iter' => $tokenize_iters, 'unit' => 'pass'],
+    ['name' => 'tokenize_php_offsets_flat','run' => 'run_tokenize_php_offsets_flat','iter' => $tokenize_iters, 'unit' => 'pass'],
 ];
 
 $results = [];
@@ -586,26 +681,30 @@ foreach ($scenarios as $s) {
         'name'           => $s['name'],
         'iters'          => $timing['iters'],
         'total_ns'       => $timing['total_ns'],
+        'unit'           => $s['unit'],
         'ns_per_iter'    => $timing['iters'] > 0 ? (int)($timing['total_ns'] / $timing['iters']) : 0,
     ];
 }
 
-printf("%-20s %10s %10s\n",
-    "scenario", "ns/iter", "iters");
-printf("%-20s %10s %10s\n",
-    "-------", "-------", "-----");
+printf("%-24s %10s %10s %-5s\n",
+    "scenario", "ns/iter", "iters", "unit");
+printf("%-24s %10s %10s %-5s\n",
+    "-------", "-------", "-----", "----");
 
 foreach ($results as $r) {
-    printf("%-20s %10d %10d\n",
+    printf("%-24s %10d %10d %-5s\n",
         $r['name'],
         $r['ns_per_iter'],
-        $r['iters']);
+        $r['iters'],
+        $r['unit']);
 }
 
 echo "\n";
 echo "Legend: see bench/c/bench_probe.c for column definitions.\n";
+echo "unit = match (one match attempt) | pass (one full all-match/split pass).\n";
 echo "PHP probe measures the full user-facing path (binding cost included).\n";
 echo "Run bench/c/bench_probe.c to compare against the pure C path.\n";
+echo "Only rows with the same unit are comparable across the two probes.\n";
 echo "\n";
 
 /* Optional baseline regression guard. Reads the committed JSON baseline
