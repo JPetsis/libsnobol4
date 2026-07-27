@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Probe Truth and Performance Fairness
+
+#### Added
+
+- **`snobol_pattern_search_batch_ex(state, subject, len, out)`** (`core/src/api.c`, `core/include/snobol/snobol.h`): Stateful batch search that reuses the state's VM/range_meta/DFA/trie/SIMD-NFA caches across calls. Avoids per-call metadata rebuild. The stateless `snobol_pattern_search_batch()` delegates to a temporary state internally.
+- **`bool eligible` field on `snobol_batch_result_t`** (`core/include/snobol/snobol.h`): Distinguishes eligible zero-match (eligible==true, DONE, no fallback) from ineligible (eligible==false, callers fall back to per-call loop).
+- **Persistent search state on PHP `snobol_pattern_t`** (`bindings/php/src/php_snobol.h`, `bindings/php/src/snobol_pattern.c`): `snobol_pattern_search_state_t *search_state` is lazily created on first search call, reused by all search methods (`searchAll`, `searchSplit`, `searchSplitOffsets`, `searchSplitCuts`, `searchReplace`), destroyed in the PHP dtor. Both the batch fast path and the per-call fallback use the same persistent state.
+- **Aligned C/PHP probe scenarios** (`bench/c/bench_probe.c`, `bindings/php/probe.php`): All-matches scenarios (`*_all`, unit=pass), per-pass tokenize rows, canonicalized subjects, `unit` column in probe output tables.
+
+#### Changed
+
+- **Anchored literal search is O(literal length) instead of O(subject)** (`core/src/search_tiers.c`): `search_literal_only()` now uses `memcmp` at `start_offset` when anchored, eliminating the whole-subject `memmem` scan. `literal_fail` collapsed from 5.6 µs to 52 ns.
+- **PHP binding uses `snobol_pattern_search_batch_ex` with persistent state** (`bindings/php/src/snobol_pattern.c`): The batch fast path and fallback loop share one persistent `snobol_pattern_search_state_t` per PHP `Pattern` object. DFA, range_meta, and trie caches are built once per pattern lifetime. Heavy zero-match `searchAll` rows collapsed ~105 µs → 208 ns.
+- **Flat result modes go through the batch fast path** (`bindings/php/src/snobol_pattern.c`): `result=>'flat'` and `result=>'offsets'` now route through the same stateful batch path as the default mode, with identical result shapes.
+- **C probe `_all` scenarios use stateful batch_ex with persistent state** (`bench/c/bench_probe.c`): Each `*_all` scenario creates one `snobol_pattern_search_state_t` reused across all iterations, so the DFA-reuse fix is measurable in the C probe.
+
 ### PHP Binding Overhead Optimizations
 
 #### Added

@@ -1,303 +1,303 @@
 {
   "schema_version": 3,
   "captured_at": "2026-07-27T00:00:00Z",
-  "captured_before_optimization": true,
+  "captured_before_optimization": false,
   "probe_iterations": 20000,
   "tokenize_outer_iterations": 2000,
-  "note": "Aligned C/PHP probe baseline captured BEFORE engine fixes (tasks 3-5). Scenario names and units match across probes; per-pass vs per-call vs per-match are explicit. pcre2_* rows are unanchored-search context. Will be regenerated post-fix.",
+  "note": "Post engine-fix aligned baseline (tasks 3-5 complete). scenario names and units match across probes.",
   "c_probe": {
     "literal_fail": {
-      "ns_per_iter": 5600,
+      "ns_per_iter": 52,
       "iters": 20000,
-      "total_ns": 112000000,
+      "total_ns": 1040000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "literal_ok": {
-      "ns_per_iter": 26,
+      "ns_per_iter": 49,
       "iters": 20000,
-      "total_ns": 520000,
+      "total_ns": 980000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "literal_late": {
-      "ns_per_iter": 71,
+      "ns_per_iter": 44,
       "iters": 20000,
-      "total_ns": 1420000,
+      "total_ns": 880000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "span_comma": {
-      "ns_per_iter": 84,
+      "ns_per_iter": 132,
       "iters": 20000,
-      "total_ns": 1680000,
+      "total_ns": 2640000,
       "unit": "match",
       "tier": 1,
       "exec": 9
     },
     "break_comma": {
-      "ns_per_iter": 71,
+      "ns_per_iter": 110,
       "iters": 20000,
-      "total_ns": 1420000,
+      "total_ns": 2200000,
       "unit": "match",
       "tier": 0,
       "exec": 6
     },
     "alternation": {
-      "ns_per_iter": 62,
+      "ns_per_iter": 90,
       "iters": 20000,
-      "total_ns": 1240000,
+      "total_ns": 1800000,
       "unit": "match",
       "tier": 4,
       "exec": 9
     },
     "alt_literals": {
-      "ns_per_iter": 39,
+      "ns_per_iter": 60,
       "iters": 20000,
-      "total_ns": 780000,
+      "total_ns": 1200000,
       "unit": "match",
       "tier": 5,
       "exec": 5
     },
     "automaton": {
-      "ns_per_iter": 68,
+      "ns_per_iter": 96,
       "iters": 20000,
-      "total_ns": 1360000,
+      "total_ns": 1920000,
       "unit": "match",
       "tier": 1,
       "exec": 6
     },
     "alt_literals_conv": {
-      "ns_per_iter": 232,
+      "ns_per_iter": 330,
       "iters": 20000,
-      "total_ns": 4640000,
+      "total_ns": 6600000,
       "unit": "match",
       "tier": 5,
       "exec": 5
     },
     "alt_literals_search": {
-      "ns_per_iter": 223,
+      "ns_per_iter": 283,
       "iters": 20000,
-      "total_ns": 4460000,
+      "total_ns": 5660000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "span_simd": {
-      "ns_per_iter": 492,
+      "ns_per_iter": 580,
       "iters": 20000,
-      "total_ns": 9840000,
+      "total_ns": 11600000,
       "unit": "match",
       "tier": 1,
       "exec": 9
     },
     "span_simd_miss": {
-      "ns_per_iter": 564,
+      "ns_per_iter": 619,
       "iters": 20000,
-      "total_ns": 11280000,
+      "total_ns": 12380000,
       "unit": "match",
       "tier": 1,
       "exec": 9
     },
     "notany_simd_miss": {
-      "ns_per_iter": 548,
+      "ns_per_iter": 558,
       "iters": 20000,
-      "total_ns": 10960000,
+      "total_ns": 11160000,
       "unit": "match",
       "tier": 9,
       "exec": 9
     },
     "alt_literals_search_all": {
-      "ns_per_iter": 82505,
+      "ns_per_iter": 2715,
       "iters": 20000,
-      "total_ns": 1650100000,
+      "total_ns": 54300000,
       "unit": "pass",
       "tier": 5,
       "exec": 5
     },
     "residue_repeat_all": {
-      "ns_per_iter": 251,
+      "ns_per_iter": 193,
       "iters": 20000,
-      "total_ns": 5020000,
+      "total_ns": 3860000,
       "unit": "pass",
       "tier": 6,
       "exec": 6
     },
     "residue_zero_width_all": {
-      "ns_per_iter": 97286,
+      "ns_per_iter": 107,
       "iters": 20000,
-      "total_ns": 1945720000,
+      "total_ns": 2140000,
       "unit": "pass",
       "tier": 6,
       "exec": 6
     },
     "pike_overflow_all": {
-      "ns_per_iter": 1152,
+      "ns_per_iter": 1001,
       "iters": 20000,
-      "total_ns": 23040000,
+      "total_ns": 20020000,
       "unit": "pass",
       "tier": 0,
       "exec": 0
     },
     "prefilter_miss_all": {
-      "ns_per_iter": 99470,
+      "ns_per_iter": 98,
       "iters": 20000,
-      "total_ns": 1989400000,
+      "total_ns": 1960000,
       "unit": "pass",
       "tier": 3,
       "exec": 3
     },
     "zero_progress_all": {
-      "ns_per_iter": 101003,
+      "ns_per_iter": 103,
       "iters": 20000,
-      "total_ns": 2020060000,
+      "total_ns": 2060000,
       "unit": "pass",
       "tier": 6,
       "exec": 6
     },
     "tokenize_conv": {
-      "ns_per_iter": 140272,
+      "ns_per_iter": 118112,
       "iters": 2000,
-      "total_ns": 280544000,
+      "total_ns": 236224000,
       "unit": "pass",
       "tier": 0,
       "exec": 0
     },
     "tokenize_reuse": {
-      "ns_per_iter": 81836,
+      "ns_per_iter": 73581,
       "iters": 2000,
-      "total_ns": 163672000,
+      "total_ns": 147162000,
       "unit": "pass",
       "tier": 2,
       "exec": 3
     },
     "tokenize_reuse_call": {
-      "ns_per_iter": 210,
+      "ns_per_iter": 142,
       "iters": 1042000,
-      "total_ns": 218820000,
+      "total_ns": 147964000,
       "unit": "call",
       "tier": 2,
       "exec": 3
     },
     "residue_repeat": {
-      "ns_per_iter": 136,
+      "ns_per_iter": 120,
       "iters": 20000,
-      "total_ns": 2720000,
+      "total_ns": 2400000,
       "unit": "match",
       "tier": 6,
       "exec": 6
     },
     "residue_zero_width": {
-      "ns_per_iter": 133,
+      "ns_per_iter": 125,
       "iters": 20000,
-      "total_ns": 2660000,
+      "total_ns": 2500000,
       "unit": "match",
       "tier": 6,
       "exec": 6
     },
     "residue_catastrophic": {
-      "ns_per_iter": 137,
+      "ns_per_iter": 115,
       "iters": 1000,
-      "total_ns": 137000,
+      "total_ns": 115000,
       "unit": "match",
       "tier": 3,
       "exec": 3
     },
     "pike_overflow": {
-      "ns_per_iter": 898,
+      "ns_per_iter": 771,
       "iters": 20000,
-      "total_ns": 17960000,
+      "total_ns": 15420000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "prefilter_miss": {
-      "ns_per_iter": 129,
+      "ns_per_iter": 119,
       "iters": 20000,
-      "total_ns": 2580000,
+      "total_ns": 2380000,
       "unit": "match",
       "tier": 3,
       "exec": 3
     },
     "zero_progress": {
-      "ns_per_iter": 137,
+      "ns_per_iter": 117,
       "iters": 20000,
-      "total_ns": 2740000,
+      "total_ns": 2340000,
       "unit": "match",
       "tier": 6,
       "exec": 6
     },
     "pcre2_literal_fail": {
-      "ns_per_iter": 61,
+      "ns_per_iter": 52,
       "iters": 20000,
-      "total_ns": 1220000,
+      "total_ns": 1040000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "pcre2_literal_ok": {
-      "ns_per_iter": 51,
+      "ns_per_iter": 35,
       "iters": 20000,
-      "total_ns": 1020000,
+      "total_ns": 700000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "pcre2_span_comma": {
-      "ns_per_iter": 32,
+      "ns_per_iter": 28,
       "iters": 20000,
-      "total_ns": 640000,
+      "total_ns": 560000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "pcre2_alternation": {
-      "ns_per_iter": 33,
+      "ns_per_iter": 29,
       "iters": 20000,
-      "total_ns": 660000,
+      "total_ns": 580000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "pcre2_alt_literals": {
-      "ns_per_iter": 39,
+      "ns_per_iter": 34,
       "iters": 20000,
-      "total_ns": 780000,
+      "total_ns": 680000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "pcre2_span_simd": {
-      "ns_per_iter": 528,
+      "ns_per_iter": 457,
       "iters": 20000,
-      "total_ns": 10560000,
+      "total_ns": 9140000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "pcre2_span_simd_miss": {
-      "ns_per_iter": 590,
+      "ns_per_iter": 470,
       "iters": 20000,
-      "total_ns": 11800000,
+      "total_ns": 9400000,
       "unit": "match",
       "tier": 0,
       "exec": 0
     },
     "pcre2_tokenize": {
-      "ns_per_iter": 20537,
+      "ns_per_iter": 16971,
       "iters": 2000,
-      "total_ns": 41074000,
+      "total_ns": 33942000,
       "unit": "pass",
       "tier": 0,
       "exec": 0
     },
     "pcre2_catastrophic": {
-      "ns_per_iter": 292,
+      "ns_per_iter": 83,
       "iters": 1,
-      "total_ns": 292,
+      "total_ns": 83,
       "unit": "match",
       "tier": 0,
       "exec": 0
@@ -305,177 +305,177 @@
   },
   "php_probe": {
     "literal_fail": {
-      "ns_per_iter": 13,
+      "ns_per_iter": 17,
       "iters": 20000,
-      "total_ns": 279296,
+      "total_ns": 343040,
       "unit": "match"
     },
     "literal_ok": {
-      "ns_per_iter": 54,
+      "ns_per_iter": 52,
       "iters": 20000,
-      "total_ns": 1086976,
+      "total_ns": 1041920,
       "unit": "match"
     },
     "literal_late": {
-      "ns_per_iter": 13,
+      "ns_per_iter": 15,
       "iters": 20000,
-      "total_ns": 268032,
+      "total_ns": 304896,
       "unit": "match"
     },
     "span_comma": {
-      "ns_per_iter": 200,
+      "ns_per_iter": 179,
       "iters": 20000,
-      "total_ns": 4012032,
+      "total_ns": 3588864,
       "unit": "match"
     },
     "break_comma": {
-      "ns_per_iter": 266,
+      "ns_per_iter": 238,
       "iters": 20000,
-      "total_ns": 5327872,
+      "total_ns": 4766720,
       "unit": "match"
     },
     "alternation": {
-      "ns_per_iter": 201,
+      "ns_per_iter": 191,
       "iters": 20000,
-      "total_ns": 4030208,
+      "total_ns": 3832064,
       "unit": "match"
     },
     "alt_literals": {
-      "ns_per_iter": 109,
+      "ns_per_iter": 94,
       "iters": 20000,
-      "total_ns": 2188800,
+      "total_ns": 1895168,
       "unit": "match"
     },
     "alt_literals_search": {
-      "ns_per_iter": 110,
+      "ns_per_iter": 93,
       "iters": 20000,
-      "total_ns": 2210048,
+      "total_ns": 1872128,
       "unit": "match"
     },
     "automaton": {
-      "ns_per_iter": 136,
+      "ns_per_iter": 123,
       "iters": 20000,
-      "total_ns": 2723072,
+      "total_ns": 2466048,
       "unit": "match"
     },
     "span_simd": {
-      "ns_per_iter": 590,
+      "ns_per_iter": 550,
       "iters": 20000,
-      "total_ns": 11815168,
+      "total_ns": 11000832,
       "unit": "match"
     },
     "span_simd_miss": {
-      "ns_per_iter": 197,
+      "ns_per_iter": 185,
       "iters": 20000,
-      "total_ns": 3947008,
+      "total_ns": 3719936,
       "unit": "match"
     },
     "notany_simd_miss": {
-      "ns_per_iter": 193,
+      "ns_per_iter": 185,
       "iters": 20000,
-      "total_ns": 3869952,
+      "total_ns": 3707904,
       "unit": "match"
     },
     "alt_literals_search_all": {
-      "ns_per_iter": 79873,
+      "ns_per_iter": 14116,
       "iters": 20000,
-      "total_ns": 1597468160,
+      "total_ns": 282324992,
       "unit": "pass"
     },
     "residue_repeat_all": {
-      "ns_per_iter": 770,
+      "ns_per_iter": 339,
       "iters": 200,
-      "total_ns": 154112,
+      "total_ns": 67840,
       "unit": "pass"
     },
     "residue_zero_width_all": {
-      "ns_per_iter": 179669,
+      "ns_per_iter": 249,
       "iters": 200,
-      "total_ns": 35933952,
+      "total_ns": 49920,
       "unit": "pass"
     },
     "pike_overflow_all": {
-      "ns_per_iter": 1410,
+      "ns_per_iter": 1214,
       "iters": 200,
-      "total_ns": 282112,
+      "total_ns": 242944,
       "unit": "pass"
     },
     "prefilter_miss_all": {
-      "ns_per_iter": 187275,
+      "ns_per_iter": 209,
       "iters": 200,
-      "total_ns": 37455104,
+      "total_ns": 41984,
       "unit": "pass"
     },
     "zero_progress_all": {
-      "ns_per_iter": 187864,
+      "ns_per_iter": 208,
       "iters": 200,
-      "total_ns": 37572864,
+      "total_ns": 41728,
       "unit": "pass"
     },
     "residue_repeat": {
-      "ns_per_iter": 13095,
+      "ns_per_iter": 11714,
       "iters": 200,
-      "total_ns": 2619136,
+      "total_ns": 2342912,
       "unit": "match"
     },
     "residue_zero_width": {
-      "ns_per_iter": 400,
+      "ns_per_iter": 385,
       "iters": 200,
-      "total_ns": 80128,
+      "total_ns": 77056,
       "unit": "match"
     },
     "residue_catastrophic": {
-      "ns_per_iter": 158360,
+      "ns_per_iter": 147564,
       "iters": 1000,
-      "total_ns": 158360064,
+      "total_ns": 147564032,
       "unit": "match"
     },
     "pike_overflow": {
-      "ns_per_iter": 5015,
+      "ns_per_iter": 4659,
       "iters": 200,
-      "total_ns": 1003008,
+      "total_ns": 931840,
       "unit": "match"
     },
     "prefilter_miss": {
-      "ns_per_iter": 157360,
+      "ns_per_iter": 146909,
       "iters": 200,
-      "total_ns": 31472128,
+      "total_ns": 29381888,
       "unit": "match"
     },
     "zero_progress": {
-      "ns_per_iter": 6740,
+      "ns_per_iter": 6100,
       "iters": 200,
-      "total_ns": 1348096,
+      "total_ns": 1220096,
       "unit": "match"
     },
     "tokenize_reuse": {
-      "ns_per_iter": 189273,
+      "ns_per_iter": 193419,
       "iters": 2000,
-      "total_ns": 378547968,
+      "total_ns": 386838016,
       "unit": "pass"
     },
     "alt_literals_search_flat": {
-      "ns_per_iter": 89096,
+      "ns_per_iter": 11816,
       "iters": 20000,
-      "total_ns": 1781924096,
+      "total_ns": 236333056,
       "unit": "pass"
     },
     "tokenize_php_flat": {
-      "ns_per_iter": 156841,
+      "ns_per_iter": 206984,
       "iters": 2000,
-      "total_ns": 313682176,
+      "total_ns": 413969920,
       "unit": "pass"
     },
     "tokenize_php_offsets": {
-      "ns_per_iter": 178205,
+      "ns_per_iter": 212619,
       "iters": 2000,
-      "total_ns": 356410112,
+      "total_ns": 425239040,
       "unit": "pass"
     },
     "tokenize_php_offsets_flat": {
-      "ns_per_iter": 179189,
+      "ns_per_iter": 187940,
       "iters": 2000,
-      "total_ns": 358378752,
+      "total_ns": 375880960,
       "unit": "pass"
     }
   },

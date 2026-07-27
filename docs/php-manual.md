@@ -901,6 +901,25 @@ collects all match positions, lengths, captures, and output in a single pass —
 eliminating per-match API boundary crossing.  Ineligible patterns fall back to the
 per-call loop transparently.
 
+The batch API now supports a **tri-state contract**:
+- `true` (matches found) — normal.
+- `false` with `eligible == true` — pattern was batch-eligible but found zero
+  matches; the search is **DONE** and must NOT be re-run via the per-call loop.
+- `false` with `eligible == false` — pattern was not batchable; caller should fall
+  back to the per-call loop.
+
+A **persistent search state** (`snobol_pattern_search_state_t`) is cached on each
+`Pattern` object lazily and reused across all search calls (`searchAll`,
+`searchSplit`, `searchSplitOffsets`, `searchSplitCuts`, `searchReplace`).  The
+state caches range metadata (SPAN/BREAK bitmasks), the DFA (Tier 7), the
+alt-literals trie (Tier 5), and the SIMD NFA (Tier 9).  These caches are built
+once per `Pattern` lifetime and reused, eliminating the per-call metadata rebuild
+that previously dominated small-subject searches (~220 µs → ~200 ns for
+zero-match automaton-eligible patterns).
+
+Both `result => 'flat'` and `captures => 'offsets'` result modes also route
+through the batch fast path, producing identical result shapes.
+
 All search methods accept an optional `$options` array:
 
 | Option      | Type      | Default     | Description                                        |
@@ -1083,7 +1102,7 @@ foreach ($it as $i => $match) {
 
 ### Reusable search state (performance)
 
-`Pattern::searchSplit`, `searchSplitOffsets`, `searchAll`, and `searchReplace` reuse a single search state across every match within a call — the state is created once and reset (not re-`malloc`'d or re-derived) between matches. For eligible patterns (no EVAL/ASSIGN/DYNAMIC side effects), the **batch-search API** eliminates the per-match reset entirely by collecting all results in a single pass through the C engine.  Ineligible patterns fall back to the per-call loop transparently.
+`Pattern::searchSplit`, `searchSplitOffsets`, `searchAll`, `searchSplitCuts`, and `searchReplace` **reuse a single persistent search state across all calls** on the same `Pattern` object. The state (VM, range_meta, DFA, trie, SIMD NFA) is lazily created on the first search call and kept alive until the `Pattern` object is destroyed. This eliminates per-call state create/destroy and DFA rebuild. For eligible patterns (no EVAL/ASSIGN/DYNAMIC side effects), the **batch-search API** uses the same persistent state via `snobol_pattern_search_batch_ex()`, so the DFA and other caches are built once and reused across calls. Ineligible and zero-match patterns also benefit: the tri-state `eligible` flag prevents redundant per-call fallback, and the persistent state avoids re-deriving metadata.
 
 This makes repeated searching over a fixed subject materially cheaper than calling `Pattern::match` in a loop: in the diagnostic probe the reuse path runs **~40–45% faster** per search call than the one-shot convenience path (`tokenize_reuse` ≈ 198–204 ns vs `tokenize_conv` ≈ 320–360 ns). For tight tokenization loops, prefer the `search*` family over repeated `match` calls; the zero-length-allocation `searchSplitOffsets` variant is the cheapest when you only need positions.
 
@@ -1373,21 +1392,37 @@ libsnobol4's search engine automatically selects the optimal matching strategy b
 ### Performance Impact
 
 ```
-Pattern Type           → Tier       → Speed (ns/iter, C probe)
-───────────────────────────────────────────────────────────
-Pure literal             Tier 2       ~183 ns
-SPAN(',')                Tier 0–1     ~269 ns
-SPAN('a-z') hit          Tier 9       ~740 ns
-SPAN('a-z') miss         Tier 9       ~610 ns
-SIMD NOTANY miss         Tier 9       ~600 ns
-BREAK(':')               Tier 0       ~250 ns
-Alternation              Tier 4       ~237 ns
-Alt-of-literals          Tier 5       ~610 ns
-Automaton pattern        Tier 7       ~173 ns
-Tokenize (BREAKX)        Tier 0–6     ~160 ns (reuse)
-Required-byte miss (prefilter) —       ~200 ns
-Pike overflow (BREAKX)   Tier 0–6     ~890 ns
-Zero-progress guard      Tier 6       ~200 ns
+Pattern Type                     → Tier       → Speed (C, ns/iter)
+──────────────────────────────────────────────────────────────────
+Pure literal (match, success)      Tier 2       ~49 ns
+Pure literal (match, fail)         Tier 2       ~52 ns
+Pure literal at offset 16 (rej)    Tier 2       ~44 ns
+SPAN(',') (match)                  Tier 0–1     ~132 ns
+BREAK(',') (match)                 Tier 0       ~110 ns
+Alternation (match)                Tier 4       ~90 ns
+Alt-of-literals (match)            Tier 5       ~60 ns
+Automaton pattern (match)          Tier 7       ~96 ns
+SPAN('0-9') on 1KB digits          Tier 9       ~580 ns
+SPAN('0-9') on 1KB letters (miss)  Tier 9       ~619 ns
+SIMD NOTANY miss                   Tier 9       ~558 ns
+Tokenize per pass                  Tier 2–3     ~73 µs
+Tokenize per call                  Tier 2–3     ~132 ns
+Pike overflow (BREAKX, first)      Tier 0–6     ~771 ns
+Required-byte miss (prefilter)     —            ~119 ns
+Zero-progress guard (first)        Tier 6       ~117 ns
+
+Batch all-matches (pass unit):
+Alt-of-literals all-matches        Tier 5       ~2.7 µs
+Residue repeat all (capture)       Tier 6       ~193 ns
+Residue zero-width all              Tier 6       ~107 ns
+Pike overflow all                  Tier 0–6     ~1.0 µs
+Prefilter miss all                 Tier 3       ~98 ns
+Zero-progress all                  Tier 6       ~103 ns
+
+PHP binding overhead (pass unit):
+Alt-of-literals all-matches        Tier 5       ~14 µs (5× C)
+Prefilter miss all                 Tier 3       ~209 ns (2× C)
+Zero-progress all                  Tier 6       ~208 ns (2× C)
 General pattern          Tier 8       ~500-1500 ns
 ```
 
