@@ -300,6 +300,7 @@ static void assert_literal_only_bc(const uint8_t *bc, size_t bc_len,
     test_assert((result.match_end - result.match_start) == expect_len,
                 "anchored match length equals expected length");
   }
+  snobol_search_meta_free(&meta);
 }
 
 /* POS(0)-wrapped literal resolves identically to the bare literal (the prelude
