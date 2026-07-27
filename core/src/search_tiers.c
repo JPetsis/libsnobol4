@@ -598,6 +598,20 @@ static bool search_literal_only(VM *vm, const char *subject, size_t subject_len,
   if (subject_len < lit_len)
     goto nomatch;
 
+  if (anchored) {
+    /* The entire pattern is this single literal, so an anchored match must
+     * begin exactly at start_offset. Compare directly — no whole-subject scan
+     * (the old memmem-then-reject path paid O(subject) for an O(literal) check). */
+    if (subject_len - start_offset >= lit_len &&
+        memcmp(subject + start_offset, lit, lit_len) == 0) {
+      out_result->success = true;
+      out_result->match_start = start_offset;
+      out_result->match_end = start_offset + lit_len;
+      return true;
+    }
+    goto nomatch;
+  }
+
   while (offset + lit_len <= subject_len) {
     const char *hay = subject + offset;
     size_t haylen = subject_len - offset;
@@ -611,11 +625,6 @@ static bool search_literal_only(VM *vm, const char *subject, size_t subject_len,
       diag->candidates_skipped += (cand - offset);
       diag->candidates_tested++;
     }
-
-    /* Anchored matching requires the literal to begin exactly at start_offset;
-     * memmem finds the first occurrence, which for anchored must be offset 0. */
-    if (anchored && cand != start_offset)
-      goto nomatch;
 
     /* No VM confirmation needed — the ENTIRE pattern is this literal. */
     out_result->success = true;

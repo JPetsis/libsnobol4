@@ -276,6 +276,7 @@ void test_search_ex_api_suite(void);
 void test_search_vm_capture_suite(void);
 void test_capture_registers_suite(void);
 void test_search_anchored_suite(void);
+void test_search_literal_only_anchored_suite(void);
 #ifdef SNOBOL_PIKE_SCAN
 void test_pike_scan_suite(void);
 #endif
@@ -372,6 +373,8 @@ int main(void) {
   RUN_SUITE("Search: VM captures", test_search_vm_capture_suite);
   RUN_SUITE("Captures: register-style", test_capture_registers_suite);
   RUN_SUITE("Search: Anchored Entry", test_search_anchored_suite);
+  RUN_SUITE("Search: Anchored literal-only early-exit",
+            test_search_literal_only_anchored_suite);
 #ifdef SNOBOL_PIKE_SCAN
   RUN_SUITE("Search: Pike Scan", test_pike_scan_suite);
 #endif
