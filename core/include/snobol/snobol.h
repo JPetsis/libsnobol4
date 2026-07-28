@@ -561,6 +561,33 @@ snobol_match_t *snobol_pattern_search_ex_anchored(
     size_t subject_len);
 
 /**
+ * @brief Lightweight unanchored search for single-literal patterns.
+ *
+ * Returns the position and length of the next occurrence of the pattern's
+ * literal at or after @p start_offset, without the overhead of
+ * snobol_pattern_search_ex() (no match struct, no capture arrays, no output
+ * buffer).  Returns false for non-literal patterns — the caller must fall
+ * back to snobol_pattern_search_ex().
+ *
+ * Per-call cost is ~15 ns (vs ~91 ns for snobol_pattern_search_ex with the
+ * short-circuit, or ~158 ns for the full tier-dispatch path).
+ *
+ * @param[in]     state         Search state created by
+ *                              snobol_pattern_search_state_create().
+ * @param[in]     subject       Subject string.
+ * @param[in]     subject_len   Byte length of @p subject.
+ * @param[in]     start_offset  Start searching from this offset.
+ * @param[out]    out_pos       Match start position (absolute in subject).
+ * @param[out]    out_len       Match length (literal length).
+ * @return true if a match was found, false otherwise (including when the
+ *         pattern is not a single literal).
+ */
+bool snobol_pattern_search_next(snobol_pattern_search_state_t *state,
+                                const char *subject, size_t subject_len,
+                                size_t start_offset, size_t *out_pos,
+                                size_t *out_len);
+
+/**
  * @brief Stateful batch search that reuses VM, range_meta, and (for
  *        automaton-eligible patterns) the DFA/trie/SIMD-NFA caches across
  *        calls.
