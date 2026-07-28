@@ -87,17 +87,59 @@ static bool exec_fusion(const snobol_fusion_t *fusion, const char *subject,
 
       case FUSION_ALT: {
         bool matched = false;
+        size_t save_cur = cur;
         for (uint32_t j = 0; j < seg->alt.alt_count; j++) {
-          snobol_fusion_segment_t *alt_seg = seg->alt.alts[j];
-          if (!alt_seg)
+          snobol_fusion_segment_t *alt_segs = seg->alt.alts[j];
+          uint32_t alt_len = seg->alt.alt_lens[j];
+          if (!alt_segs || alt_len == 0)
             continue;
-          size_t save_cur = cur;
-          if (exec_fusion((const snobol_fusion_t *)alt_seg, subject,
-                          subject_len, cur, &cur)) {
+          
+          cur = save_cur;
+          bool alt_matched = true;
+          for (uint32_t k = 0; k < alt_len; k++) {
+            const snobol_fusion_segment_t *alt_seg = &alt_segs[k];
+            switch (alt_seg->type) {
+              case FUSION_LIT: {
+                if (cur + alt_seg->lit.len > subject_len) {
+                  alt_matched = false;
+                } else if (memcmp(subject + cur, alt_seg->lit.data, alt_seg->lit.len) != 0) {
+                  alt_matched = false;
+                } else {
+                  cur += alt_seg->lit.len;
+                }
+                break;
+              }
+              case FUSION_RUN: {
+                size_t start = cur;
+                while (cur < subject_len &&
+                       fusion_bitmap_test(alt_seg->run.bitmap, (uint8_t)subject[cur])) {
+                  cur++;
+                }
+                if (cur - start < alt_seg->run.min) {
+                  alt_matched = false;
+                }
+                break;
+              }
+              case FUSION_CHAR: {
+                if (cur >= subject_len) {
+                  alt_matched = false;
+                } else if (!fusion_bitmap_test(alt_seg->chr.bitmap, (uint8_t)subject[cur])) {
+                  alt_matched = false;
+                } else {
+                  cur++;
+                }
+                break;
+              }
+              default:
+                alt_matched = false;
+                break;
+            }
+            if (!alt_matched) break;
+          }
+          if (alt_matched) {
             matched = true;
             break;
           }
-          cur = save_cur;
         }
         if (!matched)
           return false;

@@ -256,6 +256,89 @@ static void test_fusion_various_patterns(void) {
   }
 }
 
+/* ---- Alternation patterns ---- */
+static void test_fusion_alternation(void) {
+  test_suite("Fusion: alternation patterns");
+
+  /* Pattern: SPAN('0-9') ('-' | '/') SPAN('0-9')
+   * Note: Single-char alternations are optimized by compiler to OP_ANY */
+  size_t bc_len = 0;
+  uint8_t *bc = compile_pattern("SPAN('0-9') ('-' | '/') SPAN('0-9')", &bc_len);
+  test_assert(bc != NULL, "compile alternation pattern");
+  if (!bc) return;
+
+  snobol_search_meta_t meta;
+  snobol_search_derive_meta(bc, bc_len, &meta);
+
+  test_assert(meta.fusion_eligible, "alternation pattern is fusion eligible");
+  if (meta.fusion_eligible && meta.fusion) {
+    test_assert(meta.fusion->count == 3, "fusion has 3 segments (RUN, CHAR, RUN)");
+    
+    /* Note: Single-char alternations like ('-' | '/') are optimized by the 
+     * compiler to OP_ANY, which becomes FUSION_CHAR (type 2), not FUSION_ALT */
+    test_assert(meta.fusion->segs[0].type == 1 /* FUSION_RUN */, "first segment is RUN");
+    test_assert(meta.fusion->segs[1].type == 2 /* FUSION_CHAR */, "middle segment is CHAR (optimized from ANY)");
+    test_assert(meta.fusion->segs[2].type == 1 /* FUSION_RUN */, "last segment is RUN");
+
+    /* Test matching with '-' separator */
+    const char *subject1 = "123-456";
+    snobol_search_result_t result1 = {0};
+    VM vm1;
+    memset(&vm1, 0, sizeof(vm1));
+    vm1.bc = bc;
+    vm1.bc_len = bc_len;
+    bool ok1 = tier_fusion(&vm1, subject1, strlen(subject1), 0, &meta, NULL, &result1, NULL, true);
+    test_assert(ok1, "fusion match with '-' separator");
+    if (ok1) {
+      test_assert(result1.match_start == 0, "match starts at 0");
+      test_assert(result1.match_end == 7, "match ends at 7");
+    }
+
+    /* Test matching with '/' separator */
+    const char *subject2 = "123/456";
+    snobol_search_result_t result2 = {0};
+    VM vm2;
+    memset(&vm2, 0, sizeof(vm2));
+    vm2.bc = bc;
+    vm2.bc_len = bc_len;
+    bool ok2 = tier_fusion(&vm2, subject2, strlen(subject2), 0, &meta, NULL, &result2, NULL, true);
+    test_assert(ok2, "fusion match with '/' separator");
+    if (ok2) {
+      test_assert(result2.match_start == 0, "match starts at 0");
+      test_assert(result2.match_end == 7, "match ends at 7");
+    }
+
+    /* Test non-matching separator */
+    const char *subject3 = "123.456";
+    snobol_search_result_t result3 = {0};
+    VM vm3;
+    memset(&vm3, 0, sizeof(vm3));
+    vm3.bc = bc;
+    vm3.bc_len = bc_len;
+    bool ok3 = tier_fusion(&vm3, subject3, strlen(subject3), 0, &meta, NULL, &result3, NULL, true);
+    test_assert(!ok3, "fusion correctly rejects '.' separator");
+  }
+
+  snobol_search_meta_free(&meta);
+  free(bc);
+
+  /* Pattern: SPAN('0-9') ('-' | '--') SPAN('0-9')
+   * Multi-char alternation with different lengths is NOT fusible (falls back to VM)
+   * This is correct behavior - only simple same-length alternations could be fused */
+  bc = compile_pattern("SPAN('0-9') ('-' | '--') SPAN('0-9')", &bc_len);
+  test_assert(bc != NULL, "compile multi-char alternation pattern");
+  if (!bc) return;
+
+  snobol_search_meta_t meta2;
+  snobol_search_derive_meta(bc, bc_len, &meta2);
+
+  /* Multi-char alternations with different lengths are not fusible */
+  test_assert(!meta2.fusion_eligible, "multi-char alternation with different lengths is NOT fusion eligible");
+
+  snobol_search_meta_free(&meta2);
+  free(bc);
+}
+
 void test_fusion_tier_suite(void) {
   test_fusion_tier_assignment();
   test_fusion_tier_non_fusible();
@@ -263,4 +346,5 @@ void test_fusion_tier_suite(void) {
   test_fusion_exec_failure();
   test_fusion_unanchored_search();
   test_fusion_various_patterns();
+  test_fusion_alternation();
 }

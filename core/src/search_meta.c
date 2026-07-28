@@ -1202,6 +1202,224 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
         break;
       }
 
+      case OP_SPLIT: {
+        if (ip + 9 > bc_len) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint32_t branch_a = search_read_u32(bc, ip + 1);
+        uint32_t branch_b = search_read_u32(bc, ip + 5);
+        if (branch_a >= bc_len || branch_b >= bc_len) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        
+        seg->type = FUSION_ALT;
+        seg->alt.alt_count = 0;
+        memset(seg->alt.alts, 0, sizeof(seg->alt.alts));
+        memset(seg->alt.alt_lens, 0, sizeof(seg->alt.alt_lens));
+        
+        uint32_t branches[2] = {branch_a, branch_b};
+        for (int b = 0; b < 2; b++) {
+          uint32_t branch_ip = branches[b];
+          snobol_fusion_segment_t *alt_segs = 
+              (snobol_fusion_segment_t *)snobol_malloc(
+                  MAX_FUSION_SEGMENTS * sizeof(snobol_fusion_segment_t));
+          if (!alt_segs) {
+            for (uint32_t k = 0; k < seg->alt.alt_count; k++) {
+              snobol_free(seg->alt.alts[k]);
+            }
+            snobol_free(fusion);
+            return NULL;
+          }
+          
+          uint32_t alt_count = 0;
+          size_t cur_ip = branch_ip;
+          bool alt_valid = true;
+          
+          while (cur_ip < bc_len && alt_valid) {
+            uint8_t alt_op = bc[cur_ip];
+            
+            if (alt_op == OP_NOP || alt_op == OP_FENCE) {
+              cur_ip++;
+              continue;
+            }
+            if (alt_op == OP_ACCEPT || alt_op == OP_SUCCEED || 
+                alt_op == OP_JMP) {
+              break;
+            }
+            if (alt_op == OP_FAIL || alt_op == OP_ABORT) {
+              alt_valid = false;
+              break;
+            }
+            if (alt_count >= MAX_FUSION_SEGMENTS) {
+              alt_valid = false;
+              break;
+            }
+            
+            snobol_fusion_segment_t *alt_seg = &alt_segs[alt_count];
+            
+            switch (alt_op) {
+              case OP_LIT: {
+                if (cur_ip + 9 > bc_len) {
+                  alt_valid = false;
+                  break;
+                }
+                uint32_t lit_off = search_read_u32(bc, cur_ip + 1);
+                uint32_t lit_len = search_read_u32(bc, cur_ip + 5);
+                if (lit_off >= bc_len || lit_off + lit_len > bc_len) {
+                  alt_valid = false;
+                  break;
+                }
+                if (lit_len == 0) {
+                  cur_ip += 9;
+                  continue;
+                }
+                alt_seg->type = FUSION_LIT;
+                alt_seg->lit.data = bc + lit_off;
+                alt_seg->lit.len = lit_len;
+                cur_ip += 9 + lit_len;
+                alt_count++;
+                break;
+              }
+              case OP_SPAN: {
+                if (cur_ip + 3 > bc_len) {
+                  alt_valid = false;
+                  break;
+                }
+                uint16_t set_id = search_read_u16(bc, cur_ip + 1);
+                uint16_t count = 0, ci = 0;
+                const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+                if (!ranges) {
+                  alt_valid = false;
+                  break;
+                }
+                uint64_t abm[2] = {0, 0};
+                if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
+                  alt_valid = false;
+                  break;
+                }
+                alt_seg->type = FUSION_RUN;
+                fusion_bitmap_from_ascii(alt_seg->run.bitmap, abm);
+                alt_seg->run.min = 1;
+                cur_ip += 3;
+                alt_count++;
+                break;
+              }
+              case OP_ANY: {
+                if (cur_ip + 3 > bc_len) {
+                  alt_valid = false;
+                  break;
+                }
+                uint16_t set_id = search_read_u16(bc, cur_ip + 1);
+                uint16_t count = 0, ci = 0;
+                const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+                if (!ranges) {
+                  alt_valid = false;
+                  break;
+                }
+                uint64_t abm[2] = {0, 0};
+                if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
+                  alt_valid = false;
+                  break;
+                }
+                alt_seg->type = FUSION_CHAR;
+                fusion_bitmap_from_ascii(alt_seg->chr.bitmap, abm);
+                cur_ip += 3;
+                alt_count++;
+                break;
+              }
+              case OP_NOTANY: {
+                if (cur_ip + 3 > bc_len) {
+                  alt_valid = false;
+                  break;
+                }
+                uint16_t set_id = search_read_u16(bc, cur_ip + 1);
+                uint16_t count = 0, ci = 0;
+                const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+                if (!ranges) {
+                  alt_valid = false;
+                  break;
+                }
+                uint64_t abm[2] = {0, 0};
+                if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
+                  alt_valid = false;
+                  break;
+                }
+                alt_seg->type = FUSION_CHAR;
+                fusion_bitmap_from_ascii(alt_seg->chr.bitmap, abm);
+                fusion_bitmap_invert(alt_seg->chr.bitmap);
+                cur_ip += 3;
+                alt_count++;
+                break;
+              }
+              case OP_BREAK: {
+                if (cur_ip + 3 > bc_len) {
+                  alt_valid = false;
+                  break;
+                }
+                uint16_t set_id = search_read_u16(bc, cur_ip + 1);
+                uint16_t count = 0, ci = 0;
+                const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+                if (!ranges) {
+                  alt_valid = false;
+                  break;
+                }
+                uint64_t abm[2] = {0, 0};
+                if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
+                  alt_valid = false;
+                  break;
+                }
+                alt_seg->type = FUSION_RUN;
+                fusion_bitmap_from_ascii(alt_seg->run.bitmap, abm);
+                fusion_bitmap_invert(alt_seg->run.bitmap);
+                alt_seg->run.min = 0;
+                cur_ip += 3;
+                alt_count++;
+                break;
+              }
+              default:
+                alt_valid = false;
+                break;
+            }
+          }
+          
+          if (!alt_valid || alt_count == 0) {
+            snobol_free(alt_segs);
+            for (uint32_t k = 0; k < seg->alt.alt_count; k++) {
+              snobol_free(seg->alt.alts[k]);
+            }
+            snobol_free(fusion);
+            return NULL;
+          }
+          
+          if (seg->alt.alt_count < MAX_FUSION_ALT) {
+            seg->alt.alts[seg->alt.alt_count] = alt_segs;
+            seg->alt.alt_lens[seg->alt.alt_count] = alt_count;
+            seg->alt.alt_count++;
+          } else {
+            snobol_free(alt_segs);
+            for (uint32_t k = 0; k < seg->alt.alt_count; k++) {
+              snobol_free(seg->alt.alts[k]);
+            }
+            snobol_free(fusion);
+            return NULL;
+          }
+        }
+        
+        if (seg->alt.alt_count < 2) {
+          for (uint32_t k = 0; k < seg->alt.alt_count; k++) {
+            snobol_free(seg->alt.alts[k]);
+          }
+          snobol_free(fusion);
+          return NULL;
+        }
+        
+        ip += 9;
+        fusion->count++;
+        break;
+      }
+
       default:
         snobol_free(fusion);
         return NULL;
