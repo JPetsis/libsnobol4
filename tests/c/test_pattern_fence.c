@@ -18,8 +18,8 @@ void test_pattern_fence_suite(void) {
   /* FENCE test: after fence, no backtracking choice points remain */
   {
     /* Pattern: alt(fence(), fail()) - SPLIT creates choice, FENCE cuts it */
-    ast_node_t *ast = snobol_ast_create_alt(
-        snobol_ast_create_fence(), snobol_ast_create_fail());
+    ast_node_t *ast = snobol_ast_create_alt(snobol_ast_create_fence(),
+                                            snobol_ast_create_fail());
     int match_len = 0, cap_count = 0;
     bool ok = run_ast_pattern(ast, "test", 4, &match_len, &cap_count);
     test_assert(ok, "FENCE: match succeeds on SPLIT-then-FENCE path");

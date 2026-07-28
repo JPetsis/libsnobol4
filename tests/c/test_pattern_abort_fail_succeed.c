@@ -29,7 +29,8 @@ void test_pattern_abort_suite(void) {
     left_parts[0] = snobol_ast_create_lit("a", 1);
     left_parts[1] = snobol_ast_create_abort();
     ast_node_t *left = snobol_ast_create_concat(left_parts, 2);
-    ast_node_t *ast = snobol_ast_create_alt(left, snobol_ast_create_lit("b", 1));
+    ast_node_t *ast =
+        snobol_ast_create_alt(left, snobol_ast_create_lit("b", 1));
     int match_len = 0, cap_count = 0;
     bool ok = run_ast_pattern(ast, "abc", 3, &match_len, &cap_count);
     test_assert(!ok, "ABORT: prevents backtracking to alt branch");
@@ -61,7 +62,8 @@ void test_pattern_fail_suite(void) {
     left_parts[0] = snobol_ast_create_lit("a", 1);
     left_parts[1] = snobol_ast_create_fail();
     ast_node_t *left = snobol_ast_create_concat(left_parts, 2);
-    ast_node_t *ast = snobol_ast_create_alt(left, snobol_ast_create_lit("a", 1));
+    ast_node_t *ast =
+        snobol_ast_create_alt(left, snobol_ast_create_lit("a", 1));
     int match_len = 0, cap_count = 0;
     bool ok = run_ast_pattern(ast, "abc", 3, &match_len, &cap_count);
     test_assert(ok, "FAIL: backtracking to alt branch succeeds");

@@ -49,8 +49,7 @@ static inline bool fusion_bitmap_test(const uint8_t bm[32], uint8_t b) {
  * ---------------------------------------------------------------------------
  */
 static bool exec_fusion(const snobol_fusion_t *fusion, const char *subject,
-                        size_t subject_len, size_t pos,
-                        size_t *out_match_end) {
+                        size_t subject_len, size_t pos, size_t *out_match_end) {
   size_t cur = pos;
 
   for (uint32_t i = 0; i < fusion->count; i++) {
@@ -94,7 +93,7 @@ static bool exec_fusion(const snobol_fusion_t *fusion, const char *subject,
           uint32_t alt_len = seg->alt.alt_lens[j];
           if (!alt_segs || alt_len == 0)
             continue;
-          
+
           cur = save_cur;
           bool alt_matched = true;
           for (uint32_t k = 0; k < alt_len; k++) {
@@ -103,7 +102,8 @@ static bool exec_fusion(const snobol_fusion_t *fusion, const char *subject,
               case FUSION_LIT: {
                 if (cur + alt_seg->lit.len > subject_len) {
                   alt_matched = false;
-                } else if (memcmp(subject + cur, alt_seg->lit.data, alt_seg->lit.len) != 0) {
+                } else if (memcmp(subject + cur, alt_seg->lit.data,
+                                  alt_seg->lit.len) != 0) {
                   alt_matched = false;
                 } else {
                   cur += alt_seg->lit.len;
@@ -113,7 +113,8 @@ static bool exec_fusion(const snobol_fusion_t *fusion, const char *subject,
               case FUSION_RUN: {
                 size_t start = cur;
                 while (cur < subject_len &&
-                       fusion_bitmap_test(alt_seg->run.bitmap, (uint8_t)subject[cur])) {
+                       fusion_bitmap_test(alt_seg->run.bitmap,
+                                          (uint8_t)subject[cur])) {
                   cur++;
                 }
                 if (cur - start < alt_seg->run.min) {
@@ -124,18 +125,18 @@ static bool exec_fusion(const snobol_fusion_t *fusion, const char *subject,
               case FUSION_CHAR: {
                 if (cur >= subject_len) {
                   alt_matched = false;
-                } else if (!fusion_bitmap_test(alt_seg->chr.bitmap, (uint8_t)subject[cur])) {
+                } else if (!fusion_bitmap_test(alt_seg->chr.bitmap,
+                                               (uint8_t)subject[cur])) {
                   alt_matched = false;
                 } else {
                   cur++;
                 }
                 break;
               }
-              default:
-                alt_matched = false;
-                break;
+              default: alt_matched = false; break;
             }
-            if (!alt_matched) break;
+            if (!alt_matched)
+              break;
           }
           if (alt_matched) {
             matched = true;
@@ -147,8 +148,7 @@ static bool exec_fusion(const snobol_fusion_t *fusion, const char *subject,
         break;
       }
 
-      default:
-        return false;
+      default: return false;
     }
   }
 

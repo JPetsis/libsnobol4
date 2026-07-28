@@ -1028,8 +1028,8 @@ static inline void fusion_bitmap_invert(uint8_t bm[32]) {
 
 /* check_fusion_eligible uses snobol_fusion_free in error paths */
 
-static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
-                                              const snobol_search_meta_t *meta) {
+static snobol_fusion_t *check_fusion_eligible(
+    const uint8_t *bc, size_t bc_len, const snobol_search_meta_t *meta) {
   if (!bc || bc_len < 2)
     return NULL;
   if (meta->has_capture)
@@ -1215,37 +1215,37 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
           snobol_fusion_free(fusion);
           return NULL;
         }
-        
+
         seg->type = FUSION_ALT;
         seg->alt.alt_count = 0;
         memset(seg->alt.alts, 0, sizeof(seg->alt.alts));
         memset(seg->alt.alt_lens, 0, sizeof(seg->alt.alt_lens));
         fusion->count++;
         uint32_t seg_idx = fusion->count - 1;
-        
+
         uint32_t branches[2] = {branch_a, branch_b};
         for (int b = 0; b < 2; b++) {
           uint32_t branch_ip = branches[b];
-          snobol_fusion_segment_t *alt_segs = 
+          snobol_fusion_segment_t *alt_segs =
               (snobol_fusion_segment_t *)snobol_calloc(
                   1, MAX_FUSION_SEGMENTS * sizeof(snobol_fusion_segment_t));
           if (!alt_segs) {
             snobol_fusion_free(fusion);
             return NULL;
           }
-          
+
           uint32_t alt_count = 0;
           size_t cur_ip = branch_ip;
           bool alt_valid = true;
-          
+
           while (cur_ip < bc_len && alt_valid) {
             uint8_t alt_op = bc[cur_ip];
-            
+
             if (alt_op == OP_NOP || alt_op == OP_FENCE) {
               cur_ip++;
               continue;
             }
-            if (alt_op == OP_ACCEPT || alt_op == OP_SUCCEED || 
+            if (alt_op == OP_ACCEPT || alt_op == OP_SUCCEED ||
                 alt_op == OP_JMP) {
               break;
             }
@@ -1257,9 +1257,9 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
               alt_valid = false;
               break;
             }
-            
+
             snobol_fusion_segment_t *alt_seg = &alt_segs[alt_count];
-            
+
             switch (alt_op) {
               case OP_LIT: {
                 if (cur_ip + 9 > bc_len) {
@@ -1290,7 +1290,8 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
                 }
                 uint16_t set_id = search_read_u16(bc, cur_ip + 1);
                 uint16_t count = 0, ci = 0;
-                const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+                const uint8_t *ranges =
+                    get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
                 if (!ranges) {
                   alt_valid = false;
                   break;
@@ -1314,7 +1315,8 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
                 }
                 uint16_t set_id = search_read_u16(bc, cur_ip + 1);
                 uint16_t count = 0, ci = 0;
-                const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+                const uint8_t *ranges =
+                    get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
                 if (!ranges) {
                   alt_valid = false;
                   break;
@@ -1337,7 +1339,8 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
                 }
                 uint16_t set_id = search_read_u16(bc, cur_ip + 1);
                 uint16_t count = 0, ci = 0;
-                const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+                const uint8_t *ranges =
+                    get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
                 if (!ranges) {
                   alt_valid = false;
                   break;
@@ -1361,7 +1364,8 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
                 }
                 uint16_t set_id = search_read_u16(bc, cur_ip + 1);
                 uint16_t count = 0, ci = 0;
-                const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+                const uint8_t *ranges =
+                    get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
                 if (!ranges) {
                   alt_valid = false;
                   break;
@@ -1379,18 +1383,16 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
                 alt_count++;
                 break;
               }
-              default:
-                alt_valid = false;
-                break;
+              default: alt_valid = false; break;
             }
           }
-          
+
           if (!alt_valid || alt_count == 0) {
             snobol_free(alt_segs);
             snobol_fusion_free(fusion);
             return NULL;
           }
-          
+
           if (seg->alt.alt_count < MAX_FUSION_ALT) {
             seg->alt.alts[seg->alt.alt_count] = alt_segs;
             seg->alt.alt_lens[seg->alt.alt_count] = alt_count;
@@ -1401,20 +1403,18 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
             return NULL;
           }
         }
-        
+
         if (seg->alt.alt_count < 2) {
           snobol_fusion_free(fusion);
           return NULL;
         }
-        
+
         ip += 9;
         fusion->count++;
         break;
       }
 
-      default:
-        snobol_fusion_free(fusion);
-        return NULL;
+      default: snobol_fusion_free(fusion); return NULL;
     }
   }
 

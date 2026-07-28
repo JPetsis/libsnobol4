@@ -336,7 +336,8 @@ static void test_label_pattern_execution(void) {
   ast_node_t *label_node = snobol_ast_create_label("done", body);
 
   int match_len = 0, cap_count = 0;
-  bool ok = run_ast_pattern(label_node, "hello world", 11, &match_len, &cap_count);
+  bool ok =
+      run_ast_pattern(label_node, "hello world", 11, &match_len, &cap_count);
   test_assert(ok, "simple label pattern matches 'hello' in subject");
   snobol_ast_free(label_node);
 }

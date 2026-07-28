@@ -23,11 +23,20 @@ extern void test_assert(bool condition, const char *message);
 /* Compile a pattern string and return bytecode. Caller must free. */
 static uint8_t *compile_pattern(const char *pat_str, size_t *out_bc_len) {
   snobol_context_t *ctx = snobol_context_create();
-  if (!ctx) return NULL;
+  if (!ctx)
+    return NULL;
   char *err = NULL;
-  snobol_pattern_t *pat = snobol_pattern_compile(ctx, pat_str, strlen(pat_str), &err);
-  if (err) { free(err); snobol_context_destroy(ctx); return NULL; }
-  if (!pat) { snobol_context_destroy(ctx); return NULL; }
+  snobol_pattern_t *pat =
+      snobol_pattern_compile(ctx, pat_str, strlen(pat_str), &err);
+  if (err) {
+    free(err);
+    snobol_context_destroy(ctx);
+    return NULL;
+  }
+  if (!pat) {
+    snobol_context_destroy(ctx);
+    return NULL;
+  }
   const uint8_t *bc = snobol_pattern_get_bc(pat);
   size_t bc_len = snobol_pattern_get_bc_len(pat);
   uint8_t *copy = (uint8_t *)malloc(bc_len);
@@ -47,7 +56,8 @@ static void test_fusion_tier_assignment(void) {
   size_t bc_len = 0;
   uint8_t *bc = compile_pattern("SPAN('0-9') '-' SPAN('0-9')", &bc_len);
   test_assert(bc != NULL, "compile date-like pattern");
-  if (!bc) return;
+  if (!bc)
+    return;
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
@@ -101,7 +111,8 @@ static void test_fusion_exec_matches_vm(void) {
   size_t bc_len = 0;
   uint8_t *bc = compile_pattern("SPAN('0-9') '-' SPAN('0-9')", &bc_len);
   test_assert(bc != NULL, "compile pattern");
-  if (!bc) return;
+  if (!bc)
+    return;
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
@@ -123,8 +134,8 @@ static void test_fusion_exec_matches_vm(void) {
   vm.bc = bc;
   vm.bc_len = bc_len;
   /* Try at position 4 where "123-456" starts */
-  bool fused_ok = tier_fusion(&vm, subject, subject_len, 4, &meta,
-                               NULL, &fused_result, NULL, true);
+  bool fused_ok = tier_fusion(&vm, subject, subject_len, 4, &meta, NULL,
+                              &fused_result, NULL, true);
 
   test_assert(fused_ok, "fused anchored match succeeds at '123-456'");
   if (fused_ok) {
@@ -141,7 +152,8 @@ static void test_fusion_exec_failure(void) {
 
   size_t bc_len = 0;
   uint8_t *bc = compile_pattern("SPAN('0-9') '-' SPAN('0-9')", &bc_len);
-  if (!bc) return;
+  if (!bc)
+    return;
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
@@ -160,8 +172,8 @@ static void test_fusion_exec_failure(void) {
   memset(&vm, 0, sizeof(vm));
   vm.bc = bc;
   vm.bc_len = bc_len;
-  bool ok = tier_fusion(&vm, subject, subject_len, 0, &meta, NULL,
-                         &result, NULL, true);
+  bool ok = tier_fusion(&vm, subject, subject_len, 0, &meta, NULL, &result,
+                        NULL, true);
 
   test_assert(!ok, "fused match correctly fails on non-matching subject");
 
@@ -175,7 +187,8 @@ static void test_fusion_unanchored_search(void) {
 
   size_t bc_len = 0;
   uint8_t *bc = compile_pattern("SPAN('0-9') '-' SPAN('0-9')", &bc_len);
-  if (!bc) return;
+  if (!bc)
+    return;
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
@@ -194,8 +207,8 @@ static void test_fusion_unanchored_search(void) {
   memset(&vm, 0, sizeof(vm));
   vm.bc = bc;
   vm.bc_len = bc_len;
-  bool ok = tier_fusion(&vm, subject, subject_len, 0, &meta, NULL,
-                         &result, NULL, false);
+  bool ok = tier_fusion(&vm, subject, subject_len, 0, &meta, NULL, &result,
+                        NULL, false);
 
   test_assert(ok, "unanchored fusion search finds a match");
   if (ok) {
@@ -233,7 +246,8 @@ static void test_fusion_various_patterns(void) {
   for (int i = 0; i < 4; i++) {
     size_t bc_len = 0;
     uint8_t *bc = compile_pattern(patterns[i], &bc_len);
-    if (!bc) continue;
+    if (!bc)
+      continue;
 
     snobol_search_meta_t meta;
     snobol_search_derive_meta(bc, bc_len, &meta);
@@ -244,8 +258,8 @@ static void test_fusion_various_patterns(void) {
       memset(&vm, 0, sizeof(vm));
       vm.bc = bc;
       vm.bc_len = bc_len;
-      bool ok = tier_fusion(&vm, subjects[i], strlen(subjects[i]), 0,
-                             &meta, NULL, &result, NULL, true);
+      bool ok = tier_fusion(&vm, subjects[i], strlen(subjects[i]), 0, &meta,
+                            NULL, &result, NULL, true);
       char msg[128];
       snprintf(msg, sizeof(msg), "fused match succeeds for %s", names[i]);
       test_assert(ok, msg);
@@ -265,20 +279,25 @@ static void test_fusion_alternation(void) {
   size_t bc_len = 0;
   uint8_t *bc = compile_pattern("SPAN('0-9') ('-' | '/') SPAN('0-9')", &bc_len);
   test_assert(bc != NULL, "compile alternation pattern");
-  if (!bc) return;
+  if (!bc)
+    return;
 
   snobol_search_meta_t meta;
   snobol_search_derive_meta(bc, bc_len, &meta);
 
   test_assert(meta.fusion_eligible, "alternation pattern is fusion eligible");
   if (meta.fusion_eligible && meta.fusion) {
-    test_assert(meta.fusion->count == 3, "fusion has 3 segments (RUN, CHAR, RUN)");
-    
+    test_assert(meta.fusion->count == 3,
+                "fusion has 3 segments (RUN, CHAR, RUN)");
+
     /* Note: Single-char alternations like ('-' | '/') are optimized by the 
      * compiler to OP_ANY, which becomes FUSION_CHAR (type 2), not FUSION_ALT */
-    test_assert(meta.fusion->segs[0].type == 1 /* FUSION_RUN */, "first segment is RUN");
-    test_assert(meta.fusion->segs[1].type == 2 /* FUSION_CHAR */, "middle segment is CHAR (optimized from ANY)");
-    test_assert(meta.fusion->segs[2].type == 1 /* FUSION_RUN */, "last segment is RUN");
+    test_assert(meta.fusion->segs[0].type == 1 /* FUSION_RUN */,
+                "first segment is RUN");
+    test_assert(meta.fusion->segs[1].type == 2 /* FUSION_CHAR */,
+                "middle segment is CHAR (optimized from ANY)");
+    test_assert(meta.fusion->segs[2].type == 1 /* FUSION_RUN */,
+                "last segment is RUN");
 
     /* Test matching with '-' separator */
     const char *subject1 = "123-456";
@@ -287,7 +306,8 @@ static void test_fusion_alternation(void) {
     memset(&vm1, 0, sizeof(vm1));
     vm1.bc = bc;
     vm1.bc_len = bc_len;
-    bool ok1 = tier_fusion(&vm1, subject1, strlen(subject1), 0, &meta, NULL, &result1, NULL, true);
+    bool ok1 = tier_fusion(&vm1, subject1, strlen(subject1), 0, &meta, NULL,
+                           &result1, NULL, true);
     test_assert(ok1, "fusion match with '-' separator");
     if (ok1) {
       test_assert(result1.match_start == 0, "match starts at 0");
@@ -301,7 +321,8 @@ static void test_fusion_alternation(void) {
     memset(&vm2, 0, sizeof(vm2));
     vm2.bc = bc;
     vm2.bc_len = bc_len;
-    bool ok2 = tier_fusion(&vm2, subject2, strlen(subject2), 0, &meta, NULL, &result2, NULL, true);
+    bool ok2 = tier_fusion(&vm2, subject2, strlen(subject2), 0, &meta, NULL,
+                           &result2, NULL, true);
     test_assert(ok2, "fusion match with '/' separator");
     if (ok2) {
       test_assert(result2.match_start == 0, "match starts at 0");
@@ -315,7 +336,8 @@ static void test_fusion_alternation(void) {
     memset(&vm3, 0, sizeof(vm3));
     vm3.bc = bc;
     vm3.bc_len = bc_len;
-    bool ok3 = tier_fusion(&vm3, subject3, strlen(subject3), 0, &meta, NULL, &result3, NULL, true);
+    bool ok3 = tier_fusion(&vm3, subject3, strlen(subject3), 0, &meta, NULL,
+                           &result3, NULL, true);
     test_assert(!ok3, "fusion correctly rejects '.' separator");
   }
 
@@ -327,13 +349,16 @@ static void test_fusion_alternation(void) {
    * This is correct behavior - only simple same-length alternations could be fused */
   bc = compile_pattern("SPAN('0-9') ('-' | '--') SPAN('0-9')", &bc_len);
   test_assert(bc != NULL, "compile multi-char alternation pattern");
-  if (!bc) return;
+  if (!bc)
+    return;
 
   snobol_search_meta_t meta2;
   snobol_search_derive_meta(bc, bc_len, &meta2);
 
   /* Multi-char alternations with different lengths are not fusible */
-  test_assert(!meta2.fusion_eligible, "multi-char alternation with different lengths is NOT fusion eligible");
+  test_assert(
+      !meta2.fusion_eligible,
+      "multi-char alternation with different lengths is NOT fusion eligible");
 
   snobol_search_meta_free(&meta2);
   free(bc);

@@ -93,9 +93,9 @@ typedef enum {
   TIER_AUTOMATON = 7,  /**< DFA automaton for eligible patterns */
   TIER_GENERAL = 8,    /**< General VM fallback with start-byte bitmap */
   TIER_SIMD_NFA =
-      9,          /**< SIMD-accelerated Thompson NFA for charclass patterns */
+      9, /**< SIMD-accelerated Thompson NFA for charclass patterns */
   TIER_FUSED_AUTOMATON = 10, /**< Fused concat-pattern automaton (no VM) */
-  TIER_COUNT = 11 /**< Number of tiers (sentinel) */
+  TIER_COUNT = 11            /**< Number of tiers (sentinel) */
 } snobol_search_tier_t;
 
 /* ---------------------------------------------------------------------------
@@ -175,10 +175,10 @@ void snobol_auto_trie_free(snobol_auto_trie_t *trie);
  * ---------------------------------------------------------------------------
  */
 
-#define FUSION_LIT  0
-#define FUSION_RUN  1
+#define FUSION_LIT 0
+#define FUSION_RUN 1
 #define FUSION_CHAR 2
-#define FUSION_ALT  3
+#define FUSION_ALT 3
 
 #define MAX_FUSION_SEGMENTS 32
 #define MAX_FUSION_ALT 8
@@ -186,9 +186,17 @@ void snobol_auto_trie_free(snobol_auto_trie_t *trie);
 typedef struct snobol_fusion_segment_t {
   uint8_t type;
   union {
-    struct { const uint8_t *data; uint32_t len; } lit;
-    struct { uint8_t bitmap[32]; uint32_t min; } run;
-    struct { uint8_t bitmap[32]; } chr;
+    struct {
+      const uint8_t *data;
+      uint32_t len;
+    } lit;
+    struct {
+      uint8_t bitmap[32];
+      uint32_t min;
+    } run;
+    struct {
+      uint8_t bitmap[32];
+    } chr;
     struct {
       struct snobol_fusion_segment_t *alts[MAX_FUSION_ALT];
       uint32_t alt_lens[MAX_FUSION_ALT];
