@@ -34,6 +34,7 @@ extern "C" {
  *   Tier 7: DFA automaton (O(n) linear scan)
  *   Tier 8: General VM fallback (full SNOBOL4 VM)
  *   Tier 9: SIMD Thompson NFA (AVX2/NEON-accelerated byte-parallel NFA)
+ *   Tier 10: Fused concat-pattern automaton (no VM)
  *
  * ## search_vm_t
  *
@@ -93,7 +94,8 @@ typedef enum {
   TIER_GENERAL = 8,    /**< General VM fallback with start-byte bitmap */
   TIER_SIMD_NFA =
       9,          /**< SIMD-accelerated Thompson NFA for charclass patterns */
-  TIER_COUNT = 10 /**< Number of tiers (sentinel) */
+  TIER_FUSED_AUTOMATON = 10, /**< Fused concat-pattern automaton (no VM) */
+  TIER_COUNT = 11 /**< Number of tiers (sentinel) */
 } snobol_search_tier_t;
 
 /* ---------------------------------------------------------------------------
@@ -121,6 +123,7 @@ typedef enum {
 #define META_SIMD_ELIGIBLE (1u << 16)
 #define META_IS_ALT_LITERALS_FLAT (1u << 17)
 #define META_HAS_REQUIRED_LIT (1u << 18)
+#define META_FUSION_ELIGIBLE (1u << 19)
 
 /* ---------------------------------------------------------------------------
  * Automaton (DFA) types
@@ -162,6 +165,42 @@ typedef struct snobol_auto_trie_t snobol_auto_trie_t;
 
 /** Free a cached trie previously built by the Tier-5 matcher. Safe on NULL. */
 void snobol_auto_trie_free(snobol_auto_trie_t *trie);
+
+/* ---------------------------------------------------------------------------
+ * Pattern fusion types
+ *
+ * The fusion engine compiles concat chains of compatible ops (LIT, SPAN,
+ * ANY, NOTANY, BREAK) into a flat segment list.  exec_fusion() walks the
+ * segment list directly — no VM, no bytecode dispatch, no choice stack.
+ * ---------------------------------------------------------------------------
+ */
+
+#define FUSION_LIT  0
+#define FUSION_RUN  1
+#define FUSION_CHAR 2
+#define FUSION_ALT  3
+
+#define MAX_FUSION_SEGMENTS 32
+#define MAX_FUSION_ALT 8
+
+typedef struct snobol_fusion_segment_t {
+  uint8_t type;
+  union {
+    struct { const uint8_t *data; uint32_t len; } lit;
+    struct { uint8_t bitmap[32]; uint32_t min; } run;
+    struct { uint8_t bitmap[32]; } chr;
+    struct {
+      struct snobol_fusion_segment_t *alts[MAX_FUSION_ALT];
+      uint32_t alt_lens[MAX_FUSION_ALT];
+      uint32_t alt_count;
+    } alt;
+  };
+} snobol_fusion_segment_t;
+
+typedef struct {
+  uint32_t count;
+  snobol_fusion_segment_t segs[MAX_FUSION_SEGMENTS];
+} snobol_fusion_t;
 
 /** @brief Return the pattern's cached Tier-5 alternation trie, or NULL if
  *  it has not been built yet. Read-only accessor intended for diagnostics
@@ -300,6 +339,14 @@ typedef struct {
    * no side effects, captures, or complex control flow.  Patterns that pass
    * are routed to Tier 9 (TIER_SIMD_NFA). */
   bool simd_eligible;
+
+  /* Fusion eligibility --------------------------------------------------- */
+  /* True when the pattern is a concat of fusible ops (LIT, SPAN, ANY,
+   * NOTANY, BREAK) with no captures, EVAL, or side effects.  When true,
+   * `fusion` points to the compiled segment list and `tier` is set to
+   * TIER_FUSED_AUTOMATON. */
+  bool fusion_eligible;
+  snobol_fusion_t *fusion; /**< Heap-allocated fusion segment list */
 } snobol_search_meta_t;
 
 /* ---------------------------------------------------------------------------
@@ -334,6 +381,7 @@ typedef struct {
   (!!((m)->flags & META_SEARCH_VM_ELIGIBLE))
 #define snobol_meta_simd_eligible(m) (!!((m)->flags & META_SIMD_ELIGIBLE))
 #define snobol_meta_has_required_lit(m) (!!((m)->flags & META_HAS_REQUIRED_LIT))
+#define snobol_meta_fusion_eligible(m) (!!((m)->flags & META_FUSION_ELIGIBLE))
 
 /**
  * @brief Set a flag bit in metadata flags.
@@ -612,6 +660,24 @@ void snobol_dfa_free(snobol_dfa_t *dfa);
  * SNOBOL_DFA_MAX_STATES cap (i.e. construction did not abort).
  */
 bool snobol_pattern_automaton_available(const struct snobol_pattern *pattern);
+
+/**
+ * Free heap-allocated fusion struct and its ALT sub-lists.
+ * Safe on NULL.
+ */
+void snobol_fusion_free(snobol_fusion_t *fusion);
+
+/**
+ * Tier 10: Fused concat-pattern execution entry point.
+ *
+ * Executes fusible concat patterns (LIT/SPAN/ANY/NOTANY/BREAK chains)
+ * via a dedicated lightweight engine — no VM, no bytecode dispatch,
+ * no choice stack.
+ */
+bool tier_fusion(VM *vm, const char *subject, size_t subject_len,
+                 size_t start_offset, const snobol_search_meta_t *meta,
+                 const snobol_dfa_t *dfa, snobol_search_result_t *out_result,
+                 snobol_search_diag_t *diag, bool anchored);
 
 #ifdef __cplusplus
 }

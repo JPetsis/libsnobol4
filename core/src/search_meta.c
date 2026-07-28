@@ -1006,6 +1006,231 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Fusion recognition
+ *
+ * Walks the bytecode and checks if the pattern is a concat of fusible ops
+ * (LIT, SPAN, ANY, NOTANY, BREAK) with no captures, EVAL, or side effects.
+ * If fusible, builds a segment list for the fusion executor.
+ * ---------------------------------------------------------------------------
+ */
+
+static inline void fusion_bitmap_from_ascii(uint8_t bm[32],
+                                            const uint64_t abm[2]) {
+  memcpy(bm, abm, 16);
+  memset(bm + 16, 0, 16);
+}
+
+static inline void fusion_bitmap_invert(uint8_t bm[32]) {
+  for (int i = 0; i < 16; i++)
+    bm[i] = (uint8_t)~bm[i];
+  memset(bm + 16, 0xFF, 16);
+}
+
+static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
+                                              const snobol_search_meta_t *meta) {
+  if (!bc || bc_len < 2)
+    return NULL;
+  if (meta->has_capture)
+    return NULL;
+
+  snobol_fusion_t *fusion =
+      (snobol_fusion_t *)snobol_malloc(sizeof(snobol_fusion_t));
+  if (!fusion)
+    return NULL;
+  fusion->count = 0;
+
+  VM tmp_vm;
+  memset(&tmp_vm, 0, sizeof(tmp_vm));
+  tmp_vm.bc = bc;
+  tmp_vm.bc_len = bc_len;
+
+  size_t ip = 0;
+
+  while (ip < bc_len) {
+    uint8_t op = bc[ip];
+
+    if (op == OP_NOP || op == OP_FENCE) {
+      ip++;
+      continue;
+    }
+    if (op == OP_ANCHOR) {
+      ip += 2;
+      continue;
+    }
+    if ((op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB) &&
+        ip + 5 <= bc_len) {
+      ip += 5;
+      continue;
+    }
+
+    if (op == OP_ACCEPT || op == OP_SUCCEED)
+      break;
+
+    if (op == OP_FAIL || op == OP_ABORT) {
+      snobol_free(fusion);
+      return NULL;
+    }
+
+    if (fusion->count >= MAX_FUSION_SEGMENTS) {
+      snobol_free(fusion);
+      return NULL;
+    }
+
+    snobol_fusion_segment_t *seg = &fusion->segs[fusion->count];
+
+    switch (op) {
+      case OP_LIT: {
+        if (ip + 9 > bc_len) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint32_t lit_off = search_read_u32(bc, ip + 1);
+        uint32_t lit_len = search_read_u32(bc, ip + 5);
+        if (lit_off >= bc_len || lit_off + lit_len > bc_len) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        if (lit_len == 0) {
+          ip += 9;
+          continue;
+        }
+        seg->type = FUSION_LIT;
+        seg->lit.data = bc + lit_off;
+        seg->lit.len = lit_len;
+        ip += 9 + lit_len;
+        fusion->count++;
+        break;
+      }
+
+      case OP_SPAN: {
+        if (ip + 3 > bc_len) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint16_t set_id = search_read_u16(bc, ip + 1);
+        uint16_t count = 0, ci = 0;
+        const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+        if (!ranges) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint64_t abm[2] = {0, 0};
+        if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        seg->type = FUSION_RUN;
+        fusion_bitmap_from_ascii(seg->run.bitmap, abm);
+        seg->run.min = 1;
+        ip += 3;
+        fusion->count++;
+        break;
+      }
+
+      case OP_ANY: {
+        if (ip + 3 > bc_len) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint16_t set_id = search_read_u16(bc, ip + 1);
+        uint16_t count = 0, ci = 0;
+        const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+        if (!ranges) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint64_t abm[2] = {0, 0};
+        if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        seg->type = FUSION_CHAR;
+        fusion_bitmap_from_ascii(seg->chr.bitmap, abm);
+        ip += 3;
+        fusion->count++;
+        break;
+      }
+
+      case OP_NOTANY: {
+        if (ip + 3 > bc_len) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint16_t set_id = search_read_u16(bc, ip + 1);
+        uint16_t count = 0, ci = 0;
+        const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+        if (!ranges) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint64_t abm[2] = {0, 0};
+        if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        seg->type = FUSION_CHAR;
+        fusion_bitmap_from_ascii(seg->chr.bitmap, abm);
+        fusion_bitmap_invert(seg->chr.bitmap);
+        ip += 3;
+        fusion->count++;
+        break;
+      }
+
+      case OP_BREAK: {
+        if (ip + 3 > bc_len) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint16_t set_id = search_read_u16(bc, ip + 1);
+        uint16_t count = 0, ci = 0;
+        const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
+        if (!ranges) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        uint64_t abm[2] = {0, 0};
+        if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
+          snobol_free(fusion);
+          return NULL;
+        }
+        seg->type = FUSION_RUN;
+        fusion_bitmap_from_ascii(seg->run.bitmap, abm);
+        fusion_bitmap_invert(seg->run.bitmap);
+        seg->run.min = 0;
+        ip += 3;
+        fusion->count++;
+        break;
+      }
+
+      default:
+        snobol_free(fusion);
+        return NULL;
+    }
+  }
+
+  if (fusion->count < 2) {
+    snobol_free(fusion);
+    return NULL;
+  }
+
+  return fusion;
+}
+
+void snobol_fusion_free(snobol_fusion_t *fusion) {
+  if (!fusion)
+    return;
+  for (uint32_t i = 0; i < fusion->count; i++) {
+    if (fusion->segs[i].type == FUSION_ALT) {
+      for (uint32_t j = 0; j < fusion->segs[i].alt.alt_count; j++) {
+        if (fusion->segs[i].alt.alts[j])
+          snobol_free(fusion->segs[i].alt.alts[j]);
+      }
+    }
+  }
+  snobol_free(fusion);
+}
+
+/* ---------------------------------------------------------------------------
  * snobol_search_derive_meta
  *
  * Scans the compiled bytecode to extract search-acceleration hints:
@@ -1313,6 +1538,15 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
 
   /* ---- SIMD NFA eligibility ---- */
   out->simd_eligible = check_simd_eligible(bc, bc_len);
+
+  /* ---- Fusion eligibility ---- */
+  {
+    snobol_fusion_t *f = check_fusion_eligible(bc, bc_len, out);
+    if (f) {
+      out->fusion_eligible = true;
+      out->fusion = f;
+    }
+  }
   /* The SIMD NFA engine (search_simd.c) is byte-wise — its 256-bit char_mask
    * tests single bytes.  SPAN and BREAK are byte-wise in the full VM as well,
    * so the SIMD engine can run them for any byte-level charclass (including
@@ -1381,6 +1615,8 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     out->flags |= META_SEARCH_VM_ELIGIBLE;
   if (out->simd_eligible)
     out->flags |= META_SIMD_ELIGIBLE;
+  if (out->fusion_eligible)
+    out->flags |= META_FUSION_ELIGIBLE;
 
   /* ---- Capture-aware tier gating ----
    * Only TIER_SEARCH_VM (6) and TIER_GENERAL (8) record captures.  Every other
@@ -1403,6 +1639,7 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     out->is_alt_literals_flat = false;
     out->automaton_eligible = false;
     out->simd_eligible = false;
+    out->fusion_eligible = false;
   }
 
   /* ---- Compute tier index from flags ---- */
@@ -1421,6 +1658,8 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   else if (
       out->is_alt_literals) /* flat: trie (no minlength accel, but correct) */
     out->tier = TIER_ALT_LIT;
+  else if (out->fusion_eligible)
+    out->tier = TIER_FUSED_AUTOMATON;
   else if (out->simd_eligible)
     out->tier = TIER_SIMD_NFA;
   else if (out->search_vm_eligible)
@@ -1555,6 +1794,10 @@ void snobol_search_meta_free(snobol_search_meta_t *meta) {
     snobol_free(meta->bmh_skip);
     meta->bmh_skip = NULL;
   }
+  if (meta->fusion) {
+    snobol_fusion_free(meta->fusion);
+    meta->fusion = NULL;
+  }
 }
 
 void snobol_search_vm_cleanup(VM *vm) {
@@ -1617,6 +1860,7 @@ static const tier_cost_coeff_t k_tier_cost[] = {
      * because per-byte work is identical (one bit-test) and the NFA path
      * covers ANY/NOTANY too. */
     {TIER_SIMD_NFA, 15, 16},
+    {TIER_FUSED_AUTOMATON, 50, 8},
 };
 
 /* Score every eligible tier and return the cheapest. `dfa_available` gates the
@@ -1661,20 +1905,10 @@ snobol_search_tier_t select_tier_by_cost(const snobol_search_meta_t *meta,
         eligible = meta->search_vm_eligible && !meta->is_alt_literals;
         break;
       case TIER_SIMD_NFA:
-        /* SIMD Thompson NFA (Tier 9): charclass patterns (SPAN/BREAK/ANY/
-       * NOTANY) with no side effects, captures, or control flow.  Eligible
-       * for both anchored and unanchored matches — tier_simd_nfa handles
-       * the anchored contract directly (verifies at start_offset only).
-       *
-       * The SIMD NFA's 256-bit char_mask is byte-oriented.  Non-ASCII
-       * charclasses (whether byte-level >127 or codepoint-level >255) break
-       * the assumption: the build_nfa_masks function fails for codepoint
-       * ranges (>255), forcing a fallback to tier_general_fallback whose
-       * start-bitmap may be empty for such patterns, producing a false no-
-       * match.  Require ascii_class_only so SIMD NFA only runs for pure-
-       * ASCII charclasses — non-ASCII patterns route through other tiers
-       * (SEARCH_VM / GENERAL) which handle them correctly. */
         eligible = meta->simd_eligible && meta->ascii_class_only;
+        break;
+      case TIER_FUSED_AUTOMATON:
+        eligible = meta->fusion_eligible;
         break;
       case TIER_GENERAL:
         eligible = true; /* always available as fallback */
@@ -1717,6 +1951,7 @@ void SNOBOL_COLD snobol_search_dump_cost_model(FILE *out) {
       case TIER_ALT_LIT: name = "ALT_LIT"; break;
       case TIER_SEARCH_VM: name = "SEARCH_VM"; break;
       case TIER_SIMD_NFA: name = "SIMD_NFA"; break;
+      case TIER_FUSED_AUTOMATON: name = "FUSED"; break;
       case TIER_GENERAL: name = "GENERAL"; break;
       default: break;
     }
