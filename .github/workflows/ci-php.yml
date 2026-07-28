@@ -246,7 +246,7 @@ jobs:
             # Fallback: query the releases page to find the latest devel pack
             # for this major.minor version (e.g. "8.5").
             $releases = (Invoke-WebRequest -Uri "https://windows.php.net/downloads/releases/" -UseBasicParsing).Content
-            $pattern = "php-devel-pack-$($mm)-(\d+)-$($ts)Win32-$vsPack-x64\.zip"
+            $pattern = "php-devel-pack-$($mm)\.(\d+)-$($ts)Win32-$vsPack-x64\.zip"
             $matches = [regex]::Matches($releases, $pattern) | ForEach-Object { $_.Groups[0].Value }
             if ($matches.Count -gt 0) {
               $latest = $matches | Sort-Object -Descending | Select-Object -First 1
