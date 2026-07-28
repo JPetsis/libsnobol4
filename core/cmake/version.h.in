@@ -24,7 +24,7 @@ extern "C" {
 /** @brief Library patch version number. */
 #define SNOBOL_VERSION_PATCH @SNOBOL_VERSION_PATCH@
 
-/** @brief Library version as a string literal, e.g. @c "0.12.0". */
+/** @brief Library version as a string literal, e.g. @c "0.13.0". */
 #define SNOBOL_VERSION_STRING "@SNOBOL_VERSION_STRING@"
 
 #ifdef __cplusplus

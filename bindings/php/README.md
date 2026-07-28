@@ -321,11 +321,11 @@ $result = $pattern->match($subject);
 $output = $pattern->subst($subject, $template);
 ```
 
-`Pattern::match()` uses an inline literal fast-path (v0.12.0+): when the pattern is a pure literal
+`Pattern::match()` uses an inline literal fast-path (v0.13.0+): when the pattern is a pure literal
 (e.g., `"'abc'"`), the VM setup is bypassed entirely — no emit buffer, no `memset`, no dynamic init.
 The result is identical but the allocation overhead is eliminated.
 
-`Pattern::matchLiteral()` (v0.12.0+): lightweight anchored literal match returning
+`Pattern::matchLiteral()` (v0.13.0+): lightweight anchored literal match returning
 `['success' => bool, 'position' => int, 'length' => int]`. Delegates to the C
 `snobol_pattern_match_literal()` with zero heap allocations. For non-literal patterns
 returns `['success' => false, 'position' => 0, 'length' => 0]` immediately.
@@ -454,7 +454,7 @@ $minor = ($v >> 8) & 0xFF;   // 12
 $patch = $v & 0xFF;          // 0
 ```
 
-For v0.12.0 this returns `0x00000C00` (3072 in decimal).
+For v0.13.0 this returns `0x00000D00` (3328 in decimal).
 
 ## Running Tests
 

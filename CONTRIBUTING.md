@@ -283,8 +283,8 @@ The C core libsnobol4 makes the following stability guarantees around allocation
 libsnobol4 uses independent versioning for core and bindings and follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 
-- **Core**: `v<major>.<minor>.<patch>` (e.g., `v0.12.0`)
-- **PHP Binding**: `v<major>.<minor>.<patch>` (e.g., `v0.12.0`)
+- **Core**: `v<major>.<minor>.<patch>` (e.g., `v0.13.0`)
+- **PHP Binding**: `v<major>.<minor>.<patch>` (e.g., `v0.13.0`)
 
 The core version has a **single source of truth**: the
 `project(libsnobol4 VERSION X.Y.Z)` declaration in the top-level
@@ -300,8 +300,8 @@ hand-edit version literals in any header.
    `CHANGELOG.md`.
 3. Create git tags:
    ```bash
-   git tag core/v0.12.0
-   git tag php/v0.12.0
+   git tag core/v0.13.0
+   git tag php/v0.13.0
    git push origin --tags
    ```
 4. Create GitHub release with changelog

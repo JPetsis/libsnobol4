@@ -86,7 +86,7 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
 
 | Binding                       | Status   | Version  |
 |-------------------------------|----------|----------|
-| [PHP](bindings/php/README.md) | ✅ Stable | v0.12.0  |
+| [PHP](bindings/php/README.md) | ✅ Stable | v0.13.0  |
 
 ## Project Structure
 
@@ -158,7 +158,7 @@ false = no match) and `r->error` (NULL on success, otherwise an error message st
 are 0-indexed; `r->captures[i]` is the value bound to positional capture `i` from the pattern
 (where `i = 0` is the first capture).  Free the result with `snobol_match_result_free()`.
 
-#### Literal-match API (zero-allocation, v0.12.0+)
+#### Literal-match API (zero-allocation, v0.13.0+)
 
 For patterns that are pure literals (e.g., `'abc'`), use `snobol_pattern_match_literal()` for
 zero-allocation anchored matching. Returns a lightweight struct by value with `success`,
@@ -445,8 +445,8 @@ libsnobol4 uses independent versioning for core and each binding:
 
 | Component              | Current | Next        | Status               | Install                               |
 |------------------------|---------|-------------|----------------------|---------------------------------------|
-| **Core**               | v0.12.0 | v0.12.0     | ✅ v0.12.0 shipped    | `brew install JPetsis/tap/libsnobol4` |
-| **PHP Binding**        | v0.12.0 | v0.12.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
+| **Core**               | v0.13.0 | v0.13.0     | ✅ v0.13.0 shipped    | `brew install JPetsis/tap/libsnobol4` |
+| **PHP Binding**        | v0.13.0 | v0.13.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
 | **Python (reference)** | —       | —           | Prototype only       | `examples/python-binding/`            |
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.

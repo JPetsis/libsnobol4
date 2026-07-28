@@ -23,7 +23,7 @@ extern "C" {
  *
  * This eliminates per-call malloc/free overhead (~30 ns per match).
  *
- * @version 0.12.0
+ * @version 0.13.0
  */
 
 #include <stdbool.h>

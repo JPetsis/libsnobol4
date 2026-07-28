@@ -42,7 +42,7 @@ The engine now supports full SNOBOL language compatibility including:
 | Recursive EVAL     | `EVAL(EVAL(...))` parsed but not optimized                     | Avoid deep nesting               | Optimize recursive evaluation |
 
 > **Note:** The SLJIT method-JIT and tracing-JIT subsystems described in older
-> revisions of this document were **retired in v0.12.0**. The engine now executes
+> revisions of this document were **retired in v0.13.0**. The engine now executes
 > all patterns through the SNOBOL4 VM and the search-tier accelerators described in
 > `AGENTS.md` (Tiers 0–9). No `SNOBOL_JIT_*` configuration or `snobol_get_jit_stats()`
 > API exists.

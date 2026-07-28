@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 # Core libsnobol4 C library
 # This builds the language-agnostic C pattern matching engine
 
-project(libsnobol4_core VERSION 0.12.0 LANGUAGES C)
+project(libsnobol4_core VERSION 0.13.0 LANGUAGES C)
 
 # Core source files
 set(_core_sources

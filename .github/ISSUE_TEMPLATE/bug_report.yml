@@ -26,8 +26,8 @@ body:
     id: version
     attributes:
       label: Version / commit
-      description: Release tag (e.g. core/v0.12.0) or git commit SHA.
-      placeholder: "core/v0.12.0 or abc1234"
+      description: Release tag (e.g. core/v0.13.0) or git commit SHA.
+      placeholder: "core/v0.13.0 or abc1234"
     validations:
       required: true
   - type: textarea
