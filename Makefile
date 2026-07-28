@@ -43,6 +43,7 @@ build:
 		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
 		-DBUILD_TESTS=ON \
 		-DBUILD_PHP=OFF \
+		-DSNOBOL_LTO=OFF \
 		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
 		$(CMAKE_EXTRA_FLAGS)
 	@echo "==> Building libsnobol4..."

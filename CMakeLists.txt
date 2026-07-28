@@ -33,7 +33,10 @@ endif()
 
 # Priority 6.8: enable Link-Time Optimization for Release builds (canonical
 # -flto).  Disabled while PGO is active so the two pipelines don't conflict.
-if(NOT MSVC AND NOT SNOBOL_PGO_GEN AND NOT SNOBOL_PGO_USE)
+# Can be disabled explicitly with -DSNOBOL_LTO=OFF to avoid LLVM bitcode
+# version mismatch when the static library is consumed by a different linker.
+option(SNOBOL_LTO "Enable LTO for Release builds" ON)
+if(SNOBOL_LTO AND NOT MSVC AND NOT SNOBOL_PGO_GEN AND NOT SNOBOL_PGO_USE)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 endif()
 
