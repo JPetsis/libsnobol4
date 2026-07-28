@@ -307,6 +307,7 @@ void test_comparison_numeric_suite(void);
 void test_builtin_dispatch_suite(void);
 void test_search_runtime_suite(void);
 void test_fusion_suite(void);
+void test_fusion_tier_suite(void);
 void test_compact_choice_suite(void);
 void test_vm_trail_suite(void);
 void test_choice_arena_suite(void);
@@ -414,6 +415,7 @@ int main(void) {
   /* Search runtime */
   RUN_SUITE("Search Runtime", test_search_runtime_suite);
   RUN_SUITE("Fusion: SPLIT/ANY", test_fusion_suite);
+  RUN_SUITE("Fusion Tier: concat-pattern", test_fusion_tier_suite);
   RUN_SUITE("Compact Choice Stack", test_compact_choice_suite);
   RUN_SUITE("VM Trail Choice Save", test_vm_trail_suite);
   RUN_SUITE("Choice-Stack Arena", test_choice_arena_suite);

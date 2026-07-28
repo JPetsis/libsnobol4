@@ -3373,6 +3373,7 @@ static const tier_fn tier_table[TIER_COUNT] = {
     [TIER_AUTOMATON] = tier_automaton,  /* DFA automaton (O(n) scan) */
     [TIER_GENERAL] = tier_general_fallback, /* General VM fallback */
     [TIER_SIMD_NFA] = tier_simd_nfa,        /* SIMD-accelerated Thompson NFA */
+    [TIER_FUSED_AUTOMATON] = tier_fusion,   /* Fused concat-pattern (no VM) */
 };
 
 SNOBOL_ALIGNED(64)
