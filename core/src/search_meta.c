@@ -1036,7 +1036,7 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
     return NULL;
 
   snobol_fusion_t *fusion =
-      (snobol_fusion_t *)snobol_malloc(sizeof(snobol_fusion_t));
+      (snobol_fusion_t *)snobol_calloc(1, sizeof(snobol_fusion_t));
   if (!fusion)
     return NULL;
   fusion->count = 0;
@@ -1227,8 +1227,8 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
         for (int b = 0; b < 2; b++) {
           uint32_t branch_ip = branches[b];
           snobol_fusion_segment_t *alt_segs = 
-              (snobol_fusion_segment_t *)snobol_malloc(
-                  MAX_FUSION_SEGMENTS * sizeof(snobol_fusion_segment_t));
+              (snobol_fusion_segment_t *)snobol_calloc(
+                  1, MAX_FUSION_SEGMENTS * sizeof(snobol_fusion_segment_t));
           if (!alt_segs) {
             snobol_fusion_free(fusion);
             return NULL;

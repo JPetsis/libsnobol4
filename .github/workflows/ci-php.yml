@@ -240,7 +240,14 @@ jobs:
           $develUrl = "https://windows.php.net/downloads/releases/$develName"
           echo "Building against PHP $phpVer (ts flag: '$ts', devel pack toolset: $vsPack)"
           echo "Downloading dev pack: $develUrl"
-          Invoke-WebRequest -Uri $develUrl -OutFile devel.zip
+          try {
+            Invoke-WebRequest -Uri $develUrl -OutFile devel.zip -MaximumRedirection 5
+          } catch {
+            $fallbackName = "php-devel-pack-$($mm)-$($ts)Win32-$vsPack-x64.zip"
+            $fallbackUrl = "https://windows.php.net/downloads/releases/$fallbackName"
+            echo "⚠️  Exact devel pack not found, trying: $fallbackUrl"
+            Invoke-WebRequest -Uri $fallbackUrl -OutFile devel.zip -MaximumRedirection 5
+          }
           Expand-Archive devel.zip -DestinationPath php-dev
 
           # The devel pack extracts into a single top-level folder; locate
