@@ -17,6 +17,7 @@ if (PHP_SNOBOL != "no") {
         src/snobol_pattern_cache_php.c \
         src/snobol_pattern_helper_php.c \
         src/snobol_search_iterator_php.c \
+        src/snobol_split_iterator_php.c \
         core_amalgam.c";
 
     // MSVC accepts forward slashes in /I arguments.
