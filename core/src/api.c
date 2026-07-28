@@ -271,8 +271,7 @@ void snobol_pattern_free(snobol_pattern_t *pattern) {
     snobol_dfa_free(pattern->automaton);
   if (pattern->trie_cache)
     snobol_auto_trie_free(pattern->trie_cache);
-  if (pattern->meta.bmh_skip)
-    snobol_free(pattern->meta.bmh_skip);
+  snobol_search_meta_free(&pattern->meta);
   snobol_free(pattern);
 }
 
