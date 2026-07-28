@@ -14,6 +14,7 @@
 #include "snobol/search.h"
 #include "snobol/snobol.h"
 #include "snobol/snobol_attrs.h"
+#include "snobol/snobol_internal.h"
 #include "snobol/vm.h"
 
 #include <stdbool.h>
