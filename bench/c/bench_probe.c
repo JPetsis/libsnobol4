@@ -437,6 +437,38 @@ static void run_tokenize_next(int64_t iters, probe_result_t *r) {
     snobol_context_destroy(ctx);
 }
 
+/* Per-pass variant of tokenize_next: ns per full split pass using the lean
+ * snobol_pattern_search_next() API.  Pairs with tokenize_reuse and
+ * pcre2_tokenize for head-to-head comparison. */
+static void run_tokenize_next_pass(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "' '", 3);
+    size_t slen = strlen(SUBJECT_WHITESPACE);
+    const uint8_t *bc = snobol_pattern_get_bc(pat);
+    size_t bc_len = snobol_pattern_get_bc_len(pat);
+    snobol_pattern_search_state_t *state =
+        snobol_pattern_search_state_create(bc, bc_len);
+    int64_t passes = 0;
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters && passes < (int64_t)1e9; i++) {
+        size_t pos = 0;
+        size_t match_pos, match_len;
+        while (snobol_pattern_search_next(state, SUBJECT_WHITESPACE,
+                                          slen, pos, &match_pos, &match_len)) {
+            pos = match_pos + match_len;
+        }
+        passes++;
+    }
+    int64_t end = bench_ns();
+    r->iters = passes;
+    r->total_ns = end - start;
+    r->ns_per_iter = (passes > 0) ? (r->total_ns / passes) : 0;
+    capture_tiers(pat, slen, r);
+    snobol_pattern_search_state_destroy(state);
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
 /* Spike: bare memchr tokenize loop — no tier dispatch, no prefilter,
  * no search_evec.  Measures the irreducible cost of finding the next ' '
  * in the tokenize subject.  Gap vs tokenize_reuse_call (~160 ns) is the
@@ -1387,8 +1419,8 @@ int main(void) {
     printf("Tokenize uses %" PRId64 " outer iters (one full pass each).\n\n",
            tokenize_iters);
 
-    /* Total scenarios: 31 snobol + 9 PCRE2 (when available) = 40 */
-    probe_result_t results[40];
+    /* Total scenarios: 32 snobol + 9 PCRE2 (when available) = 41 */
+    probe_result_t results[41];
     memset(results, 0, sizeof(results));
 
     /* Run each scenario */
@@ -1426,6 +1458,7 @@ int main(void) {
         { "tokenize_reuse_call",   run_tokenize_call,              tokenize_iters, "call" },
         { "tokenize_fastpath",     run_tokenize_fastpath,          tokenize_iters, "call" },
         { "tokenize_next",         run_tokenize_next,              tokenize_iters, "call" },
+        { "tokenize_next_pass",    run_tokenize_next_pass,         tokenize_iters, "pass" },
         { "tokenize_memchr",       run_tokenize_memchr,            tokenize_iters, "call" },
         { "residue_repeat",        run_residue_repeat,             iters,  "match" },
         { "residue_zero_width",    run_residue_zero_width,         iters,  "match" },
