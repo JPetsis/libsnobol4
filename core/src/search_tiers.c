@@ -3481,6 +3481,12 @@ bool SNOBOL_HOT snobol_search_exec(VM *SNOBOL_RESTRICT vm,
    * snobol_search_exec_anchored → dispatch_search_impl directly), and when
    * a diagnostics struct is requested (the short-circuit doesn't populate it). */
   if (meta && meta->is_literal_only && meta->required_lit_len == 1 && !diag) {
+    out_result->success = false;
+    out_result->pike_overflowed = false;
+    out_result->prefilter_skip = false;
+    out_result->aborted = false;
+    if (start_offset > subject_len)
+      return false;
     const unsigned char *p = (const unsigned char *)memchr(
         subject + start_offset, meta->required_lit[0],
         subject_len - start_offset);
@@ -3488,8 +3494,6 @@ bool SNOBOL_HOT snobol_search_exec(VM *SNOBOL_RESTRICT vm,
       out_result->success = true;
       out_result->match_start = (size_t)(p - (const unsigned char *)subject);
       out_result->match_end = out_result->match_start + meta->required_lit_len;
-    } else {
-      out_result->success = false;
     }
     return out_result->success;
   }
