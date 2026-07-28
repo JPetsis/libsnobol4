@@ -7,23 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Single-Literal Tokenize Fast Path
+### Lean Tokenize API
 
 #### Added
 
-- **Short-circuit in `snobol_search_exec()`** (`core/src/search_tiers.c`):
-  Detects single-byte literal patterns (`meta->is_literal_only &&
-  meta->required_lit_len == 1`) and handles them via direct `memchr`,
-  bypassing the prefilter, tier dispatch, and `search_literal_only`
-  entirely. `tokenize_reuse_call` dropped 160→91 ns (—43%);
-  `tokenize_reuse` pass dropped 84,369→47,176 ns (—44%). The fast path
-  is skipped when a diagnostics struct is requested.
+- **`snobol_pattern_search_next()`** (`core/src/api.c`,
+  `core/include/snobol/snobol.h`): Lightweight unanchored single-literal
+  search returning position+length via out-parameters. Skips the match
+  struct, capture arrays, and output buffer — ~8 ns/call instead of
+  ~88 ns through `snobol_pattern_search_ex`. Returns false for
+  non-literal patterns; caller falls back. Supports single-byte (memchr)
+  and multi-byte (memmem) literals.
+- **C test suite** (`tests/c/test_api_search_next.c`): 5 scenarios:
+  single-byte advancing, multi-byte literal, non-literal fallback,
+  NULL guards, start_offset past end.
 
 #### Changed
 
-- **`run_tokenize_fastpath` probe scenario** (`bench/c/bench_probe.c`):
-  C-side probe row that exercises the new short-circuit through the
-  production `snobol_pattern_search_ex` API. Reports ~91 ns/call.
+- **`php_snobol_searchsplit_record_offsets()`** (`bindings/php/src/`):
+  Per-call fallback for `searchSplit`, `searchSplitOffsets`,
+  `searchSplitCuts` now uses `snobol_pattern_search_next()` when the
+  delimiter is a literal-only pattern (~8 ns/call vs ~88 ns).
+- **`run_tokenize_next` probe scenario** (`bench/c/bench_probe.c`):
+  C-side probe row exercising `snobol_pattern_search_next()` through the
+  production API. Reports ~8 ns/call.
 
 ### PHP Match Routing and Per-Call Optimization
 

@@ -971,11 +971,10 @@ bool snobol_pattern_search_next(snobol_pattern_search_state_t *state,
   size_t remain = subject_len - start_offset;
   const void *found;
   if (state->meta.required_lit_len == 1) {
-    found = memchr(subject + start_offset, state->meta.required_lit[0],
-                   remain);
+    found = memchr(subject + start_offset, state->meta.required_lit[0], remain);
   } else {
-    found = memmem(subject + start_offset, remain,
-                   state->meta.required_lit, state->meta.required_lit_len);
+    found = memmem(subject + start_offset, remain, state->meta.required_lit,
+                   state->meta.required_lit_len);
   }
   if (!found)
     return false;
