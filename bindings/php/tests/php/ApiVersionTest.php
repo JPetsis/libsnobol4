@@ -43,7 +43,7 @@ class ApiVersionTest extends TestCase
     public function testEncodingMatchesV0120(): void
     {
         // v0.13.0 encodes as (0 << 16) | (13 << 8) | 0 = 0x00000D00
-        $expected = (0 << 16) | (12 << 8) | 0;
+        $expected = (0 << 16) | (13 << 8) | 0;
         $this->assertSame($expected, snobol_get_api_version());
     }
 
