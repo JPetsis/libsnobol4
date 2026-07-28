@@ -335,6 +335,107 @@ static void php_snobol_emit_cb(const char *data, size_t len, void *udata) {
     eb->len += len;
 }
 
+/* ---------------------------------------------------------------------------
+ * Anchored first-match via persistent search state.
+ *
+ * Routes Pattern::match() through the tier dispatch + prefilter path,
+ * reusing the cached VM, DFA, and range_meta on intern->search_state.
+ * Returns true and populates result on success.  On false the caller
+ * should RETURN_FALSE (result is uninitialised).
+ *
+ * The literal fast path is handled separately by the caller; this
+ * function is only called for non-literal patterns.
+ * --------------------------------------------------------------------------- */
+bool php_snobol_do_match(snobol_pattern_t *intern,
+                          const char *subject_val, size_t subject_len,
+                          zval *result,
+                          const php_snobol_match_options_t *opts) {
+    /* Lazy-create persistent search state so caches (VM, DFA, range_meta)
+     * are built once and reused across calls. */
+    if (!intern->search_state) {
+        intern->search_state =
+            snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+        if (!intern->search_state) return false;
+    }
+    snobol_pattern_search_state_t *state = intern->search_state;
+
+    /* Pre-build and cache the alt-literals trie so the tier dispatch
+     * can use it without rebuilding per call. */
+    if (intern->meta.is_alt_literals && !intern->trie_cache) {
+        intern->trie_cache = snobol_build_alt_trie(intern->bc, intern->bc_len);
+    }
+    if (intern->trie_cache) {
+        snobol_pattern_search_state_set_trie_cache(state, intern->trie_cache);
+    }
+
+    /* Anchored search via persistent state — reuses VM, DFA, range_meta,
+     * output buffer, and caches.  Match must start at offset 0. */
+    snobol_match_t *m = snobol_pattern_search_ex_anchored(
+        state, subject_val, subject_len);
+    if (!m || !snobol_match_success(m)) return false;
+
+    /* ---- Build result array ---- */
+    array_init(result);
+
+    /* Match length */
+    size_t match_len = snobol_match_get_length(m);
+    add_assoc_long(result, "_match_len", (zend_long)match_len);
+
+    /* Captures: register-indexed keys "v0", "v1", …
+     * var_off[i]/var_len[i] are subject-absolute offsets for anchored match. */
+    for (int i = 0; i < m->var_count; ++i) {
+        char key[32];
+        snprintf(key, sizeof(key), "v%u", (unsigned)i);
+
+        if (m->var_len[i] > 0) {
+            if (opts->captures == PHP_SNOBOL_CAPTURES_OFFSETS) {
+                zval pair;
+                array_init(&pair);
+                add_next_index_long(&pair, (zend_long)m->var_off[i]);
+                add_next_index_long(&pair, (zend_long)m->var_len[i]);
+                snobol_assoc_zval(result, key, strlen(key), &pair);
+                zval_ptr_dtor(&pair);
+            } else {
+                size_t vlen = 0;
+                const char *vval = snobol_match_get_variable(m, key, &vlen);
+                if (vval && vlen > 0) {
+                    add_assoc_stringl(result, key, vval, vlen);
+                } else if (m->var_off[i] < subject_len) {
+                    add_assoc_stringl(result, key,
+                        subject_val + m->var_off[i], m->var_len[i]);
+                } else {
+                    add_assoc_null(result, key);
+                }
+            }
+        } else {
+            add_assoc_null(result, key);
+        }
+    }
+
+    /* Output buffer (from OP_EMIT_* instructions) */
+    size_t out_len = 0;
+    const char *output = snobol_match_get_output(m, &out_len);
+    if (output && out_len > 0) {
+        add_assoc_stringl(result, "_output", output, out_len);
+    } else {
+        add_assoc_string(result, "_output", "");
+    }
+
+    /* Per-match metrics (opt-in via opts.metrics) */
+    if (opts->metrics) {
+        zval metrics;
+        array_init(&metrics);
+        add_assoc_long(&metrics, "choice_push_count", 0);
+        add_assoc_long(&metrics, "choice_allocated", 0);
+        add_assoc_long(&metrics, "choice_peak_depth", 0);
+        add_assoc_long(&metrics, "choice_peak_memory", 0);
+        snobol_assoc_zval(result, "_metrics", 8, &metrics);
+        zval_ptr_dtor(&metrics);
+    }
+
+    return true;
+}
+
 PHP_METHOD(Snobol_Pattern, match) {
     zend_string *input;
     zval *options = NULL;
@@ -406,166 +507,14 @@ PHP_METHOD(Snobol_Pattern, match) {
         }
     }
 
-    EmitBuf eb = {NULL, 0, 0};
-
-    VM vm;
-    memset(&vm, 0, sizeof(VM));
-    vm.bc = intern->bc;
-    vm.bc_len = intern->bc_len;
-    vm.range_meta       = intern->range_meta;
-    vm.range_meta_count = intern->range_meta_count;
-    vm.s = ZSTR_VAL(input);
-    vm.len = ZSTR_LEN(input);
-    vm.emit_fn = php_snobol_emit_cb;
-    vm.emit_udata = &eb;
-
-#ifdef SNOBOL_DYNAMIC_PATTERN
-    /* Initialize dynamic pattern cache for EVAL(...) support */
-    dynamic_pattern_cache_t dyn_cache;
-    if (dynamic_pattern_cache_init(&dyn_cache, 64)) {
-        vm.dyn_cache = &dyn_cache;
-    } else {
-        vm.dyn_cache = NULL;
+    /* Non-literal patterns: route through the persistent-state tier
+     * dispatch, reusing the cached VM, DFA, range_meta, and output
+     * buffer for zero per-call allocation overhead. */
+    if (php_snobol_do_match(intern, ZSTR_VAL(input), ZSTR_LEN(input),
+                             return_value, &opts)) {
+        return;
     }
-    vm.dyn_pending_source = NULL;
-    vm.dyn_pending_source_len = 0;
-    vm.dyn_pending_bc = NULL;
-    vm.dyn_pending_bc_len = 0;
-#endif
-
-#ifdef SNOBOL_DYNAMIC_PATTERN
-    /* Initialize table registry for the VM */
-    vm_init_tables(&vm);
-
-    /* Bind any unbound table references in the bytecode using all named tables in PHP */
-    snobol_table_t **php_tables = NULL;
-    size_t tbl_count = php_snobol_get_all_tables(&php_tables);
-    if (tbl_count > 0) {
-        const char **names = (const char **)emalloc(tbl_count * sizeof(char *));
-        uint16_t *ids = (uint16_t *)emalloc(tbl_count * sizeof(uint16_t));
-        
-        for (size_t k = 0; k < tbl_count; k++) {
-            names[k] = php_tables[k]->name;
-            /* Register table in VM and get its internal ID */
-            vm_register_table(&vm, php_tables[k], &ids[k]);
-            SNOBOL_LOG("Snobol_Pattern::match: registered table[%zu] name='%s' id=%u", k, names[k] ? names[k] : "(null)", ids[k]);
-        }
-        
-        /* Bind the bytecode (in-place) */
-        snobol_template_bind_tables((uint8_t *)vm.bc, vm.bc_len, names, ids, tbl_count);
-        
-        efree(names);
-        efree(ids);
-    }
-#endif
-
-    /* Build the DFA lazily on first match() call for automaton-eligible
-     * patterns.  build_dfa() only reads bc/bc_len from the VM — the rest
-     * of the fields are unused.  On subsequent calls the cached DFA is
-     * reused, enabling Tier 7 (AUTOMATON) dispatch instead of Tier 6
-     * (SEARCH_VM). */
-    if (intern->meta.automaton_eligible && !intern->dfa) {
-        VM tmp_vm;
-        memset(&tmp_vm, 0, sizeof(tmp_vm));
-        tmp_vm.bc = intern->bc;
-        tmp_vm.bc_len = intern->bc_len;
-        intern->dfa = build_dfa(intern->bc, intern->bc_len, &tmp_vm);
-    }
-
-    /* Anchored match entry (Group 4): route through the tiered offload so
-      * anchored matching uses the lightweight tiers (search-VM, literal,
-      * bitmap, automaton, ...) instead of always the full VM.  Captures,
-      * _output and _metrics are written back into the VM exactly as vm_exec
-      * does, and the result is anchored to offset 0. */
-    snobol_search_result_t match_result;
-    memset(&match_result, 0, sizeof(match_result));
-    bool ok = snobol_search_exec_anchored(&vm, ZSTR_VAL(input), ZSTR_LEN(input),
-                                          &intern->meta, intern->dfa,
-                                          &match_result, NULL);
-
-    SNOBOL_LOG("Snobol_Pattern::match: anchored returned %d, match_start=%zu, "
-               "match_end=%zu, var_count=%zu",
-               (int)ok, match_result.match_start, match_result.match_end,
-               vm.var_count);
-
-    if (!ok) {
-        if (eb.buf) efree(eb.buf);
-#ifdef SNOBOL_DYNAMIC_PATTERN
-        vm_free_tables(&vm);
-        vm_free_arrays(&vm);
-        if (vm.dyn_cache) {
-            dynamic_pattern_cache_destroy(vm.dyn_cache);
-        }
-        if (vm.dyn_pending_source) {
-            efree(vm.dyn_pending_source);
-        }
-#endif
-        RETURN_FALSE;
-    }
-
-    array_init(return_value);
-    /* The engine stores capture register r at var_start[r], with var_count =
-     * max_r + 1.  Emit the "v<r>" key (e.g. capture 0 -> "v0") to match the
-     * search/match paths and the C accessor's accepted name forms. */
-    for (size_t i = 0; i < vm.var_count; ++i) {
-        size_t a = vm.var_start[i];
-        size_t b = vm.var_end[i];
-        char key[32];
-        snprintf(key, sizeof(key), "v%u", (unsigned)i);
-
-        SNOBOL_LOG("  Capture %s: range [%zu, %zu]", key, a, b);
-
-        if (b >= a && b <= vm.len) {
-            if (opts.captures == PHP_SNOBOL_CAPTURES_OFFSETS) {
-                zval pair;
-                array_init(&pair);
-                add_next_index_long(&pair, (zend_long)a);
-                add_next_index_long(&pair, (zend_long)(b - a));
-                snobol_assoc_zval(return_value, key, strlen(key), &pair);
-                zval_ptr_dtor(&pair);
-            } else {
-                add_assoc_stringl(return_value, key, vm.s + a, b - a);
-            }
-        } else {
-            add_assoc_null(return_value, key);
-        }
-    }
-    add_assoc_long(return_value, "_match_len",
-                   (zend_long)(match_result.match_end - match_result.match_start));
-
-    if (eb.buf) {
-        add_assoc_stringl(return_value, "_output", eb.buf, eb.len);
-        efree(eb.buf);
-    } else {
-        add_assoc_string(return_value, "_output", "");
-    }
-
-    /* Attach VM metrics for observability (opt-in via opts.metrics) */
-    if (opts.metrics) {
-        zval metrics;
-        array_init(&metrics);
-        add_assoc_long(&metrics, "choice_push_count", (zend_long)vm.choice_push_count);
-        add_assoc_long(&metrics, "choice_allocated", (zend_long)vm.choice_allocated);
-        add_assoc_long(&metrics, "choice_peak_depth", (zend_long)vm.choice_peak_depth);
-        add_assoc_long(&metrics, "choice_peak_memory", (zend_long)vm.choice_peak_memory);
-        snobol_assoc_zval(return_value, "_metrics", 8, &metrics);
-        zval_ptr_dtor(&metrics);
-    }
-
-#ifdef SNOBOL_DYNAMIC_PATTERN
-    vm_free_tables(&vm);
-    if (vm.dyn_cache) {
-        dynamic_pattern_cache_destroy(vm.dyn_cache);
-    }
-    if (vm.dyn_pending_source) {
-        efree(vm.dyn_pending_source);
-    }
-    if (vm.dyn_pending_bc) {
-        efree(vm.dyn_pending_bc);
-    }
-#endif
-
-    SNOBOL_LOG("Snobol_Pattern::match: DONE");
+    RETURN_FALSE;
 }
 
 PHP_METHOD(Snobol_Pattern, subst) {

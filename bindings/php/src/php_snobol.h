@@ -98,4 +98,14 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
                                zval *result,
                                const php_snobol_match_options_t *opts);
 
+/* Anchored first-match via persistent search state.
+ * Routes Pattern::match() through the tier dispatch + prefilter path,
+ * reusing the cached VM, DFA, and range_meta on intern->search_state.
+ * Returns true and populates result on success; false on no match.
+ * The literal fast path is handled separately by the caller. */
+bool php_snobol_do_match(snobol_pattern_t *intern,
+                          const char *subject_val, size_t subject_len,
+                          zval *result,
+                          const php_snobol_match_options_t *opts);
+
 #endif /* PHP_SNOBOL_H */

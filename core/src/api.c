@@ -835,6 +835,105 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
 }
 
 /* ---------------------------------------------------------------------------
+ * Stateful anchored search
+ *
+ * Identical to snobol_pattern_search_ex() but uses snobol_search_exec_anchored
+ * so the match must start at offset 0 (SNOBOL-style anchored match).
+ * Reuses the same persistent VM, DFA, range_meta, and output buffer.
+ * ---------------------------------------------------------------------------
+ */
+snobol_match_t *snobol_pattern_search_ex_anchored(
+    snobol_pattern_search_state_t *state, const char *subject,
+    size_t subject_len) {
+  if (!state || !subject)
+    return NULL;
+
+  /* Lazy init: output buffer on first call */
+  if (!state->buf_inited) {
+    snobol_buf_init(&state->out_buf);
+    state->buf_inited = true;
+  }
+
+  if (!state->vm_inited) {
+    memset(&state->vm, 0, sizeof(VM));
+    state->vm.bc = (uint8_t *)state->bc;
+    state->vm.bc_len = state->bc_len;
+    state->vm.pattern = state->pattern;
+    state->vm.range_meta = state->range_meta;
+    state->vm.range_meta_count = state->range_meta_count;
+    state->vm.out = &state->out_buf;
+    state->vm_inited = true;
+  }
+
+  /* Free output/captures from previous call */
+  if (state->match.output) {
+    snobol_free(state->match.output);
+    state->match.output = NULL;
+    state->match.output_len = 0;
+  }
+  for (int i = 0; i < API_MAX_VARS; i++) {
+    if (state->match.var_values[i]) {
+      snobol_free(state->match.var_values[i]);
+      state->match.var_values[i] = NULL;
+      state->match.var_lens[i] = 0;
+    }
+  }
+  state->match.success = false;
+  state->match.var_count = 0;
+
+  /* Reset out_buf length (keeps capacity) */
+  state->out_buf.len = 0;
+  if (state->out_buf.cap > 0 && state->out_buf.data)
+    state->out_buf.data[0] = '\0';
+
+  /* Build and cache DFA for automaton-eligible patterns */
+  snobol_dfa_t *dfa = NULL;
+  if (state->meta.automaton_eligible) {
+    dfa = state->dfa;
+    if (!dfa) {
+      dfa = build_dfa(state->bc, state->bc_len, &state->vm);
+      if (dfa)
+        state->dfa = dfa;
+    }
+  }
+
+  /* Build and cache SIMD NFA */
+  if (!state->nfa && state->meta.simd_eligible)
+    state->nfa = build_nfa_masks_alloc(state->bc, state->bc_len, &state->vm);
+  state->vm.simd_nfa = state->nfa;
+
+  /* Anchored search — must start at offset 0 */
+  snobol_search_result_t sr;
+  bool ok = snobol_search_exec_anchored(&state->vm, subject, subject_len,
+                                        &state->meta, dfa, &sr, NULL);
+  state->match.success = ok;
+  state->match.position = sr.match_start;
+  state->match.length = sr.match_end - sr.match_start;
+
+  if (ok && state->out_buf.len > 0) {
+    state->match.output = (char *)snobol_malloc(state->out_buf.len + 1);
+    if (state->match.output) {
+      memcpy(state->match.output, state->out_buf.data, state->out_buf.len);
+      state->match.output[state->out_buf.len] = '\0';
+      state->match.output_len = state->out_buf.len;
+    }
+  }
+
+  int n = (int)state->vm.var_count;
+  if (n > API_MAX_VARS)
+    n = API_MAX_VARS;
+  state->match.var_count = n;
+  /* Anchored: start_offset is always 0, so captures are subject-absolute */
+  for (int i = 0; i < n; i++) {
+    size_t vs = state->vm.var_start[i];
+    size_t ve = state->vm.var_end[i];
+    match_store_capture(&state->match, subject, i, vs, ve, subject_len);
+  }
+
+  return &state->match;
+}
+
+/* ---------------------------------------------------------------------------
  * Batch-search API
  *
  * Finds all non-overlapping matches in a single pass by inlining the search

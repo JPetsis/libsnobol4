@@ -525,6 +525,25 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
                                          size_t start_offset);
 
 /**
+ * @brief Stateful anchored search that reuses VM, DFA, and range_meta.
+ *
+ * Identical to snobol_pattern_search_ex() but calls
+ * snobol_search_exec_anchored() internally so the match MUST start at
+ * offset 0 (SNOBOL-style anchored match).  Intended for Pattern::match().
+ *
+ * @param[in,out] state       Search state created by
+ *                            snobol_pattern_search_state_create().
+ * @param[in]     subject     Subject string (UTF-8).
+ * @param[in]     subject_len Byte length of @p subject.
+ * @return Pointer to the internal match result owned by @p state, valid
+ *         until the next call on the same state or state destruction.
+ *         The caller must NOT free this pointer.
+ */
+snobol_match_t *snobol_pattern_search_ex_anchored(
+    snobol_pattern_search_state_t *state, const char *subject,
+    size_t subject_len);
+
+/**
  * @brief Stateful batch search that reuses VM, range_meta, and (for
  *        automaton-eligible patterns) the DFA/trie/SIMD-NFA caches across
  *        calls.
