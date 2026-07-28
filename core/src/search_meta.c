@@ -1026,6 +1026,8 @@ static inline void fusion_bitmap_invert(uint8_t bm[32]) {
   memset(bm + 16, 0xFF, 16);
 }
 
+/* check_fusion_eligible uses snobol_fusion_free in error paths */
+
 static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
                                               const snobol_search_meta_t *meta) {
   if (!bc || bc_len < 2)
@@ -1067,12 +1069,12 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
       break;
 
     if (op == OP_FAIL || op == OP_ABORT) {
-      snobol_free(fusion);
+      snobol_fusion_free(fusion);
       return NULL;
     }
 
     if (fusion->count >= MAX_FUSION_SEGMENTS) {
-      snobol_free(fusion);
+      snobol_fusion_free(fusion);
       return NULL;
     }
 
@@ -1081,13 +1083,13 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
     switch (op) {
       case OP_LIT: {
         if (ip + 9 > bc_len) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint32_t lit_off = search_read_u32(bc, ip + 1);
         uint32_t lit_len = search_read_u32(bc, ip + 5);
         if (lit_off >= bc_len || lit_off + lit_len > bc_len) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         if (lit_len == 0) {
@@ -1104,19 +1106,19 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
 
       case OP_SPAN: {
         if (ip + 3 > bc_len) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint16_t set_id = search_read_u16(bc, ip + 1);
         uint16_t count = 0, ci = 0;
         const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
         if (!ranges) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint64_t abm[2] = {0, 0};
         if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         seg->type = FUSION_RUN;
@@ -1129,19 +1131,19 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
 
       case OP_ANY: {
         if (ip + 3 > bc_len) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint16_t set_id = search_read_u16(bc, ip + 1);
         uint16_t count = 0, ci = 0;
         const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
         if (!ranges) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint64_t abm[2] = {0, 0};
         if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         seg->type = FUSION_CHAR;
@@ -1153,19 +1155,19 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
 
       case OP_NOTANY: {
         if (ip + 3 > bc_len) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint16_t set_id = search_read_u16(bc, ip + 1);
         uint16_t count = 0, ci = 0;
         const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
         if (!ranges) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint64_t abm[2] = {0, 0};
         if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         seg->type = FUSION_CHAR;
@@ -1178,19 +1180,19 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
 
       case OP_BREAK: {
         if (ip + 3 > bc_len) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint16_t set_id = search_read_u16(bc, ip + 1);
         uint16_t count = 0, ci = 0;
         const uint8_t *ranges = get_ranges_ptr(&tmp_vm, set_id, &count, &ci);
         if (!ranges) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint64_t abm[2] = {0, 0};
         if (!ranges_to_ascii_bitmap(ranges, count, abm)) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         seg->type = FUSION_RUN;
@@ -1204,13 +1206,13 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
 
       case OP_SPLIT: {
         if (ip + 9 > bc_len) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         uint32_t branch_a = search_read_u32(bc, ip + 1);
         uint32_t branch_b = search_read_u32(bc, ip + 5);
         if (branch_a >= bc_len || branch_b >= bc_len) {
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         
@@ -1218,6 +1220,8 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
         seg->alt.alt_count = 0;
         memset(seg->alt.alts, 0, sizeof(seg->alt.alts));
         memset(seg->alt.alt_lens, 0, sizeof(seg->alt.alt_lens));
+        fusion->count++;
+        uint32_t seg_idx = fusion->count - 1;
         
         uint32_t branches[2] = {branch_a, branch_b};
         for (int b = 0; b < 2; b++) {
@@ -1226,10 +1230,7 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
               (snobol_fusion_segment_t *)snobol_malloc(
                   MAX_FUSION_SEGMENTS * sizeof(snobol_fusion_segment_t));
           if (!alt_segs) {
-            for (uint32_t k = 0; k < seg->alt.alt_count; k++) {
-              snobol_free(seg->alt.alts[k]);
-            }
-            snobol_free(fusion);
+            snobol_fusion_free(fusion);
             return NULL;
           }
           
@@ -1386,10 +1387,7 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
           
           if (!alt_valid || alt_count == 0) {
             snobol_free(alt_segs);
-            for (uint32_t k = 0; k < seg->alt.alt_count; k++) {
-              snobol_free(seg->alt.alts[k]);
-            }
-            snobol_free(fusion);
+            snobol_fusion_free(fusion);
             return NULL;
           }
           
@@ -1399,19 +1397,13 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
             seg->alt.alt_count++;
           } else {
             snobol_free(alt_segs);
-            for (uint32_t k = 0; k < seg->alt.alt_count; k++) {
-              snobol_free(seg->alt.alts[k]);
-            }
-            snobol_free(fusion);
+            snobol_fusion_free(fusion);
             return NULL;
           }
         }
         
         if (seg->alt.alt_count < 2) {
-          for (uint32_t k = 0; k < seg->alt.alt_count; k++) {
-            snobol_free(seg->alt.alts[k]);
-          }
-          snobol_free(fusion);
+          snobol_fusion_free(fusion);
           return NULL;
         }
         
@@ -1421,13 +1413,13 @@ static snobol_fusion_t *check_fusion_eligible(const uint8_t *bc, size_t bc_len,
       }
 
       default:
-        snobol_free(fusion);
+        snobol_fusion_free(fusion);
         return NULL;
     }
   }
 
   if (fusion->count < 2) {
-    snobol_free(fusion);
+    snobol_fusion_free(fusion);
     return NULL;
   }
 
