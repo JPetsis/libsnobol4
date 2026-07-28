@@ -1887,6 +1887,30 @@ void php_snobol_create_search_iterator(zval *return_value,
                                         size_t subject_len);
 
 /**
+ * Pattern::searchSplitGenerator(string $subject): Iterator
+ *
+ * Returns a SplitIterator that lazily yields segment strings — the C
+ * search loop advances only when the caller iterates.  Callers that
+ * break after N segments pay zero cost for the remaining delimiters.
+ * Uses snobol_pattern_search_next() internally for literal delimiters.
+ */
+PHP_METHOD(Snobol_Pattern, searchSplitGenerator) {
+    zend_string *subject;
+    ZEND_PARSE_PARAMETERS_START(1,1)
+        Z_PARAM_STR(subject)
+    ZEND_PARSE_PARAMETERS_END();
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+    if (!intern->bc || intern->bc_len == 0) {
+        zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
+        RETURN_FALSE;
+    }
+
+    php_snobol_create_split_iterator(return_value, intern,
+                                      ZSTR_VAL(subject), ZSTR_LEN(subject));
+}
+
+/**
  * Pattern::searchAllGenerator(string $subject): Generator
  *
  * Returns a SearchIterator that lazily yields match results — the C
@@ -1931,6 +1955,7 @@ static const zend_function_entry snobol_pattern_methods[] = {
     PHP_ME(Snobol_Pattern, searchSplitCuts, ai_searchSplitCuts, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, searchReplace, ai_searchReplace, ZEND_ACC_PUBLIC)
     PHP_ME(Snobol_Pattern, searchAllGenerator, ai_searchAllGenerator, ZEND_ACC_PUBLIC)
+    PHP_ME(Snobol_Pattern, searchSplitGenerator, ai_searchAllGenerator, ZEND_ACC_PUBLIC)
     PHP_FE_END
 };
 

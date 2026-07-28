@@ -95,6 +95,12 @@ void php_snobol_create_search_iterator(zval *return_value,
                                         snobol_pattern_t *pattern,
                                         const char *subject,
                                         size_t subject_len);
+void php_snobol_create_split_iterator(zval *return_value,
+                                       snobol_pattern_t *pattern,
+                                       const char *subject,
+                                       size_t subject_len);
+void snobol_split_iterator_minit(void);
+extern zend_class_entry *snobol_split_iterator_ce;
 
 /* Core search loop used by Pattern::searchAll and PatternHelper::matchAll */
 void php_snobol_do_search_all(snobol_pattern_t *intern,

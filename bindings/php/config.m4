@@ -44,6 +44,7 @@ if test "$PHP_SNOBOL" != "no"; then
     src/snobol_pattern_cache_php.c
     src/snobol_pattern_helper_php.c
     src/snobol_search_iterator_php.c
+    src/snobol_split_iterator_php.c
     core_amalgam.c
   "
 

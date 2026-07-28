@@ -375,4 +375,64 @@ class BindingOptimizationTest extends TestCase
         $this->assertSame('the', $parts[0]);
         $this->assertSame('walk', $parts[1]);
     }
+
+    /* ============================================================
+     *  11. Lazy split iterator (P4)
+     * ============================================================ */
+
+    public function testSearchSplitGeneratorProducesSegments(): void
+    {
+        $p = Pattern::fromString("','");
+        $result = [];
+        foreach ($p->searchSplitGenerator("a,b,c") as $i => $seg) {
+            $result[$i] = $seg;
+        }
+        $this->assertCount(3, $result);
+        $this->assertSame('a', $result[0]);
+        $this->assertSame('b', $result[1]);
+        $this->assertSame('c', $result[2]);
+    }
+
+    public function testSearchSplitGeneratorEarlyBreak(): void
+    {
+        $p = Pattern::fromString("','");
+        $count = 0;
+        foreach ($p->searchSplitGenerator("w,x,y,z") as $seg) {
+            $count++;
+            if ($count >= 2) break;
+        }
+        $this->assertSame(2, $count);
+    }
+
+    public function testSearchSplitGeneratorNoDelimiter(): void
+    {
+        $p = Pattern::fromString("','");
+        $result = [];
+        foreach ($p->searchSplitGenerator("hello") as $seg) {
+            $result[] = $seg;
+        }
+        $this->assertCount(1, $result);
+        $this->assertSame('hello', $result[0]);
+    }
+
+    public function testSearchSplitGeneratorEmptySubject(): void
+    {
+        $p = Pattern::fromString("','");
+        $result = [];
+        foreach ($p->searchSplitGenerator("") as $seg) {
+            $result[] = $seg;
+        }
+        $this->assertCount(0, $result);
+    }
+
+    public function testSearchSplitGeneratorEquivalence(): void
+    {
+        $p = Pattern::fromString("','");
+        $eager = $p->searchSplit("a,b,c");
+        $lazy = [];
+        foreach ($p->searchSplitGenerator("a,b,c") as $seg) {
+            $lazy[] = $seg;
+        }
+        $this->assertSame($eager, $lazy);
+    }
 }
