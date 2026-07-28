@@ -59,6 +59,10 @@ typedef struct snobol_pattern {
     /* Persistent search state reused across calls, avoiding per-call
      * state create/destroy and DFA rebuild.  Lazily created. */
     snobol_pattern_search_state_t *search_state;
+    /* Cached eval callbacks registered via setEvalCallbacks().
+     * Stored as a PHP array mapping fn_id => callable.
+     * Initialized to ZVAL_UNDEF; freed in dtor. */
+    zval eval_callbacks;
     zend_object std;
 } snobol_pattern_t;
 

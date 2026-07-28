@@ -721,6 +721,17 @@ void snobol_pattern_search_state_set_trie_cache(
     state->vm.trie_cache = trie;
 }
 
+void snobol_pattern_search_state_set_eval_fn(
+    snobol_pattern_search_state_t *state,
+    bool (*eval_fn)(int fn_id, const char *s, size_t start, size_t end,
+                    void *userdata),
+    void *eval_udata) {
+  if (state) {
+    state->vm.eval_fn = eval_fn;
+    state->vm.eval_udata = eval_udata;
+  }
+}
+
 snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
                                          const char *subject,
                                          size_t subject_len,

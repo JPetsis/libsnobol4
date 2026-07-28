@@ -490,6 +490,23 @@ void snobol_pattern_search_state_set_trie_cache(
     snobol_pattern_search_state_t *state, snobol_auto_trie_t *trie);
 
 /**
+ * @brief Set the EVAL callback function on a search state's persistent VM.
+ *
+ * Once set, the callback persists for the lifetime of the state, avoiding
+ * per-call allocation.  Pass NULL (the default) to clear.
+ *
+ * @param[in] state        Search state created by
+ *                         snobol_pattern_search_state_create().
+ * @param[in] eval_fn      EVAL callback (NULL to clear).
+ * @param[in] eval_userdata Opaque pointer passed to @p eval_fn.
+ */
+void snobol_pattern_search_state_set_eval_fn(
+    snobol_pattern_search_state_t *state,
+    bool (*eval_fn)(int fn_id, const char *s, size_t start, size_t end,
+                    void *userdata),
+    void *eval_udata);
+
+/**
  * @brief Destroy a search state object. NULL-safe.
  *
  * Releases the cached VM, output buffer, match result, and the

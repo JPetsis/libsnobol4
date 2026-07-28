@@ -70,6 +70,10 @@ static void php_snobol_pattern_dtor(zend_object *object) {
         snobol_pattern_search_state_destroy(intern->search_state);
         intern->search_state = NULL;
     }
+    if (Z_TYPE(intern->eval_callbacks) != IS_UNDEF) {
+        zval_ptr_dtor(&intern->eval_callbacks);
+        ZVAL_UNDEF(&intern->eval_callbacks);
+    }
 
     zend_object_std_dtor(object);
     SNOBOL_LOG("php_snobol_pattern_dtor: done");
@@ -336,6 +340,49 @@ static void php_snobol_emit_cb(const char *data, size_t len, void *udata) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Eval callback dispatcher.
+ *
+ * Called by the VM when it encounters an OP_EVAL instruction.
+ * Looks up fn_id in the pattern's cached eval_callbacks array,
+ * calls the registered PHP callable with the matched substring,
+ * and returns true/false accordingly.
+ *
+ * The userdata pointer carries the snobol_pattern_t internals so
+ * we can access the cached callbacks without per-call allocation.
+ * --------------------------------------------------------------------------- */
+static bool php_snobol_eval_cb(int fn_id, const char *s, size_t start,
+                                size_t end, void *userdata) {
+    snobol_pattern_t *intern = (snobol_pattern_t *)userdata;
+    if (!intern || Z_TYPE(intern->eval_callbacks) == IS_UNDEF)
+        return false;
+
+    zval *cb = zend_hash_index_find(Z_ARRVAL(intern->eval_callbacks),
+                                     (zend_ulong)fn_id);
+    if (!cb || !zend_is_callable(cb, 0, NULL))
+        return false;
+
+    /* Extract the substring that matched the EVAL operand */
+    size_t sub_len = (end > start) ? end - start : 0;
+    zval retval;
+    zval args[1];
+    if (sub_len > 0 && start < end) {
+        ZVAL_STRINGL(&args[0], s + start, sub_len);
+    } else {
+        ZVAL_EMPTY_STRING(&args[0]);
+    }
+
+    if (call_user_function(NULL, NULL, cb, &retval, 1, args) != SUCCESS) {
+        zval_ptr_dtor(&args[0]);
+        return false;
+    }
+
+    bool ok = zend_is_true(&retval);
+    zval_ptr_dtor(&retval);
+    zval_ptr_dtor(&args[0]);
+    return ok;
+}
+
+/* ---------------------------------------------------------------------------
  * Anchored first-match via persistent search state.
  *
  * Routes Pattern::match() through the tier dispatch + prefilter path,
@@ -366,6 +413,15 @@ bool php_snobol_do_match(snobol_pattern_t *intern,
     }
     if (intern->trie_cache) {
         snobol_pattern_search_state_set_trie_cache(state, intern->trie_cache);
+    }
+
+    /* Wire up cached eval callbacks on the persistent VM so the
+     * callback function pointer persists across calls (no per-call
+     * allocation).  The userdata is the PHP pattern struct itself,
+     * which holds the cached callbacks array. */
+    if (Z_TYPE(intern->eval_callbacks) != IS_UNDEF) {
+        snobol_pattern_search_state_set_eval_fn(
+            state, php_snobol_eval_cb, intern);
     }
 
     /* Anchored search via persistent state — reuses VM, DFA, range_meta,
@@ -688,7 +744,23 @@ PHP_METHOD(Snobol_Pattern, subst) {
 }
 
 PHP_METHOD(Snobol_Pattern, setEvalCallbacks) {
-    SNOBOL_LOG("Snobol_Pattern::setEvalCallbacks: CALLED");
+    zval *callbacks;
+    ZEND_PARSE_PARAMETERS_START(1,1)
+        Z_PARAM_ARRAY(callbacks)
+    ZEND_PARSE_PARAMETERS_END();
+
+    snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+
+    /* Free any previously cached callbacks */
+    if (Z_TYPE(intern->eval_callbacks) != IS_UNDEF)
+        zval_ptr_dtor(&intern->eval_callbacks);
+
+    /* Store a copy — the array persists on the pattern struct and is
+     * reused across match/search calls without re-allocation. */
+    ZVAL_COPY(&intern->eval_callbacks, callbacks);
+
+    SNOBOL_LOG("Snobol_Pattern::setEvalCallbacks: stored %d entries",
+               (int)zend_hash_num_elements(Z_ARRVAL_P(callbacks)));
     RETURN_TRUE;
 }
 
