@@ -74,6 +74,10 @@ comparisons against snobol anchored rows.
 | `tokenize_conv`            | `' '`                          | whitespace stream          | `snobol_pattern_match` loop         | pass  |
 | `tokenize_reuse`           | `' '`                          | whitespace stream          | `snobol_pattern_search_ex` loop      | pass  |
 | `tokenize_reuse_call`      | `' '`                          | whitespace stream          | `snobol_pattern_search` per call     | call  |
+| `tokenize_fastpath`        | `' '`                          | whitespace stream          | `snobol_pattern_search_ex` (short)   | call  |
+| `tokenize_next`            | `' '`                          | whitespace stream          | `snobol_pattern_search_next` loop    | call  |
+| `tokenize_next_pass`       | `' '`                          | whitespace stream          | `snobol_pattern_search_next` pass    | pass  |
+| `tokenize_memchr`          | `' '`                          | whitespace stream          | bare `memchr` loop                   | call  |
 
 Scenarios ending in `_all` run each iteration through `snobol_pattern_search_batch_ex`
 with a persistent state, so the DFA/range_meta caches are built once per scenario

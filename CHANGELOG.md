@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **C test suite** (`tests/c/test_api_search_next.c`): 5 scenarios:
   single-byte advancing, multi-byte literal, non-literal fallback,
   NULL guards, start_offset past end.
+- **`Snobol\SplitIterator`** (`bindings/php/src/snobol_split_iterator_php.c`):
+  Lazy split iterator implementing `Iterator`. Calls
+  `snobol_pattern_search_next()` incrementally — one segment per
+  `next()` call. Early break after N segments pays zero cost for
+  remaining delimiters. Accessible via `Pattern::searchSplitGenerator()`.
 
 #### Changed
 

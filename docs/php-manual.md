@@ -975,6 +975,22 @@ foreach ($it as $match) {
 
 The SearchIterator is ideal for "find first N" patterns. For full iteration, the flat array mode of `searchAll()` is faster because it avoids per-match PHP dispatch overhead.
 
+### `Pattern::searchSplitGenerator()` — Lazy Split Iteration
+
+Returns a `Snobol\SplitIterator` that lazily yields segment strings one at a time. Each segment is materialized as a `zend_string` only when the caller's iteration reaches it — callers that break after N segments pay zero cost for the remaining delimiters. Uses `snobol_pattern_search_next()` internally for literal delimiters (~8 ns/call).
+
+```php
+$p = Pattern::fromString("','");
+$it = $p->searchSplitGenerator("a,b,c");
+foreach ($it as $i => $segment) {
+    echo "$i: $segment\n";  // "0: a", "1: b", "2: c"
+    // break after first 2 segments — the 3rd is never computed
+    if ($i >= 1) break;
+}
+```
+
+The SplitIterator is ideal for "find first N" split results. For full iteration that processes all segments, the eager `searchSplit()` is faster because it avoids per-segment PHP dispatch overhead.
+
 ### `Pattern::searchSplit()`
 
 Split subject at matches, returning non-matching segments.
@@ -1078,6 +1094,8 @@ $result = PatternHelper::replace($p, "new", "old text with old words");
 ### `Snobol\SearchIterator` — Lazy Match Iteration
 
 `SearchIterator` implements PHP's `Iterator` interface for lazy iteration over search matches. Created implicitly by `Pattern::searchAllGenerator()`.
+
+`SplitIterator` implements PHP's `Iterator` interface for lazy iteration over split segments. Created implicitly by `Pattern::searchSplitGenerator()`. Internally uses `snobol_pattern_search_next()` for literal delimiters.
 
 ```php
 class SearchIterator implements Iterator {
