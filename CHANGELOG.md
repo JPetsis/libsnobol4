@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### PHP Match Routing and Per-Call Optimization
+
+#### Added
+
+- **`snobol_pattern_search_ex_anchored()`** (`core/src/api.c`, `core/include/snobol/snobol.h`): Stateful anchored search entry point that reuses the persistent VM, DFA, range_meta, and output buffer across calls. Match must start at offset 0 (SNOBOL-style anchored semantics). Intended for `Pattern::match()`.
+- **`php_snobol_do_match()`** (`bindings/php/src/snobol_pattern.c`, `bindings/php/src/php_snobol.h`): Routes `Pattern::match()` through the search-tier dispatch path (the same pipeline used by `searchAll`/`searchSplit`), adding the required-byte prefilter, search-VM accelerators, and automaton/Tier 7 offload to the PHP first-match path.
+- **`snobol_pattern_search_state_set_eval_fn()`** (`core/src/api.c`, `core/include/snobol/snobol.h`): Stores the EVAL callback and userdata on the state's persistent VM, avoiding per-call callback allocation.
+- **`eval_callbacks` cache on PHP `snobol_pattern_t`** (`bindings/php/src/php_snobol.h`, `bindings/php/src/snobol_pattern.c`): `setEvalCallbacks()` now stores the callbacks array on the pattern; the callback function pointer is passed to the persistent VM via the state setter, eliminating per-call allocation.
+
+#### Changed
+
+- **`Pattern::match()` now uses persistent search state** (`bindings/php/src/snobol_pattern.c`): The match method no longer creates a stack VM, EmitBuf, dyn_cache, or table binding per call. Instead it calls `php_snobol_do_match()` which reuses `intern->search_state` and the tier dispatch. Simple patterns (span, break, alternation, automaton) improved from ~100–1,000× PHP/C ratio to 1.6–3.2×. The existing `memcmp` literal fast path is preserved.
+- **`setEvalCallbacks()` stores the callbacks array** (`bindings/php/src/snobol_pattern.c`): Previously a no-op; now saves the array on the pattern struct for use by the persistent VM's eval callback dispatcher.
+
 ### Probe Truth and Performance Fairness
 
 #### Added
