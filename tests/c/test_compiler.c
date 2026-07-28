@@ -11,55 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "snobol/ast.h"
-#include "snobol/compiler.h"
-#include "snobol/snobol.h"
-#include "snobol/vm.h"
+#include "test_helpers.h"
 
 /* External test framework functions */
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
-
-/* ---------------------------------------------------------------------------
- * Helper: compile an AST, run the VM, return success + capture registers.
- * ---------------------------------------------------------------------------
- */
-static bool run_ast_pattern(ast_node_t *ast, const char *subject,
-                            size_t sub_len, int *out_match_len,
-                            int *out_cap_count) {
-  uint8_t *bc = NULL;
-  size_t bc_len = 0;
-  if (compile_ast_to_bytecode_c(ast, false, &bc, &bc_len) != 0) {
-    return false;
-  }
-  if (!bc || bc_len == 0) {
-    if (bc)
-      free(bc);
-    return false;
-  }
-
-  VM vm = {0};
-  vm.bc = bc;
-  vm.bc_len = bc_len;
-  vm.s = subject;
-  vm.len = sub_len;
-
-  snobol_buf out_buf = {0};
-  snobol_buf_init(&out_buf);
-  vm.out = &out_buf;
-
-  bool ok = vm_run(&vm);
-
-  if (out_match_len)
-    *out_match_len = (int)vm.pos;
-  if (out_cap_count)
-    *out_cap_count = (int)vm.var_count;
-
-  snobol_buf_free(&out_buf);
-  vm_free_labels(&vm);
-  free(bc);
-  return ok;
-}
 
 void test_compiler_suite(void) {
   test_suite("Compiler Tests");

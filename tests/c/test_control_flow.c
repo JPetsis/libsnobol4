@@ -18,6 +18,7 @@
 #include "snobol/lexer.h"
 #include "snobol/parser.h"
 #include "snobol/vm.h"
+#include "test_helpers.h"
 
 /* External test framework functions */
 extern void test_suite(const char *name);
@@ -334,22 +335,9 @@ static void test_label_pattern_execution(void) {
   ast_node_t *body = snobol_ast_create_lit("hello", 5);
   ast_node_t *label_node = snobol_ast_create_label("done", body);
 
-  uint8_t *bc = NULL;
-  size_t bc_len = 0;
-  int rc = compile_ast_to_bytecode_c(label_node, false, &bc, &bc_len);
-
-  test_assert(rc == 0, "simple label pattern compiles successfully");
-
-  if (rc == 0 && bc) {
-    VM vm = {0};
-    vm.bc = bc;
-    vm.bc_len = bc_len;
-    vm.s = "hello world";
-    vm.len = 11;
-    bool matched = vm_exec(&vm);
-    test_assert(matched, "simple label pattern matches 'hello' in subject");
-    compiler_free(bc);
-  }
+  int match_len = 0, cap_count = 0;
+  bool ok = run_ast_pattern(label_node, "hello world", 11, &match_len, &cap_count);
+  test_assert(ok, "simple label pattern matches 'hello' in subject");
   snobol_ast_free(label_node);
 }
 
@@ -366,31 +354,13 @@ static void test_forward_goto_execution(void) {
   parts[2] = snobol_ast_create_label("done", snobol_ast_create_lit("B", 1));
   ast_node_t *root = snobol_ast_create_concat(parts, 3);
 
-  uint8_t *bc = NULL;
-  size_t bc_len = 0;
-  int rc = compile_ast_to_bytecode_c(root, false, &bc, &bc_len);
+  int match_len = 0, cap_count = 0;
+  bool ok = run_ast_pattern(root, "AB", 2, &match_len, &cap_count);
+  test_assert(ok, "forward goto pattern matches 'AB'");
 
-  test_assert(rc == 0, "forward goto pattern compiles successfully");
+  ok = run_ast_pattern(root, "AC", 2, &match_len, &cap_count);
+  test_assert(!ok, "forward goto pattern rejects 'AC'");
 
-  if (rc == 0 && bc) {
-    VM vm = {0};
-
-    /* Should match "AB" */
-    vm.bc = bc;
-    vm.bc_len = bc_len;
-    vm.s = "AB";
-    vm.len = 2;
-    bool matched = vm_exec(&vm);
-    test_assert(matched, "forward goto pattern matches 'AB'");
-
-    /* Should not match "AC" (B expected after goto) */
-    vm.s = "AC";
-    vm.len = 2;
-    matched = vm_exec(&vm);
-    test_assert(!matched, "forward goto pattern rejects 'AC'");
-
-    compiler_free(bc);
-  }
   snobol_ast_free(root);
 }
 
