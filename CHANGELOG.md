@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Single-Literal Tokenize Fast Path
+
+#### Added
+
+- **Short-circuit in `snobol_search_exec()`** (`core/src/search_tiers.c`):
+  Detects single-byte literal patterns (`meta->is_literal_only &&
+  meta->required_lit_len == 1`) and handles them via direct `memchr`,
+  bypassing the prefilter, tier dispatch, and `search_literal_only`
+  entirely. `tokenize_reuse_call` dropped 160→91 ns (—43%);
+  `tokenize_reuse` pass dropped 84,369→47,176 ns (—44%). The fast path
+  is skipped when a diagnostics struct is requested.
+
+#### Changed
+
+- **`run_tokenize_fastpath` probe scenario** (`bench/c/bench_probe.c`):
+  C-side probe row that exercises the new short-circuit through the
+  production `snobol_pattern_search_ex` API. Reports ~91 ns/call.
+
 ### PHP Match Routing and Per-Call Optimization
 
 #### Added

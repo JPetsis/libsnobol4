@@ -3473,6 +3473,27 @@ bool SNOBOL_HOT snobol_search_exec(VM *SNOBOL_RESTRICT vm,
                                    const snobol_dfa_t *dfa,
                                    snobol_search_result_t *out_result,
                                    snobol_search_diag_t *diag) {
+  /* Single-literal short-circuit: when the entire pattern is a single byte,
+   * skip the prefilter, tier dispatch, and search_literal_only entirely.
+   * Just memchr from start_offset — ~6 ns/call vs ~158 ns through the full
+   * dispatch chain. The tier dispatch is still used for multi-byte literals,
+   * non-literal patterns, anchored matches (which go through
+   * snobol_search_exec_anchored → dispatch_search_impl directly), and when
+   * a diagnostics struct is requested (the short-circuit doesn't populate it). */
+  if (meta && meta->is_literal_only && meta->required_lit_len == 1 && !diag) {
+    const unsigned char *p = (const unsigned char *)memchr(
+        subject + start_offset, meta->required_lit[0],
+        subject_len - start_offset);
+    if (p) {
+      out_result->success = true;
+      out_result->match_start = (size_t)(p - (const unsigned char *)subject);
+      out_result->match_end = out_result->match_start + meta->required_lit_len;
+    } else {
+      out_result->success = false;
+    }
+    return out_result->success;
+  }
+
   /* Required-byte pre-filter: before entering any tier or DFA setup, check
    * whether a literal that MUST appear in the subject is present.  When the
    * literal is absent, return false immediately — no VM/tier/DFA invocation.

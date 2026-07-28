@@ -366,6 +366,43 @@ static void run_tokenize_call(int64_t iters, probe_result_t *r) {
     run_tokenize_common(iters, r, false);
 }
 
+/* Production API fast path: same tokenize loop as run_tokenize_common but
+ * exercises the single-literal short-circuit in snobol_search_exec().
+ * Reports as 'call' unit, matching tokenize_reuse_call and tokenize_memchr. */
+static void run_tokenize_fastpath(int64_t iters, probe_result_t *r) {
+    snobol_context_t *ctx = snobol_context_create();
+    snobol_pattern_t *pat = compile_or_die(ctx, "' '", 3);
+    size_t slen = strlen(SUBJECT_WHITESPACE);
+    const uint8_t *bc = snobol_pattern_get_bc(pat);
+    size_t bc_len = snobol_pattern_get_bc_len(pat);
+    snobol_pattern_search_state_t *state =
+        snobol_pattern_search_state_create(bc, bc_len);
+    int64_t total_search_calls = 0;
+    int64_t start = bench_ns();
+    for (int64_t i = 0; i < iters && total_search_calls < (int64_t)1e9; i++) {
+        size_t pos = 0;
+        while (pos <= slen) {
+            snobol_match_t *m = snobol_pattern_search_ex(
+                state, SUBJECT_WHITESPACE, slen, pos);
+            total_search_calls++;
+            if (!snobol_match_success(m))
+                break;
+            pos = snobol_match_get_position(m) +
+                  snobol_match_get_length(m);
+        }
+    }
+    int64_t end = bench_ns();
+    r->iters = total_search_calls;
+    r->total_ns = end - start;
+    r->ns_per_iter = (total_search_calls > 0)
+                         ? (r->total_ns / total_search_calls)
+                         : 0;
+    capture_tiers(pat, slen, r);
+    snobol_pattern_search_state_destroy(state);
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+}
+
 /* Spike: bare memchr tokenize loop — no tier dispatch, no prefilter,
  * no search_evec.  Measures the irreducible cost of finding the next ' '
  * in the tokenize subject.  Gap vs tokenize_reuse_call (~160 ns) is the
@@ -1316,8 +1353,8 @@ int main(void) {
     printf("Tokenize uses %" PRId64 " outer iters (one full pass each).\n\n",
            tokenize_iters);
 
-    /* Total scenarios: 29 snobol + 9 PCRE2 (when available) = 38 */
-    probe_result_t results[38];
+    /* Total scenarios: 30 snobol + 9 PCRE2 (when available) = 39 */
+    probe_result_t results[39];
     memset(results, 0, sizeof(results));
 
     /* Run each scenario */
@@ -1353,6 +1390,7 @@ int main(void) {
         { "tokenize_conv",        run_tokenize_convenience,       tokenize_iters, "pass" },
         { "tokenize_reuse",        run_tokenize,                   tokenize_iters, "pass" },
         { "tokenize_reuse_call",   run_tokenize_call,              tokenize_iters, "call" },
+        { "tokenize_fastpath",     run_tokenize_fastpath,          tokenize_iters, "call" },
         { "tokenize_memchr",       run_tokenize_memchr,            tokenize_iters, "call" },
         { "residue_repeat",        run_residue_repeat,             iters,  "match" },
         { "residue_zero_width",    run_residue_zero_width,         iters,  "match" },
