@@ -243,10 +243,19 @@ jobs:
           try {
             Invoke-WebRequest -Uri $develUrl -OutFile devel.zip -MaximumRedirection 5
           } catch {
-            $fallbackName = "php-devel-pack-$($mm)-$($ts)Win32-$vsPack-x64.zip"
-            $fallbackUrl = "https://windows.php.net/downloads/releases/$fallbackName"
-            echo "⚠️  Exact devel pack not found, trying: $fallbackUrl"
-            Invoke-WebRequest -Uri $fallbackUrl -OutFile devel.zip -MaximumRedirection 5
+            # Fallback: query the releases page to find the latest devel pack
+            # for this major.minor version (e.g. "8.5").
+            $releases = (Invoke-WebRequest -Uri "https://windows.php.net/downloads/releases/" -UseBasicParsing).Content
+            $pattern = "php-devel-pack-$($mm)-(\d+)-$($ts)Win32-$vsPack-x64\.zip"
+            $matches = [regex]::Matches($releases, $pattern) | ForEach-Object { $_.Groups[0].Value }
+            if ($matches.Count -gt 0) {
+              $latest = $matches | Sort-Object -Descending | Select-Object -First 1
+              $fallbackUrl = "https://windows.php.net/downloads/releases/$latest"
+              echo "⚠️  Exact devel pack not found ($phpVer), using: $latest"
+              Invoke-WebRequest -Uri $fallbackUrl -OutFile devel.zip -MaximumRedirection 5
+            } else {
+              throw "No devel pack found for PHP $mm"
+            }
           }
           Expand-Archive devel.zip -DestinationPath php-dev
 
