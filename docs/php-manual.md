@@ -1392,6 +1392,7 @@ libsnobol4's search engine automatically selects the optimal matching strategy b
 | 7    | `AUTOMATON`  | ★★★★☆ | Tier 6 set, ASCII-only, no captures                 | DFA via powerset construction                     |
 | 8    | `GENERAL`    | ★★☆☆☆ | Any pattern                                         | Full VM (~2.5 KB) + start-byte bitmap             |
 | 9    | `SIMD_NFA`   | ★★★★☆ | Tier 6 set, ASCII-only, no captures, SIMD available | Vectorized NEON vqtbl1q_u8 / AVX2 vpshufb inner loop (cost-model selected) |
+| 10   | `FUSED_AUTOMATON` | ★★★★★ | Concat of fusible ops (LIT/SPAN/ANY/NOTANY/BREAK), no captures | Flat segment list execution (no VM, no bytecode dispatch) |
 
 ### What Triggers Each Tier
 
@@ -1406,6 +1407,7 @@ libsnobol4's search engine automatically selects the optimal matching strategy b
 - **Tier 7** — Tier 6-eligible pattern that is ASCII-only charclass and **capture-free**, and DFA powerset construction succeeds (< 4096 states). Only promoted when the pattern has `has_bmh_skip` (literal prefix ≥ 2 bytes) to avoid O(n²) per-position trial loop for 1-byte literals.
 - **Tier 8** — Everything else (fallback through full VM)
 - **Tier 9** — Single charclass op (SPAN/BREAK/ANY/NOTANY) + terminator, ASCII-only charclass, **capture-free**, and platform has AVX2/NEON.  Vectorized inner loop: NEON uses `vld1q_u8` + 256-byte membership table with `vqtbl1q_u8` lookup (16 bytes/cycle), AVX2 uses `vpshufb` + `vpmovmskb` (32 bytes/cycle). Tail bytes <16 (<32 for AVX2) fall through to scalar. Cached on the pattern search state (built once, reused across calls).
+- **Tier 10** — Concat of fusible ops (LIT/SPAN/ANY/NOTANY/BREAK) with no captures, EVAL, or side effects, and ≤32 segments. The pattern is compiled into a flat segment list at compile time and executed directly without VM overhead. Single-character alternations (e.g., `('-' | '/')`) are optimized to FUSION_CHAR by the compiler. Multi-character alternations with different lengths fall back to the VM.
 
 ### Performance Impact
 
@@ -1420,6 +1422,8 @@ BREAK(',') (match)                 Tier 0       ~110 ns
 Alternation (match)                Tier 4       ~90 ns
 Alt-of-literals (match)            Tier 5       ~60 ns
 Automaton pattern (match)          Tier 7       ~96 ns
+Fused concat (match)               Tier 10      ~50 ns
+Fused concat (unanchored)          Tier 10      ~150 ns
 SPAN('0-9') on 1KB digits          Tier 9       ~580 ns
 SPAN('0-9') on 1KB letters (miss)  Tier 9       ~619 ns
 SIMD NOTANY miss                   Tier 9       ~558 ns

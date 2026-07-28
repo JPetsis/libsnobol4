@@ -49,6 +49,7 @@ CORE_FILES=(
     "search_meta.c"
     "search_tiers.c"
     "search_simd.c"
+    "search_fusion.c"
     "api.c"
 )
 

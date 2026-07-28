@@ -47,5 +47,6 @@
 #include "../../core/src/search_meta.c"
 #include "../../core/src/search_tiers.c"
 #include "../../core/src/search_simd.c"
+#include "../../core/src/search_fusion.c"
 #include "../../core/src/api.c"
 

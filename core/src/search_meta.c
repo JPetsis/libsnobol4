@@ -2078,7 +2078,7 @@ static const tier_cost_coeff_t k_tier_cost[] = {
      * because per-byte work is identical (one bit-test) and the NFA path
      * covers ANY/NOTANY too. */
     {TIER_SIMD_NFA, 15, 16},
-    {TIER_FUSED_AUTOMATON, 50, 8},
+    {TIER_FUSED_AUTOMATON, 20, 8},
 };
 
 /* Score every eligible tier and return the cheapest. `dfa_available` gates the
@@ -2126,7 +2126,7 @@ snobol_search_tier_t select_tier_by_cost(const snobol_search_meta_t *meta,
         eligible = meta->simd_eligible && meta->ascii_class_only;
         break;
       case TIER_FUSED_AUTOMATON:
-        eligible = meta->fusion_eligible;
+        eligible = meta->fusion_eligible && !meta->has_literal_prefix;
         break;
       case TIER_GENERAL:
         eligible = true; /* always available as fallback */

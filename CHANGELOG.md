@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Pattern Fusion (Tier 10)
+
+#### Added
+
+- **`TIER_FUSED_AUTOMATON` (Tier 10)** (`core/include/snobol/search.h`, `core/src/search_fusion.c`): Compile-time pattern fusion for concat chains of compatible ops (LIT/SPAN/ANY/NOTANY/BREAK). The fusion pass recognizes fusible patterns during `snobol_search_derive_meta()` and compiles them into a flat segment list. The `exec_fusion()` engine walks the segment list directly — no VM, no bytecode dispatch, no choice stack. Expected 2-5× speedup for date/phone/key-value patterns vs VM execution.
+- **`snobol_fusion_segment_t` and `snobol_fusion_t`** (`core/include/snobol/search.h`): Fusion segment types (FUSION_LIT, FUSION_RUN, FUSION_CHAR, FUSION_ALT) and compiled fusion struct. Segment lists are heap-allocated and freed via `snobol_fusion_free()`.
+- **Fusion recognition in `check_fusion_eligible()`** (`core/src/search_meta.c`): Walks bytecode, identifies fusible concat patterns, builds 256-bit bitmap segment lists. Gates on `has_capture` (fusion doesn't support captures), `>32 segments` (complexity cap), and non-fusible ops (EVAL, DYNAMIC, etc.).
+- **`tier_fusion()` dispatch** (`core/src/search_fusion.c`): Anchored path runs `exec_fusion()` once at offset 0. Unanchored path iterates positions verifying with `exec_fusion()`. Wired into `tier_table[TIER_FUSED_AUTOMATON]` in `search_tiers.c`.
+- **Fusion cost model entry** (`core/src/search_meta.c`): `setup_ns=50, per_byte_div=8` in `k_tier_cost[]`. Added to `select_tier_by_cost()` eligibility switch.
+- **C test suite** (`tests/c/test_fusion_tier.c`): 7 test functions covering tier assignment, non-fusible patterns, anchored/unanchored execution, various segment types, and alternation patterns.
+
+#### Changed
+
+- **`snobol_search_meta_t`** (`core/include/snobol/search.h`): Added `fusion_eligible` bool and `fusion` pointer fields. Added `META_FUSION_ELIGIBLE` flag and `snobol_meta_fusion_eligible()` accessor macro.
+- **`snobol_search_derive_meta()`** (`core/src/search_meta.c`): Calls `check_fusion_eligible()` after SIMD eligibility check. Sets `tier = TIER_FUSED_AUTOMATON` when fusion is eligible. Gates on `has_capture` (fusion doesn't support captures).
+- **`snobol_search_meta_free()`** (`core/src/search_meta.c`): Frees fusion struct via `snobol_fusion_free()`.
+- **`snobol_search_executed_tier()`** (`core/src/search_tiers.c`): Reports `TIER_FUSED_AUTOMATON` when fusion is eligible.
+
 ### Lean Tokenize API
 
 #### Added

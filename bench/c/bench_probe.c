@@ -691,7 +691,21 @@ static void run_alt_literals_anchored(int64_t iters, probe_result_t *r) {
 
 static void run_automaton_anchored(int64_t iters, probe_result_t *r) {
     run_anchored_scenario("SPAN('abc') 'd'", 15, SUBJECT_AUTOMATON,
-                          strlen(SUBJECT_AUTOMATON), iters, r, true);
+                           strlen(SUBJECT_AUTOMATON), iters, r, true);
+}
+
+/* Fused concat anchored: SPAN('0-9') '-' SPAN('0-9') on matching subject.
+ * The fusion tier (Tier 10) executes this as a flat segment list — no VM,
+ * no bytecode dispatch, no choice stack. */
+static void run_fused_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("SPAN('0-9') '-' SPAN('0-9')", 27, "123-456",
+                          7, iters, r, true);
+}
+
+/* Fused concat anchored (fail): SPAN('0-9') '-' SPAN('0-9') on non-matching. */
+static void run_fused_fail_anchored(int64_t iters, probe_result_t *r) {
+    run_anchored_scenario("SPAN('0-9') '-' SPAN('0-9')", 27, "abc-def",
+                          7, iters, r, true);
 }
 
 /* ---------------------------------------------------------------------------
@@ -1419,8 +1433,8 @@ int main(void) {
     printf("Tokenize uses %" PRId64 " outer iters (one full pass each).\n\n",
            tokenize_iters);
 
-    /* Total scenarios: 32 snobol + 9 PCRE2 (when available) = 41 */
-    probe_result_t results[41];
+    /* Total scenarios: 34 snobol + 9 PCRE2 (when available) = 43 */
+    probe_result_t results[43];
     memset(results, 0, sizeof(results));
 
     /* Run each scenario */
@@ -1439,6 +1453,9 @@ int main(void) {
         { "alternation",         run_alternation_anchored,         iters, "match" },
         { "alt_literals",        run_alt_literals_anchored,        iters, "match" },
         { "automaton",           run_automaton_anchored,           iters, "match" },
+        /* Fused concat (Tier 10) */
+        { "fused_match",         run_fused_anchored,               iters, "match" },
+        { "fused_fail",          run_fused_fail_anchored,           iters, "match" },
         /* Convenience / search scenarios (first match per iteration) */
         { "alt_literals_conv",   run_alt_literals,                iters, "match" },
         { "alt_literals_search", run_alt_literals_search,         iters, "match" },
