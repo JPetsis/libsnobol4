@@ -322,4 +322,57 @@ class BindingOptimizationTest extends TestCase
         }
         $this->assertEquals(2, $count);
     }
+
+    /* ============================================================
+     *  10. Lean tokenize API (P2)
+     * ============================================================ */
+
+    public function testSearchSplitLiteralDelimiterNextPath(): void
+    {
+        $p = Pattern::fromString("','");
+        $parts = $p->searchSplit("a,b,c");
+        $this->assertCount(3, $parts);
+        $this->assertSame('a', $parts[0]);
+        $this->assertSame('b', $parts[1]);
+        $this->assertSame('c', $parts[2]);
+    }
+
+    public function testSearchSplitLiteralDelimiterFlat(): void
+    {
+        $p = Pattern::fromString("','");
+        $flat = $p->searchSplit("a,b,c", ['result' => 'flat']);
+        $this->assertCount(6, $flat);
+        $this->assertSame(0, $flat[0]);
+        $this->assertSame(1, $flat[1]);
+        $this->assertSame(2, $flat[2]);
+        $this->assertSame(1, $flat[3]);
+    }
+
+    public function testSearchSplitLiteralDelimiterOffsets(): void
+    {
+        $p = Pattern::fromString("','");
+        $parts = $p->searchSplitOffsets("a,b,c");
+        $this->assertCount(3, $parts);
+        $this->assertSame([0, 1], $parts[0]);
+        $this->assertSame([2, 1], $parts[1]);
+        $this->assertSame([4, 1], $parts[2]);
+    }
+
+    public function testSearchSplitLiteralDelimiterCuts(): void
+    {
+        $p = Pattern::fromString("','");
+        $cuts = $p->searchSplitCuts("a,b,c");
+        $this->assertCount(2, $cuts);
+        $this->assertSame(2, $cuts[0]);   // first delimiter ends at pos 2
+        $this->assertSame(4, $cuts[1]);   // second delimiter ends at pos 4
+    }
+
+    public function testSearchSplitAltDelimiterFallback(): void
+    {
+        $p = Pattern::fromString("'cat' | 'dog'");
+        $parts = $p->searchSplit("thecatwalk");
+        $this->assertCount(2, $parts);
+        $this->assertSame('the', $parts[0]);
+        $this->assertSame('walk', $parts[1]);
+    }
 }
