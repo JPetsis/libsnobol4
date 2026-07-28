@@ -187,7 +187,11 @@ static void pike_test_overflow_long(void) {
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
   snobol_pattern_t *p = snobol_pattern_compile(ctx, "BREAKX(' ')", 11, &err);
-  if (!p) { pike_assert(false, "overflow long compile"); snobol_context_destroy(ctx); return; }
+  if (!p) {
+    pike_assert(false, "overflow long compile");
+    snobol_context_destroy(ctx);
+    return;
+  }
   const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
   char subject[1024];
   memset(subject, 'x', 900);
@@ -210,7 +214,11 @@ static void pike_test_overflow_short(void) {
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
   snobol_pattern_t *p = snobol_pattern_compile(ctx, "BREAKX(' ')", 11, &err);
-  if (!p) { pike_assert(false, "overflow short compile"); snobol_context_destroy(ctx); return; }
+  if (!p) {
+    pike_assert(false, "overflow short compile");
+    snobol_context_destroy(ctx);
+    return;
+  }
   const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
   char subject[] = "hello world";
   VM vm;

@@ -164,9 +164,10 @@ bool build_nfa_masks(simd_nfa_t *nfa, const uint8_t *bc, size_t bc_len,
                      const VM *vm);
 
 struct simd_nfa *build_nfa_masks_alloc(const uint8_t *bc, size_t bc_len,
-                                        const VM *vm) {
+                                       const VM *vm) {
   struct simd_nfa *nfa = (struct simd_nfa *)snobol_malloc(sizeof(simd_nfa_t));
-  if (!nfa) return NULL;
+  if (!nfa)
+    return NULL;
   if (!build_nfa_masks(nfa, bc, bc_len, vm)) {
     snobol_free(nfa);
     return NULL;
@@ -175,7 +176,7 @@ struct simd_nfa *build_nfa_masks_alloc(const uint8_t *bc, size_t bc_len,
 }
 
 bool build_nfa_masks(simd_nfa_t *nfa, const uint8_t *bc, size_t bc_len,
-                            const VM *vm) {
+                     const VM *vm) {
   memset(nfa, 0, sizeof(*nfa));
   nfa->num_states = 0;
   nfa->start_state = 0;
@@ -455,8 +456,8 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
        * Each hi_selector value selects a 16-byte block in the table.
        * For each of the 16 possible hi values we blend the lo result. */
       __m256i lo = _mm256_and_si256(data, _mm256_set1_epi8(0x0F));
-      __m256i hi = _mm256_and_si256(
-          _mm256_srli_epi32(data, 4), _mm256_set1_epi8(0x0F));
+      __m256i hi =
+          _mm256_and_si256(_mm256_srli_epi32(data, 4), _mm256_set1_epi8(0x0F));
       /* Look up low nibble in each 16-byte sub-table and blend by hi value.
        * vpshufb operates on two independent 16-byte lanes, so we must
        * broadcast the 16-byte sub-table to both lanes — a plain 32-byte
@@ -471,8 +472,8 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
       }
       /* result byte is 1 for class byte, 0 for non-class.
        * For SPAN we want the first 0: compute bitmask of inverted result. */
-      int class_mask = _mm256_movemask_epi8(
-          _mm256_cmpeq_epi8(result, _mm256_set1_epi8(1)));
+      int class_mask =
+          _mm256_movemask_epi8(_mm256_cmpeq_epi8(result, _mm256_set1_epi8(1)));
       int non_class_mask = (~class_mask) & 0xFFFFFFFF;
       if (non_class_mask) {
         unsigned first = (unsigned)__builtin_ctz(non_class_mask);
@@ -486,8 +487,8 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
     while (i + 32 <= subject_len) {
       __m256i data = _mm256_loadu_si256((const __m256i *)(subject + i));
       __m256i lo = _mm256_and_si256(data, _mm256_set1_epi8(0x0F));
-      __m256i hi = _mm256_and_si256(
-          _mm256_srli_epi32(data, 4), _mm256_set1_epi8(0x0F));
+      __m256i hi =
+          _mm256_and_si256(_mm256_srli_epi32(data, 4), _mm256_set1_epi8(0x0F));
       __m256i result = _mm256_setzero_si256();
       for (int g = 0; g < 16; g++) {
         __m256i sub = _mm256_broadcastsi128_si256(
@@ -497,8 +498,8 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
         result = _mm256_blendv_epi8(result, tbl, mask);
       }
       /* For BREAK, we want the first 1 (delimiter byte) */
-      int delim_mask = _mm256_movemask_epi8(
-          _mm256_cmpeq_epi8(result, _mm256_set1_epi8(1)));
+      int delim_mask =
+          _mm256_movemask_epi8(_mm256_cmpeq_epi8(result, _mm256_set1_epi8(1)));
       if (delim_mask) {
         unsigned first = (unsigned)__builtin_ctz(delim_mask);
         i += first;
@@ -513,23 +514,23 @@ tail:
   return simd_nfa_exec_scalar(nfa, subject, subject_len, start, out_result);
 
 found_span_match: {
-    /* SPAN matched up to position i (first non-class byte) */
-    if (i > start) {
-      out_result->success = true;
-      out_result->match_start = start;
-      out_result->match_end = i;
-      return true;
-    }
-    return false;
-  }
-
-found_break_match: {
-    /* BREAK matched up to position i (first delimiter byte) */
+  /* SPAN matched up to position i (first non-class byte) */
+  if (i > start) {
     out_result->success = true;
     out_result->match_start = start;
     out_result->match_end = i;
     return true;
   }
+  return false;
+}
+
+found_break_match: {
+  /* BREAK matched up to position i (first delimiter byte) */
+  out_result->success = true;
+  out_result->match_start = start;
+  out_result->match_end = i;
+  return true;
+}
 }
 #endif /* SNOBOL_HAS_AVX2 */
 
@@ -622,21 +623,21 @@ tail:
   return simd_nfa_exec_scalar(nfa, subject, subject_len, start, out_result);
 
 found_span_match: {
-    if (i > start) {
-      out_result->success = true;
-      out_result->match_start = start;
-      out_result->match_end = i;
-      return true;
-    }
-    return false;
-  }
-
-found_break_match: {
+  if (i > start) {
     out_result->success = true;
     out_result->match_start = start;
     out_result->match_end = i;
     return true;
   }
+  return false;
+}
+
+found_break_match: {
+  out_result->success = true;
+  out_result->match_start = start;
+  out_result->match_end = i;
+  return true;
+}
 }
 #endif /* SNOBOL_HAS_NEON */
 

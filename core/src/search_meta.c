@@ -1447,8 +1447,7 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
         last_lit_off = scan;
         uint32_t lit_off = search_read_u32(bc, scan + 1);
         uint32_t lit_len = search_read_u32(bc, scan + 5);
-        if (lit_len > 0 && lit_off < bc_len &&
-            lit_off + lit_len <= bc_len) {
+        if (lit_len > 0 && lit_off < bc_len && lit_off + lit_len <= bc_len) {
           last_lit_len = (size_t)lit_len < SNOBOL_SEARCH_MAX_PREFIX
                              ? (size_t)lit_len
                              : SNOBOL_SEARCH_MAX_PREFIX;
@@ -1473,7 +1472,8 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
             uint32_t b_off = check[bi];
             /* Skip past the branch's first instruction (if LIT = 9+lit_len,
              * if JMP = 5, otherwise assume 1) */
-            if (b_off >= bc_len) continue;
+            if (b_off >= bc_len)
+              continue;
             uint8_t b_op = bc[b_off];
             size_t b_skip = 1;
             if (b_op == OP_LIT && b_off + 9 <= bc_len)
@@ -1483,7 +1483,10 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
             size_t jmp_off = b_off + b_skip;
             if (jmp_off + 5 <= bc_len && bc[jmp_off] == OP_JMP) {
               uint32_t jt = search_read_u32(bc, jmp_off + 1);
-              if (jt > last_lit_off) { lit_bypassed = true; break; }
+              if (jt > last_lit_off) {
+                lit_bypassed = true;
+                break;
+              }
             }
           }
         }
@@ -1496,8 +1499,8 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
         adv = 14;
       else if (op == OP_REPEAT_STEP)
         adv = 6;
-      else if (op == OP_JMP || op == OP_LEN ||
-               op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB)
+      else if (op == OP_JMP || op == OP_LEN || op == OP_POS || op == OP_RPOS ||
+               op == OP_TAB || op == OP_RTAB)
         adv = 5;
       else if (op == OP_ANCHOR || op == OP_CAP_START || op == OP_CAP_END)
         adv = 2;

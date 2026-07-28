@@ -13,13 +13,18 @@ static void test_prefilter_miss(void) {
   char *err = NULL;
   /* ('a'+)+ 'b' — required lit is 'b' */
   snobol_pattern_t *p = snobol_pattern_compile(ctx, "('a'+)+ 'b'", 12, &err);
-  if (!p) { test_assert(false, "prefilter miss: compile"); snobol_context_destroy(ctx); return; }
+  if (!p) {
+    test_assert(false, "prefilter miss: compile");
+    snobol_context_destroy(ctx);
+    return;
+  }
   VM vm;
   memset(&vm, 0, sizeof(vm));
   vm.bc = (uint8_t *)snobol_pattern_get_bc(p);
   vm.bc_len = snobol_pattern_get_bc_len(p);
   const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
-  fprintf(stderr, "  prefilter miss: has_required_lit=%d required_lit_len=%zu "
+  fprintf(stderr,
+          "  prefilter miss: has_required_lit=%d required_lit_len=%zu "
           "has_literal_prefix=%d tier=%d\n",
           meta->has_required_lit, meta->required_lit_len,
           meta->has_literal_prefix, meta->tier);
@@ -36,7 +41,11 @@ static void test_prefilter_hit(void) {
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
   snobol_pattern_t *p = snobol_pattern_compile(ctx, "('a'+)+ 'b'", 12, &err);
-  if (!p) { test_assert(false, "prefilter hit: compile"); snobol_context_destroy(ctx); return; }
+  if (!p) {
+    test_assert(false, "prefilter hit: compile");
+    snobol_context_destroy(ctx);
+    return;
+  }
   VM vm;
   memset(&vm, 0, sizeof(vm));
   vm.bc = (uint8_t *)snobol_pattern_get_bc(p);
@@ -46,7 +55,8 @@ static void test_prefilter_hit(void) {
   bool ok = snobol_search_exec(&vm, "aaaaabaaaa", 10, 0, meta, NULL, &r, NULL);
   test_assert(ok, "prefilter hit: match found");
   test_assert(!r.prefilter_skip, "prefilter hit: prefilter_skip not set");
-  test_assert(r.match_start <= 5 && r.match_end > 5, "prefilter hit: match contains 'b'");
+  test_assert(r.match_start <= 5 && r.match_end > 5,
+              "prefilter hit: match contains 'b'");
   snobol_pattern_free(p);
   snobol_context_destroy(ctx);
   snobol_search_vm_cleanup(&vm);
@@ -57,7 +67,11 @@ static void test_prefilter_noop(void) {
   char *err = NULL;
   /* 'a' | 'b' — no single required lit (SPLIT in bytecode prevents it) */
   snobol_pattern_t *p = snobol_pattern_compile(ctx, "'a' | 'b'", 9, &err);
-  if (!p) { test_assert(false, "prefilter noop: compile"); snobol_context_destroy(ctx); return; }
+  if (!p) {
+    test_assert(false, "prefilter noop: compile");
+    snobol_context_destroy(ctx);
+    return;
+  }
   const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
   VM vm;
   memset(&vm, 0, sizeof(vm));

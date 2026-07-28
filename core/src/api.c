@@ -655,10 +655,10 @@ struct snobol_pattern_search_state {
   snobol_search_meta_t meta; /* derived once at create time */
   snobol_range_meta_t *range_meta; /* owned — derived once at create time */
   size_t range_meta_count;
-  snobol_dfa_t *dfa; /* cached automaton (Tier 7), built once per state */
+  snobol_dfa_t *dfa;    /* cached automaton (Tier 7), built once per state */
   struct simd_nfa *nfa; /* cached SIMD NFA (Tier 9), built once per state */
-  bool vm_inited;    /* true after first search call sets it up */
-  bool buf_inited;   /* true after first out_buf_init */
+  bool vm_inited;       /* true after first search call sets it up */
+  bool buf_inited;      /* true after first out_buf_init */
 };
 
 snobol_pattern_search_state_t *snobol_pattern_search_state_create(
@@ -965,9 +965,8 @@ snobol_match_t *snobol_pattern_search_ex_anchored(
  * snobol_batch_result_free). The caller must zero `out` and set out->eligible
  * before calling; this function returns the match status but never touches
  * out->eligible. */
-static bool batch_run(snobol_pattern_search_state_t *state,
-                      const char *subject, size_t len,
-                      snobol_batch_result_t *out) {
+static bool batch_run(snobol_pattern_search_state_t *state, const char *subject,
+                      size_t len, snobol_batch_result_t *out) {
   VM *vm = &state->vm;
   const snobol_search_meta_t *meta = &state->meta;
 
@@ -998,7 +997,7 @@ static bool batch_run(snobol_pattern_search_state_t *state,
   /* ---- Allocate result arrays (caller-owned, fresh per call) ---- */
   size_t cap = 64;
   size_t *positions = (size_t *)snobol_malloc(cap * sizeof(size_t));
-  size_t *lengths   = (size_t *)snobol_malloc(cap * sizeof(size_t));
+  size_t *lengths = (size_t *)snobol_malloc(cap * sizeof(size_t));
   size_t *output_lens = (size_t *)snobol_malloc(cap * sizeof(size_t));
   size_t outbuf_cap = 1024;
   char *outbuf_data = (char *)snobol_malloc(outbuf_cap);
@@ -1037,17 +1036,19 @@ static bool batch_run(snobol_pattern_search_state_t *state,
     vm->len = len;
 
     snobol_search_result_t sr;
-    bool ok = snobol_search_exec(vm, subject, len, offset, meta, dfa,
-                                 &sr, NULL);
+    bool ok =
+        snobol_search_exec(vm, subject, len, offset, meta, dfa, &sr, NULL);
     if (!ok || sr.aborted)
       break;
 
     /* Grow position/length/output_len arrays if needed */
     if (count >= cap) {
       size_t new_cap = cap * 2;
-      size_t *np = (size_t *)snobol_realloc(positions, new_cap * sizeof(size_t));
+      size_t *np =
+          (size_t *)snobol_realloc(positions, new_cap * sizeof(size_t));
       size_t *nl = (size_t *)snobol_realloc(lengths, new_cap * sizeof(size_t));
-      size_t *no = (size_t *)snobol_realloc(output_lens, new_cap * sizeof(size_t));
+      size_t *no =
+          (size_t *)snobol_realloc(output_lens, new_cap * sizeof(size_t));
       if (!np || !nl || !no) {
         snobol_free(np ? np : positions);
         snobol_free(nl ? nl : lengths);
@@ -1064,10 +1065,10 @@ static bool batch_run(snobol_pattern_search_state_t *state,
     }
 
     size_t mstart = sr.match_start;
-    size_t mlen   = sr.match_end - sr.match_start;
+    size_t mlen = sr.match_end - sr.match_start;
 
     positions[count] = mstart;
-    lengths[count]   = mlen;
+    lengths[count] = mlen;
     output_lens[count] = 0;
 
     /* Collect captures. VM stores offsets relative to the search window
@@ -1085,8 +1086,8 @@ static bool batch_run(snobol_pattern_search_state_t *state,
           if (!captures[ri])
             continue;
         } else if (count >= cap) {
-          size_t *new_row = (size_t *)snobol_realloc(
-              captures[ri], cap * 2 * sizeof(size_t));
+          size_t *new_row =
+              (size_t *)snobol_realloc(captures[ri], cap * 2 * sizeof(size_t));
           if (!new_row)
             continue;
           captures[ri] = new_row;
@@ -1095,7 +1096,7 @@ static bool batch_run(snobol_pattern_search_state_t *state,
         }
         size_t vs = vm->var_start[ri];
         size_t ve = vm->var_end[ri];
-        captures[ri][count * 2]     = offset + vs;
+        captures[ri][count * 2] = offset + vs;
         captures[ri][count * 2 + 1] = (ve > vs) ? (ve - vs) : 0;
       }
     }
@@ -1154,11 +1155,11 @@ static bool batch_run(snobol_pattern_search_state_t *state,
   }
 
   out->match_count = count;
-  out->positions   = positions;
-  out->lengths     = lengths;
-  out->var_count   = max_var_count;
-  out->captures    = captures; /* may be NULL when no captures */
-  out->outputs     = (out_pos > 0) ? outbuf_data : NULL;
+  out->positions = positions;
+  out->lengths = lengths;
+  out->var_count = max_var_count;
+  out->captures = captures; /* may be NULL when no captures */
+  out->outputs = (out_pos > 0) ? outbuf_data : NULL;
   out->output_lens = output_lens;
 
   return true;
@@ -1187,7 +1188,8 @@ bool snobol_pattern_search_batch(const uint8_t *bc, size_t bc_len,
    * automaton-eligible patterns) the DFA are derived/built once for this call.
    * The stateful snobol_pattern_search_batch_ex() reuses a persistent state to
    * amortise that cost across calls. */
-  snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(bc, bc_len);
+  snobol_pattern_search_state_t *st =
+      snobol_pattern_search_state_create(bc, bc_len);
   if (!st)
     return false;
   bool ok = batch_run(st, subject, len, out);

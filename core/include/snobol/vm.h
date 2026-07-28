@@ -18,9 +18,10 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-struct snobol_pattern;      /* forward decl — only used as an opaque pointer below */
-struct simd_nfa;            /* forward decl — cached NFA for Tier 9 */
-struct snobol_auto_trie_t;  /* forward decl — pre-built alt-lit trie for Tier 5 */
+struct snobol_pattern; /* forward decl — only used as an opaque pointer below */
+struct simd_nfa;       /* forward decl — cached NFA for Tier 9 */
+struct
+    snobol_auto_trie_t; /* forward decl — pre-built alt-lit trie for Tier 5 */
 
 /** @brief Enable dynamic pattern and table support */
 #define SNOBOL_DYNAMIC_PATTERN 1

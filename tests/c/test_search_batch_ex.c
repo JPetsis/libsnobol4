@@ -22,7 +22,7 @@ extern void test_assert(bool condition, const char *message);
 /* Run both stateless batch and stateful batch_ex on the same pattern/subject
  * and assert identical match counts, positions, lengths, and eligible flag. */
 static void assert_batch_ex_matches_batch(const char *src, const char *subject,
-                                           size_t slen, const char *label) {
+                                          size_t slen, const char *label) {
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
   (void)label;
@@ -40,7 +40,8 @@ static void assert_batch_ex_matches_batch(const char *src, const char *subject,
   memset(&b1, 0, sizeof(b1));
   bool ok1 = snobol_pattern_search_batch(bc, bc_len, subject, slen, meta, &b1);
 
-  snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(bc, bc_len);
+  snobol_pattern_search_state_t *st =
+      snobol_pattern_search_state_create(bc, bc_len);
   snobol_batch_result_t b2;
   memset(&b2, 0, sizeof(b2));
   bool ok2 = snobol_pattern_search_batch_ex(st, subject, slen, &b2);
@@ -66,7 +67,8 @@ static void assert_batch_ex_matches_batch(const char *src, const char *subject,
 static void test_batch_ex_eligible_zero_match(void) {
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
-  snobol_pattern_t *pat = snobol_pattern_compile(ctx, "SPAN('abc') 'd'", 14, &err);
+  snobol_pattern_t *pat =
+      snobol_pattern_compile(ctx, "SPAN('abc') 'd'", 14, &err);
   test_assert(pat != NULL, "compile eligible pattern");
   if (pat) {
     const uint8_t *bc = snobol_pattern_get_bc(pat);
@@ -81,7 +83,8 @@ static void test_batch_ex_eligible_zero_match(void) {
     test_assert(b.match_count == 0, "match_count 0");
     snobol_batch_result_free(&b);
 
-    snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(bc, bc_len);
+    snobol_pattern_search_state_t *st =
+        snobol_pattern_search_state_create(bc, bc_len);
     snobol_batch_result_t be;
     memset(&be, 0, sizeof(be));
     bool oke = snobol_pattern_search_batch_ex(st, "aaaa", 4, &be);
@@ -113,7 +116,8 @@ static void test_batch_ex_ineligible_flag(void) {
   test_assert(!b.eligible, "ineligible flag false (stateless)");
   snobol_batch_result_free(&b);
 
-  snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(bc, bc_len);
+  snobol_pattern_search_state_t *st =
+      snobol_pattern_search_state_create(bc, bc_len);
   snobol_batch_result_t be;
   memset(&be, 0, sizeof(be));
   bool oke = snobol_pattern_search_batch_ex(st, "x", 1, &be);
@@ -130,12 +134,14 @@ static void test_batch_ex_ineligible_flag(void) {
 static void test_batch_ex_dfa_reused(void) {
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
-  snobol_pattern_t *pat = snobol_pattern_compile(ctx, "SPAN('abc') 'd'", 14, &err);
+  snobol_pattern_t *pat =
+      snobol_pattern_compile(ctx, "SPAN('abc') 'd'", 14, &err);
   test_assert(pat != NULL, "compile automaton pattern");
   if (pat) {
     const uint8_t *bc = snobol_pattern_get_bc(pat);
     size_t bc_len = snobol_pattern_get_bc_len(pat);
-    snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(bc, bc_len);
+    snobol_pattern_search_state_t *st =
+        snobol_pattern_search_state_create(bc, bc_len);
     const char *subj = "abcabcabcdabcabcabc";
     size_t slen = strlen(subj);
     for (int i = 0; i < 50; i++) {
@@ -162,7 +168,8 @@ static void test_batch_ex_interleaved_with_search_ex(void) {
   if (pat) {
     const uint8_t *bc = snobol_pattern_get_bc(pat);
     size_t bc_len = snobol_pattern_get_bc_len(pat);
-    snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(bc, bc_len);
+    snobol_pattern_search_state_t *st =
+        snobol_pattern_search_state_create(bc, bc_len);
     const char *subj = "abcabcabc";
     size_t slen = strlen(subj);
 
@@ -189,7 +196,8 @@ static void test_batch_ex_interleaved_with_search_ex(void) {
 void test_search_batch_ex_suite(void) {
   test_suite("Search: stateful batch_ex + tri-state eligible");
   assert_batch_ex_matches_batch("'abc'", "abcabcabc", 9, "lit");
-  assert_batch_ex_matches_batch("'cat' | 'dog' | 'fox'", "cat dog fox", 11, "altlit");
+  assert_batch_ex_matches_batch("'cat' | 'dog' | 'fox'", "cat dog fox", 11,
+                                "altlit");
   assert_batch_ex_matches_batch("SPAN('0-9')", "a1b22c333", 8, "span");
   test_batch_ex_eligible_zero_match();
   test_batch_ex_ineligible_flag();

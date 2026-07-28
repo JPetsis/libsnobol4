@@ -360,15 +360,15 @@ static inline void snobol_meta_set_flag(snobol_search_meta_t *m,
  */
 typedef struct {
   bool success;
-  bool aborted;       /**< Set true when an OP_ABORT terminated the match,
+  bool aborted;         /**< Set true when an OP_ABORT terminated the match,
                           signalling the caller to stop searching entirely. */
   bool pike_overflowed; /**< Set true when pike_scan's thread buffer overflowed
                              and the restart-loop fallback was used. */
   bool prefilter_skip;  /**< Set true when the required-byte prefilter
                              rejected the subject without entering any tier. */
-  size_t match_start; /**< Byte offset of match start within the original
+  size_t match_start;   /**< Byte offset of match start within the original
                           subject */
-  size_t match_end;   /**< Byte offset just past the match end in the original
+  size_t match_end;     /**< Byte offset just past the match end in the original
                           subject */
 } snobol_search_result_t;
 

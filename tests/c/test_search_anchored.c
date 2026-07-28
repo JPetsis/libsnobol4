@@ -179,7 +179,8 @@ void test_search_anchored_suite(void) {
  * reference; the pre-change path produced the same logical result, just slower).
  * `start_offset` is the anchor position (0 for a plain anchored match). */
 static void assert_literal_only_anchored(const char *pattern_str,
-                                         const char *subject, size_t start_offset,
+                                         const char *subject,
+                                         size_t start_offset,
                                          bool expect_success,
                                          size_t expect_len) {
   snobol_context_t *ctx = snobol_context_create();
@@ -209,7 +210,8 @@ static void assert_literal_only_anchored(const char *pattern_str,
   fvm.pos = start_offset;
   bool ok_f = vm_run(&fvm);
 
-  test_assert(ok_a == expect_success, "anchored literal-only success expectation");
+  test_assert(ok_a == expect_success,
+              "anchored literal-only success expectation");
   test_assert(ok_a == ok_f, "anchored literal-only agrees with full VM");
   if (expect_success) {
     test_assert(result.match_start == start_offset,
@@ -257,7 +259,8 @@ static void test_literal_only_empty(void) {
   VM avm = make_vm(bc, bc_len, "abc");
   snobol_search_result_t result;
   memset(&result, 0, sizeof(result));
-  bool ok_a = snobol_search_exec_anchored(&avm, "abc", 3, meta, NULL, &result, NULL);
+  bool ok_a =
+      snobol_search_exec_anchored(&avm, "abc", 3, meta, NULL, &result, NULL);
 
   VM fvm = make_vm(bc, bc_len, "abc");
   bool ok_f = vm_run(&fvm);
@@ -292,7 +295,8 @@ static void assert_literal_only_bc(const uint8_t *bc, size_t bc_len,
   fvm.pos = start_offset;
   bool ok_f = vm_run(&fvm);
 
-  test_assert(ok_a == expect_success, "anchored literal-only success expectation");
+  test_assert(ok_a == expect_success,
+              "anchored literal-only success expectation");
   test_assert(ok_a == ok_f, "anchored literal-only agrees with full VM");
   if (expect_success) {
     test_assert(result.match_start == start_offset,
@@ -307,26 +311,20 @@ static void assert_literal_only_bc(const uint8_t *bc, size_t bc_len,
  * skip leaves the anchored memcmp behavior unchanged). Bytecode:
  *   OP_POS(0) OP_LIT(off=14,len=3) "pqr" OP_ACCEPT */
 static void test_literal_only_pos_wrapped(void) {
-  uint8_t bc[] = {
-      OP_POS, 0, 0, 0, 0,
-      OP_LIT,
-      0, 0, 0, 14,           /* lit_off = 14 */
-      0, 0, 0, 3,            /* lit_len = 3 */
-      'p', 'q', 'r',
-      OP_ACCEPT};
+  uint8_t bc[] = {OP_POS, 0,   0,   0,        0,
+                  OP_LIT, 0,   0,   0,        14, /* lit_off = 14 */
+                  0,      0,   0,   3,            /* lit_len = 3 */
+                  'p',    'q', 'r', OP_ACCEPT};
   assert_literal_only_bc(bc, sizeof(bc), "pqrzzzzzzzzzzzzzz", 0, true, 3);
 }
 
 /* RPOS(3)-wrapped literal at the end resolves identically to the full VM.
  * Bytecode: OP_RPOS(3) OP_LIT(off=14,len=3) "abc" OP_ACCEPT */
 static void test_literal_only_rpos_wrapped(void) {
-  uint8_t bc[] = {
-      OP_RPOS, 0, 0, 0, 3,
-      OP_LIT,
-      0, 0, 0, 14,           /* lit_off = 14 */
-      0, 0, 0, 3,            /* lit_len = 3 */
-      'a', 'b', 'c',
-      OP_ACCEPT};
+  uint8_t bc[] = {OP_RPOS, 0,   0,   0,        3,
+                  OP_LIT,  0,   0,   0,        14, /* lit_off = 14 */
+                  0,       0,   0,   3,            /* lit_len = 3 */
+                  'a',     'b', 'c', OP_ACCEPT};
   assert_literal_only_bc(bc, sizeof(bc), "abc", 0, true, 3);
 }
 

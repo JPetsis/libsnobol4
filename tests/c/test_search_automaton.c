@@ -442,7 +442,8 @@ static void test_repeat_in_automaton(void) {
   bc[ip++] = OP_LIT;
   emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
   emit_u32_be(bc, &ip, 2);
-  bc[ip++] = 'a'; bc[ip++] = 'b';
+  bc[ip++] = 'a';
+  bc[ip++] = 'b';
 
   /* REPEAT_STEP: opcode(1) + loop_id(1) + jmp_target(4) = 6 bytes */
   bc[ip++] = OP_REPEAT_STEP;
@@ -454,7 +455,8 @@ static void test_repeat_in_automaton(void) {
   bc[ip++] = OP_LIT;
   emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
   emit_u32_be(bc, &ip, 2);
-  bc[ip++] = 'c'; bc[ip++] = 'd';
+  bc[ip++] = 'c';
+  bc[ip++] = 'd';
   bc[ip++] = OP_ACCEPT;
 
   /* Patch skip_target in REPEAT_INIT */

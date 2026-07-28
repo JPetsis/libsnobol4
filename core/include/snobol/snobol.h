@@ -152,16 +152,16 @@ typedef struct snobol_pattern snobol_pattern_t;
  * regardless of match count, and false (the safe default) for early-outs.
  */
 typedef struct snobol_batch_result {
-  size_t match_count;      /**< Number of matches found (0 when return false). */
-  size_t *positions;       /**< [match_count] match start offsets. */
-  size_t *lengths;         /**< [match_count] match byte lengths. */
-  size_t var_count;        /**< Number of capture registers (0 = no captures). */
-  size_t **captures;       /**< [var_count][match_count * 2]: each row stores
+  size_t match_count;  /**< Number of matches found (0 when return false). */
+  size_t *positions;   /**< [match_count] match start offsets. */
+  size_t *lengths;     /**< [match_count] match byte lengths. */
+  size_t var_count;    /**< Number of capture registers (0 = no captures). */
+  size_t **captures;   /**< [var_count][match_count * 2]: each row stores
                                  [start0, len0, start1, len1, ...]. */
-  char *outputs;           /**< Concatenated NUL-terminated output strings,
+  char *outputs;       /**< Concatenated NUL-terminated output strings,
                                  one per match, final sentinel is empty. */
-  size_t *output_lens;     /**< [match_count] byte length of each output. */
-  bool eligible;           /**< True when the pattern was batch-eligible
+  size_t *output_lens; /**< [match_count] byte length of each output. */
+  bool eligible;       /**< True when the pattern was batch-eligible
                                  (zero matches still sets this). */
 } snobol_batch_result_t;
 

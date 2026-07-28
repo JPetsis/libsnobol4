@@ -11,8 +11,8 @@ extern void test_assert(bool condition, const char *message);
 
 /* Helper: run per-call loop and compare position/length against batch result. */
 static void assert_batch_matches_percall(snobol_pattern_t *pat,
-                                          const char *subject, size_t slen,
-                                          const char *label) {
+                                         const char *subject, size_t slen,
+                                         const char *label) {
   const uint8_t *bc = snobol_pattern_get_bc(pat);
   size_t bc_len = snobol_pattern_get_bc_len(pat);
   const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
@@ -20,8 +20,8 @@ static void assert_batch_matches_percall(snobol_pattern_t *pat,
   /* Batch API */
   snobol_batch_result_t batch;
   memset(&batch, 0, sizeof(batch));
-  bool batch_ok = snobol_pattern_search_batch(bc, bc_len, subject, slen,
-                                               meta, &batch);
+  bool batch_ok =
+      snobol_pattern_search_batch(bc, bc_len, subject, slen, meta, &batch);
 
   /* Per-call loop reference */
   snobol_pattern_search_state_t *state =
@@ -54,7 +54,8 @@ static void assert_batch_matches_percall(snobol_pattern_t *pat,
 
   /* Compare positions and lengths */
   size_t n = batch_ok ? batch.match_count : 0;
-  if (n > ref_count) n = ref_count;
+  if (n > ref_count)
+    n = ref_count;
   for (size_t i = 0; i < n; i++) {
     snprintf(msg, sizeof(msg), "%s: pos[%zu] %zu vs %zu", label, i,
              batch.positions[i], ref_pos[i]);
@@ -110,9 +111,8 @@ void test_search_batch_suite(void) {
     test_assert(pat != NULL, "compile alt-lit succeeds");
     if (pat)
       assert_batch_matches_percall(
-          pat,
-          "the cat went dog walking fox jumped cat over dog near fox",
-          51, "altlit");
+          pat, "the cat went dog walking fox jumped cat over dog near fox", 51,
+          "altlit");
     free(err);
     snobol_pattern_free(pat);
     snobol_context_destroy(ctx);

@@ -3180,9 +3180,9 @@ static bool tier_search_vm(VM *vm, const char *subject, size_t subject_len,
   if (start_offset == 0 && !anchored) {
     if (diag)
       diag->search_vm_tests++;
-    bool pike_ok = pike_scan(vm->bc, vm->bc_len, subject, subject_len, meta,
-                             vm->range_meta, vm->range_meta_count, vm,
-                             out_result);
+    bool pike_ok =
+        pike_scan(vm->bc, vm->bc_len, subject, subject_len, meta,
+                  vm->range_meta, vm->range_meta_count, vm, out_result);
     if (pike_ok || !out_result->pike_overflowed)
       return pike_ok;
     /* Overflow: fall through to the restart loop which tries each position
@@ -3496,7 +3496,7 @@ bool SNOBOL_HOT snobol_search_exec(VM *SNOBOL_RESTRICT vm,
     }
   }
   return dispatch_search_impl(vm, subject, subject_len, start_offset, meta, dfa,
-                               out_result, diag, false);
+                              out_result, diag, false);
 }
 
 snobol_search_tier_t snobol_search_executed_tier(
@@ -3556,20 +3556,41 @@ snobol_auto_trie_t *snobol_build_alt_trie(const uint8_t *bc, size_t bc_len) {
 
   while (sp > 0 && all_ok) {
     size_t ip = stack[--sp];
-    if (ip + 2 > bc_len) { all_ok = false; break; }
+    if (ip + 2 > bc_len) {
+      all_ok = false;
+      break;
+    }
     uint8_t op = bc[ip];
     if (op == OP_LIT) {
-      if (ip + 10 > bc_len) { all_ok = false; break; }
+      if (ip + 10 > bc_len) {
+        all_ok = false;
+        break;
+      }
       uint32_t off = search_read_u32(bc, ip + 1);
       uint32_t len = search_read_u32(bc, ip + 5);
-      if (off >= bc_len || off + len > bc_len) { all_ok = false; break; }
-      if (!trie_insert(trie, bc + off, len)) { all_ok = false; break; }
+      if (off >= bc_len || off + len > bc_len) {
+        all_ok = false;
+        break;
+      }
+      if (!trie_insert(trie, bc + off, len)) {
+        all_ok = false;
+        break;
+      }
     } else if (op == OP_SPLIT) {
-      if (ip + 9 > bc_len) { all_ok = false; break; }
+      if (ip + 9 > bc_len) {
+        all_ok = false;
+        break;
+      }
       uint32_t a = search_read_u32(bc, ip + 1);
       uint32_t b = search_read_u32(bc, ip + 5);
-      if (a >= bc_len || b >= bc_len) { all_ok = false; break; }
-      if (sp + 2 > 64) { all_ok = false; break; }
+      if (a >= bc_len || b >= bc_len) {
+        all_ok = false;
+        break;
+      }
+      if (sp + 2 > 64) {
+        all_ok = false;
+        break;
+      }
       stack[sp++] = b;
       stack[sp++] = a;
     } else {

@@ -122,16 +122,16 @@ void test_reuse_search_suite(void) {
   {
     snobol_context_t *ctx = snobol_context_create();
     char *err = NULL;
-    snobol_pattern_t *p = snobol_pattern_compile(ctx, "'hello' SPAN(' ')", 17, &err);
+    snobol_pattern_t *p =
+        snobol_pattern_compile(ctx, "'hello' SPAN(' ')", 17, &err);
     if (p) {
-      snobol_pattern_search_state_t *state =
-          snobol_pattern_search_state_create(snobol_pattern_get_bc(p),
-                                              snobol_pattern_get_bc_len(p));
+      snobol_pattern_search_state_t *state = snobol_pattern_search_state_create(
+          snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p));
       if (state) {
         bool all_ok = true;
         for (int i = 0; i < 1000; i++) {
-          snobol_match_t *m = snobol_pattern_search_ex(
-              state, "hello world", 11, 0);
+          snobol_match_t *m =
+              snobol_pattern_search_ex(state, "hello world", 11, 0);
           if (!m || !m->success)
             all_ok = false;
         }
