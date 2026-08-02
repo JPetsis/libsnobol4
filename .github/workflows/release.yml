@@ -107,33 +107,162 @@ jobs:
           release-tag: ${{ github.ref_name }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  # Windows: PIE requires pre-built DLLs; use the official PHP Windows builder.
+  # Windows: PIE requires pre-built DLLs.  php/php-windows-builder expects
+  # config.w32 at the repo root, which our bindings/php layout does not
+  # satisfy, so drive the dev-pack build directly (same flow as ci-php.yml).
+  # PHP 8.3 needs VS2019 (retired from GH runners) — Windows builds 8.4 only.
   windows:
     name: Windows x86_64 (PHP ${{ matrix.php-version }})
     needs: [create-draft-release]
-    runs-on: windows-latest
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
-        php-version: [ '8.3', '8.4' ]
+        php-version: [ '8.4' ]
     permissions:
       contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build the extension
-        uses: php/php-windows-builder/extension@v1
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php-version }}
-          arch: x64
-          ts: nts
+          tools: composer
+          coverage: none
 
-      - name: Attach Windows binaries to the release
-        uses: php/php-windows-builder/release@v1
-        with:
-          release: ${{ github.ref_name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download PHP dev pack and locate MSVC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $phpVer = (php -r "echo PHP_VERSION;")
+          $ts = (php -r "echo ZEND_THREAD_SAFE ? '' : 'nts-';")
+          $mm = ($phpVer -split '\.')[0..1] -join '.'
+          $vsPack = @{'8.0'='vs16';'8.1'='vs16';'8.2'='vs16';'8.3'='vs16';'8.4'='vs17';'8.5'='vs17'}[$mm]
+          if (-not $vsPack) { $vsPack = 'vs16' }
+
+          $develName = "php-devel-pack-$phpVer-$($ts)Win32-$vsPack-x64.zip"
+          $develUrl = "https://windows.php.net/downloads/releases/$develName"
+          echo "Building against PHP $phpVer (ts flag: '$ts', devel pack toolset: $vsPack)"
+          try {
+            Invoke-WebRequest -Uri $develUrl -OutFile devel.zip -MaximumRedirection 5
+          } catch {
+            $releases = (Invoke-WebRequest -Uri "https://windows.php.net/downloads/releases/" -UseBasicParsing).Content
+            $pattern = "php-devel-pack-$($mm)\.(\d+)-$($ts)Win32-$vsPack-x64\.zip"
+            $matches = [regex]::Matches($releases, $pattern) | ForEach-Object { $_.Groups[0].Value }
+            if ($matches.Count -gt 0) {
+              $latest = $matches | Sort-Object -Descending | Select-Object -First 1
+              $fallbackUrl = "https://windows.php.net/downloads/releases/$latest"
+              echo "Exact devel pack not found ($phpVer), using: $latest"
+              Invoke-WebRequest -Uri $fallbackUrl -OutFile devel.zip -MaximumRedirection 5
+            } else {
+              throw "No devel pack found for PHP $mm"
+            }
+          }
+          Expand-Archive devel.zip -DestinationPath php-dev
+
+          $phpize = (Get-ChildItem php-dev -Recurse -Filter phpize.bat | Select-Object -First 1).FullName
+          if (-not $phpize) { throw "phpize.bat not found in dev pack" }
+          $phpDev = Split-Path $phpize
+          echo "PHP_DEV=$phpDev" >> $env:GITHUB_ENV
+
+          $phpBin = Split-Path (Get-Command php.exe).Source
+          echo "PHP_BIN_DIR=$phpBin" >> $env:GITHUB_ENV
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $vsVer = '17'
+          $vsRange = "[$($vsVer).0,$([int]$vsVer + 1).0)"
+          $vsPath = & $vswhere -version $vsRange -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath -format value
+          if (-not $vsPath) { throw "Visual Studio $vsVer.x with VC tools (x86.x64) not found" }
+          $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found at $vcvars" }
+          echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
+
+      - name: Install bison (required by configure.bat)
+        shell: pwsh
+        run: |
+          $bisonUrl = "https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip"
+          Invoke-WebRequest -Uri $bisonUrl -OutFile winflexbison.zip -MaximumRedirection 5
+          & 7z x winflexbison.zip -owinflexbison -y | Out-Null
+          $found = Get-ChildItem winflexbison -Recurse -Filter bison.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            $found = Get-ChildItem winflexbison -Recurse -Filter win_bison.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $found) { throw "bison.exe / win_bison.exe not found after extracting winflexbison" }
+          $toolsDir = $found.DirectoryName
+          $bisonPath = Join-Path $toolsDir "bison.exe"
+          if (-not (Test-Path $bisonPath)) {
+            Copy-Item $found.FullName $bisonPath
+          }
+          echo $toolsDir >> $env:GITHUB_PATH
+          & $bisonPath --version
+
+      - name: Create re2c stub source
+        shell: pwsh
+        run: |
+          @'
+          #include <stdio.h>
+          int main(int argc, char *argv[]) {
+              printf("re2c 3.1\n");
+              return 0;
+          }
+          '@ | Set-Content -Path re2c_stub.c -NoNewline
+
+      - name: Generate core version header
+        shell: bash
+        run: |
+          # The Windows phpize build does not run CMake over the core, so the
+          # generated snobol/version.h must be produced explicitly from the
+          # single version source in CMakeLists.txt.
+          ./dev/generate_version_header.sh
+
+      - name: Build extension (phpize + nmake)
+        shell: cmd
+        run: |
+          @echo on
+          call "%VCVARS%"
+          if errorlevel 1 exit /b 1
+          set "PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PATH%"
+          where bison
+          bison --version
+          cl.exe /nologo /Fe:re2c.exe re2c_stub.c /link /SUBSYSTEM:CONSOLE
+          if errorlevel 1 exit /b 1
+          set "PATH=%GITHUB_WORKSPACE%;%PATH%"
+          cd /d %GITHUB_WORKSPACE%\bindings\php
+          call phpize.bat
+          if errorlevel 1 exit /b 1
+          call configure.bat --enable-snobol=shared
+          if errorlevel 1 exit /b 1
+          powershell -Command "$f='x64\Release\resp\SNOBOL_GLOBAL_OBJS.txt'; $c=Get-Content $f -Raw; $c=$c.Replace('\Release\\src/','\Release\\'); $c=$c.Replace('\Release\\src\','\Release\\'); Set-Content $f $c -NoNewline"
+          nmake
+          if errorlevel 1 exit /b 1
+          for /r %%d in (php_snobol.dll) do @if exist "%%d" copy /Y "%%d" .
+          dir *.dll
+          if not exist php_snobol.dll exit /b 1
+
+      - name: Package DLL per PIE naming convention
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = Get-ChildItem bindings\php -Recurse -Filter php_snobol.dll | Select-Object -First 1
+          if (-not $dll) { throw "php_snobol.dll not found" }
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          $zipName = "php_snobol-$ver-${{ matrix.php-version }}-nts-vs17-x86_64.zip"
+          Copy-Item $dll.FullName php_snobol.dll
+          Compress-Archive -Path php_snobol.dll -DestinationPath $zipName -Force
+          echo "ZIP=$zipName" >> $env:GITHUB_ENV
+          echo "Packaged: $zipName"
+
+      - name: Attach Windows binary to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" "$env:ZIP"
 
   # Source tarball (respects .gitattributes export-ignore).
   source-tarball:
