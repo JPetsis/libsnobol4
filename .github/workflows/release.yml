@@ -101,7 +101,7 @@ jobs:
 
       - name: Build and attach PIE binary
         id: php-ext-binary-builder
-        uses: php/pie-ext-binary-builder@0.0.2
+        uses: php/pie-ext-binary-builder@0.0.3
         with:
           build-path: bindings/php
           release-tag: ${{ github.ref_name }}
