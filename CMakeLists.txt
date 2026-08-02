@@ -74,13 +74,19 @@ if(BUILD_PHP)
     add_subdirectory(bindings/php)
 endif()
 
-# Examples
-add_subdirectory(examples/c)
+# Examples (only if present — excluded from the distributed zipball)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/c)
+    add_subdirectory(examples/c)
+endif()
 
 # Optional: C microbenchmark suite (off by default)
 option(BUILD_BENCH_C "Build C microbenchmark suite" OFF)
 if(BUILD_BENCH_C)
-    add_subdirectory(bench/c)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bench/c)
+        add_subdirectory(bench/c)
+    else()
+        message(WARNING "BUILD_BENCH_C=ON but bench/c not present; ignoring")
+    endif()
 endif()
 
 # Custom targets
