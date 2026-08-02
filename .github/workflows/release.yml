@@ -61,11 +61,11 @@ jobs:
             php-version: '8.4'
           - os: darwin
             arch: arm64
-            runner: macos-14
+            runner: macos-15
             php-version: '8.3'
           - os: darwin
             arch: arm64
-            runner: macos-14
+            runner: macos-15
             php-version: '8.4'
     permissions:
       contents: write
@@ -126,7 +126,7 @@ jobs:
         uses: php/php-windows-builder/extension@v1
         with:
           php-version: ${{ matrix.php-version }}
-          arch: x86_64
+          arch: x64
           ts: nts
 
       - name: Attach Windows binaries to the release
