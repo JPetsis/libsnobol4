@@ -44,6 +44,10 @@ jobs:
             runner: ubuntu-latest
             php-version: '8.4'
           - os: linux
+            arch: x86_64
+            runner: ubuntu-latest
+            php-version: '8.5'
+          - os: linux
             arch: aarch64
             runner: ubuntu-24.04-arm
             php-version: '8.3'
@@ -51,6 +55,10 @@ jobs:
             arch: aarch64
             runner: ubuntu-24.04-arm
             php-version: '8.4'
+          - os: linux
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+            php-version: '8.5'
           - os: darwin
             arch: x86_64
             runner: macos-15-intel
@@ -60,6 +68,10 @@ jobs:
             runner: macos-15-intel
             php-version: '8.4'
           - os: darwin
+            arch: x86_64
+            runner: macos-15-intel
+            php-version: '8.5'
+          - os: darwin
             arch: arm64
             runner: macos-15
             php-version: '8.3'
@@ -67,6 +79,10 @@ jobs:
             arch: arm64
             runner: macos-15
             php-version: '8.4'
+          - os: darwin
+            arch: arm64
+            runner: macos-15
+            php-version: '8.5'
     permissions:
       contents: write
     steps:
@@ -110,7 +126,7 @@ jobs:
   # Windows: PIE requires pre-built DLLs.  php/php-windows-builder expects
   # config.w32 at the repo root, which our bindings/php layout does not
   # satisfy, so drive the dev-pack build directly (same flow as ci-php.yml).
-  # PHP 8.3 needs VS2019 (retired from GH runners) — Windows builds 8.4 only.
+  # PHP 8.3 needs VS2019 (retired from GH runners) — Windows builds 8.4/8.5.
   windows:
     name: Windows x86_64 (PHP ${{ matrix.php-version }})
     needs: [create-draft-release]
@@ -118,7 +134,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php-version: [ '8.4' ]
+        php-version: [ '8.4', '8.5' ]
     permissions:
       contents: write
     steps:
@@ -251,12 +267,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $dll = Get-ChildItem bindings\php -Recurse -Filter php_snobol.dll | Select-Object -First 1
           if (-not $dll) { throw "php_snobol.dll not found" }
-          $ver = "${{ github.ref_name }}".TrimStart('v')
-          $zipName = "php_snobol-$ver-${{ matrix.php-version }}-nts-vs17-x86_64.zip"
-          Copy-Item $dll.FullName php_snobol.dll
-          Compress-Archive -Path php_snobol.dll -DestinationPath $zipName -Force
+          # PIE's WindowsExtensionAssetName uses the Composer pretty version
+          # (v1.0.0, with the 'v') for both the zip and the DLL inside it.
+          # The DLL is renamed on install to php_snobol.dll by PIE itself.
+          $ver = "${{ github.ref_name }}"
+          $base = "php_snobol-$ver-${{ matrix.php-version }}-nts-vs17-x86_64"
+          $zipName = "$base.zip"
+          Copy-Item $dll.FullName "$base.dll"
+          Compress-Archive -Path "$base.dll" -DestinationPath $zipName -Force
           echo "ZIP=$zipName" >> $env:GITHUB_ENV
-          echo "Packaged: $zipName"
+          echo "Packaged: $zipName ($base.dll inside)"
 
       - name: Attach Windows binary to the release
         env:

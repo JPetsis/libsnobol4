@@ -40,10 +40,10 @@ class ApiVersionTest extends TestCase
         $this->assertSame(0, $minor, 'Minor version component must be 0 (v1.0.0)');
     }
 
-    public function testEncodingMatchesV100(): void
+    public function testEncodingMatchesV101(): void
     {
-        // v1.0.0 encodes as (1 << 16) | (0 << 8) | 0 = 0x00010000
-        $expected = (1 << 16) | (0 << 8) | 0;
+        // v1.0.1 encodes as (1 << 16) | (0 << 8) | 1 = 0x00010001
+        $expected = (1 << 16) | (0 << 8) | 1;
         $this->assertSame($expected, snobol_get_api_version());
     }
 

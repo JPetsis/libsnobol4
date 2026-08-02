@@ -1,7 +1,7 @@
 # Doxyfile for libsnobol4
 
 PROJECT_NAME           = "libsnobol4"
-PROJECT_NUMBER         = 1.0.0
+PROJECT_NUMBER         = 1.0.1
 PROJECT_BRIEF          = "High-performance SNOBOL4-style pattern matching library"
 OUTPUT_DIRECTORY       = docs/api
 INPUT                  = core/include/snobol

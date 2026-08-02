@@ -17,7 +17,7 @@ typedef struct snobol_pattern_search_state snobol_pattern_search_state_t;
 extern zend_module_entry snobol_module_entry;
 #define phpext_snobol_ptr &snobol_module_entry
 
-#define PHP_SNOBOL_VERSION "1.0.0"
+#define PHP_SNOBOL_VERSION "1.0.1"
 
 PHP_MINIT_FUNCTION(snobol);
 
