@@ -1,0 +1,35 @@
+# Trim the Packagist/GitHub zipball: files marked export-ignore are excluded
+# from git archive / codeload downloads.  Kept in the archive: core/,
+# bindings/php/ (config.m4 + core_amalgam.c + src/), root composer.json,
+# CMakeLists.txt.
+
+# Tooling / editor noise
+.gitattributes            export-ignore
+.gitignore                export-ignore
+.ddev/                    export-ignore
+.dist/                    export-ignore
+.editorconfig             export-ignore
+.github/                  export-ignore
+
+# Dev + CI infrastructure
+dev/                      export-ignore
+scripts/                  export-ignore
+tests/                    export-ignore
+bench/                    export-ignore
+fuzz/                     export-ignore
+examples/                 export-ignore
+
+# Docs that are not needed to build the extension
+docs/                     export-ignore
+Doxyfile                  export-ignore
+CHANGELOG.md              export-ignore
+CONTRIBUTING.md           export-ignore
+CODE_OF_CONDUCT.md        export-ignore
+MIGRATION.md              export-ignore
+SECURITY.md               export-ignore
+
+# Build artifacts
+build/                    export-ignore
+*.so                      export-ignore
+*.dll                     export-ignore
+*.o                       export-ignore

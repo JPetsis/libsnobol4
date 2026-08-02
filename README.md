@@ -15,6 +15,25 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
 
 > **Official scope:** C engine + PHP binding only. See [CONTRIBUTING.md](CONTRIBUTING.md) for community binding guidance.
 
+## Quick Install
+
+The fastest way to use libsnobol4 from PHP:
+
+```bash
+pie install libsnobol4/snobol
+```
+
+This installs the native `snobol` PHP extension — PIE downloads a pre-built
+binary for your platform, or falls back to building from source automatically.
+
+| What you need                  | Command                                                                                |
+|--------------------------------|----------------------------------------------------------------------------------------|
+| **PHP extension** (recommended) | `pie install libsnobol4/snobol` — single command, binary or source                     |
+| **C library on macOS**         | `brew install JPetsis/homebrew-tap/libsnobol4`                                         |
+| **C library, any platform**    | `cmake -B build && cmake --build build && cmake --install build`                       |
+
+See [Distribution](#distribution) for details and alternative channels.
+
 ## Features
 
 ### Core Library (C)
@@ -86,7 +105,7 @@ Additional language bindings (Python, Rust, Go, etc.) are community contribution
 
 | Binding                       | Status   | Version  |
 |-------------------------------|----------|----------|
-| [PHP](bindings/php/README.md) | ✅ Stable | v0.13.0  |
+| [PHP](bindings/php/README.md) | ✅ Stable | v1.0.0  |
 
 ## Project Structure
 
@@ -391,10 +410,10 @@ See `bench/` directory for benchmark scripts and `bench/results_builtin.json` fo
 
 ### C Library
 
-| Channel               | Command                                                          | Notes                       |
-|-----------------------|------------------------------------------------------------------|-----------------------------|
-| **Build from source** | `cmake -B build && cmake --build build && cmake --install build` | Full control, all platforms |
-| **Homebrew (macOS)**  | `brew install JPetsis/homebrew-tap/libsnobol4`                   | Pre-built, ARM64 + x86_64   |
+| Channel               | Command                                                          | Notes                                    |
+|-----------------------|------------------------------------------------------------------|------------------------------------------|
+| **Build from source** | `cmake -B build && cmake --build build && cmake --install build` | Full control, all platforms              |
+| **Homebrew (macOS)**  | `brew install JPetsis/homebrew-tap/libsnobol4`                   | Builds from source via CMake (no bottles yet) |
 
 ### PHP Extension
 
@@ -445,8 +464,8 @@ libsnobol4 uses independent versioning for core and each binding:
 
 | Component              | Current | Next        | Status               | Install                               |
 |------------------------|---------|-------------|----------------------|---------------------------------------|
-| **Core**               | v0.13.0 | v0.13.0     | ✅ v0.13.0 shipped    | `brew install JPetsis/tap/libsnobol4` |
-| **PHP Binding**        | v0.13.0 | v0.13.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
+| **Core**               | v1.0.0 | v1.0.0     | ✅ v1.0.0 shipped    | `brew install JPetsis/homebrew-tap/libsnobol4` |
+| **PHP Binding**        | v1.0.0 | v1.0.0     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
 | **Python (reference)** | —       | —           | Prototype only       | `examples/python-binding/`            |
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.

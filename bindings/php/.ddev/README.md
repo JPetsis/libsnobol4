@@ -50,6 +50,23 @@ ddev exec php -m | grep snobol
 
 You should see `snobol` in the output.
 
+## PIE (test path)
+
+The web image installs the [PIE](https://github.com/php/pie) CLI
+(`.ddev/web-build/Dockerfile`, pinned version + attestation-verified PHAR) so
+you can test the real `pie install` flow from inside the container:
+
+```bash
+ddev exec pie show -v
+# After a v1.0.0 release exists:
+ddev exec pie install libsnobol4/snobol
+```
+
+PIE installs the **published Packagist release** — for development on the
+current source, use `ddev build-snobol-extension` (the canonical dev build).
+Only one installer should be active at a time to avoid enabling the extension
+twice.
+
 ## Troubleshooting
 
 ### "Core directory not found"

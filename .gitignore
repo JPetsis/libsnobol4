@@ -34,6 +34,9 @@ CaseFolding.txt
 # dev/generate_version_header.sh for the PHP amalgam build)
 core/include/snobol/version.h
 
+# Generated documentation (Doxygen output: html + man pages)
+docs/api/
+
 # Other common exclusions
 .env
 node_modules/

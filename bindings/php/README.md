@@ -54,6 +54,54 @@ ddev exec php -m | grep snobol
 # Output: snobol
 ```
 
+## Install via PIE (Packagist)
+
+The extension is published on [Packagist](https://packagist.org) as
+`libsnobol4/snobol` (`type: php-ext`). End users install it with
+[PIE](https://github.com/php/pie) — the official PHP extension installer:
+
+```bash
+# Requires PHP 8.1+ and, for source builds, autoconf/make/gcc + php-dev
+pie install libsnobol4/snobol
+```
+
+PIE downloads a pre-built binary matching your platform (PHP version, OS, libc,
+thread-safety) from the GitHub release, or falls back to a `phpize` source
+build. The extension is then enabled in your PHP configuration automatically.
+
+To declare it in a project's `composer.json`:
+
+```json
+{
+    "require": {
+        "ext-snobol": "*"
+    }
+}
+```
+
+then `pie install` inside the project directory resolves and installs any
+missing extensions.
+
+### Testing the PIE install path in DDEV
+
+The DDEV web image includes the PIE CLI (`.ddev/web-build/Dockerfile`), so you
+can exercise the real end-to-end install flow without leaving the container:
+
+```bash
+# Verify PIE targets the container's PHP
+ddev exec pie show -v
+
+# After a v1.0.0 release exists on Packagist/GitHub:
+ddev exec pie install libsnobol4/snobol
+```
+
+> **Note:** the PIE path installs the **published release** from Packagist —
+> it does not build from the mounted working tree. For day-to-day development
+> on the current source, keep using `ddev build-snobol-extension` (the
+> canonical dev build). If you test with PIE after the source build, make sure
+> only one installer is active at a time, otherwise the extension is enabled
+> twice in PHP.
+
 ## Native Build (Without DDEV)
 
 ### Prerequisites
@@ -449,12 +497,12 @@ returns `FAILURE`. You can query the version from PHP:
 
 ```php
 $v = snobol_get_api_version();
-$major = ($v >> 16) & 0xFF;  // 0
-$minor = ($v >> 8) & 0xFF;   // 12
+$major = ($v >> 16) & 0xFF;  // 1
+$minor = ($v >> 8) & 0xFF;   // 0
 $patch = $v & 0xFF;          // 0
 ```
 
-For v0.13.0 this returns `0x00000D00` (3328 in decimal).
+For v1.0.0 this returns `0x00010000` (65536 in decimal).
 
 ## Running Tests
 

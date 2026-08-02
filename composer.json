@@ -1,0 +1,32 @@
+{
+  "name": "libsnobol4/snobol",
+  "description": "SNOBOL4-style pattern matching for PHP — native C extension",
+  "type": "php-ext",
+  "keywords": [
+    "snobol",
+    "pattern-matching",
+    "regex",
+    "string-processing"
+  ],
+  "license": "Apache-2.0",
+  "require": {
+    "php": "^8.3",
+    "ext-ctype": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Snobol\\": "bindings/php/stubs/"
+    },
+    "files": [
+      "bindings/php/stubs/functions.php"
+    ]
+  },
+  "php-ext": {
+    "extension-name": "snobol",
+    "build-path": "bindings/php",
+    "download-url-method": [
+      "pre-packaged-binary",
+      "composer-default"
+    ]
+  }
+}

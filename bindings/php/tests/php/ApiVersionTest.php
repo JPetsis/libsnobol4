@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
  * PHP test for snobol_get_api_version().
  *
  * Verifies the version encoding (MAJOR << 16 | MINOR << 8 | PATCH)
- * and that the major component matches SNOBOL_VERSION_MAJOR = 0.
+ * and that the major component matches SNOBOL_VERSION_MAJOR = 1.
  */
 class ApiVersionTest extends TestCase
 {
@@ -26,24 +26,24 @@ class ApiVersionTest extends TestCase
         $this->assertIsInt($v);
     }
 
-    public function testMajorVersionIsZero(): void
+    public function testMajorVersionIsOne(): void
     {
         $v = snobol_get_api_version();
         $major = ($v >> 16) & 0xFF;
-        $this->assertSame(0, $major, 'Major version component must be 0');
+        $this->assertSame(1, $major, 'Major version component must be 1');
     }
 
-    public function testMinorVersionIsTwelve(): void
+    public function testMinorVersionIsZero(): void
     {
         $v = snobol_get_api_version();
         $minor = ($v >> 8) & 0xFF;
-        $this->assertSame(13, $minor, 'Minor version component must be 13 (v0.13.0)');
+        $this->assertSame(0, $minor, 'Minor version component must be 0 (v1.0.0)');
     }
 
-    public function testEncodingMatchesV0120(): void
+    public function testEncodingMatchesV100(): void
     {
-        // v0.13.0 encodes as (0 << 16) | (13 << 8) | 0 = 0x00000D00
-        $expected = (0 << 16) | (13 << 8) | 0;
+        // v1.0.0 encodes as (1 << 16) | (0 << 8) | 0 = 0x00010000
+        $expected = (1 << 16) | (0 << 8) | 0;
         $this->assertSame($expected, snobol_get_api_version());
     }
 
