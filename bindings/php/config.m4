@@ -31,6 +31,32 @@ if test "$PHP_SNOBOL" != "no"; then
 
   AC_MSG_NOTICE([Using core directory: $CORE_DIR])
 
+  dnl Generate snobol/version.h if missing.  The header is normally produced
+  dnl by CMake (configure_file) or dev/generate_version_header.sh, but neither
+  dnl runs when the extension is built from a distributed zipball (Packagist/
+  dnl PIE) — version.h is gitignored and dev/ is export-ignored.  Parse the
+  dnl project() version from the top-level CMakeLists.txt (which IS in the
+  dnl archive) and substitute the version.h.in template, exactly like the
+  dnl generator script does.  If the header already exists (e.g. CI ran the
+  dnl generator), leave it untouched.
+  if test ! -f "$CORE_DIR/include/snobol/version.h"; then
+    AC_MSG_NOTICE([Generating missing snobol/version.h from CMakeLists.txt])
+    SNOBOL_VERSION_LINE=$(grep -E 'project[[[:space:]]]*\([[[:space:]]]*libsnobol4[[[:space:]]]+VERSION[[[:space:]]]+[[0-9]]+\.[[0-9]]+\.[[0-9]]+' "$CORE_DIR/../CMakeLists.txt" | head -1)
+    if test -z "$SNOBOL_VERSION_LINE"; then
+      AC_MSG_ERROR([Cannot find 'project(libsnobol4 VERSION X.Y.Z)' in $CORE_DIR/../CMakeLists.txt])
+    fi
+    SNOBOL_VERSION_MAJOR=$(echo "$SNOBOL_VERSION_LINE" | grep -Eo '[[0-9]]+\.[[0-9]]+\.[[0-9]]+' | head -1 | cut -d. -f1)
+    SNOBOL_VERSION_MINOR=$(echo "$SNOBOL_VERSION_LINE" | grep -Eo '[[0-9]]+\.[[0-9]]+\.[[0-9]]+' | head -1 | cut -d. -f2)
+    SNOBOL_VERSION_PATCH=$(echo "$SNOBOL_VERSION_LINE" | grep -Eo '[[0-9]]+\.[[0-9]]+\.[[0-9]]+' | head -1 | cut -d. -f3)
+    SNOBOL_VERSION_STRING="$SNOBOL_VERSION_MAJOR.$SNOBOL_VERSION_MINOR.$SNOBOL_VERSION_PATCH"
+    sed -e "s/@SNOBOL_VERSION_MAJOR@/$SNOBOL_VERSION_MAJOR/g" \
+        -e "s/@SNOBOL_VERSION_MINOR@/$SNOBOL_VERSION_MINOR/g" \
+        -e "s/@SNOBOL_VERSION_PATCH@/$SNOBOL_VERSION_PATCH/g" \
+        -e "s/@SNOBOL_VERSION_STRING@/$SNOBOL_VERSION_STRING/g" \
+        "$CORE_DIR/cmake/version.h.in" > "$CORE_DIR/include/snobol/version.h"
+    AC_MSG_NOTICE([Generated snobol/version.h ($SNOBOL_VERSION_STRING)])
+  fi
+
   dnl All source paths are relative to $ext_srcdir (= $abs_srcdir).
   dnl core_amalgam.c lives here and #include-s all core translation units,
   dnl avoiding any ".." path components that confuse phpize.
