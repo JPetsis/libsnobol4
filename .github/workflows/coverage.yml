@@ -48,6 +48,7 @@ jobs:
         with:
           files: coverage-filtered.info
           flags: c-core
+          disable_search: true
           fail_ci_if_error: false
 
   coverage-php:
@@ -102,4 +103,5 @@ jobs:
         with:
           files: bindings/php/clover.xml
           flags: php-binding
+          disable_search: true
           fail_ci_if_error: false
