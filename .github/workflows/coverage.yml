@@ -1,0 +1,101 @@
+name: Coverage
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  coverage-c:
+    name: C coverage (gcov/lcov)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install lcov
+        run: sudo apt-get update && sudo apt-get install -y lcov
+
+      - name: Configure with coverage flags
+        run: cmake -B build -DBUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="--coverage -O0"
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Run tests
+        working-directory: build
+        run: ctest --output-on-failure
+
+      - name: Capture coverage
+        run: |
+          lcov --capture --directory build --output-file coverage.info \
+               --rc lcov_branch_coverage=1 \
+               --exclude '/usr/*' --exclude 'build/_deps/*'
+          lcov --remove coverage.info --output-file coverage-filtered.info \
+               '*/tests/*' '*/examples/*' '*/bench/*'
+          lcov --list coverage-filtered.info
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage-filtered.info
+          flags: c-core
+          fail_ci_if_error: false
+
+  coverage-php:
+    name: PHP coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: xdebug
+          coverage: xdebug
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf
+          sudo rm -f /etc/apt/sources.list.d/ondrej-php* /etc/apt/sources.list.d/*ondrej*
+          sudo add-apt-repository --no-update -y ppa:ondrej/php
+          sudo apt-get update
+          sudo apt-get install -y php8.5-dev
+
+      - name: Install Composer dependencies
+        working-directory: bindings/php
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          composer dump-autoload -o
+
+      - name: Generate core version header
+        run: ./dev/generate_version_header.sh
+
+      - name: Build PHP extension with phpize
+        working-directory: bindings/php
+        run: |
+          phpize
+          ./configure --enable-snobol=shared
+          make -j"$(nproc)"
+          sudo make install
+          echo "extension=snobol.so" | sudo tee "$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')/99-snobol.ini" > /dev/null
+          php -m | grep -i '^snobol$'
+
+      - name: Run PHP tests with coverage
+        working-directory: bindings/php
+        run: |
+          XDEBUG_MODE=coverage vendor/bin/phpunit tests/php --coverage-clover clover.xml
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: bindings/php/clover.xml
+          flags: php-binding
+          fail_ci_if_error: false

@@ -1,0 +1,21 @@
+---
+name: Performance regression / question
+about: Report a slowdown or ask about matching performance
+title: "perf: "
+labels: [performance]
+---
+
+## Scenario
+
+<!-- What pattern and subject shape? Include the pattern text. -->
+
+## Measurements
+
+<!-- Paste output of the diagnostic probe if available:
+     PROBE_ITERS=1000000 ./build/bench/c/snobol4_probe -->
+
+## Context
+
+- Previous version (if regression): 
+- Subject size / pattern shape:
+- Did it regress or is it a first measurement?

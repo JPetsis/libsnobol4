@@ -1,0 +1,33 @@
+name: Stale
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-issue-stale: 90
+          days-before-issue-close: 30
+          days-before-pr-stale: 45
+          days-before-pr-close: 15
+          stale-issue-label: "stale"
+          stale-pr-label: "stale"
+          exempt-issue-labels: "next-release,help wanted,bug"
+          exempt-pr-labels: "next-release,help wanted"
+          stale-issue-message: >
+            This issue has been inactive for 90 days. It will be closed in 30
+            days unless activity resumes or it is labelled `next-release`.
+          stale-pr-message: >
+            This PR has been inactive for 45 days. It will be closed in 15
+            days unless activity resumes.
+          close-issue-message: "Closed due to inactivity. Reopen if this is still relevant."
+          close-pr-message: "Closed due to inactivity. Reopen if this is still relevant."

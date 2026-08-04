@@ -1,0 +1,36 @@
+# Path-based PR labels (actions/labeler)
+# Matches against changed files. Labels must exist in the repo.
+
+core (C):
+  - core/**/*
+
+php-binding:
+  - bindings/php/**/*
+
+build / packaging:
+  - CMakeLists.txt
+  - core/CMakeLists.txt
+  - bindings/php/CMakeLists.txt
+  - .github/workflows/release.yml
+  - .github/workflows/ci-*.yml
+  - composer.json
+  - .gitattributes
+
+performance:
+  - core/src/search_*.c
+  - core/src/vm_exec.c
+  - bench/**/*
+  - bindings/php/probe.php
+
+portability:
+  - core/include/**/*
+  - bindings/php/config.m4
+  - bindings/php/config.w32
+  - bindings/php/CMakeLists.txt
+
+documentation:
+  - README.md
+  - docs/**/*
+  - CHANGELOG.md
+  - .github/ISSUE_TEMPLATE/**/*
+  - .github/pull_request_template.md

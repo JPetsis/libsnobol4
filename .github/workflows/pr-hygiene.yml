@@ -1,0 +1,57 @@
+name: PR Hygiene
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  title-format:
+    name: Conventional commit title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Convention: type(scope): subject — e.g. "feat(php): add DFA cache"
+          # Allowed types: feat, fix, refactor, docs, test, chore, perf, ci, build
+          if ! echo "$TITLE" | grep -qE '^(feat|fix|refactor|docs|test|chore|perf|ci|build)(\([a-z0-9-]+\))?!?: .+'; then
+            echo "❌ PR title does not follow conventional commits:"
+            echo "   $TITLE"
+            echo ""
+            echo "Expected: <type>(<scope>): <subject>"
+            echo "Allowed types: feat, fix, refactor, docs, test, chore, perf, ci, build"
+            exit 1
+          fi
+
+  changelog:
+    name: CHANGELOG entry required
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check CHANGELOG modified
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # Compare the PR branch against the base branch; require a CHANGELOG diff.
+          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --quiet
+          BASE="origin/${BASE_REF}"
+          HEAD="origin/${HEAD_REF}"
+          CHANGED=$(git diff --name-only "${BASE}"..."${HEAD}" 2>/dev/null || true)
+          if echo "${CHANGED}" | grep -q "^CHANGELOG.md$"; then
+            echo "✓ CHANGELOG.md updated"
+          elif ! echo "${CHANGED}" | grep -qE '\.(c|h|php)$'; then
+            echo "✓ Docs-only change — no CHANGELOG entry required"
+          else
+            echo "❌ CHANGELOG.md must be updated (add your change under [Unreleased])."
+            echo "   Docs-only PRs are exempt."
+            exit 1
+          fi

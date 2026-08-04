@@ -23,7 +23,23 @@ jobs:
       - name: Create draft release from tag
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --draft --notes-from-tag
+        run: |
+          # Auto-generate notes from merged PRs since the previous tag,
+          # grouped by the PR's labels (conventional-commit + labeler make
+          # this readable). Falls back to the tag message when no PRs exist.
+          PREV=$(git describe --abbrev=0 --tags "${{ github.ref_name }}^" 2>/dev/null || echo "")
+          if [ -n "$PREV" ]; then
+            gh release create "${{ github.ref_name }}" \
+              --title "${{ github.ref_name }}" \
+              --draft \
+              --generate-notes \
+              --latest=false \
+              --notes-start-tag "$PREV" 2>/dev/null \
+              || gh release create "${{ github.ref_name }}" \
+                   --title "${{ github.ref_name }}" --draft --notes-from-tag
+          else
+            gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --draft --notes-from-tag
+          fi
 
   # Pre-built PIE binaries (Linux x86_64 + aarch64, macOS x86_64 + arm64).
   # Windows uses php/php-windows-builder in the windows job below.
