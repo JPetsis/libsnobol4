@@ -1,7 +1,7 @@
 name: Auto-label
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize]
 
 permissions:
@@ -12,6 +12,9 @@ jobs:
   labeler:
     runs-on: ubuntu-latest
     steps:
+      # pull_request_target runs in the context of the base branch, so the
+      # config fetched below is always the latest from main — not the PR
+      # head branch, which may carry a stale .github/labeler.yml.
       - uses: actions/labeler@v5
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
