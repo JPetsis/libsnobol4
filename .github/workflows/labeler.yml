@@ -15,7 +15,7 @@ jobs:
       # pull_request_target runs in the context of the base branch, so the
       # config fetched below is always the latest from main — not the PR
       # head branch, which may carry a stale .github/labeler.yml.
-      - uses: actions/labeler@v5
+      - uses: actions/labeler@v7
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           configuration-path: .github/labeler.yml
