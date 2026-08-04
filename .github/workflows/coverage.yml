@@ -52,18 +52,21 @@ jobs:
           fail_ci_if_error: false
 
   coverage-php:
-    name: PHP coverage
+    name: PHP extension coverage (gcov on C sources)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install lcov
+        run: sudo apt-get update && sudo apt-get install -y lcov
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: xdebug
-          coverage: xdebug
+          tools: composer
+          coverage: none
 
       - name: Install system dependencies
         run: |
@@ -83,8 +86,11 @@ jobs:
       - name: Generate core version header
         run: ./dev/generate_version_header.sh
 
-      - name: Build PHP extension with phpize
+      - name: Build PHP extension with coverage instrumentation
         working-directory: bindings/php
+        env:
+          CFLAGS: --coverage -O0
+          LDFLAGS: --coverage
         run: |
           phpize
           ./configure --enable-snobol=shared
@@ -93,15 +99,27 @@ jobs:
           echo "extension=snobol.so" | sudo tee "$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')/99-snobol.ini" > /dev/null
           php -m | grep -i '^snobol$'
 
-      - name: Run PHP tests with coverage
+      - name: Run PHP tests (drives the instrumented extension)
         working-directory: bindings/php
+        run: vendor/bin/phpunit tests/php
+
+      - name: Capture C coverage of the extension sources
         run: |
-          XDEBUG_MODE=coverage vendor/bin/phpunit tests/php --coverage-clover clover.xml
+          # The PHP binding's implementation is C (bindings/php/src/*.c),
+          # exercised through PHP tests.  gcov captures it; phpunit's clover
+          # would only see the stubs, which never execute.
+          lcov --capture --directory bindings/php --output-file php-ext.info \
+               --rc branch_coverage=1 \
+               --exclude '/usr/*'
+          lcov --remove php-ext.info --output-file php-ext-filtered.info \
+               --ignore-errors unused \
+               '*/tests/*' '*/stubs/*' '*/core/*'
+          lcov --list php-ext-filtered.info
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: bindings/php/clover.xml
+          files: php-ext-filtered.info
           flags: php-binding
           disable_search: true
           fail_ci_if_error: false
