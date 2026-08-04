@@ -1,5 +1,5 @@
-# Path-based PR labels (actions/labeler)
-# Matches against changed files. Labels must exist in the repo.
+# Path-based PR labels (actions/labeler v5)
+# Labels must exist in the repo. Each entry is an array of glob patterns.
 
 core (C):
   - core/**/*
@@ -13,6 +13,9 @@ build / packaging:
   - bindings/php/CMakeLists.txt
   - .github/workflows/release.yml
   - .github/workflows/ci-*.yml
+  - .github/workflows/coverage.yml
+  - .github/workflows/pr-hygiene.yml
+  - .github/workflows/labeler.yml
   - composer.json
   - .gitattributes
 
