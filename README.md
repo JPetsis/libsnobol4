@@ -1,9 +1,17 @@
 # libsnobol4
 
-![core-build](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-core.yml/badge.svg)
-![php-build](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-php.yml/badge.svg)
-![sanitizers](https://github.com/JPetsis/libsnobol4/actions/workflows/sanitizers.yml/badge.svg)
-[![docs](https://github.com/JPetsis/libsnobol4/actions/workflows/docs.yml/badge.svg)](https://JPetsis.github.io/libsnobol4/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Core CI](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-core.yml/badge.svg)](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-core.yml)
+[![PHP CI](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-php.yml/badge.svg)](https://github.com/JPetsis/libsnobol4/actions/workflows/ci-php.yml)
+[![Sanitizers](https://github.com/JPetsis/libsnobol4/actions/workflows/sanitizers.yml/badge.svg)](https://github.com/JPetsis/libsnobol4/actions/workflows/sanitizers.yml)
+[![Valgrind](https://github.com/JPetsis/libsnobol4/actions/workflows/valgrind.yml/badge.svg)](https://github.com/JPetsis/libsnobol4/actions/workflows/valgrind.yml)
+[![Fuzz](https://github.com/JPetsis/libsnobol4/actions/workflows/fuzz.yml/badge.svg)](https://github.com/JPetsis/libsnobol4/actions/workflows/fuzz.yml)
+[![Benchmarks](https://github.com/JPetsis/libsnobol4/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/JPetsis/libsnobol4/actions/workflows/benchmarks.yml)
+[![Coverage](https://codecov.io/gh/JPetsis/libsnobol4/branch/main/graph/badge.svg)](https://codecov.io/gh/JPetsis/libsnobol4)
+[![Docs](https://github.com/JPetsis/libsnobol4/actions/workflows/docs.yml/badge.svg)](https://JPetsis.github.io/libsnobol4/)
+[![Packagist](https://img.shields.io/packagist/v/libsnobol4/snobol.svg)](https://packagist.org/packages/libsnobol4/snobol)
+[![Packagist Downloads](https://img.shields.io/packagist/dt/libsnobol4/snobol.svg)](https://packagist.org/packages/libsnobol4/snobol)
+[![GitHub Release](https://img.shields.io/github/v/release/JPetsis/libsnobol4.svg)](https://github.com/JPetsis/libsnobol4/releases)
 
 A high-performance C library implementing [SNOBOL4](https://en.wikipedia.org/wiki/SNOBOL)-style string pattern
 matching and manipulation — a **PCRE alternative** for complex string processing.

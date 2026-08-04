@@ -33,8 +33,8 @@ jobs:
       - name: Capture coverage
         run: |
           lcov --capture --directory build --output-file coverage.info \
-               --rc lcov_branch_coverage=1 \
-               --exclude '/usr/*' --exclude 'build/_deps/*'
+               --rc branch_coverage=1 \
+               --exclude '/usr/*'
           lcov --remove coverage.info --output-file coverage-filtered.info \
                '*/tests/*' '*/examples/*' '*/bench/*'
           lcov --list coverage-filtered.info
