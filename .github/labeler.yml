@@ -1,39 +1,51 @@
 # Path-based PR labels (actions/labeler v5)
-# Labels must exist in the repo. Each entry is an array of glob patterns.
+# Each label maps to a match object (not plain globs — v5 breaking change).
+# Labels must exist in the repo.
 
 core (C):
-  - core/**/*
+  - changed-files:
+      - any-glob-to-any-file: 'core/**/*'
 
 php-binding:
-  - bindings/php/**/*
+  - changed-files:
+      - any-glob-to-any-file: 'bindings/php/**/*'
 
 build / packaging:
-  - CMakeLists.txt
-  - core/CMakeLists.txt
-  - bindings/php/CMakeLists.txt
-  - .github/workflows/release.yml
-  - .github/workflows/ci-*.yml
-  - .github/workflows/coverage.yml
-  - .github/workflows/pr-hygiene.yml
-  - .github/workflows/labeler.yml
-  - composer.json
-  - .gitattributes
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'CMakeLists.txt'
+          - 'core/CMakeLists.txt'
+          - 'bindings/php/CMakeLists.txt'
+          - '.github/workflows/release.yml'
+          - '.github/workflows/ci-*.yml'
+          - '.github/workflows/coverage.yml'
+          - '.github/workflows/pr-hygiene.yml'
+          - '.github/workflows/labeler.yml'
+          - '.github/workflows/dependabot-auto-merge.yml'
+          - 'composer.json'
+          - '.gitattributes'
 
 performance:
-  - core/src/search_*.c
-  - core/src/vm_exec.c
-  - bench/**/*
-  - bindings/php/probe.php
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'core/src/search_*.c'
+          - 'core/src/vm_exec.c'
+          - 'bench/**/*'
+          - 'bindings/php/probe.php'
 
 portability:
-  - core/include/**/*
-  - bindings/php/config.m4
-  - bindings/php/config.w32
-  - bindings/php/CMakeLists.txt
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'core/include/**/*'
+          - 'bindings/php/config.m4'
+          - 'bindings/php/config.w32'
+          - 'bindings/php/CMakeLists.txt'
 
 documentation:
-  - README.md
-  - docs/**/*
-  - CHANGELOG.md
-  - .github/ISSUE_TEMPLATE/**/*
-  - .github/pull_request_template.md
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'README.md'
+          - 'docs/**/*'
+          - 'CHANGELOG.md'
+          - '.github/ISSUE_TEMPLATE/**/*'
+          - '.github/pull_request_template.md'
