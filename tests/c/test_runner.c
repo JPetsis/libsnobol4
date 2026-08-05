@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "../../core/include/snobol/snobol_internal.h"
 
@@ -118,7 +120,8 @@ static void watchdog_log(const char *fmt, ...) {
   if (fopen_s(&fp, "watchdog.log", "a") != 0 || !fp)
     return;
 #else
-  FILE *fp = fopen("watchdog.log", "a");
+  int fd = open("watchdog.log", O_WRONLY | O_CREAT | O_APPEND, 0600);
+  FILE *fp = fd >= 0 ? fdopen(fd, "a") : nullptr;
   if (!fp)
     return;
 #endif

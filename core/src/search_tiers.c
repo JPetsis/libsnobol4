@@ -2057,6 +2057,10 @@ static uint16_t dfa_hash_find_or_insert(dfa_hash_entry_t *ht, size_t cap,
 snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len, const VM *dfa_vm) {
   if (!bc || bc_len == 0)
     return NULL;
+  /* NFA state indices are uint16_t — reject oversized bytecode instead of
+   * truncating offsets (callers fall back to the VM). */
+  if (bc_len > UINT16_MAX)
+    return NULL;
 
   /* ---- Pre-scan bytecode for multi-byte LIT data positions ---- */
   /* Build a table mapping each literal data byte offset to its continuation:
@@ -2136,13 +2140,13 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len, const VM *dfa_vm) {
   if (!eps_closures)
     goto fail;
 
-  for (uint16_t off = 0; off < bc_len; off++) {
+  for (size_t off = 0; off < bc_len; off++) {
     uint8_t op = bc[off];
     if (op == OP_ACCEPT || op == OP_ABORT || op == OP_SUCCEED) {
       nfa_set_clear(&eps_closures[off]);
-      nfa_set_add(&eps_closures[off], off);
+      nfa_set_add(&eps_closures[off], (uint16_t)off);
     } else {
-      epsilon_closure(bc, bc_len, off, &eps_closures[off]);
+      epsilon_closure(bc, bc_len, (uint16_t)off, &eps_closures[off]);
     }
   }
 
