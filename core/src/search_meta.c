@@ -1026,8 +1026,34 @@ static inline void fusion_bitmap_invert(uint8_t bm[32]) {
   memset(bm + 16, 0xFF, 16);
 }
 
-/* check_fusion_eligible uses snobol_fusion_free in error paths */
-
+/* ---------------------------------------------------------------------------
+ * check_fusion_eligible: build a fused segment list for a pattern.
+ *
+ * Scans the pattern bytecode and records a sequence of adjacent fusible
+ * operations — the side-effect-free, search-VM-eligible subset (LIT, SPAN,
+ * BREAK, ANY, NOTANY, BREAKX, and bushy SPLIT-of-literals alternations) —
+ * into a freshly allocated segment list.  When the whole pattern reduces to
+ * such a run, the tier-10 fusion executor can match it with a single linear
+ * pass over the subject instead of per-operation dispatch.
+ *
+ * Eligibility rules:
+ *  - patterns with captures, or with any non-fusible opcode (ARB/BAL/EVAL/
+ *    ASSIGN/position ops/jumps/…) are rejected with NULL
+ *  - out-of-range or empty literal payloads are rejected
+ *  - the segment count is capped at MAX_FUSION_SEGMENTS (alternation
+ *    branches at MAX_FUSION_ALT)
+ *
+ * Every rejection path frees the partially-built list internally, so a
+ * non-NULL return is the only resource the caller owns — release it with
+ * snobol_fusion_free() when no longer needed.
+ *
+ * @param bc      Pattern bytecode
+ * @param bc_len  Bytecode length
+ * @param meta    Derived search metadata for the pattern
+ * @return Newly allocated fusion segment list, or NULL when the pattern is
+ *         not fusible (callers fall back to regular tier dispatch)
+ * ---------------------------------------------------------------------------
+ */
 static snobol_fusion_t *check_fusion_eligible(
     const uint8_t *bc, size_t bc_len, const snobol_search_meta_t *meta) {
   if (!bc || bc_len < 2)

@@ -13,7 +13,7 @@ extern "C" {
 #include "snobol/arena.h"
 
 /**
- * @file snobol_ast.h
+ * @file ast.h
  * @brief Abstract Syntax Tree representation for SNOBOL patterns
  *
  * Uses tagged union structs for type-safe AST nodes.

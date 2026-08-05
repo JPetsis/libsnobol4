@@ -498,7 +498,7 @@ void snobol_pattern_search_state_set_trie_cache(
  * @param[in] state        Search state created by
  *                         snobol_pattern_search_state_create().
  * @param[in] eval_fn      EVAL callback (NULL to clear).
- * @param[in] eval_userdata Opaque pointer passed to @p eval_fn.
+ * @param[in] eval_udata   Opaque pointer passed to @p eval_fn.
  */
 void snobol_pattern_search_state_set_eval_fn(
     snobol_pattern_search_state_t *state,

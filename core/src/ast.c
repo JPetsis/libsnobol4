@@ -195,6 +195,23 @@ ast_node_t *snobol_ast_create_label(char *name, ast_node_t *target) {
   return node;
 }
 
+/**
+ * Deep-copy an AST subtree.
+ *
+ * Recursively clones the node and all owned descendants (concat parts,
+ * alternation children, capture/arbno/repetition bodies, literal and
+ * charclass payloads, label names, and table keys/values), producing a
+ * structurally identical tree that shares no memory with the source.
+ * Nodes whose children were bound via snobol_ast_set_arena are cloned into
+ * the same arena when one is active, otherwise into the heap.
+ *
+ * The caller owns the returned tree and must release it with
+ * snobol_ast_free() when it is no longer needed.
+ *
+ * @param node AST subtree to clone, or NULL
+ * @return Newly allocated clone, or NULL when @p node is NULL or the
+ *         allocation fails
+ */
 ast_node_t *snobol_ast_clone(const ast_node_t *node) {
   if (!node)
     return nullptr;

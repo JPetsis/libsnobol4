@@ -36,15 +36,29 @@ static inline bool fusion_bitmap_test(const uint8_t bm[32], uint8_t b) {
 /* ---------------------------------------------------------------------------
  * exec_fusion: execute a fused pattern at a given position.
  *
- * Walks the segment list, matching each segment in sequence.  Returns true
- * on success (all segments matched), filling out_match_end with the position
- * after the last segment.  Returns false on first segment failure.
+ * Walks the segment list produced by check_fusion_eligible, matching each
+ * segment against the subject in sequence, starting at @p pos and advancing
+ * the cursor by the length of every matched segment:
  *
- * @param fusion     Compiled fusion segment list
- * @param subject    Subject string
- * @param subject_len Subject length
- * @param pos        Starting position
- * @param out_match_end Output: position after last matched segment
+ *  - FUSION_LIT:  memcmp the literal at the cursor
+ *  - FUSION_RUN:  consume a run of bytes accepted by the segment's bitmap
+ *  - FUSION_CHAR: single-byte bitmap test
+ *  - FUSION_ALT:  try each alternative branch (each itself a small segment
+ *                 list) at the same cursor; the first branch that matches
+ *                 advances the cursor; a branch that fails or exceeds the
+ *                 subject leaves the cursor untouched
+ *
+ * Matching is strictly sequential and side-effect free: the first segment
+ * that fails aborts the whole attempt and returns false.  On success
+ * *out_match_end is set to the position after the last matched segment.
+ *
+ * @param fusion       Compiled fusion segment list (from
+ *                     check_fusion_eligible / snobol_fusion_build)
+ * @param subject      Subject string
+ * @param subject_len  Subject length
+ * @param pos          Starting position
+ * @param out_match_end Output: position after last matched segment (only on
+ *                      success)
  * @return true if all segments matched; false on failure
  * ---------------------------------------------------------------------------
  */

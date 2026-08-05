@@ -11,7 +11,7 @@ extern "C" {
 #include <stdint.h>
 
 /**
- * @file snobol_table.h
+ * @file table.h
  * @brief Runtime-owned associative table objects for SNOBOL4
  *
  * Ownership/Lifetime Rules:

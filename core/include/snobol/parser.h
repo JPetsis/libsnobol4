@@ -11,7 +11,7 @@ extern "C" {
 #include <stddef.h>
 
 /**
- * @file snobol_parser.h
+ * @file parser.h
  * @brief Recursive descent parser for SNOBOL pattern syntax
  *
  * Consumes tokens from lexer and produces AST.

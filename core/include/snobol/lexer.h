@@ -10,7 +10,7 @@ extern "C" {
 #include <stdint.h>
 
 /**
- * @file snobol_lexer.h
+ * @file lexer.h
  * @brief Lexer for SNOBOL pattern syntax
  *
  * Converts UTF-8 source text into a stream of tokens.

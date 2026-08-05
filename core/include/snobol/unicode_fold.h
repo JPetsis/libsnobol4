@@ -34,7 +34,7 @@ extern "C" {
  *                The buffer is written by the function; ownership stays with
  *                the caller.  Do NOT free the contents — they are scalar
  * values.
- * @param out_len Set to the number of codepoints written to <out> (1 or 2).
+ * @param out_len Set to the number of codepoints written to @p out (1 or 2).
  */
 void snobol_to_upper_cp(uint32_t cp, uint32_t *out, int *out_len);
 

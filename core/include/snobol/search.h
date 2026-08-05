@@ -542,6 +542,8 @@ void snobol_search_dump_cost_model(FILE *out);
  * @param start_offset  Byte offset to start searching from (0 = beginning)
  * @param meta          Optional pre-derived metadata for acceleration (NULL =
  * derive inline)
+ * @param dfa           Optional pre-built DFA for the automaton tier (NULL =
+ * none)
  * @param out_result    Output: match position (always written; success=false on
  * no match)
  * @param diag          Optional diagnostics output (may be NULL)
@@ -638,6 +640,7 @@ bool check_simd_eligible(const uint8_t *bc, size_t bc_len);
  * @param dfa          Unused (must be NULL)
  * @param out_result   Match result
  * @param diag         Diagnostics (may be NULL)
+ * @param anchored     Whether the match must begin exactly at start_offset
  * @return true when a match is found
  */
 bool tier_simd_nfa(VM *vm, const char *subject, size_t subject_len,

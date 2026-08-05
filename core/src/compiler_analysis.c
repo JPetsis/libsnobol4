@@ -1,10 +1,26 @@
 #include "compiler_internal.h"
 
+/**
+ * Initialize a bytecode output buffer.
+ *
+ * Allocates the initial 4096-byte buffer; the buffer grows geometrically
+ * via cb_ensure() as instructions are emitted.  The caller owns the buffer
+ * and must release it with cb_free().
+ *
+ * @param c CodeBuf to initialize (must not be NULL)
+ */
 void cb_init(CodeBuf *c) {
   c->cap = 4096;
   c->buf = snobol_malloc(c->cap);
   c->len = 0;
 }
+/**
+ * Release a bytecode output buffer.
+ *
+ * Frees the buffer and zeroes all fields.  NULL-safe and idempotent.
+ *
+ * @param c CodeBuf to release (may be NULL)
+ */
 void cb_free(CodeBuf *c) {
   if (c->buf) {
     snobol_free(c->buf);
@@ -21,6 +37,14 @@ void cb_ensure(CodeBuf *c, size_t need) {
   c->buf = snobol_realloc(c->buf, newcap);
   c->cap = newcap;
 }
+/**
+ * Return the current write position of a bytecode buffer.
+ *
+ * The position equals the number of bytes emitted so far.
+ *
+ * @param c CodeBuf to query (must not be NULL)
+ * @return Current length of the emitted bytecode
+ */
 size_t cb_pos(CodeBuf *c) {
   return c->len;
 }
@@ -61,6 +85,20 @@ bool compiler_case_insensitive = false;
  * the compiler warn (and the VM bound iterations) to avoid O(n^2)/exponential
  * choice-point blowup. */
 
+/**
+ * Determine whether an AST subtree can match the empty string.
+ *
+ * A subtree is nullable when it can complete a match without consuming
+ * any subject bytes: literal nodes only when empty, concat only when every
+ * part is nullable, alternation when either branch is nullable, and
+ * zero-width structural nodes (ARBNO, repeat(0,…), SUCCEED, FAIL, FENCE,
+ * REM, BREAKX, BAL) are always nullable.  The compiler uses this to warn
+ * about (and bound) zero-width closures that could otherwise produce
+ * exponential choice-point blowup.
+ *
+ * @param node AST subtree to analyse, or NULL
+ * @return true if the subtree can match empty (NULL input → false)
+ */
 bool ast_node_nullable(const ast_node_t *node) {
   if (!node)
     return false;
@@ -102,6 +140,16 @@ bool ast_node_nullable(const ast_node_t *node) {
   }
 }
 
+/**
+ * Emit a compiler diagnostic to stderr when enabled.
+ *
+ * Diagnostics are gated by the SNOBOL_DIAG environment variable (any
+ * non-empty value enables them); the flag is probed once on first use.
+ * Used by the compiler to surface warnings such as unbounded nullable
+ * closures.
+ *
+ * @param msg Message to print (NULL prints an empty line)
+ */
 void snobol_diag(const char *msg) {
   static int diag_enabled = -1;
   if (diag_enabled < 0)
@@ -110,6 +158,15 @@ void snobol_diag(const char *msg) {
     fprintf(stderr, "[snobol-diag] %s\n", msg ? msg : "");
 }
 
+/**
+ * Release the compiler's global character-class registry.
+ *
+ * Walks the singly-linked list of CCEntry nodes (see add_range /
+ * get_cc_entry), freeing each entry and its range array, then resets the
+ * list head, count, and the case-insensitivity flag.  Called at the end
+ * of a compile so per-pattern character classes do not leak or leak
+ * across compiles.
+ */
 void free_charclass_list(void) {
   CCEntry *e = charclass_head;
   while (e) {
@@ -144,6 +201,16 @@ int compare_ranges(const void *a, const void *b) {
   return 0;
 }
 
+/**
+ * Sort and merge the range list of a character-class entry.
+ *
+ * Orders the entry's ranges by start offset and merges adjacent or
+ * overlapping ranges (gap of one codepoint included) into a canonical,
+ * disjoint, sorted sequence — the representation the rest of the
+ * pipeline (bitmap caching, case folding, range lookups) relies on.
+ *
+ * @param e Character-class entry whose ranges are normalized in place
+ */
 void normalize_ranges(CCEntry *e) {
   if (e->range_count == 0)
     return;
@@ -455,6 +522,21 @@ static ArmInfo parse_arm_b(const uint8_t *bc, size_t bc_len, size_t b) {
   return r;
 }
 
+/**
+ * Fuse SPLIT-of-ANY (and SPLIT-of-LIT) alternations into a single ANY.
+ *
+ * Scans the emitted bytecode right-to-left (so inner SPLITs fuse before
+ * outer ones) and, for each SPLIT whose two arms are strictly-forward
+ * LIT or ANY operations that merge at the same point, rewrites the SPLIT
+ * site into a single OP_ANY whose charclass is the union of the two arm
+ * classes, padding the gap to the merge point with OP_NOPs.  NOTANY arms
+ * are never fused.  This shrinks the pattern and speeds up search-mode
+ * execution by replacing two-arm branches with a single character-class
+ * scan.
+ *
+ * @param cb Bytecode buffer holding the pattern to fuse (modified in
+ *           place)
+ */
 void snobol_bc_fuse_split_any(CodeBuf *cb) {
   uint8_t *bc = cb->buf;
   size_t bc_len = cb->len;

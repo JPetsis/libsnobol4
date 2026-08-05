@@ -10,7 +10,7 @@ extern "C" {
 #include <stdint.h>
 
 /**
- * @file snobol_dynamic_pattern.h
+ * @file dynamic_pattern.h
  * @brief Dynamic pattern objects and canonical cache keys
  *
  * Ownership/Lifetime Rules:
