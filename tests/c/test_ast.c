@@ -410,62 +410,47 @@ void test_cov_ast_type_names_and_dump(void) {
   FILE *sink = tmpfile();
   test_assert(sink != NULL, "dump sink created");
   if (sink) {
-    ast_node_t *dump_nodes[32];
+    ast_node_t *dump_nodes[40];
     size_t dn = 0;
     snobol_ast_dump(NULL, sink, 2);
-    snobol_ast_dump(snobol_ast_create_lit("hi", 2), sink, 0);
-    snobol_ast_dump(snobol_ast_create_span("ab", 2), sink, 0);
-    snobol_ast_dump(snobol_ast_create_any("ab", 2), sink, 0);
-    snobol_ast_dump(snobol_ast_create_any(NULL, 0), sink, 0);
-    snobol_ast_dump(snobol_ast_create_notany("c", 1), sink, 0);
-    snobol_ast_dump(snobol_ast_create_break("x", 1), sink, 0);
-    snobol_ast_dump(snobol_ast_create_breakx(";", 1), sink, 0);
-    snobol_ast_dump(snobol_ast_create_len(2), sink, 0);
-    snobol_ast_dump(snobol_ast_create_assign(1, 0), sink, 0);
-    snobol_ast_dump(snobol_ast_create_eval(1, 0), sink, 0);
-    snobol_ast_dump(snobol_ast_create_anchor(ANCHOR_START), sink, 0);
-    snobol_ast_dump(snobol_ast_create_bal('(', ')'), sink, 0);
-    snobol_ast_dump(snobol_ast_create_rpos(1), sink, 0);
-    snobol_ast_dump(snobol_ast_create_rtab(2), sink, 0);
-    snobol_ast_dump(snobol_ast_create_pos(0), sink, 0);
-    snobol_ast_dump(snobol_ast_create_tab(1), sink, 0);
-    snobol_ast_dump(snobol_ast_create_fence(), sink, 0);
-    snobol_ast_dump(snobol_ast_create_rem(), sink, 0);
-    snobol_ast_dump(snobol_ast_create_abort(), sink, 0);
-    snobol_ast_dump(snobol_ast_create_fail(), sink, 0);
-    snobol_ast_dump(snobol_ast_create_succeed(), sink, 0);
-    snobol_ast_dump(snobol_ast_create_emit("x", 1, 0), sink, 0);
-    snobol_ast_dump(snobol_ast_create_goto("L"), sink, 0);
-    snobol_ast_dump(
-        snobol_ast_create_label((char *)"L", snobol_ast_create_lit("a", 1)),
-        sink, 0);
-    snobol_ast_dump(
-        snobol_ast_create_table_access("t", snobol_ast_create_lit("k", 1)),
-        sink, 0);
-    snobol_ast_dump(
+    dump_nodes[dn++] = snobol_ast_create_lit("hi", 2);
+    dump_nodes[dn++] = snobol_ast_create_span("ab", 2);
+    dump_nodes[dn++] = snobol_ast_create_any("ab", 2);
+    dump_nodes[dn++] = snobol_ast_create_any(NULL, 0);
+    dump_nodes[dn++] = snobol_ast_create_notany("c", 1);
+    dump_nodes[dn++] = snobol_ast_create_break("x", 1);
+    dump_nodes[dn++] = snobol_ast_create_breakx(";", 1);
+    dump_nodes[dn++] = snobol_ast_create_len(2);
+    dump_nodes[dn++] = snobol_ast_create_assign(1, 0);
+    dump_nodes[dn++] = snobol_ast_create_eval(1, 0);
+    dump_nodes[dn++] = snobol_ast_create_anchor(ANCHOR_START);
+    dump_nodes[dn++] = snobol_ast_create_bal('(', ')');
+    dump_nodes[dn++] = snobol_ast_create_rpos(1);
+    dump_nodes[dn++] = snobol_ast_create_rtab(2);
+    dump_nodes[dn++] = snobol_ast_create_pos(0);
+    dump_nodes[dn++] = snobol_ast_create_tab(1);
+    dump_nodes[dn++] = snobol_ast_create_fence();
+    dump_nodes[dn++] = snobol_ast_create_rem();
+    dump_nodes[dn++] = snobol_ast_create_abort();
+    dump_nodes[dn++] = snobol_ast_create_fail();
+    dump_nodes[dn++] = snobol_ast_create_succeed();
+    dump_nodes[dn++] = snobol_ast_create_emit("x", 1, 0);
+    dump_nodes[dn++] = snobol_ast_create_goto("L");
+    dump_nodes[dn++] =
+        snobol_ast_create_label((char *)"L", snobol_ast_create_lit("a", 1));
+    dump_nodes[dn++] =
+        snobol_ast_create_table_access("t", snobol_ast_create_lit("k", 1));
+    dump_nodes[dn++] =
         snobol_ast_create_table_update("t", snobol_ast_create_lit("k", 1),
-                                       snobol_ast_create_lit("v", 1)),
-        sink, 0);
-    snobol_ast_dump(
-        snobol_ast_create_dynamic_eval(snobol_ast_create_lit("x", 1)), sink,
-        0);
-    ast_node_t *arbno_dump =
-        snobol_ast_create_arbno(snobol_ast_create_lit("q", 1));
-    dump_nodes[dn++] = arbno_dump;
-    snobol_ast_dump(arbno_dump, sink, 0);
-    ast_node_t *cap_dump =
-        snobol_ast_create_cap(1, snobol_ast_create_lit("c", 1));
-    dump_nodes[dn++] = cap_dump;
-    snobol_ast_dump(cap_dump, sink, 0);
-    ast_node_t *alt_dump =
-        snobol_ast_create_alt(snobol_ast_create_lit("l", 1),
-                              snobol_ast_create_lit("r", 1));
-    dump_nodes[dn++] = alt_dump;
-    snobol_ast_dump(alt_dump, sink, 0);
-    ast_node_t *rep_dump =
+                                       snobol_ast_create_lit("v", 1));
+    dump_nodes[dn++] =
+        snobol_ast_create_dynamic_eval(snobol_ast_create_lit("x", 1));
+    dump_nodes[dn++] = snobol_ast_create_arbno(snobol_ast_create_lit("q", 1));
+    dump_nodes[dn++] = snobol_ast_create_cap(1, snobol_ast_create_lit("c", 1));
+    dump_nodes[dn++] = snobol_ast_create_alt(snobol_ast_create_lit("l", 1),
+                                             snobol_ast_create_lit("r", 1));
+    dump_nodes[dn++] =
         snobol_ast_create_repeat(snobol_ast_create_lit("z", 1), 0, 3);
-    dump_nodes[dn++] = rep_dump;
-    snobol_ast_dump(rep_dump, sink, 0);
     ast_node_t **dump_parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
     dump_parts[0] = snobol_ast_create_lit("a", 1);
     dump_parts[1] = snobol_ast_create_lit("b", 1);
@@ -536,9 +521,9 @@ void test_cov_ast_aliases_and_null_args(void) {
   snobol_ast_free(a18);
 
   /* NULL-argument branches. */
-  test_assert(snobol_ast_create_lit(NULL, 0) != NULL,
-              "lit(NULL) node created (empty text)");
-  snobol_ast_free(snobol_ast_create_lit(NULL, 0));
+  ast_node_t *lit_null = snobol_ast_create_lit(NULL, 0);
+  test_assert(lit_null != NULL, "lit(NULL) node created (empty text)");
+  snobol_ast_free(lit_null);
   ast_node_t *any_null = snobol_ast_create_any(NULL, 0);
   test_assert(any_null != NULL && any_null->data.charclass.set == NULL,
               "any(NULL) keeps empty set");

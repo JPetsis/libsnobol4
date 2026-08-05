@@ -860,17 +860,17 @@ void test_cov_api_builder(void) {
   /* Builder with NULL nodes passed through to AST constructors. */
   b = snobol_pattern_build_create();
   test_assert(b != NULL, "second builder created");
-  test_assert(snobol_pattern_build_arbno(b, NULL) != NULL,
-              "arbno accepts NULL child (node owns nothing)");
-  test_assert(snobol_pattern_build_cap(b, 1, NULL) != NULL,
-              "cap accepts NULL child");
-  test_assert(snobol_pattern_build_alt(b, NULL, NULL) != NULL,
-              "alt accepts NULL children");
+  ast_node_t *arb = snobol_pattern_build_arbno(b, NULL);
+  ast_node_t *cap_n = snobol_pattern_build_cap(b, 1, NULL);
+  ast_node_t *alt_n = snobol_pattern_build_alt(b, NULL, NULL);
+  test_assert(arb != NULL, "arbno accepts NULL child (node owns nothing)");
+  test_assert(cap_n != NULL, "cap accepts NULL child");
+  test_assert(alt_n != NULL, "alt accepts NULL children");
   test_assert(snobol_pattern_build_emit(b, NULL) == NULL,
               "emit(NULL) passthrough");
-  snobol_ast_free(snobol_pattern_build_arbno(b, NULL));
-  snobol_ast_free(snobol_pattern_build_cap(b, 1, NULL));
-  snobol_ast_free(snobol_pattern_build_alt(b, NULL, NULL));
+  snobol_ast_free(arb);
+  snobol_ast_free(cap_n);
+  snobol_ast_free(alt_n);
   snobol_pattern_build_destroy(b);
 }
 

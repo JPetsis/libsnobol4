@@ -252,7 +252,11 @@ void test_cov_misc_array(void) {
   size_t count = 0;
   char **vals = snobol_array_values(a, &count);
   test_assert(vals != NULL && count == 10, "values snapshot");
-  snobol_free(vals);
+  if (vals) {
+    for (size_t vi = 0; vi < count; vi++)
+      snobol_free(vals[vi]);
+    snobol_free(vals);
+  }
 
   /* Retain/release lifecycle. */
   snobol_array_t *r = snobol_array_retain(a);
@@ -269,10 +273,12 @@ void test_cov_misc_array(void) {
   snobol_array_clear(NULL);
   snobol_array_release(NULL);
   test_assert(snobol_array_values(NULL, &count) == NULL, "values(NULL)");
-  test_assert(snobol_array_create(1) != NULL, "create with positive hint");
-  snobol_array_release(snobol_array_create(1));
-  test_assert(snobol_array_create(-1) != NULL, "create with negative hint");
-  snobol_array_release(snobol_array_create(-1));
+  snobol_array_t *tmp = snobol_array_create(1);
+  test_assert(tmp != NULL, "create with positive hint");
+  snobol_array_release(tmp);
+  tmp = snobol_array_create(-1);
+  test_assert(tmp != NULL, "create with negative hint");
+  snobol_array_release(tmp);
 }
 
 /* ── choice-stack arena + write-log + trail ───────────────────────────────── */
@@ -313,13 +319,18 @@ void test_cov_misc_array_round2(void) {
   size_t count = 0;
   char **vals = snobol_array_values(a, &count);
   test_assert(vals != NULL && count > 0, "values with tombstones");
-  snobol_free(vals);
+  if (vals) {
+    for (size_t vi = 0; vi < count; vi++)
+      snobol_free(vals[vi]);
+    snobol_free(vals);
+  }
 
   /* Clear frees everything. */
   snobol_array_clear(a);
   size_t c2 = 99;
-  test_assert(snobol_array_values(a, &c2) != NULL && c2 == 0,
-              "values on empty array");
+  char **empty_vals = snobol_array_values(a, &c2);
+  test_assert(empty_vals != NULL && c2 == 0, "values on empty array");
+  snobol_free(empty_vals);
   snobol_array_release(a);
 }
 
@@ -345,7 +356,11 @@ void test_cov_misc_round3_array(void) {
   size_t cnt = 0;
   char **vals = snobol_array_values(a, &cnt);
   test_assert(vals != NULL && cnt == 100, "values after tombstone churn");
-  snobol_free(vals);
+  if (vals) {
+    for (size_t vi = 0; vi < cnt; vi++)
+      snobol_free(vals[vi]);
+    snobol_free(vals);
+  }
   snobol_array_release(a);
 }
 
