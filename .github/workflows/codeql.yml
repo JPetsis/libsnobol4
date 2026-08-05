@@ -1,0 +1,76 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'core/**'
+      - 'tests/c/**'
+      - 'bindings/php/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/codeql.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'core/**'
+      - 'tests/c/**'
+      - 'bindings/php/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/codeql.yml'
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze-cpp:
+    name: Analyze C/C++
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: cpp
+          queries: security-and-quality
+          config: |
+            paths:
+              - core
+              - tests/c
+
+      - name: Configure with CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DBUILD_BENCH_C=OFF
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  analyze-php:
+    name: Analyze PHP
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: php
+          queries: security-and-quality
+          config: |
+            paths:
+              - bindings/php
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
