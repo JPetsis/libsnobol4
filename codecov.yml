@@ -1,0 +1,24 @@
+# Codecov configuration
+#
+# Gates:
+#  - c-core: the core C library coverage must stay at >= target (90%)
+#    with a 1% threshold; PRs that drop coverage below that floor fail.
+#  - php-binding: informational only (the binding's coverage is measured
+#    through the PHP test suite and is not gated).
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+      c-core:
+        target: 90%
+        threshold: 1%
+        flags:
+          - c-core
+      php-binding:
+        informational: true
+        flags:
+          - php-binding

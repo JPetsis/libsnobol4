@@ -49,7 +49,7 @@ jobs:
           files: coverage-filtered.info
           flags: c-core
           disable_search: true
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
   coverage-php:
     name: PHP extension coverage (gcov on C sources)
@@ -122,4 +122,4 @@ jobs:
           files: php-ext-filtered.info
           flags: php-binding
           disable_search: true
-          fail_ci_if_error: false
+          fail_ci_if_error: true
