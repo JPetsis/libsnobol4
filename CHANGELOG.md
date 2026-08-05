@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Parser leaked the label-name string on labelled patterns** (`core/src/parser.c`,
+  `parse_statement`): `snobol_ast_create_label` copies the name and returns
+  ownership to the caller, but the parser passed its malloc'd `label_name` to
+  the node constructor without freeing it afterwards — every labelled pattern
+  leaked the name. Found by the coverage-driven label tests under the leak
+  sanitizer / valgrind.
+- **`snobol_pattern_build_label` leaked the name copy** (`core/src/api.c`): the
+  builder allocated a name copy and handed it to `snobol_ast_create_label`,
+  which duplicates the name itself — the builder's copy leaked on every call.
+- **Successful full-VM matches leaked the undo trail and write-log**
+  (`core/src/search_meta.c`): `snobol_search_vm_cleanup` freed the pike buffers
+  and choice arena but not the VM trail / write-log lazily allocated by `vm_run`
+  on success paths — every successful tier-8 match leaked ~8 KB plus the
+  write-log. Cleanup now frees both.
+- **Batch searches with captures leaked the row-capacity array**
+  (`core/src/api.c`, `batch_run`): `row_caps` was freed only on failure paths,
+  never on success.
+- **Inline metadata derivation in dispatch leaked bmh_skip/fusion**
+  (`core/src/search_tiers.c`): NULL-meta callers of `snobol_search_exec`
+  derived into a stack meta whose heap (BMH skip table, fusion segments) was
+  never freed.
+
 - **Batch-search capture rows overflow past 64 matches** (`core/src/api.c`,
   `batch_run`): capture rows were allocated once with the initial result-array
   capacity (64 matches) and never reallocated — the row-realloc check tested

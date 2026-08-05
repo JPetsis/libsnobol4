@@ -2025,6 +2025,8 @@ void snobol_search_vm_cleanup(VM *vm) {
     vm_arena_destroy(vm->choices_arena);
     vm->choices_arena = NULL;
   }
+  vm_trail_free(vm);
+  vm_write_log_free(vm);
 }
 
 /* ---------------------------------------------------------------------------

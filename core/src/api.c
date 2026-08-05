@@ -1220,6 +1220,9 @@ static bool batch_run(snobol_pattern_search_state_t *state, const char *subject,
   out->outputs = (out_pos > 0) ? outbuf_data : NULL;
   out->output_lens = output_lens;
 
+  if (row_caps)
+    snobol_free(row_caps);
+
   return true;
 }
 
@@ -1587,11 +1590,13 @@ ast_node_t *snobol_pattern_build_alt(snobol_pattern_build_t *build,
 ast_node_t *snobol_pattern_build_label(snobol_pattern_build_t *build,
                                        const char *name, ast_node_t *target) {
   (void)build;
-  /* snobol_ast_create_label takes ownership of name */
+  /* snobol_ast_create_label copies the name; free our copy here. */
   char *name_copy = (char *)snobol_malloc(strlen(name) + 1);
   if (name_copy)
     strcpy(name_copy, name);
-  return snobol_ast_create_label(name_copy, target);
+  ast_node_t *node = snobol_ast_create_label(name_copy, target);
+  free(name_copy);
+  return node;
 }
 
 ast_node_t *snobol_pattern_build_goto(snobol_pattern_build_t *build,

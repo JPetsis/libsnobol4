@@ -3399,9 +3399,11 @@ static bool SNOBOL_HOT dispatch_search_impl(
 
   /* Derive metadata inline if not provided */
   snobol_search_meta_t local_meta;
+  bool meta_derived_inline = false;
   if (!meta) {
     snobol_search_derive_meta(vm->bc, vm->bc_len, &local_meta);
     meta = &local_meta;
+    meta_derived_inline = true;
   }
 
   /* Cost-model tier selection (Priority 4): refine the structural tier from
@@ -3464,8 +3466,12 @@ static bool SNOBOL_HOT dispatch_search_impl(
   /* Direct tier dispatch for the chosen tier.  For anchored matching each
    * tier handler bounds its attempt to a single position (start_offset), so a
    * successful match always begins at the anchor — no post-filter needed. */
-  return tier_table[dispatch_tier](vm, subject, subject_len, start_offset, meta,
-                                   dfa, out_result, diag, anchored);
+  bool dispatched = tier_table[dispatch_tier](vm, subject, subject_len,
+                                              start_offset, meta, dfa,
+                                              out_result, diag, anchored);
+  if (meta_derived_inline)
+    snobol_search_meta_free(&local_meta);
+  return dispatched;
 }
 
 SNOBOL_ALIGNED(64)
