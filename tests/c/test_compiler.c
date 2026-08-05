@@ -17,6 +17,267 @@
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
 
+
+/* ===== test_coverage_codegen: coverage-driven tests merged into test_compiler.c ===== */
+#include <stdint.h>
+#include "../../core/include/snobol/ast.h"
+#include "../../core/include/snobol/compiler.h"
+#include "../../core/include/snobol/vm.h"
+
+extern void test_suite(const char *name);
+extern void test_assert(bool condition, const char *message);
+
+/* Compile an AST; frees the AST and returns the bytecode buffer. */
+static uint8_t *cov_compile(ast_node_t *ast, size_t *out_len) {
+  uint8_t *bc = NULL;
+  size_t bc_len = 0;
+  int rc = compile_ast_to_bytecode_c(ast, false, &bc, &bc_len);
+  snobol_ast_free(ast);
+  if (rc != 0) {
+    compiler_free(bc);
+    return NULL;
+  }
+  if (out_len)
+    *out_len = bc_len;
+  return bc;
+}
+
+void test_cov_codegen_emit_all(void) {
+  test_suite("Coverage: codegen emit paths for every node type");
+
+  uint8_t *bc;
+  size_t bc_len;
+
+  /* Primitive nodes. */
+  bc = cov_compile(snobol_ast_create_lit("ab", 2), &bc_len);
+  test_assert(bc && bc_len > 0, "LIT emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_span("0-9", 3), &bc_len);
+  test_assert(bc && bc_len > 0, "SPAN emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_break(",", 1), &bc_len);
+  test_assert(bc && bc_len > 0, "BREAK emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_any("ab", 2), &bc_len);
+  test_assert(bc && bc_len > 0, "ANY emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_notany("c", 1), &bc_len);
+  test_assert(bc && bc_len > 0, "NOTANY emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_breakx(";", 1), &bc_len);
+  test_assert(bc && bc_len > 0, "BREAKX emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_len(2), &bc_len);
+  test_assert(bc && bc_len > 0, "LEN emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_assign(1, 0), &bc_len);
+  test_assert(bc && bc_len > 0, "ASSIGN emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_eval(SNOBOL_FN_SIZE, 0), &bc_len);
+  test_assert(bc && bc_len > 0, "EVAL emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_bal('(', ')'), &bc_len);
+  test_assert(bc && bc_len > 0, "BAL emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_fence(), &bc_len);
+  test_assert(bc && bc_len > 0, "FENCE emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_rem(), &bc_len);
+  test_assert(bc && bc_len > 0, "REM emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_rpos(1), &bc_len);
+  test_assert(bc && bc_len > 0, "RPOS emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_rtab(2), &bc_len);
+  test_assert(bc && bc_len > 0, "RTAB emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_pos(0), &bc_len);
+  test_assert(bc && bc_len > 0, "POS emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_tab(1), &bc_len);
+  test_assert(bc && bc_len > 0, "TAB emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_abort(), &bc_len);
+  test_assert(bc && bc_len > 0, "ABORT emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_fail(), &bc_len);
+  test_assert(bc && bc_len > 0, "FAIL emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_succeed(), &bc_len);
+  test_assert(bc && bc_len > 0, "SUCCEED emits");
+  compiler_free(bc);
+
+  /* Compound / structural nodes. */
+  bc = cov_compile(snobol_ast_create_cap(1, snobol_ast_create_lit("a", 1)),
+                   &bc_len);
+  test_assert(bc && bc_len > 0, "CAP emits");
+  compiler_free(bc);
+  bc = cov_compile(
+      snobol_ast_create_repeat(snobol_ast_create_lit("a", 1), 1, 3), &bc_len);
+  test_assert(bc && bc_len > 0, "REPEAT emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_arbno(snobol_ast_create_lit("a", 1)),
+                   &bc_len);
+  test_assert(bc && bc_len > 0, "ARBNO emits");
+  compiler_free(bc);
+  bc = cov_compile(
+      snobol_ast_create_alt(snobol_ast_create_lit("a", 1),
+                            snobol_ast_create_lit("b", 1)),
+      &bc_len);
+  test_assert(bc && bc_len > 0, "ALT emits");
+  compiler_free(bc);
+  {
+    ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+    parts[0] = snobol_ast_create_lit("a", 1);
+    parts[1] = snobol_ast_create_lit("b", 1);
+    bc = cov_compile(snobol_ast_create_concat(parts, 2), &bc_len);
+    test_assert(bc && bc_len > 0, "CONCAT emits");
+    compiler_free(bc);
+  }
+
+  /* Anchors, emit, table access/update. */
+  bc = cov_compile(snobol_ast_create_anchor(ANCHOR_START), &bc_len);
+  test_assert(bc && bc_len > 0, "ANCHOR(start) emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_anchor(ANCHOR_END), &bc_len);
+  test_assert(bc && bc_len > 0, "ANCHOR(end) emits");
+  compiler_free(bc);
+  bc = cov_compile(snobol_ast_create_emit("out", 2, 1), &bc_len);
+  test_assert(bc && bc_len > 0, "EMIT emits");
+  compiler_free(bc);
+  bc = cov_compile(
+      snobol_ast_create_table_access("tbl", snobol_ast_create_lit("k", 1)),
+      &bc_len);
+  test_assert(bc && bc_len > 0, "TABLE_ACCESS emits");
+  compiler_free(bc);
+  bc = cov_compile(
+      snobol_ast_create_table_update("tbl", snobol_ast_create_lit("k", 1),
+                                     snobol_ast_create_lit("v", 1)),
+      &bc_len);
+  test_assert(bc && bc_len > 0, "TABLE_UPDATE emits");
+  compiler_free(bc);
+  bc = cov_compile(
+      snobol_ast_create_dynamic_eval(snobol_ast_create_lit("x", 1)), &bc_len);
+  test_assert(bc && bc_len > 0, "DYNAMIC_EVAL emits");
+  compiler_free(bc);
+
+  /* Case-insensitive literal compilation. */
+  {
+    ast_node_t *ast = snobol_ast_create_lit("HELLO", 5);
+    uint8_t *bc2 = NULL;
+    size_t len2 = 0;
+    int rc = compile_ast_to_bytecode_c(ast, true, &bc2, &len2);
+    test_assert(rc == 0 && bc2 && len2 > 0,
+                "case-insensitive literal compiles");
+    compiler_free(bc2);
+    snobol_ast_free(ast);
+  }
+}
+
+
+
+void test_cov_codegen_labels(void) {
+  test_suite("Coverage: codegen label table + goto");
+
+  /* Nested labels grow the codegen label table past its initial capacity. */
+  {
+    ast_node_t **parts = (ast_node_t **)malloc(6 * sizeof(ast_node_t *));
+    parts[0] = snobol_ast_create_label((char *)"a", snobol_ast_create_lit("A", 1));
+    parts[1] = snobol_ast_create_label((char *)"b", snobol_ast_create_lit("B", 1));
+    parts[2] = snobol_ast_create_label((char *)"c", snobol_ast_create_lit("C", 1));
+    parts[3] = snobol_ast_create_label((char *)"d", snobol_ast_create_lit("D", 1));
+    parts[4] = snobol_ast_create_label((char *)"e", snobol_ast_create_lit("E", 1));
+    parts[5] = snobol_ast_create_goto("a");
+    ast_node_t *ast = snobol_ast_create_concat(parts, 6);
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    int rc = compile_ast_to_bytecode_c(ast, false, &bc, &bc_len);
+    test_assert(rc == 0 && bc && bc_len > 0, "multi-label tree compiles");
+    compiler_free(bc);
+    snobol_ast_free(ast);
+  }
+
+  /* Unknown label: compiler rejects with no bytecode. */
+  {
+    ast_node_t *ast = snobol_ast_create_goto("missing");
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    int rc = compile_ast_to_bytecode_c(ast, false, &bc, &bc_len);
+    test_assert(rc != 0 && bc == NULL, "goto to unknown label rejected");
+    compiler_free(bc);
+    snobol_ast_free(ast);
+  }
+}
+
+
+/* ===== test_coverage_engine2 (part): coverage-driven tests merged into test_compiler.c ===== */
+#include "../../core/include/snobol/search.h"
+#include "../../core/include/snobol/snobol.h"
+#include "../../core/include/snobol/snobol_internal.h"
+
+void test_cov_engine2_fuse_shapes(void) {
+  test_suite("Coverage: SPLIT->ANY fusion shape matrix");
+
+  /* ANY-arm and mixed arms. */
+  const char *pats[] = {"ANY('a') | ANY('b')", "ANY('a') | 'b'",
+                        "'a' | ANY('b')", "NOTANY('a') | 'b'",
+                        "('a' | 'b') | ('a' | 'b')", "'a' | 'b' | 'a'"};
+  for (size_t i = 0; i < sizeof(pats) / sizeof(pats[0]); i++) {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    snobol_pattern_t *p =
+        snobol_pattern_compile_ex(ctx, pats[i], strlen(pats[i]), 0, &err);
+    test_assert(p != NULL, "fuse-shape pattern compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_search(p, "b", 1);
+      test_assert(m && m->success, "fuse-shape pattern matches");
+      if (m)
+        snobol_match_free(m);
+      snobol_pattern_free(p);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+
+  /* Identical charclasses dedup in add_or_get_charclass. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    const char *src = "SPAN('a') 'x' SPAN('a')";
+    snobol_pattern_t *p =
+        snobol_pattern_compile_ex(ctx, src, strlen(src), 0, &err);
+    test_assert(p != NULL, "repeated charclass compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_search(p, "aaxaa", 5);
+      test_assert(m && m->success, "repeated charclass matches");
+      if (m)
+        snobol_match_free(m);
+      snobol_pattern_free(p);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+
+  /* Long compile grows the code buffer. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    char src[512];
+    size_t sl = 0;
+    for (int i = 0; i < 40; i++) {
+      memcpy(src + sl, "SPAN('0-9') ", 12);
+      sl += 12;
+    }
+    snobol_pattern_t *p =
+        snobol_pattern_compile_ex(ctx, src, sl, 0, &err);
+    test_assert(p != NULL, "long chain compiles");
+    if (p)
+      snobol_pattern_free(p);
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+}
+
 void test_compiler_suite(void) {
   test_suite("Compiler Tests");
 
@@ -99,4 +360,7 @@ void test_compiler_suite(void) {
 
     snobol_ast_free(alt);
   }
+  test_cov_codegen_emit_all();
+  test_cov_codegen_labels();
+  test_cov_engine2_fuse_shapes();
 }

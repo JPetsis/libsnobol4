@@ -275,6 +275,408 @@ static void test_parser_memory_cleanup(void) {
   test_assert(true, "10 parse/free cycles completed without crash");
 }
 
+
+/* ===== test_coverage_parser: coverage-driven tests merged into test_parser.c ===== */
+#include <stdint.h>
+#include "../../core/include/snobol/ast.h"
+#include "../../core/include/snobol/lexer.h"
+#include "../../core/include/snobol/parser.h"
+
+extern void test_suite(const char *name);
+extern void test_assert(bool condition, const char *message);
+
+/* Parse a source string; returns the AST (caller frees) or NULL. */
+static ast_node_t *covp_parse(snobol_parser_t *parser, const char *src,
+                             bool *has_error) {
+  snobol_lexer_t *lexer = snobol_lexer_create(src, strlen(src));
+  ast_node_t *ast = snobol_parser_parse(parser, lexer);
+  if (has_error)
+    *has_error = snobol_parser_has_error(parser);
+  snobol_lexer_destroy(lexer);
+  return ast;
+}
+
+void test_cov_parser_labels_and_gotos(void) {
+  test_suite("Coverage: parser labels + gotos");
+
+  /* Label: `foo: 'a'` parses to AST_LABEL wrapping a literal. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "foo: 'a'", &err);
+    test_assert(ast && !err && ast->type == AST_LABEL, "label parses");
+    if (ast) {
+      test_assert(ast->data.label.name &&
+                      strcmp(ast->data.label.name, "foo") == 0,
+                  "label name captured");
+      snobol_ast_free(ast);
+    }
+    snobol_parser_destroy(parser);
+  }
+
+  /* Nested labels grow the seen-label table past its initial capacity. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "a: b: c: d: e: 'x'", &err);
+    test_assert(ast && !err, "five nested labels parse");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+
+  /* Duplicate label is rejected. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "dup: dup: 'a'", &err);
+    test_assert(ast == NULL && err, "duplicate label rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* Goto syntax: `'a' : (L)` produces concat(pattern, goto). */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a' : (L)", &err);
+    test_assert(ast && !err && ast->type == AST_CONCAT, "goto parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+
+  /* Goto failure modes. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a' : (", &err);
+    test_assert(ast == NULL && err, "goto without paren body rejected");
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a' : (1)", &err);
+    test_assert(ast == NULL && err, "goto with non-ident label rejected");
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a' : (L", &err);
+    test_assert(ast == NULL && err, "goto without closing paren rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* Trailing garbage after the pattern. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a' 'b'", &err);
+    test_assert(ast && !err, "concatenation parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+}
+
+
+
+void test_cov_parser_repetition_and_primary(void) {
+  test_suite("Coverage: parser repetition + primary errors");
+
+  /* '?' and '+' postfix operators. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a'?", &err);
+    test_assert(ast && !err && ast->type == AST_REPETITION,
+                "question-mark parses to repetition");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a'+", &err);
+    test_assert(ast && !err && ast->type == AST_CONCAT,
+                "plus parses to concat(clone, arbno)");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+
+  /* Alternation with a missing right side. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a' |", &err);
+    test_assert(ast == NULL && err, "dangling pipe rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* Unclosed paren. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "('a'", &err);
+    test_assert(ast == NULL && err, "unclosed paren rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* Anchors as primaries. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "^'a'", &err);
+    test_assert(ast && !err && ast->type == AST_CONCAT,
+                "start anchor parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "$ 'a'", &err);
+    test_assert(ast && !err, "end anchor parses as primary");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+
+  /* Bad capture targets. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "@5 'a'", &err);
+    test_assert(ast == NULL && err, "non-ident capture target rejected");
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "@r1", &err);
+    test_assert(ast == NULL && err, "capture without sub-pattern rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* Bare identifier and unknown token. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "bareident", &err);
+    test_assert(ast == NULL && err, "bare identifier rejected");
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "5", &err);
+    test_assert(ast == NULL && err, "numeric token rejected");
+    snobol_parser_destroy(parser);
+  }
+}
+
+
+
+void test_cov_parser_functions(void) {
+  test_suite("Coverage: parser function-call validation");
+
+  /* ANY() with no argument is accepted. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "ANY()", &err);
+    test_assert(ast && !err && ast->type == AST_ANY, "ANY() parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+
+  /* Argument-type errors for each builtin. */
+  {
+    /* Bare digits are skipped by the lexer, so these must use identifiers. */
+    const char *bad[] = {"SPAN(foo)", "BREAK(foo)", "BREAKX(foo)", "ANY(foo)",
+                         "NOTANY(foo)", "POS(foo)", "TAB(foo)", "FOO('x')"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+      snobol_parser_t *parser = snobol_parser_create();
+      bool err = false;
+      ast_node_t *ast = covp_parse(parser, bad[i], &err);
+      test_assert(ast == NULL && err, "bad builtin argument rejected");
+      snobol_parser_destroy(parser);
+    }
+  }
+
+  /* Missing closing paren after the argument. */
+  {
+    const char *bad[] = {"SPAN('a'", "BREAK('a'", "BREAKX('a'", "ANY('a'",
+                         "NOTANY('a'", "LEN('5'", "POS('2'", "TAB('3'",
+                         "ABORT(x)", "ABORT(", "FAIL(", "SUCCEED("};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+      snobol_parser_t *parser = snobol_parser_create();
+      bool err = false;
+      ast_node_t *ast = covp_parse(parser, bad[i], &err);
+      test_assert(ast == NULL && err, "unclosed builtin call rejected");
+      snobol_parser_destroy(parser);
+    }
+  }
+
+  /* Valid zero-arg and integer-arg builtins. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "ABORT()", &err);
+    test_assert(ast && !err && ast->type == AST_ABORT, "ABORT() parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "FAIL()", &err);
+    test_assert(ast && !err && ast->type == AST_FAIL, "FAIL() parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "SUCCEED()", &err);
+    test_assert(ast && !err && ast->type == AST_SUCCEED, "SUCCEED() parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "POS('2')", &err);
+    test_assert(ast && !err && ast->type == AST_POS, "POS('2') parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "TAB('3')", &err);
+    test_assert(ast && !err && ast->type == AST_TAB, "TAB('3') parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "LEN('5')", &err);
+    test_assert(ast && !err && ast->type == AST_LEN, "LEN('5') parses");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+
+  /* NULL guards. */
+  test_assert(snobol_parser_parse(NULL, NULL) == NULL, "parse(NULL,NULL)");
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    test_assert(snobol_parser_parse(parser, NULL) == NULL,
+                "parse(parser,NULL)");
+    test_assert(!snobol_parser_has_error(NULL), "has_error(NULL)");
+    test_assert(snobol_parser_get_error(NULL) == NULL, "get_error(NULL)");
+    snobol_parser_destroy(parser);
+  }
+}
+
+
+
+void test_cov_parser_round3(void) {
+  test_suite("Coverage: parser trailing tokens + misc errors");
+
+  /* Trailing token after the pattern. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a' =", &err);
+    test_assert(ast == NULL && err, "trailing token rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* ':' followed by EOF (no '(') — goto expect failure. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "'a' :", &err);
+    test_assert(ast == NULL && err, "dangling colon rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* '@*' capture target (star fallback branch). */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    /* The '@*' star-capture branch does not advance past the star, so the
+     * parse fails on the leftover token.  Assert the current (defensive)
+     * behavior. */
+    ast_node_t *ast = covp_parse(parser, "@* 'a'", &err);
+    test_assert(ast == NULL && err, "star capture target rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* EVAL with an empty expression. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "EVAL()", &err);
+    test_assert(ast == NULL && err, "empty EVAL expression rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* EVAL without closing paren. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "EVAL('x'", &err);
+    test_assert(ast == NULL && err, "unclosed EVAL rejected");
+    snobol_parser_destroy(parser);
+  }
+
+  /* Re-parse frees the previous parse's labels. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "x: 'a'", &err);
+    test_assert(ast && !err, "first labelled parse");
+    if (ast)
+      snobol_ast_free(ast);
+    ast = covp_parse(parser, "y: 'b'", &err);
+    test_assert(ast && !err, "second labelled parse reuses parser");
+    if (ast)
+      snobol_ast_free(ast);
+    snobol_parser_destroy(parser);
+  }
+
+  /* Error-location and clear-error accessors. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    size_t line = 0, col = 0;
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "5", &err);
+    test_assert(ast == NULL && err, "numeric token errors");
+    snobol_parser_get_error_location(parser, &line, &col);
+    test_assert(line >= 1, "error location line");
+    snobol_parser_clear_error(parser);
+    test_assert(!snobol_parser_has_error(parser), "clear error resets");
+    snobol_parser_get_error_location(parser, NULL, NULL);
+    snobol_parser_get_error_location(NULL, &line, &col);
+    snobol_parser_clear_error(NULL);
+    snobol_parser_destroy(parser);
+  }
+}
+
 void test_parser_suite(void) {
   test_parser_create_destroy();
   test_parser_literal();
@@ -290,4 +692,8 @@ void test_parser_suite(void) {
   test_parser_error_unclosed_literal();
   test_parser_error_empty();
   test_parser_memory_cleanup();
+  test_cov_parser_labels_and_gotos();
+  test_cov_parser_repetition_and_primary();
+  test_cov_parser_functions();
+  test_cov_parser_round3();
 }

@@ -745,6 +745,366 @@ static void test_legacy_emit_expr(void) {
   snobol_buf_free(&out);
 }
 
+
+/* ===== test_coverage_compiler: coverage-driven tests merged into test_template_ops.c ===== */
+#include "../../core/include/snobol/compiler.h"
+#include "../../core/include/snobol/vm.h"
+
+extern void test_suite(const char *name);
+extern void test_assert(bool condition, const char *message);
+
+static uint8_t *cov_compile_tpl(const char *tpl, size_t *out_len, int *out_rc) {
+  uint8_t *bc = NULL;
+  size_t bc_len = 0;
+  int rc = compile_template_to_bytecode(tpl, strlen(tpl), &bc, &bc_len);
+  if (out_rc)
+    *out_rc = rc;
+  if (out_len)
+    *out_len = bc_len;
+  return bc;
+}
+
+void test_cov_tpl_substitutions(void) {
+  test_suite("Coverage: template substitution forms");
+
+  uint8_t *bc;
+  size_t bc_len;
+  int rc;
+
+  /* Capture refs: $v1 and ${v1}. */
+  bc = cov_compile_tpl("$v1", &bc_len, &rc);
+  test_assert(bc && rc == 0 && bc_len > 0, "$v1 compiles");
+  compiler_free(bc);
+  bc = cov_compile_tpl("${v1}", &bc_len, &rc);
+  test_assert(bc && rc == 0, "${v1} compiles");
+  compiler_free(bc);
+
+  /* Braced formats. */
+  bc = cov_compile_tpl("${v1.upper()}", &bc_len, &rc);
+  test_assert(bc && rc == 0, "${v1.upper()} compiles");
+  compiler_free(bc);
+  bc = cov_compile_tpl("${v1.lower()}", &bc_len, &rc);
+  test_assert(bc && rc == 0, "${v1.lower()} compiles");
+  compiler_free(bc);
+  bc = cov_compile_tpl("${v1.length()}", &bc_len, &rc);
+  test_assert(bc && rc == 0, "${v1.length()} compiles");
+  compiler_free(bc);
+  bc = cov_compile_tpl("${v1.lpad(5,'-')}", &bc_len, &rc);
+  test_assert(bc && rc == 0, "${v1.lpad(5,'-')} compiles");
+  compiler_free(bc);
+  bc = cov_compile_tpl("${v1.rpad(3,'*')}", &bc_len, &rc);
+  test_assert(bc && rc == 0, "${v1.rpad(3,'*')} compiles");
+  compiler_free(bc);
+  bc = cov_compile_tpl("${v1.rpad(10)}", &bc_len, &rc);
+  test_assert(bc && rc == 0, "${v1.rpad(10)} (no fill) compiles");
+  compiler_free(bc);
+
+  /* Unknown braced format falls back to a plain capture emit. */
+  bc = cov_compile_tpl("${v1.bogus()}", &bc_len, &rc);
+  test_assert(bc && rc == 0, "${v1.bogus()} falls back to capture");
+  compiler_free(bc);
+
+  /* Unclosed brace falls back to a literal '$'. */
+  bc = cov_compile_tpl("${v1", &bc_len, &rc);
+  test_assert(bc && rc == 0, "unclosed brace falls back");
+  compiler_free(bc);
+
+  /* Literal '$' at the end of the template. */
+  bc = cov_compile_tpl("x$", &bc_len, &rc);
+  test_assert(bc && rc == 0, "trailing $ compiles");
+  compiler_free(bc);
+
+  /* '$v' without digits → literal '$'. */
+  bc = cov_compile_tpl("$v", &bc_len, &rc);
+  test_assert(bc && rc == 0, "$v without digits falls back");
+  compiler_free(bc);
+
+  /* '$' followed by non-v/brace → literal '$'. */
+  bc = cov_compile_tpl("$9", &bc_len, &rc);
+  test_assert(bc && rc == 0, "$9 falls back to literal");
+  compiler_free(bc);
+
+  /* Plain literal segments. */
+  bc = cov_compile_tpl("plain text", &bc_len, &rc);
+  test_assert(bc && rc == 0, "plain text compiles");
+  compiler_free(bc);
+}
+
+
+
+void test_cov_tpl_tables(void) {
+  test_suite("Coverage: template table-backed substitutions");
+
+  uint8_t *bc;
+  size_t bc_len;
+  int rc;
+
+  /* Literal key: $v1[tbl['key']]. */
+  bc = cov_compile_tpl("$v1[tbl['key']]", &bc_len, &rc);
+  test_assert(bc && rc == 0, "table literal key compiles");
+  compiler_free(bc);
+
+  /* Capture key: $v1[tbl[v1]] and $v1[tbl[2]]. */
+  bc = cov_compile_tpl("$v1[tbl[v1]]", &bc_len, &rc);
+  test_assert(bc && rc == 0, "table capture key compiles");
+  compiler_free(bc);
+  bc = cov_compile_tpl("$v1[tbl[2]]", &bc_len, &rc);
+  test_assert(bc && rc == 0, "table digit key compiles");
+  compiler_free(bc);
+
+  /* Error fallbacks: every bad shape emits a literal '$'. */
+  {
+    const char *bad[] = {"$v1[x]",          /* empty table name */
+                         "$v1[tbl",         /* no bracket */
+                         "$v1[tbl['unclosed", /* unclosed quote */
+                         "$v1[tbl['k'",     /* missing close bracket */
+                         "$v1[tbl[v",       /* capture key without digits */
+                         "$v1[tbl[x]"};     /* non-digit unquoted key */
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+      bc = cov_compile_tpl(bad[i], &bc_len, &rc);
+      test_assert(bc && rc == 0, "malformed table ref falls back");
+      compiler_free(bc);
+    }
+  }
+
+  /* Overlong table name → compile failure. */
+  {
+    char tpl[340];
+    size_t ti = 0;
+    memcpy(tpl + ti, "$v1[", 4);
+    ti += 4;
+    memset(tpl + ti, 'x', 256);
+    ti += 256;
+    memcpy(tpl + ti, "['k']]", 6);
+    ti += 6;
+    tpl[ti] = '\0';
+    bc = cov_compile_tpl(tpl, &bc_len, &rc);
+    test_assert(bc == NULL && rc == -1, "overlong table name rejected");
+    compiler_free(bc);
+  }
+
+  /* bind_tables: resolve literal + capture key tables and report unknown. */
+  {
+    bc = cov_compile_tpl("$v1[tbl['key']] $v1[tbl[v1]]", &bc_len, &rc);
+    test_assert(bc && rc == 0, "multi-table template compiles");
+    if (bc) {
+      const char *names[] = {"tbl"};
+      const uint16_t ids[] = {7};
+      int res = snobol_template_bind_tables(bc, bc_len, names, ids, 1);
+      test_assert(res == 0, "table names resolve");
+      compiler_free(bc);
+
+      /* Fresh bytecode with no bindings → unbound table reported. */
+      uint8_t *bc2 = cov_compile_tpl("$v1[tbl['key']] $v1[tbl[v1]]", &bc_len,
+                                     &rc);
+      test_assert(bc2 != NULL, "second template compiles");
+      res = snobol_template_bind_tables(bc2, bc_len, NULL, NULL, 0);
+      test_assert(res == -1, "unbound table reported");
+      compiler_free(bc2);
+    }
+  }
+
+  /* bind_tables guards and the full opcode walk. */
+  {
+    test_assert(snobol_template_bind_tables(NULL, 0, NULL, NULL, 0) == 0,
+                "bind(NULL) no-op");
+
+    /* Crafted template bytecode walking every bindable opcode form. */
+    uint8_t bc2[256];
+    size_t ip = 0;
+    bc2[ip++] = OP_EMIT_LITERAL;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 1; /* len=1 */
+    bc2[ip++] = 'x';
+    bc2[ip++] = OP_EMIT_CAPTURE;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_EMIT_EXPR;
+    bc2[ip++] = 0;
+    bc2[ip++] = 1;
+    bc2[ip++] = OP_EMIT_FORMAT;
+    bc2[ip++] = 0;
+    bc2[ip++] = SNBL_FMT_UPPER;
+    bc2[ip++] = OP_EMIT_FORMAT;
+    bc2[ip++] = 0;
+    bc2[ip++] = SNBL_FMT_LPAD;
+    bc2[ip++] = 0;
+    bc2[ip++] = 5;
+    bc2[ip++] = '-';
+    bc2[ip++] = OP_LIT;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 1;
+    bc2[ip++] = 'y';
+    bc2[ip++] = OP_ANY;
+    bc2[ip++] = 0;
+    bc2[ip++] = 1;
+    bc2[ip++] = OP_SPAN;
+    bc2[ip++] = 0;
+    bc2[ip++] = 1;
+    bc2[ip++] = OP_BREAK;
+    bc2[ip++] = 0;
+    bc2[ip++] = 1;
+    bc2[ip++] = OP_BREAKX;
+    bc2[ip++] = 0;
+    bc2[ip++] = 1;
+    bc2[ip++] = OP_NOTANY;
+    bc2[ip++] = 0;
+    bc2[ip++] = 1;
+    bc2[ip++] = OP_LEN;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 1;
+    bc2[ip++] = OP_CAP_START;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_CAP_END;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_ASSIGN;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_REM;
+    bc2[ip++] = OP_FENCE;
+    bc2[ip++] = OP_DYNAMIC;
+    bc2[ip++] = OP_NOP;
+    bc2[ip++] = OP_FAIL;
+    bc2[ip++] = OP_SPLIT;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_REPEAT_INIT;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_REPEAT_STEP;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_JMP;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_RPOS;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_RTAB;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_POS;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_TAB;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_ABORT;
+    bc2[ip++] = OP_SUCCEED;
+    bc2[ip++] = OP_LABEL;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_GOTO;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_GOTO_F;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_BAL;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_EVAL;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = OP_EMIT_TABLE;
+    bc2[ip++] = 0xFF;
+    bc2[ip++] = 0xFF;
+    bc2[ip++] = 0; /* key_type literal */
+    bc2[ip++] = 3; /* name_len */
+    bc2[ip++] = 't';
+    bc2[ip++] = 'b';
+    bc2[ip++] = 'l';
+    bc2[ip++] = 0;
+    bc2[ip++] = 3; /* key_len */
+    bc2[ip++] = 'k';
+    bc2[ip++] = 'e';
+    bc2[ip++] = 'y';
+    bc2[ip++] = OP_EMIT_TABLE;
+    bc2[ip++] = 0xFF;
+    bc2[ip++] = 0xFF;
+    bc2[ip++] = 1; /* key_type capture */
+    bc2[ip++] = 3;
+    bc2[ip++] = 't';
+    bc2[ip++] = 'b';
+    bc2[ip++] = 'l';
+    bc2[ip++] = 1; /* key_reg */
+    bc2[ip++] = OP_TABLE_GET;
+    bc2[ip++] = 0xFF;
+    bc2[ip++] = 0xFF;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 3;
+    bc2[ip++] = 't';
+    bc2[ip++] = 'b';
+    bc2[ip++] = 'l';
+    bc2[ip++] = OP_TABLE_SET;
+    bc2[ip++] = 0xFF;
+    bc2[ip++] = 0xFF;
+    bc2[ip++] = 0;
+    bc2[ip++] = 0;
+    bc2[ip++] = 3;
+    bc2[ip++] = 't';
+    bc2[ip++] = 'b';
+    bc2[ip++] = 'l';
+    bc2[ip++] = OP_ACCEPT;
+    size_t bc_len2 = ip;
+
+    const char *names[] = {"tbl"};
+    const uint16_t ids[] = {9};
+    int res = snobol_template_bind_tables(bc2, bc_len2, names, ids, 1);
+    test_assert(res == 0, "bind walker resolves all table refs");
+
+    /* Truncated EMIT_TABLE / TABLE_GET stop the walk safely. */
+    res = snobol_template_bind_tables(bc2, 3, names, ids, 1);
+    test_assert(res == 0, "truncated bytecode stops the walk");
+  }
+}
+
 void test_template_ops_suite(void) {
   test_format_upper();
   test_format_lower();
@@ -768,4 +1128,6 @@ void test_template_ops_suite(void) {
   test_e2e_table_capture_key();
 #endif
   test_legacy_emit_expr();
+  test_cov_tpl_substitutions();
+  test_cov_tpl_tables();
 }
