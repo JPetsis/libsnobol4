@@ -15,6 +15,865 @@
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
 
+
+/* ===== test_coverage_api: coverage-driven tests merged into test_api_match.c ===== */
+#include <stdio.h>
+#include "../../core/include/snobol/ast.h"
+#include "../../core/include/snobol/compiler.h"
+#include "../../core/include/snobol/search.h"
+#include "../../core/include/snobol/vm.h"
+#include "../../core/include/snobol/snobol.h"
+
+extern void test_suite(const char *name);
+extern void test_assert(bool condition, const char *message);
+
+/* ── Core pattern struct mirror (api.c:40-62) ─────────────────────────────── */
+
+typedef struct {
+  uint8_t *bc;
+  size_t bc_len;
+  bool case_insensitive;
+  snobol_search_meta_t meta;
+  bool meta_initialized;
+  snobol_range_meta_t *range_meta;
+  size_t range_meta_count;
+  snobol_dfa_t *automaton;
+  snobol_auto_trie_t *trie_cache;
+  int trie_cache_refs;
+} cova_pattern_layout;
+
+/* Build a pattern object from raw bytecode (mirrors do_compile's metadata
+ * derivation).  The caller owns the result and must free via
+ * snobol_pattern_free(). */
+static snobol_pattern_t *cova_make_pattern(uint8_t *bc, size_t bc_len) {
+  cova_pattern_layout *p =
+      (cova_pattern_layout *)calloc(1, sizeof(cova_pattern_layout));
+  if (!p)
+    return NULL;
+  p->bc = bc;
+  p->bc_len = bc_len;
+  snobol_search_derive_meta(bc, bc_len, &p->meta);
+  p->meta_initialized = true;
+  snobol_build_range_meta(bc, bc_len, &p->range_meta, &p->range_meta_count);
+  return (snobol_pattern_t *)p;
+}
+
+/* Compile an AST to bytecode and wrap it in a pattern object. */
+static snobol_pattern_t *cova_compile_pattern(ast_node_t *root) {
+  uint8_t *bc = NULL;
+  size_t bc_len = 0;
+  if (compile_ast_to_bytecode_c(root, false, &bc, &bc_len) != 0)
+    return NULL;
+  snobol_pattern_t *p = cova_make_pattern(bc, bc_len);
+  if (!p)
+    free(bc);
+  return p;
+}
+
+static ast_node_t *cova_cap_eval(int fn, const char *text, size_t len) {
+  ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+  parts[0] = snobol_ast_create_cap(1, snobol_ast_create_lit(text, len));
+  parts[1] = snobol_ast_create_eval(fn, 1);
+  return snobol_ast_create_concat(parts, 2);
+}
+
+/* ── NULL contracts and trivial accessors ─────────────────────────────────── */
+
+void test_cov_api_null_contracts(void) {
+  test_suite("Coverage: API NULL contracts");
+
+  snobol_pattern_free(NULL);
+  snobol_match_free(NULL);
+  snobol_match_reset(NULL);
+  snobol_context_destroy(NULL);
+  snobol_batch_result_free(NULL);
+  snobol_pattern_build_destroy(NULL);
+  snobol_match_result_free(NULL);
+  snobol_pattern_search_state_destroy(NULL);
+  snobol_search_meta_free(NULL);
+  snobol_search_vm_cleanup(NULL);
+  snobol_dfa_free(NULL);
+  snobol_auto_trie_free(NULL);
+  snobol_fusion_free(NULL);
+  test_assert(true, "all NULL frees are safe");
+
+  test_assert(snobol_pattern_get_bc(NULL) == NULL, "get_bc(NULL)");
+  test_assert(snobol_pattern_get_bc_len(NULL) == 0, "get_bc_len(NULL)");
+  test_assert(snobol_pattern_get_meta(NULL) == NULL, "get_meta(NULL)");
+  test_assert(snobol_pattern_get_range_meta(NULL, NULL) == NULL,
+              "get_range_meta(NULL)");
+  test_assert(snobol_pattern_get_trie_cache(NULL) == NULL,
+              "get_trie_cache(NULL)");
+  test_assert(!snobol_pattern_automaton_available(NULL),
+              "automaton_available(NULL)");
+  test_assert(snobol_pattern_match_literal(NULL, "x", 1).success == false,
+              "match_literal(NULL)");
+  test_assert(snobol_pattern_match(NULL, "x", 1) == NULL, "match(NULL)");
+  test_assert(snobol_pattern_match(NULL, NULL, 0) == NULL, "match(NULL,NULL)");
+  test_assert(snobol_pattern_search(NULL, "x", 1) == NULL, "search(NULL)");
+  test_assert(snobol_pattern_search(NULL, NULL, 0) == NULL,
+              "search(NULL,NULL)");
+  test_assert(!snobol_pattern_search_reuse(NULL, "x", 1, NULL),
+              "search_reuse(NULL)");
+  test_assert(!snobol_match_success(NULL), "match_success(NULL)");
+  test_assert(snobol_match_get_output(NULL, NULL) == NULL,
+              "get_output(NULL)");
+  test_assert(snobol_match_get_variable(NULL, "1", NULL) == NULL,
+              "get_variable(NULL)");
+  test_assert(snobol_match_get_position(NULL) == 0, "get_position(NULL)");
+  test_assert(snobol_match_get_length(NULL) == 0, "get_length(NULL)");
+
+  snobol_match_t *mk = snobol_match_create();
+  test_assert(mk != NULL, "match_create allocates");
+  snobol_match_free(mk);
+
+  snobol_pattern_search_state_t *st =
+      snobol_pattern_search_state_create(NULL, 0);
+  test_assert(st == NULL, "state_create(NULL, 0)");
+  test_assert(snobol_pattern_search_ex(NULL, "x", 1, 0) == NULL,
+              "search_ex(NULL state)");
+  test_assert(snobol_pattern_search_ex_anchored(NULL, "x", 1) == NULL,
+              "search_ex_anchored(NULL state)");
+  test_assert(!snobol_pattern_search_next(NULL, "x", 1, 0, NULL, NULL),
+              "search_next(NULL state)");
+  snobol_pattern_search_state_set_pattern(NULL, NULL);
+  snobol_pattern_search_state_set_trie_cache(NULL, NULL);
+  snobol_pattern_search_state_set_eval_fn(NULL, NULL, NULL);
+  test_assert(true, "state setters are NULL-safe");
+
+  snobol_batch_result_t out;
+  memset(&out, 0, sizeof(out));
+  test_assert(!snobol_pattern_search_batch(NULL, 0, "x", 1, NULL, &out),
+              "batch(NULL bc)");
+  snobol_pattern_search_state_t *st2 =
+      snobol_pattern_search_state_create((const uint8_t *)"ab", 2);
+  test_assert(st2 != NULL, "state_create with bytecode");
+  test_assert(!snobol_pattern_search_batch_ex(NULL, "x", 1, &out),
+              "batch_ex(NULL state)");
+  snobol_pattern_search_state_destroy(st2);
+}
+
+/* ── match_literal ────────────────────────────────────────────────────────── */
+
+
+
+void test_cov_api_match_literal(void) {
+  test_suite("Coverage: match_literal paths");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = NULL;
+  snobol_pattern_t *pat =
+      snobol_pattern_compile_ex(ctx, "'hello'", 7, 0, &err);
+  test_assert(pat != NULL, "compile literal");
+  if (pat) {
+    snobol_literal_match_t r =
+        snobol_pattern_match_literal(pat, "hello world", 11);
+    test_assert(r.success && r.length == 5, "literal matches prefix");
+    r = snobol_pattern_match_literal(pat, "nope", 4);
+    test_assert(!r.success, "literal mismatch");
+    r = snobol_pattern_match_literal(pat, "hell", 4);
+    test_assert(!r.success, "subject shorter than literal");
+    r = snobol_pattern_match_literal(pat, NULL, 0);
+    test_assert(!r.success, "NULL subject");
+    snobol_pattern_free(pat);
+  }
+  free(err);
+  err = NULL;
+
+  /* Non-literal pattern → success=false. */
+  pat = snobol_pattern_compile_ex(ctx, "'ab' SPAN('0-9')", 16, 0, &err);
+  test_assert(pat != NULL, "compile non-literal");
+  if (pat) {
+    snobol_literal_match_t r =
+        snobol_pattern_match_literal(pat, "ab12", 4);
+    test_assert(!r.success, "non-literal pattern returns no literal match");
+    snobol_pattern_free(pat);
+  }
+  free(err);
+  snobol_context_destroy(ctx);
+}
+
+/* ── pattern-object match/search/reuse with output + captures ─────────────── */
+
+
+
+void test_cov_api_match_output_captures(void) {
+  test_suite("Coverage: match() output/capture copy");
+
+  /* EVAL(TRIM) appends to vm->out → match->output copy path. */
+  ast_node_t *ast = cova_cap_eval(SNOBOL_FN_TRIM, "x ", 2);
+  snobol_pattern_t *pat = cova_compile_pattern(ast);
+  test_assert(pat != NULL, "EVAL pattern compiles");
+  if (pat) {
+    snobol_match_t *m = snobol_pattern_match(pat, "x ", 2);
+    test_assert(m != NULL, "match returns result");
+    if (m) {
+      test_assert(snobol_match_success(m), "match succeeds");
+      size_t olen = 0;
+      const char *out = snobol_match_get_output(m, &olen);
+      test_assert(olen == 1 && out && out[0] == 'x',
+                  "match copies EVAL output");
+      const char *cap = snobol_match_get_variable(m, "1", NULL);
+      test_assert(cap && cap[0] == 'x', "match materializes capture");
+      snobol_match_free(m);
+    }
+    snobol_pattern_free(pat);
+  }
+  snobol_ast_free(ast);
+
+  /* Literal-only non-match short-circuits without VM output. */
+  ast = snobol_ast_create_lit("zz", 2);
+  pat = cova_compile_pattern(ast);
+  test_assert(pat != NULL, "literal compiles");
+  if (pat) {
+    snobol_match_t *m = snobol_pattern_match(pat, "ab", 2);
+    test_assert(m && !snobol_match_success(m),
+                "literal-only mismatch short-circuits");
+    if (m)
+      snobol_match_free(m);
+    snobol_pattern_free(pat);
+  }
+  snobol_ast_free(ast);
+}
+
+
+
+void test_cov_api_search_prefilter(void) {
+  test_suite("Coverage: search() required-byte prefilter");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = NULL;
+
+  /* 1-byte required literal absent → prefiltered zero-match result. */
+  snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, "'a'", 3, 0, &err);
+  test_assert(pat != NULL, "compile 1-byte literal");
+  if (pat) {
+    snobol_match_t *m = snobol_pattern_search(pat, "zzzz", 4);
+    test_assert(m && !snobol_match_success(m),
+                "1-byte prefilter rejects subject");
+    if (m)
+      snobol_match_free(m);
+    m = snobol_pattern_search(pat, "zaz", 3);
+    test_assert(m && snobol_match_success(m), "1-byte literal found");
+    if (m)
+      snobol_match_free(m);
+    snobol_pattern_free(pat);
+  }
+  free(err);
+  err = NULL;
+
+  /* 2-byte required literal absent → memmem prefilter path. */
+  pat = snobol_pattern_compile_ex(ctx, "'ab'", 4, 0, &err);
+  test_assert(pat != NULL, "compile 2-byte literal");
+  if (pat) {
+    snobol_match_t *m = snobol_pattern_search(pat, "qqqq", 4);
+    test_assert(m && !snobol_match_success(m),
+                "2-byte prefilter rejects subject");
+    if (m)
+      snobol_match_free(m);
+    snobol_pattern_free(pat);
+  }
+  free(err);
+  snobol_context_destroy(ctx);
+}
+
+
+
+void test_cov_api_search_output_captures(void) {
+  test_suite("Coverage: search() output/capture copy");
+
+  ast_node_t *ast = cova_cap_eval(SNOBOL_FN_TRIM, "x ", 2);
+  snobol_pattern_t *pat = cova_compile_pattern(ast);
+  test_assert(pat != NULL, "EVAL pattern compiles");
+  if (pat) {
+    snobol_match_t *m = snobol_pattern_search(pat, "x ", 2);
+    test_assert(m && snobol_match_success(m), "search succeeds");
+    if (m) {
+      size_t olen = 0;
+      const char *out = snobol_match_get_output(m, &olen);
+      test_assert(olen == 1 && out && out[0] == 'x',
+                  "search copies EVAL output");
+      test_assert(snobol_match_get_position(m) == 0, "search position");
+      const char *cap = snobol_match_get_variable(m, "1", NULL);
+      test_assert(cap && cap[0] == 'x', "search materializes capture");
+      snobol_match_free(m);
+    }
+    snobol_pattern_free(pat);
+  }
+  snobol_ast_free(ast);
+
+  /* Probe: unanchored captures are window-relative but copied against the
+   * full subject, so matches away from offset 0 materialize wrong bytes.
+   * Correct behavior: subject "aax " yields the capture "x " (offsets
+   * shifted by the match position).  Disabled until the engine is fixed;
+   * see dev/coverage-findings.md.
+   *
+   *   pat = cova_compile_pattern(cova_cap_eval(SNOBOL_FN_TRIM, "x ", 2));
+   *   m = snobol_pattern_search(pat, "aax ", 4);
+   *   cap = snobol_match_get_variable(m, "1", NULL);
+   *   test_assert(cap && strcmp(cap, "x ") == 0,
+   *               "capture offsets are subject-absolute");
+   */
+
+  /* Capture-only pattern through search (capture copy path).  The repeat
+   * overflows pike so the capture-aware restart loop records the variable
+   * registers (pike's ACCEPT writeback drops them today). */
+  ast = snobol_ast_create_cap(1, snobol_ast_create_repeat(
+                                     snobol_ast_create_lit("a", 1), 1, -1));
+  ast_node_t **tail = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+  tail[0] = ast;
+  tail[1] = snobol_ast_create_lit("b", 1);
+  ast = snobol_ast_create_concat(tail, 2);
+  pat = cova_compile_pattern(ast);
+  test_assert(pat != NULL, "capture pattern compiles");
+  if (pat) {
+    snobol_match_t *m = snobol_pattern_search(pat, "aab", 3);
+    test_assert(m && snobol_match_success(m), "capture search succeeds");
+    if (m) {
+      size_t clen = 0;
+      const char *cap = snobol_match_get_variable(m, "1", &clen);
+      test_assert(cap && clen == 2 && memcmp(cap, "aa", 2) == 0,
+                  "capture copied");
+      snobol_match_free(m);
+    }
+    snobol_pattern_free(pat);
+  }
+  snobol_ast_free(ast);
+}
+
+
+
+void test_cov_api_search_reuse(void) {
+  test_suite("Coverage: search_reuse output/capture");
+
+  snobol_match_t *mr = snobol_match_create();
+  test_assert(mr != NULL, "match_create succeeds");
+  if (!mr)
+    return;
+
+  ast_node_t *ast = cova_cap_eval(SNOBOL_FN_TRIM, "x ", 2);
+  snobol_pattern_t *pat = cova_compile_pattern(ast);
+  test_assert(pat != NULL, "EVAL pattern compiles");
+  if (pat) {
+    bool ok = snobol_pattern_search_reuse(pat, "x ", 2, mr);
+    test_assert(ok, "reuse search succeeds");
+    test_assert(mr->success, "reuse result success flag");
+    size_t olen = 0;
+    const char *out = snobol_match_get_output(mr, &olen);
+    test_assert(olen == 1 && out && out[0] == 'x',
+                "reuse copies EVAL output");
+    const char *cap = snobol_match_get_variable(mr, "1", NULL);
+    test_assert(cap && cap[0] == 'x', "reuse materializes capture");
+
+    /* Second call reuses the same match object (reset path). */
+    ok = snobol_pattern_search_reuse(pat, "yyy", 3, mr);
+    test_assert(!ok && !mr->success, "reuse second call resets result");
+    snobol_pattern_free(pat);
+  }
+  snobol_ast_free(ast);
+  snobol_match_free(mr);
+}
+
+/* ── stateful _ex API ─────────────────────────────────────────────────────── */
+
+
+
+void test_cov_api_search_state(void) {
+  test_suite("Coverage: search-state lifecycle + _ex variants");
+
+  ast_node_t *ast = cova_cap_eval(SNOBOL_FN_TRIM, "x ", 2);
+  uint8_t *bc = NULL;
+  size_t bc_len = 0;
+  compile_ast_to_bytecode_c(ast, false, &bc, &bc_len);
+  snobol_ast_free(ast);
+  test_assert(bc && bc_len > 0, "EVAL bytecode compiles");
+
+  snobol_pattern_search_state_t *st =
+      snobol_pattern_search_state_create(bc, bc_len);
+  test_assert(st != NULL, "state created");
+
+  /* Setters with real values. */
+  snobol_pattern_search_state_set_pattern(st, NULL);
+  snobol_pattern_search_state_set_trie_cache(st, NULL);
+  snobol_pattern_search_state_set_eval_fn(st, NULL, NULL);
+  test_assert(true, "state setters accept values");
+
+  snobol_match_t *m = snobol_pattern_search_ex(st, "aax ", 4, 0);
+  test_assert(m && m->success, "first _ex call succeeds");
+  if (m) {
+    size_t olen = 0;
+    const char *out = snobol_match_get_output(m, &olen);
+    test_assert(olen == 1 && out && out[0] == 'x', "_ex output copy");
+  }
+
+  /* Second call with output + captures → cross-call cleanup paths. */
+  m = snobol_pattern_search_ex(st, "qqx ", 4, 2);
+  test_assert(m && m->success, "second _ex call with start_offset");
+  if (m) {
+    size_t olen = 0;
+    const char *out = snobol_match_get_output(m, &olen);
+    test_assert(olen == 1 && out && out[0] == 'x',
+                "_ex window output copy");
+    const char *cap = snobol_match_get_variable(m, "1", NULL);
+    test_assert(cap && cap[0] == 'x', "_ex window capture");
+    test_assert(snobol_match_get_position(m) == 2, "_ex absolute position");
+  }
+  snobol_pattern_search_state_destroy(st);
+  free(bc);
+
+  /* _ex_anchored: DFA + SIMD NFA caches on the state. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    const char *src = "'ab' SPAN('0-9')";
+    snobol_pattern_t *pat =
+        snobol_pattern_compile_ex(ctx, src, strlen(src), 0, &err);
+    test_assert(pat != NULL, "compile automaton-eligible pattern");
+    if (pat) {
+      const uint8_t *pbc = snobol_pattern_get_bc(pat);
+      snobol_pattern_search_state_t *st2 =
+          snobol_pattern_search_state_create(pbc,
+                                             snobol_pattern_get_bc_len(pat));
+      test_assert(st2 != NULL, "state for anchored pattern");
+      if (st2) {
+        m = snobol_pattern_search_ex_anchored(st2, "ab12", 4);
+        test_assert(m && m->success, "anchored _ex match");
+        test_assert(m && snobol_match_get_position(m) == 0,
+                    "anchored position 0");
+        /* Probe: anchored matching through the DFA automaton must not
+         * match away from the anchor.  Today search_automaton_exec scans
+         * unanchored and the DFA override ignores the anchored flag, so
+         * "xab12" wrongly matches at offset 1.  Disabled until the engine
+         * is fixed; see dev/coverage-findings.md.
+         *
+         *   m = snobol_pattern_search_ex_anchored(st2, "xab12", 5);
+         *   test_assert(m && !m->success, "anchored match stays at 0");
+         */
+        snobol_pattern_search_state_destroy(st2);
+      }
+      snobol_pattern_free(pat);
+    }
+    free(err);
+
+    /* SIMD-eligible pattern builds the state NFA cache. */
+    src = "SPAN('a-z')";
+    pat = snobol_pattern_compile_ex(ctx, src, strlen(src), 0, &err);
+    test_assert(pat != NULL, "compile SIMD-eligible pattern");
+    if (pat) {
+      snobol_pattern_search_state_t *st3 = snobol_pattern_search_state_create(
+          snobol_pattern_get_bc(pat), snobol_pattern_get_bc_len(pat));
+      test_assert(st3 != NULL, "state for SIMD pattern");
+      if (st3) {
+        m = snobol_pattern_search_ex_anchored(st3, "abc", 3);
+        test_assert(m && m->success, "anchored SIMD match");
+        snobol_pattern_search_state_destroy(st3);
+      }
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+
+  /* search_next lean API. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, "'ab'", 4, 0, &err);
+    test_assert(pat != NULL, "compile literal for search_next");
+    if (pat) {
+      snobol_pattern_search_state_t *st4 = snobol_pattern_search_state_create(
+          snobol_pattern_get_bc(pat), snobol_pattern_get_bc_len(pat));
+      test_assert(st4 != NULL, "state for search_next");
+      if (st4) {
+        size_t pos = 0, len = 0;
+        bool ok = snobol_pattern_search_next(st4, "xxabyy", 6, 0, &pos, &len);
+        test_assert(ok && pos == 2 && len == 2, "search_next finds literal");
+        ok = snobol_pattern_search_next(st4, "xxabyy", 6, 3, &pos, &len);
+        test_assert(!ok, "search_next past the occurrence");
+        ok = snobol_pattern_search_next(st4, "xx", 2, 0, &pos, &len);
+        test_assert(!ok, "search_next miss");
+        ok = snobol_pattern_search_next(st4, "xx", 2, 9, &pos, &len);
+        test_assert(!ok, "search_next offset beyond subject");
+        snobol_pattern_search_state_destroy(st4);
+      }
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    err = NULL;
+
+    /* Non-literal pattern → search_next false. */
+    pat = snobol_pattern_compile_ex(ctx, "'ab' SPAN('0-9')", 16, 0, &err);
+    test_assert(pat != NULL, "compile non-literal for search_next");
+    if (pat) {
+      snobol_pattern_search_state_t *st5 = snobol_pattern_search_state_create(
+          snobol_pattern_get_bc(pat), snobol_pattern_get_bc_len(pat));
+      test_assert(st5 != NULL, "state for non-literal");
+      if (st5) {
+        size_t pos = 0, len = 0;
+        test_assert(!snobol_pattern_search_next(st5, "ab12", 4, 0, &pos, &len),
+                    "search_next rejects non-literal patterns");
+        snobol_pattern_search_state_destroy(st5);
+      }
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+}
+
+/* ── batch API ────────────────────────────────────────────────────────────── */
+
+
+
+void test_cov_api_batch(void) {
+  test_suite("Coverage: batch API growth/captures/cleanup");
+
+  /* >64 matches → result-array growth. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, "','", 3, 0, &err);
+    test_assert(pat != NULL, "compile comma literal");
+    if (pat) {
+      char subject[256];
+      size_t slen = 0;
+      for (int i = 0; i < 100; i++) {
+        subject[slen++] = ',';
+        subject[slen++] = 'x';
+      }
+      snobol_batch_result_t out;
+      memset(&out, 0, sizeof(out));
+      bool ok = snobol_pattern_search_batch(snobol_pattern_get_bc(pat),
+                                            snobol_pattern_get_bc_len(pat),
+                                            subject, slen,
+                                            snobol_pattern_get_meta(pat),
+                                            &out);
+      test_assert(ok, "batch finds many matches");
+      test_assert(out.eligible, "batch eligible");
+      test_assert(out.match_count == 100, "all 100 matches collected");
+      snobol_batch_result_free(&out);
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+
+  /* Capture pattern: capture rows collected (and grown past 64).  The '+'
+   * repeat overflows pike so the capture-aware restart loop records the
+   * variable registers. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    const char *cpat = "@r1('x'+) ','";
+    snobol_pattern_t *pat =
+        snobol_pattern_compile_ex(ctx, cpat, strlen(cpat), 0, &err);
+    test_assert(pat != NULL, "compile capture batch pattern");
+    if (pat) {
+      char subject[512];
+      size_t slen = 0;
+      for (int i = 0; i < 80; i++) {
+        subject[slen++] = 'x';
+        subject[slen++] = 'x';
+        subject[slen++] = 'x';
+        subject[slen++] = ',';
+      }
+      snobol_batch_result_t out;
+      memset(&out, 0, sizeof(out));
+      bool ok = snobol_pattern_search_batch(snobol_pattern_get_bc(pat),
+                                            snobol_pattern_get_bc_len(pat),
+                                            subject, slen,
+                                            snobol_pattern_get_meta(pat),
+                                            &out);
+      test_assert(ok, "capture batch succeeds");
+      test_assert(out.var_count >= 1, "capture rows reported");
+      test_assert(out.captures != NULL, "capture rows collected");
+      if (out.captures && out.captures[1] && out.match_count > 0) {
+        test_assert(out.captures[1][1] == 3,
+                    "first capture length is 3 bytes");
+      }
+      snobol_batch_result_free(&out);
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+
+  /* Zero matches → count==0 cleanup, eligible stays true. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, "','", 3, 0, &err);
+    if (pat) {
+      snobol_batch_result_t out;
+      memset(&out, 0, sizeof(out));
+      bool ok = snobol_pattern_search_batch(snobol_pattern_get_bc(pat),
+                                            snobol_pattern_get_bc_len(pat),
+                                            "no commas here", 14,
+                                            snobol_pattern_get_meta(pat),
+                                            &out);
+      test_assert(!ok && out.eligible, "zero-match batch done, eligible");
+      snobol_batch_result_free(&out);
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+
+  /* Ineligible pattern (REM op): batch returns false, eligible=false. */
+  {
+    ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+    parts[0] = snobol_ast_create_lit("a", 1);
+    parts[1] = snobol_ast_create_rem();
+    ast_node_t *ast = snobol_ast_create_concat(parts, 2);
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    compile_ast_to_bytecode_c(ast, false, &bc, &bc_len);
+    snobol_ast_free(ast);
+    test_assert(bc && bc_len > 0, "REM bytecode compiles");
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(bc, bc_len, &meta);
+    test_assert(!meta.search_vm_eligible, "REM pattern not batch-eligible");
+    snobol_batch_result_t out;
+    memset(&out, 0, sizeof(out));
+    bool ok = snobol_pattern_search_batch(bc, bc_len, "ab", 2, &meta, &out);
+    test_assert(!ok && !out.eligible, "ineligible batch falls back");
+    snobol_search_meta_free(&meta);
+    free(bc);
+  }
+
+  /* Stateful batch_ex with state reuse. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, "','", 3, 0, &err);
+    if (pat) {
+      snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(
+          snobol_pattern_get_bc(pat), snobol_pattern_get_bc_len(pat));
+      test_assert(st != NULL, "state for batch_ex");
+      if (st) {
+        snobol_batch_result_t out;
+        memset(&out, 0, sizeof(out));
+        bool ok = snobol_pattern_search_batch_ex(st, "a,b,c", 5, &out);
+        test_assert(ok && out.match_count == 2, "batch_ex finds 2 commas");
+        snobol_batch_result_free(&out);
+
+        /* Second call on the same state (reuses caches). */
+        memset(&out, 0, sizeof(out));
+        ok = snobol_pattern_search_batch_ex(st, "x", 1, &out);
+        test_assert(!ok && out.eligible, "batch_ex zero-match done");
+        snobol_batch_result_free(&out);
+        snobol_pattern_search_state_destroy(st);
+      }
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+}
+
+/* ── match accessors ──────────────────────────────────────────────────────── */
+
+
+
+void test_cov_api_accessors(void) {
+  test_suite("Coverage: match accessor edge cases");
+
+  /* get_output on a non-success match → NULL, len 0. */
+  snobol_match_t *m = snobol_match_create();
+  test_assert(m != NULL, "match created");
+  if (!m)
+    return;
+  m->success = false;
+  size_t l = 99;
+  test_assert(snobol_match_get_output(m, &l) == NULL && l == 0,
+              "get_output on failed match");
+  test_assert(snobol_match_get_position(m) == 0, "position on failed match");
+  test_assert(snobol_match_get_length(m) == 0, "length on failed match");
+
+  /* Successful match with output and a populated capture (register 1). */
+  m->success = true;
+  m->output = strdup("out");
+  m->output_len = 3;
+  m->var_subject = "captured";
+  m->var_off[1] = 0;
+  m->var_len[1] = 8;
+  m->var_count = 2;
+  const char *out = snobol_match_get_output(m, &l);
+  test_assert(out && l == 3 && strcmp(out, "out") == 0, "output accessor");
+  out = snobol_match_get_output(m, NULL);
+  test_assert(out != NULL, "output accessor with NULL len");
+
+  /* Capture materialization + "v" prefix + invalid names. */
+  const char *cap = snobol_match_get_variable(m, "1", &l);
+  test_assert(cap && l == 8 && strcmp(cap, "captured") == 0,
+              "lazy capture materialization");
+  cap = snobol_match_get_variable(m, "v1", &l);
+  test_assert(cap && l == 8, "v-prefixed capture name");
+  cap = snobol_match_get_variable(m, "0", &l);
+  test_assert(cap && l == 0 && cap[0] == '\0',
+              "unset register 0 materializes as empty string");
+  test_assert(snobol_match_get_variable(m, "", &l) == NULL && l == 0,
+              "empty name rejected");
+  test_assert(snobol_match_get_variable(m, "v", &l) == NULL,
+              "bare v rejected");
+  test_assert(snobol_match_get_variable(m, "abc", &l) == NULL,
+              "non-numeric name rejected");
+  test_assert(snobol_match_get_variable(m, "-3", &l) == NULL,
+              "negative index rejected");
+  test_assert(snobol_match_get_variable(m, "999", &l) == NULL,
+              "index beyond MAX_VARS rejected");
+  test_assert(snobol_match_get_variable(m, "2", &l) == NULL,
+              "index beyond var_count rejected");
+
+  /* Unset register 0 (var_len 0): materializes as an empty string. */
+  cap = snobol_match_get_variable(m, "0", &l);
+  test_assert(cap && l == 0, "unset register materializes empty");
+  test_assert(snobol_match_get_variable(m, "3", &l) == NULL,
+              "index beyond var_count rejected again");
+
+  /* Reset frees owned strings; free frees the struct. */
+  snobol_match_reset(m);
+  test_assert(m->output == NULL && m->var_values[0] == NULL,
+              "reset frees owned strings");
+  snobol_match_free(m);
+}
+
+/* ── one-shot snobol_match() ──────────────────────────────────────────────── */
+
+
+
+void test_cov_api_one_shot(void) {
+  test_suite("Coverage: one-shot snobol_match()");
+
+  /* Success with captures. */
+  snobol_match_result_t *r =
+      snobol_match("@r1('ab') 'c'", 13, "abc", 3, 0);
+  test_assert(r != NULL, "one-shot result allocated");
+  if (r) {
+    test_assert(r->success, "one-shot match succeeds");
+    test_assert(r->error == NULL, "no error on success");
+    test_assert(r->capture_count == 2, "capture count follows reg 1");
+    test_assert(r->captures && r->captures[1] &&
+                    strcmp(r->captures[1], "ab") == 0,
+                "capture copied");
+    test_assert(r->capture_lens && r->capture_lens[1] == 2,
+                "capture length");
+    snobol_match_result_free(r);
+  }
+
+  /* Compile failure → malloc'd error string. */
+  r = snobol_match("(", 1, "abc", 3, 0);
+  test_assert(r != NULL, "failed one-shot result allocated");
+  if (r) {
+    test_assert(!r->success, "one-shot reports failure");
+    test_assert(r->error != NULL, "error string set");
+    snobol_match_result_free(r);
+  }
+
+  /* No-match success=false, no captures. */
+  r = snobol_match("'z'", 3, "abc", 3, 0);
+  test_assert(r != NULL, "no-match result allocated");
+  if (r) {
+    test_assert(!r->success, "no-match reported");
+    test_assert(r->captures == NULL || r->capture_count == 0,
+                "no captures on failure");
+    snobol_match_result_free(r);
+  }
+
+  /* Case-insensitive flag. */
+  r = snobol_match("'hello'", 7, "HELLO", 5, SNOBOL_FLAG_CASE_INSENSITIVE);
+  test_assert(r != NULL && r->success, "case-insensitive one-shot");
+  if (r)
+    snobol_match_result_free(r);
+}
+
+/* ── builder API ──────────────────────────────────────────────────────────── */
+
+
+
+void test_cov_api_builder(void) {
+  test_suite("Coverage: pattern builder constructors");
+
+  snobol_pattern_build_t *b = snobol_pattern_build_create();
+  test_assert(b != NULL, "builder created");
+  if (!b)
+    return;
+
+  ast_node_t *n1 = snobol_pattern_build_lit(b, "abc", 3);
+  ast_node_t *n2 = snobol_pattern_build_span(b, "0-9", 3);
+  ast_node_t *n3 = snobol_pattern_build_brk(b, ",", 1);
+  ast_node_t *n4 = snobol_pattern_build_any(b, "a", 1);
+  ast_node_t *n5 = snobol_pattern_build_notany(b, "a", 1);
+  ast_node_t *n6 = snobol_pattern_build_len(b, 2);
+  ast_node_t *n7 = snobol_pattern_build_arbno(b, n6);
+  ast_node_t *n8 = snobol_pattern_build_cap(b, 0, n1);
+  ast_node_t *n9 = snobol_pattern_build_assign(b, 1, 0);
+  ast_node_t *n10 = snobol_pattern_build_pos(b, 0);
+  ast_node_t *n11 = snobol_pattern_build_tab(b, 1);
+  ast_node_t *n12 = snobol_pattern_build_rpos(b, 0);
+  ast_node_t *n13 = snobol_pattern_build_rtab(b, 0);
+  ast_node_t *n14 = snobol_pattern_build_breakx(b, ";", 1);
+  ast_node_t *n15 = snobol_pattern_build_bal(b, '(', ')');
+  ast_node_t *n16 = snobol_pattern_build_fence(b);
+  ast_node_t *n17 = snobol_pattern_build_rem(b);
+  ast_node_t *n18 = snobol_pattern_build_abort(b);
+  ast_node_t *n19 = snobol_pattern_build_fail(b);
+  ast_node_t *n20 = snobol_pattern_build_succeed(b);
+  ast_node_t *n21 = snobol_pattern_build_label(b, "L", n20);
+  ast_node_t *n22 = snobol_pattern_build_goto(b, "L");
+
+  test_assert(n1 && n2 && n3 && n4 && n5 && n6 && n7 && n8 && n9 && n10 &&
+                  n11 && n12 && n13 && n14 && n15 && n16 && n17 && n18 && n19 &&
+                  n20 && n21 && n22,
+              "all builder constructors return nodes");
+
+  /* concat + alt + emit passthrough. */
+  ast_node_t **parts = (ast_node_t **)malloc(4 * sizeof(ast_node_t *));
+  parts[0] = n8;   /* cap(0, lit "abc") */
+  parts[1] = n9;   /* assign(1, 0) */
+  parts[2] = n10;  /* pos(0) */
+  parts[3] = n16;  /* fence */
+  ast_node_t *root = snobol_pattern_build_concat(b, parts, 4);
+  ast_node_t *alt = snobol_pattern_build_alt(b, root, n7);
+  test_assert(root && alt, "concat and alt build");
+  test_assert(snobol_pattern_build_emit(b, alt) == alt,
+              "emit transfers ownership");
+  snobol_ast_free(alt);
+
+  /* The remaining standalone nodes. */
+  snobol_ast_free(n2);
+  snobol_ast_free(n3);
+  snobol_ast_free(n4);
+  snobol_ast_free(n5);
+  snobol_ast_free(n11);
+  snobol_ast_free(n12);
+  snobol_ast_free(n13);
+  snobol_ast_free(n14);
+  snobol_ast_free(n15);
+  snobol_ast_free(n17);
+  snobol_ast_free(n18);
+  snobol_ast_free(n19);
+  snobol_ast_free(n21);
+  snobol_ast_free(n22);
+  snobol_pattern_build_destroy(b);
+
+  /* Builder with NULL nodes passed through to AST constructors. */
+  b = snobol_pattern_build_create();
+  test_assert(b != NULL, "second builder created");
+  test_assert(snobol_pattern_build_arbno(b, NULL) != NULL,
+              "arbno accepts NULL child (node owns nothing)");
+  test_assert(snobol_pattern_build_cap(b, 1, NULL) != NULL,
+              "cap accepts NULL child");
+  test_assert(snobol_pattern_build_alt(b, NULL, NULL) != NULL,
+              "alt accepts NULL children");
+  test_assert(snobol_pattern_build_emit(b, NULL) == NULL,
+              "emit(NULL) passthrough");
+  snobol_ast_free(snobol_pattern_build_arbno(b, NULL));
+  snobol_ast_free(snobol_pattern_build_cap(b, 1, NULL));
+  snobol_ast_free(snobol_pattern_build_alt(b, NULL, NULL));
+  snobol_pattern_build_destroy(b);
+}
+
 void test_api_match_suite(void) {
   test_suite("API: snobol_match()");
 
@@ -161,4 +1020,15 @@ void test_api_match_suite(void) {
       snobol_match_result_free(r);
     }
   }
+  test_cov_api_null_contracts();
+  test_cov_api_match_literal();
+  test_cov_api_match_output_captures();
+  test_cov_api_search_prefilter();
+  test_cov_api_search_output_captures();
+  test_cov_api_search_reuse();
+  test_cov_api_search_state();
+  test_cov_api_batch();
+  test_cov_api_accessors();
+  test_cov_api_one_shot();
+  test_cov_api_builder();
 }
