@@ -5,7 +5,21 @@ All notable changes to the libsnobol4 project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.13.0] - 2026-07-28
+## [Unreleased]
+
+### Fixed
+
+- **Batch-search capture rows overflow past 64 matches** (`core/src/api.c`,
+  `batch_run`): capture rows were allocated once with the initial result-array
+  capacity (64 matches) and never reallocated — the row-realloc check tested
+  `count >= cap` after the result arrays had already doubled `cap`, so the
+  condition was always false. Batch searches with captures and more than 64
+  matches wrote past the 1024-byte row allocation (heap-buffer-overflow,
+  verified under ASan). Rows now track their own capacity (`row_caps[]`),
+  double in lockstep with the result arrays, and zero the new tail. Found by
+  the coverage-driven API test suite.
+
+## ## [0.13.0] - 2026-07-28
 
 ### Pattern Fusion (Tier 10)
 

@@ -1049,16 +1049,26 @@ static bool batch_run(snobol_pattern_search_state_t *state, const char *subject,
     return false;
   }
 
-  /* Capture arrays: allocate rows for MAX_VARS lazily */
+  /* Capture arrays: allocate rows for MAX_VARS lazily.  Each row's capacity
+   * (in match pairs) is tracked separately in row_caps because the result
+   * arrays' `cap` doubles in the main loop — a realloc condition against the
+   * live `cap` would never fire for rows (they would overflow past 64
+   * matches). */
   bool has_caps = meta->has_capture;
   size_t **captures = NULL;
+  size_t *row_caps = NULL;
   if (has_caps) {
     captures = (size_t **)snobol_calloc((size_t)MAX_VARS, sizeof(size_t *));
-    if (!captures) {
+    row_caps = (size_t *)snobol_calloc((size_t)MAX_VARS, sizeof(size_t));
+    if (!captures || !row_caps) {
       snobol_free(positions);
       snobol_free(lengths);
       snobol_free(output_lens);
       snobol_free(outbuf_data);
+      if (captures)
+        snobol_free(captures);
+      if (row_caps)
+        snobol_free(row_caps);
       return false;
     }
   }
@@ -1124,14 +1134,21 @@ static bool batch_run(snobol_pattern_search_state_t *state, const char *subject,
           captures[ri] = (size_t *)snobol_calloc(cap, 2 * sizeof(size_t));
           if (!captures[ri])
             continue;
-        } else if (count >= cap) {
-          size_t *new_row =
-              (size_t *)snobol_realloc(captures[ri], cap * 2 * sizeof(size_t));
+          row_caps[ri] = cap;
+        } else if (count >= row_caps[ri]) {
+          /* Row capacity is in match pairs; double it (catching up to the
+           * grown result arrays) and zero the new tail. */
+          size_t new_row_cap = row_caps[ri] * 2;
+          while (new_row_cap <= count)
+            new_row_cap *= 2;
+          size_t *new_row = (size_t *)snobol_realloc(
+              captures[ri], new_row_cap * 2 * sizeof(size_t));
           if (!new_row)
             continue;
           captures[ri] = new_row;
-          memset(captures[ri] + (cap / 2) * 2, 0,
-                 (cap / 2) * 2 * sizeof(size_t));
+          memset(captures[ri] + row_caps[ri] * 2, 0,
+                 (new_row_cap - row_caps[ri]) * 2 * sizeof(size_t));
+          row_caps[ri] = new_row_cap;
         }
         size_t vs = vm->var_start[ri];
         size_t ve = vm->var_end[ri];
@@ -1190,6 +1207,8 @@ static bool batch_run(snobol_pattern_search_state_t *state, const char *subject,
         snobol_free(captures[i]);
       snobol_free(captures);
     }
+    if (row_caps)
+      snobol_free(row_caps);
     return false;
   }
 
