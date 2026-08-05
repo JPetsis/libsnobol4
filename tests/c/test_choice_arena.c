@@ -180,9 +180,107 @@ static void test_arena_deep_vm_backtrack(void) {
   free(subject);
 }
 
+
+/* ===== test_coverage_misc (part): coverage-driven tests merged into test_choice_arena.c ===== */
+#include <stdint.h>
+#include "../../core/include/snobol/array.h"
+#include "../../core/include/snobol/lexer.h"
+#include "../../core/include/snobol/search.h"
+#include "../../core/include/snobol/string_fn.h"
+#include "../../core/include/snobol/vm.h"
+#include "../../core/include/snobol/snobol.h"
+#include "../../core/include/snobol/snobol_internal.h"
+
+void test_cov_misc_choice_arena(void) {
+  test_suite("Coverage: choice arena + stats + reset");
+
+  ChoiceArena *arena = vm_arena_create();
+  test_assert(arena != NULL, "arena created");
+
+  /* Small records stay in the head page. */
+  bool all_ok = true;
+  for (int i = 0; i < 50; i++) {
+    if (!vm_arena_alloc(arena, 32))
+      all_ok = false;
+  }
+  test_assert(all_ok, "small records allocated");
+
+  /* A record larger than a page chains a new page. */
+  uint8_t *big = vm_arena_alloc(arena, CHOICE_ARENA_PAGE_SIZE + 64);
+  test_assert(big != NULL, "oversized record allocates a new page");
+
+  /* Pop everything back, including the chained page. */
+  for (int i = 0; i < 51; i++)
+    vm_arena_pop_last(arena);
+  test_assert(arena->total_used == 0, "arena drained");
+
+  /* Reset with a chained page: reset frees the tail page. */
+  vm_arena_alloc(arena, CHOICE_ARENA_PAGE_SIZE + 64);
+  vm_arena_reset(arena);
+  test_assert(arena->total_used == 0 && arena->cur == arena->head,
+              "reset returns to the head page");
+
+  vm_arena_destroy(arena);
+  vm_arena_destroy(NULL);
+  vm_arena_reset(NULL);
+  test_assert(vm_arena_alloc(NULL, 8) == NULL, "alloc(NULL)");
+  vm_arena_pop_last(NULL);
+  test_assert(true, "arena NULL guards");
+
+  /* VM-level choice stats. */
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  test_assert(vm_choice_stack_memory_usage(&vm) == 0, "usage empty");
+  test_assert(vm_choice_stack_depth(&vm) == 0, "depth empty");
+  test_assert(vm_choice_record_average_size(&vm) == 0, "avg empty");
+
+  /* Push/pop through the VM (compact mode). */
+  vm.choices_arena = vm_arena_create();
+  vm.use_compact_choice = true;
+  vm_trail_init(&vm);
+  vm.trail_cap = 64;
+  vm.trail = (UndoRecord *)snobol_malloc(vm.trail_cap * sizeof(UndoRecord));
+  test_assert(vm.trail != NULL, "trail buffer");
+  vm_push_choice(&vm, 10, 3);
+  vm_push_choice(&vm, 20, 6);
+  test_assert(vm_choice_stack_depth(&vm) == 2, "depth 2");
+  test_assert(vm_pop_choice(&vm), "pop 1");
+  test_assert(vm_choice_stack_depth(&vm) == 1, "depth 1");
+  test_assert(vm_choice_stack_memory_usage(&vm) > 0, "usage > 0");
+  test_assert(vm_choice_record_average_size(&vm) > 0, "avg > 0");
+  test_assert(vm_pop_choice(&vm), "pop 2");
+  test_assert(!vm_pop_choice(&vm), "pop empty fails");
+
+  /* Legacy full-snapshot mode with populated captures. */
+  vm.use_compact_choice = false;
+  vm.max_cap_used = 2;
+  vm.cap_start[0] = 1;
+  vm.cap_end[0] = 2;
+  vm.var_count = 1;
+  vm.max_counter_used = 1;
+  vm.counters[0] = 5;
+  vm_push_choice(&vm, 30, 9);
+  vm.cap_start[0] = 99;
+  test_assert(vm_pop_choice(&vm), "legacy pop");
+  test_assert(vm.cap_start[0] == 1, "legacy snapshot restores captures");
+
+  /* snobol_vm_reset clears everything. */
+  vm.var_count = 3;
+  vm_write_log_init(&vm);
+  snobol_vm_reset(&vm);
+  test_assert(vm.var_count == 0 && vm.pos == 0 && vm.max_cap_used == 0,
+              "reset clears VM state");
+
+  vm_trail_free(&vm);
+  vm_write_log_free(&vm);
+  vm_arena_destroy(vm.choices_arena);
+}
+
+
 void test_choice_arena_suite(void) {
   test_suite("Choice-Stack Arena (W2c)");
   test_arena_unit();
   test_arena_reset();
   test_arena_deep_vm_backtrack();
+  test_cov_misc_choice_arena();
 }

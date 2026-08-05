@@ -353,6 +353,172 @@ static void test_multi_loop_matches_legacy(void) {
 
 /* ── Suite entry point ────────────────────────────────────────────────────── */
 
+
+/* ===== test_coverage_misc (part): coverage-driven tests merged into test_vm_trail.c ===== */
+#include <stdint.h>
+#include "../../core/include/snobol/array.h"
+#include "../../core/include/snobol/lexer.h"
+#include "../../core/include/snobol/search.h"
+#include "../../core/include/snobol/string_fn.h"
+#include "../../core/include/snobol/vm.h"
+#include "../../core/include/snobol/snobol.h"
+#include "../../core/include/snobol/snobol_internal.h"
+
+void test_cov_misc_write_log_trail(void) {
+  test_suite("Coverage: write-log + undo trail ops");
+
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  vm.use_compact_choice = true;
+  vm_write_log_init(&vm);
+  vm.write_log_cap = MAX_CAPS;
+  vm.write_log = (WriteLogEntry *)snobol_malloc(vm.write_log_cap *
+                                                sizeof(WriteLogEntry));
+  test_assert(vm.write_log != NULL, "write log allocated");
+
+  /* Track with wrap-around: >64 entries rotate the circular buffer. */
+  for (int i = 0; i < 80; i++)
+    vm_write_log_track_cap_start(&vm, (uint8_t)(i & 0x3F), (size_t)i);
+  test_assert(vm_write_log_count_entries(&vm) > 0, "entries counted");
+
+  /* Re-tracking an existing cap updates the old_start in place. */
+  vm_write_log_track_cap_start(&vm, 0, 1000);
+  vm_write_log_track_cap_end(&vm, 0, 2000);
+
+  WriteLogEntry buf[64];
+  size_t n = vm_write_log_count_entries(&vm);
+  vm_write_log_copy_entries(&vm, buf, 64);
+  test_assert(n <= 64, "copy respects capacity");
+
+  /* Disabled (non-compact) tracking is a no-op. */
+  vm.use_compact_choice = false;
+  vm_write_log_track_cap_start(&vm, 1, 5);
+  vm_write_log_track_cap_end(&vm, 1, 9);
+  vm.use_compact_choice = true;
+  vm_write_log_clear(&vm);
+  test_assert(vm_write_log_count_entries(&vm) == 0, "clear empties log");
+
+  vm_write_log_free(&vm);
+  vm_write_log_clear(&vm); /* safe after free */
+
+  /* Trail ops. */
+  vm_trail_init(&vm);
+  vm.trail_cap = 16;
+  vm.trail = (UndoRecord *)snobol_malloc(vm.trail_cap * sizeof(UndoRecord));
+  test_assert(vm.trail != NULL, "trail buffer");
+  test_assert(vm_trail_depth(&vm) == 0, "trail empty");
+
+  vm_trail_counter_inc(&vm, 2, 7, 11);
+  vm_trail_cap_write(&vm, 1, 2, 30, 40);
+  vm_trail_var_write(&vm, 3, 50, 60);
+  vm.cap_start[1] = 999;
+  vm.var_start[3] = 888;
+  test_assert(vm_trail_depth(&vm) == 3, "trail depth 3");
+
+  vm_trail_replay(&vm, 0);
+  test_assert(vm.cap_start[1] == 30 && vm.var_start[3] == 50,
+              "replay restores prior values");
+  test_assert(vm_trail_depth(&vm) == 0, "replay consumes records");
+
+  vm_trail_clear(&vm);
+  test_assert(vm_trail_depth(&vm) == 0, "clear empties trail");
+  vm_trail_push(&vm, (UndoRecord){0});
+  test_assert(vm_trail_depth(&vm) == 1, "push after clear");
+  vm_trail_replay(&vm, 0);
+  vm_trail_free(&vm);
+  vm_trail_free(&vm); /* NULL-safe */
+}
+
+/* ── string functions ─────────────────────────────────────────────────────── */
+
+
+
+void test_cov_misc_write_log_round2(void) {
+  test_suite("Coverage: write-log existing-entry + trail growth");
+
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  vm.use_compact_choice = true;
+  vm_write_log_init(&vm);
+  vm.write_log_cap = MAX_CAPS;
+  vm.write_log = (WriteLogEntry *)snobol_malloc(vm.write_log_cap *
+                                                sizeof(WriteLogEntry));
+
+  /* Tracking the same cap twice updates the existing entry in place. */
+  vm_write_log_track_cap_start(&vm, 3, 100);
+  vm_write_log_track_cap_start(&vm, 3, 200);
+  vm_write_log_track_cap_end(&vm, 3, 300);
+  vm_write_log_track_cap_end(&vm, 3, 400);
+  WriteLogEntry buf[64];
+  size_t n = vm_write_log_count_entries(&vm);
+  vm_write_log_copy_entries(&vm, buf, 64);
+  bool found3 = false;
+  for (size_t i = 0; i < n && i < 64; i++) {
+    if (buf[i].cap_index == 3 && buf[i].old_start == 200 &&
+        buf[i].old_end == 400)
+      found3 = true;
+  }
+  test_assert(found3, "re-tracked entry updated in place");
+  vm_write_log_free(&vm);
+
+  /* Trail growth: push more records than the initial capacity. */
+  vm_trail_init(&vm);
+  vm.trail_cap = 2;
+  vm.trail = (UndoRecord *)snobol_malloc(vm.trail_cap * sizeof(UndoRecord));
+  for (int i = 0; i < 10; i++)
+    vm_trail_counter_inc(&vm, 0, (uint32_t)i, (size_t)i);
+  test_assert(vm_trail_depth(&vm) == 10, "trail grew past capacity");
+  vm_trail_replay(&vm, 0);
+  test_assert(vm.counters[0] == 0, "trail replay restored counter");
+  vm_trail_free(&vm);
+}
+
+
+
+void test_cov_misc_round3_trail(void) {
+  /* VM capture: cap_write sub 0/1 + trail push growth with writes. */
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  vm.use_compact_choice = true;
+  vm_trail_init(&vm);
+  vm.trail_cap = 2;
+  vm.trail = (UndoRecord *)snobol_malloc(vm.trail_cap * sizeof(UndoRecord));
+  vm.cap_start[4] = 111;
+  vm_trail_cap_write(&vm, 4, 0, 111, 0);   /* sub 0: start only */
+  vm.cap_end[4] = 222;
+  vm_trail_cap_write(&vm, 4, 1, 0, 222);   /* sub 1: end only */
+  vm.cap_start[5] = 333;
+  vm.cap_end[5] = 444;
+  vm_trail_cap_write(&vm, 5, 2, 333, 444); /* sub 2: both */
+  vm.var_start[2] = 55;
+  vm.var_end[2] = 66;
+  vm_trail_var_write(&vm, 2, 55, 66);
+  vm.cap_start[4] = 0;
+  vm.cap_end[4] = 0;
+  vm.cap_start[5] = 0;
+  vm.cap_end[5] = 0;
+  vm.var_start[2] = 0;
+  vm.var_end[2] = 0;
+  vm_trail_replay(&vm, 0);
+  test_assert(vm.cap_start[4] == 111 && vm.cap_end[4] == 222 &&
+                  vm.cap_start[5] == 333 && vm.cap_end[5] == 444 &&
+                  vm.var_start[2] == 55 && vm.var_end[2] == 66,
+              "trail replay restores all write kinds");
+  vm_trail_free(&vm);
+
+  /* write-log: wrap-around on track_cap_end. */
+  memset(&vm, 0, sizeof(vm));
+  vm.use_compact_choice = true;
+  vm_write_log_init(&vm);
+  vm.write_log_cap = 8;
+  vm.write_log = (WriteLogEntry *)snobol_malloc(vm.write_log_cap *
+                                                sizeof(WriteLogEntry));
+  for (int i = 0; i < 30; i++)
+    vm_write_log_track_cap_end(&vm, (uint8_t)i, (size_t)i);
+  test_assert(vm_write_log_count_entries(&vm) == 8, "write-log wrapped");
+  vm_write_log_free(&vm);
+}
+
 void test_vm_trail_suite(void) {
   test_suite("VM Trail Choice Save");
 
@@ -360,4 +526,7 @@ void test_vm_trail_suite(void) {
   test_cap_heavy_matches_legacy();
   test_repeat_backtrack_replays_trail();
   test_multi_loop_matches_legacy();
+  test_cov_misc_write_log_trail();
+  test_cov_misc_write_log_round2();
+  test_cov_misc_round3_trail();
 }

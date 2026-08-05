@@ -364,6 +364,201 @@ static void test_fusion_alternation(void) {
   free(bc);
 }
 
+
+/* ===== test_coverage_misc (part): coverage-driven tests merged into test_fusion_tier.c ===== */
+#include <stdint.h>
+#include "../../core/include/snobol/array.h"
+#include "../../core/include/snobol/lexer.h"
+#include "../../core/include/snobol/search.h"
+#include "../../core/include/snobol/string_fn.h"
+#include "../../core/include/snobol/vm.h"
+#include "../../core/include/snobol/snobol.h"
+#include "../../core/include/snobol/snobol_internal.h"
+
+void test_cov_misc_fusion(void) {
+  test_suite("Coverage: fusion executor paths");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = NULL;
+
+  /* Concat chain with CHAR + LIT + NOTANY segments.  (SPLIT-led chains are
+   * not fusible: the builder advances past the SPLIT by 9 bytes into branch
+   * A.  See dev/coverage-findings.md.) */
+  const char *src = "ANY('a') 'x' NOTANY('0-9')";
+  snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, src, strlen(src), 0,
+                                                    &err);
+  test_assert(pat != NULL, "fusion pattern compiles");
+  if (pat) {
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+    test_assert(meta->fusion_eligible, "pattern is fusion-eligible");
+
+    snobol_match_t *m = snobol_pattern_search(pat, "xxaxq", 5);
+    test_assert(m && snobol_match_success(m), "fusion chain matches");
+    if (m) {
+      test_assert(snobol_match_get_position(m) == 2, "fusion match position");
+      test_assert(snobol_match_get_length(m) == 3, "fusion match length");
+      snobol_match_free(m);
+    }
+
+    /* Failure paths: ANY mismatch, NOTANY mismatch (digit). */
+    m = snobol_pattern_search(pat, "bxq", 3);
+    test_assert(m && !snobol_match_success(m), "ANY mismatch fails");
+    if (m)
+      snobol_match_free(m);
+    m = snobol_pattern_search(pat, "ax5", 3);
+    test_assert(m && !snobol_match_success(m), "NOTANY mismatch fails");
+    if (m)
+      snobol_match_free(m);
+    snobol_pattern_free(pat);
+  }
+  free(err);
+  err = NULL;
+
+  /* RUN + LIT chain. */
+  src = "ANY('a') SPAN('0-9') 'x'";
+  pat = snobol_pattern_compile_ex(ctx, src, strlen(src), 0, &err);
+  test_assert(pat != NULL, "run+lit fusion pattern compiles");
+  if (pat) {
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+    test_assert(meta->fusion_eligible, "run+lit chain fusible");
+    snobol_match_t *m = snobol_pattern_search(pat, "a34x", 4);
+    test_assert(m && snobol_match_success(m), "run+lit chain matches");
+    if (m)
+      snobol_match_free(m);
+    m = snobol_pattern_search(pat, "a!x", 3);
+    test_assert(m && !snobol_match_success(m), "SPAN min-1 fails");
+    if (m)
+      snobol_match_free(m);
+    snobol_pattern_free(pat);
+  }
+  free(err);
+
+  /* NOTANY correctness through the DFA automaton (regression for the
+   * double-inverted DFA transition). */
+  src = "'ab' NOTANY('0-9') BREAK('!')";
+  pat = snobol_pattern_compile_ex(ctx, src, strlen(src), 0, &err);
+  test_assert(pat != NULL, "notany dfa pattern compiles");
+  if (pat) {
+    snobol_match_t *m = snobol_pattern_search(pat, "abq!", 4);
+    test_assert(m && snobol_match_success(m), "NOTANY accepts non-digit");
+    if (m)
+      snobol_match_free(m);
+    m = snobol_pattern_search(pat, "ab3!", 4);
+    test_assert(m && !snobol_match_success(m), "NOTANY rejects digit");
+    if (m)
+      snobol_match_free(m);
+    snobol_pattern_free(pat);
+  }
+  free(err);
+
+  snobol_context_destroy(ctx);
+}
+
+
+
+/* ===== test_coverage_engine2 (part): coverage-driven tests merged into test_fusion_tier.c ===== */
+#include "../../core/include/snobol/ast.h"
+#include "../../core/include/snobol/compiler.h"
+
+void test_cov_engine2_fusion_entry(void) {
+  test_suite("Coverage: fusion tier entry guards");
+
+  VM vm;
+  memset(&vm, 0, sizeof(vm));
+  snobol_search_result_t res;
+  memset(&res, 0, sizeof(res));
+
+  /* NULL meta → controlled failure. */
+  test_assert(!tier_fusion(&vm, "x", 1, 0, NULL, NULL, &res, NULL, false),
+              "tier_fusion(NULL meta) fails");
+  test_assert(!res.success, "fusion failure result flagged");
+
+  /* NULL subject guard. */
+  snobol_search_meta_t meta;
+  memset(&meta, 0, sizeof(meta));
+  test_assert(!tier_fusion(&vm, NULL, 1, 0, &meta, NULL, &res, NULL, false),
+              "tier_fusion(NULL subject) fails");
+
+  /* Anchored execution of a real fusion pattern. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    const char *src = "ANY('a') 'x' NOTANY('0-9')";
+    snobol_pattern_t *pat =
+        snobol_pattern_compile_ex(ctx, src, strlen(src), 0, &err);
+    test_assert(pat != NULL, "fusion pattern compiles");
+    if (pat) {
+      const snobol_search_meta_t *m = snobol_pattern_get_meta(pat);
+      test_assert(m->fusion_eligible, "fusion-eligible");
+      vm.bc = (uint8_t *)snobol_pattern_get_bc(pat);
+      vm.bc_len = snobol_pattern_get_bc_len(pat);
+      size_t rmc = 0;
+      vm.range_meta = (snobol_range_meta_t *)snobol_pattern_get_range_meta(
+          pat, &rmc);
+      vm.range_meta_count = rmc;
+      bool ok = tier_fusion(&vm, "axq", 3, 0, m, NULL, &res, NULL, true);
+      test_assert(ok && res.match_end == 3, "anchored fusion match");
+      ok = tier_fusion(&vm, "ax5", 3, 0, m, NULL, &res, NULL, true);
+      test_assert(!ok, "anchored fusion mismatch");
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+}
+
+/* ── SPLIT→ANY fusion pass ────────────────────────────────────────────────── */
+
+
+
+void test_cov_engine2_fusion_pass(void) {
+  test_suite("Coverage: SPLIT->ANY fusion pass shapes");
+
+  /* Single-char alternations fuse to OP_ANY; longer arms do not. */
+  const char *pats[] = {"'a' | 'b'", "'a' | 'b' | 'c'", "'ab' | 'cd'",
+                        "'a' | 'bc'", "'a' | NOTANY('x')"};
+  for (size_t i = 0; i < sizeof(pats) / sizeof(pats[0]); i++) {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    snobol_pattern_t *p =
+        snobol_pattern_compile_ex(ctx, pats[i], strlen(pats[i]), 0, &err);
+    test_assert(p != NULL, "alt pattern compiles");
+    if (p) {
+      /* Single-char alts route to the bitmap tier; anything else falls to
+       * the VM.  Both must still match correctly. */
+      snobol_match_t *m = snobol_pattern_search(p, "ab", 2);
+      test_assert(m && m->success, "alternation matches");
+      if (m)
+        snobol_match_free(m);
+      snobol_pattern_free(p);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+
+  /* Case-insensitive single-char alternation. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    const char *src = "'a' | 'b'";
+    snobol_pattern_t *p = snobol_pattern_compile_ex(
+        ctx, src, strlen(src), SNOBOL_FLAG_CASE_INSENSITIVE, &err);
+    test_assert(p != NULL, "ci alt compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_search(p, "B", 1);
+      test_assert(m && m->success, "ci alternation matches");
+      if (m)
+        snobol_match_free(m);
+      snobol_pattern_free(p);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+}
+
+/* ── derive_meta malformed-bytecode leftovers ─────────────────────────────── */
+
+
 void test_fusion_tier_suite(void) {
   test_fusion_tier_assignment();
   test_fusion_tier_non_fusible();
@@ -372,4 +567,7 @@ void test_fusion_tier_suite(void) {
   test_fusion_unanchored_search();
   test_fusion_various_patterns();
   test_fusion_alternation();
+  test_cov_misc_fusion();
+  test_cov_engine2_fusion_entry();
+  test_cov_engine2_fusion_pass();
 }

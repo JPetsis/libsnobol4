@@ -222,6 +222,83 @@ static void test_lexer_single_quotes(void) {
   snobol_lexer_destroy(lexer);
 }
 
+
+/* ===== test_coverage_misc (part): coverage-driven tests merged into test_lexer.c ===== */
+#include <stdint.h>
+#include "../../core/include/snobol/array.h"
+#include "../../core/include/snobol/lexer.h"
+#include "../../core/include/snobol/search.h"
+#include "../../core/include/snobol/string_fn.h"
+#include "../../core/include/snobol/vm.h"
+#include "../../core/include/snobol/snobol.h"
+#include "../../core/include/snobol/snobol_internal.h"
+
+void test_cov_misc_lexer(void) {
+  test_suite("Coverage: lexer NULL guards + tokens");
+
+  test_assert(snobol_lexer_create(NULL, 0) == NULL, "lexer_create(NULL)");
+  test_assert(snobol_lexer_next(NULL).type == TOKEN_EOF, "next(NULL)");
+  test_assert(snobol_lexer_peek(NULL).type == TOKEN_EOF, "peek(NULL)");
+  test_assert(snobol_lexer_get_pos(NULL) == 0, "get_pos(NULL)");
+  test_assert(snobol_lexer_get_line(NULL) == 1, "get_line(NULL)");
+  snobol_lexer_state_t st = snobol_lexer_save(NULL);
+  test_assert(st.pos == 0, "save(NULL) zero state");
+  snobol_lexer_restore(NULL, st);
+  snobol_lexer_destroy(NULL);
+  test_assert(true, "lexer NULL guards");
+
+  /* Token names for every single-char operator. */
+  test_assert(strcmp(snobol_token_name(TOKEN_STAR), "STAR") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_PLUS), "PLUS") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_QUESTION), "QUESTION") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_ANCHOR_START),
+                         "ANCHOR_START") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_ANCHOR_END), "ANCHOR_END") ==
+                      0 &&
+                  strcmp(snobol_token_name(TOKEN_AT), "AT") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_COLON), "COLON") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_LBRACKET), "LBRACKET") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_RBRACKET), "RBRACKET") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_EQUALS), "EQUALS") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_COMMA), "COMMA") == 0 &&
+                  strcmp(snobol_token_name(TOKEN_EOF), "EOF") == 0 &&
+                  strcmp(snobol_token_name((token_type_t)99), "UNKNOWN") == 0,
+              "operator token names resolve");
+
+  /* Unterminated charclass still yields a CHARCLASS token. */
+  {
+    snobol_lexer_t *l = snobol_lexer_create("[abc", 4);
+    token_t t = snobol_lexer_next(l);
+    test_assert(t.type == TOKEN_CHARCLASS, "unterminated charclass token");
+    snobol_lexer_destroy(l);
+  }
+
+  /* Single-char operator tokens. */
+  {
+    snobol_lexer_t *l = snobol_lexer_create("^$@:*+?", 7);
+    token_t t = snobol_lexer_next(l);
+    test_assert(t.type == TOKEN_ANCHOR_START, "^ token");
+    t = snobol_lexer_next(l);
+    test_assert(t.type == TOKEN_ANCHOR_END, "$ token");
+    t = snobol_lexer_next(l);
+    test_assert(t.type == TOKEN_AT, "@ token");
+    t = snobol_lexer_next(l);
+    test_assert(t.type == TOKEN_COLON, ": token");
+    t = snobol_lexer_next(l);
+    test_assert(t.type == TOKEN_STAR, "* token");
+    t = snobol_lexer_next(l);
+    test_assert(t.type == TOKEN_PLUS, "+ token");
+    t = snobol_lexer_next(l);
+    test_assert(t.type == TOKEN_QUESTION, "? token");
+    t = snobol_lexer_next(l);
+    test_assert(t.type == TOKEN_EOF, "EOF reached");
+    snobol_lexer_destroy(l);
+  }
+}
+
+/* ── array edge cases ─────────────────────────────────────────────────────── */
+
+
 void test_lexer_suite(void) {
   test_lexer_create_destroy();
   test_lexer_create_null_source();
@@ -235,4 +312,5 @@ void test_lexer_suite(void) {
   test_lexer_peek();
   test_lexer_position_tracking();
   test_lexer_single_quotes();
+  test_cov_misc_lexer();
 }

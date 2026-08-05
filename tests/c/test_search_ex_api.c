@@ -19,6 +19,76 @@
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
 
+
+/* ===== test_coverage_engine2 (part): coverage-driven tests merged into test_search_ex_api.c ===== */
+#include <stdio.h>
+#include "../../core/include/snobol/ast.h"
+#include "../../core/include/snobol/compiler.h"
+#include "../../core/include/snobol/search.h"
+#include "../../core/include/snobol/vm.h"
+#include "../../core/include/snobol/snobol.h"
+#include "../../core/include/snobol/snobol_internal.h"
+
+void test_cov_engine2_state_api(void) {
+  test_suite("Coverage: state API capture cleanup + anchored output");
+
+  /* Capture pattern searched twice: second call frees prior var_values. */
+  {
+    ast_node_t *ast = snobol_ast_create_cap(1, snobol_ast_create_lit("ab", 2));
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    compile_ast_to_bytecode_c(ast, false, &bc, &bc_len);
+    snobol_ast_free(ast);
+    snobol_pattern_search_state_t *st =
+        snobol_pattern_search_state_create(bc, bc_len);
+    test_assert(st != NULL, "state created");
+    snobol_match_t *m = snobol_pattern_search_ex(st, "xxab", 4, 2);
+    test_assert(m && m->success, "capture search from offset");
+    if (m) {
+      const char *cap = snobol_match_get_variable(m, "1", NULL);
+      test_assert(cap && strcmp(cap, "ab") == 0,
+                  "capture materialized at window offset");
+    }
+    /* Second call over a non-matching subject frees the capture strings. */
+    m = snobol_pattern_search_ex(st, "zz", 2, 0);
+    test_assert(m && !m->success, "second call no-match");
+    snobol_pattern_search_state_destroy(st);
+    free(bc);
+  }
+
+  /* Anchored state search with EVAL output + capture. */
+  {
+    ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+    parts[0] = snobol_ast_create_cap(1, snobol_ast_create_lit("x ", 2));
+    parts[1] = snobol_ast_create_eval(SNOBOL_FN_TRIM, 1);
+    ast_node_t *ast = snobol_ast_create_concat(parts, 2);
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    compile_ast_to_bytecode_c(ast, false, &bc, &bc_len);
+    snobol_ast_free(ast);
+    snobol_pattern_search_state_t *st =
+        snobol_pattern_search_state_create(bc, bc_len);
+    test_assert(st != NULL, "anchored state created");
+    snobol_match_t *m = snobol_pattern_search_ex_anchored(st, "x ", 2);
+    test_assert(m && m->success, "anchored EVAL match");
+    if (m) {
+      size_t olen = 0;
+      const char *out = snobol_match_get_output(m, &olen);
+      test_assert(olen == 1 && out && out[0] == 'x',
+                  "anchored EVAL output copied");
+      const char *cap = snobol_match_get_variable(m, "1", NULL);
+      test_assert(cap && cap[0] == 'x', "anchored capture copied");
+    }
+    m = snobol_pattern_search_ex_anchored(st, "ab", 2);
+    test_assert(m && !m->success, "anchored second call mismatch");
+    snobol_pattern_search_state_destroy(st);
+    free(bc);
+  }
+}
+
+/* ── fusion tier entry guards + anchored ──────────────────────────────────── */
+
+
 void test_search_ex_api_suite(void) {
   test_suite("Search: stateful _ex API");
 
@@ -172,4 +242,5 @@ void test_search_ex_api_suite(void) {
     if (s)
       snobol_pattern_search_state_destroy(s);
   }
+  test_cov_engine2_state_api();
 }

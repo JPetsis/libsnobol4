@@ -1253,6 +1253,80 @@ static void test_simd_nfa_cache(void) {
   snobol_context_destroy(ctx);
 }
 
+
+/* ===== test_coverage_simd: coverage-driven tests merged into test_search_simd.c ===== */
+#include <stdint.h>
+
+extern void test_suite(const char *name);
+extern void test_assert(bool condition, const char *message);
+
+static bool covs_search(const char *pat_src, const char *subject,
+                       size_t *out_pos, size_t *out_len) {
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = NULL;
+  snobol_pattern_t *pat =
+      snobol_pattern_compile_ex(ctx, pat_src, strlen(pat_src), 0, &err);
+  bool ok = false;
+  if (pat) {
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+    test_assert(meta->simd_eligible, "pattern is SIMD-eligible");
+    snobol_match_t *m = snobol_pattern_search(pat, subject, strlen(subject));
+    ok = m && m->success;
+    if (m) {
+      if (out_pos)
+        *out_pos = m->position;
+      if (out_len)
+        *out_len = m->length;
+      snobol_match_free(m);
+    }
+    snobol_pattern_free(pat);
+  } else {
+    free(err);
+  }
+  snobol_context_destroy(ctx);
+  return ok;
+}
+
+void test_cov_simd_patterns(void) {
+  test_suite("Coverage: SIMD NFA pattern shapes");
+
+  size_t pos = 0, len = 0;
+
+  /* SPAN: long run inside a >16-byte subject (vector scan path). */
+  test_assert(covs_search("SPAN('a')", "bbbbbbbbbbbbbbbbaaaaaaaaaaaaaaaaaaaa", &pos, &len),
+              "SPAN long run matches");
+  test_assert(pos == 16 && len == 20, "SPAN run position/length");
+
+  /* SPAN with a run crossing a vector boundary. */
+  test_assert(covs_search("SPAN('a')", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab", &pos, &len),
+              "SPAN run crossing vector boundary");
+  test_assert(len == 31, "SPAN boundary run length");
+
+  /* BREAK: delimiter inside a long subject. */
+  test_assert(covs_search("BREAK(',')", "aaaaaaaaaaaaaaa,bbbbbbbbbbbbbbbb", &pos, &len),
+              "BREAK delimiter found");
+  test_assert(pos == 0 && len == 15, "BREAK stops before delimiter");
+
+  /* ANY / NOTANY single char. */
+  test_assert(covs_search("ANY('a')", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbab", &pos, &len),
+              "ANY single char found");
+  test_assert(pos == 30 && len == 1, "ANY position");
+  test_assert(!covs_search("NOTANY('a')", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", NULL, NULL),
+              "NOTANY rejects class-only subject");
+  test_assert(covs_search("NOTANY('a')", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", &pos, &len),
+              "NOTANY matches non-class byte");
+  test_assert(pos == 0 && len == 1, "NOTANY first byte");
+
+  /* Failure subjects drive the candidate-skip loop. */
+  test_assert(!covs_search("SPAN('a')", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", NULL, NULL),
+              "SPAN no-match subject");
+  test_assert(covs_search("BREAK(',')", "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq", &pos, &len),
+              "BREAK consumes delimiter-less subject");
+  test_assert(len == 31, "BREAK full-length match");
+  test_assert(!covs_search("ANY('a')", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", NULL, NULL),
+              "ANY no-match subject");
+}
+
 void test_search_simd_suite(void) {
   test_simd_eligibility();
   test_simd_tier_routing();
@@ -1267,4 +1341,5 @@ void test_search_simd_suite(void) {
   test_simd_nfa_linearity();
   test_star_span_greedy();
   test_simd_nfa_cache();
+  test_cov_simd_patterns();
 }
