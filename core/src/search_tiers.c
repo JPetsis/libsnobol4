@@ -2332,10 +2332,12 @@ snobol_dfa_t *build_dfa(const uint8_t *bc, size_t bc_len, const VM *dfa_vm) {
             uint64_t bs[4];
             if (!get_op_bytes(bc, bc_len, off, dfa_vm, bs))
               break;
-            bool in_class = (b < 64)    ? (bs[0] & (1ULL << b)) == 0
-                            : (b < 128) ? (bs[1] & (1ULL << (b - 64))) == 0
-                            : (b < 192) ? (bs[2] & (1ULL << (b - 128))) == 0
-                                        : (bs[3] & (1ULL << (b - 192))) == 0;
+            /* get_op_bytes for NOTANY already returns the class complement,
+             * so a byte transitions when its bit IS set in bs[]. */
+            bool in_class = (b < 64)    ? (bs[0] & (1ULL << b)) != 0
+                            : (b < 128) ? (bs[1] & (1ULL << (b - 64))) != 0
+                            : (b < 192) ? (bs[2] & (1ULL << (b - 128))) != 0
+                                        : (bs[3] & (1ULL << (b - 192))) != 0;
             if (!in_class)
               break;
             ec_merge(eps_closures, (uint16_t)(off + 3), &next_set);

@@ -497,9 +497,12 @@ static bool simd_nfa_exec_avx2(const simd_nfa_t *nfa, const char *subject,
         __m256i mask = _mm256_cmpeq_epi8(hi, _mm256_set1_epi8((char)g));
         result = _mm256_blendv_epi8(result, tbl, mask);
       }
-      /* For BREAK, we want the first 1 (delimiter byte) */
-      int delim_mask =
+      /* For BREAK, the table marks non-delimiter bytes as 1 — we want the
+       * first 0 (delimiter byte).  Invert the movemask and find its lowest
+       * set bit. */
+      int non_delim =
           _mm256_movemask_epi8(_mm256_cmpeq_epi8(result, _mm256_set1_epi8(1)));
+      int delim_mask = (~non_delim) & 0xFFFFFFFF;
       if (delim_mask) {
         unsigned first = (unsigned)__builtin_ctz(delim_mask);
         i += first;
@@ -525,7 +528,11 @@ found_span_match: {
 }
 
 found_break_match: {
-  /* BREAK matched up to position i (first delimiter byte) */
+  /* BREAK matched up to position i (first delimiter byte).
+   * When the match is empty (i == start) this is a valid zero-length match
+   * at a delimiter.  When the block had no delimiter the vector loop would
+   * not reach here — the j-loop below only fires when the table reported a
+   * delimiter. */
   out_result->success = true;
   out_result->match_start = start;
   out_result->match_end = i;
@@ -603,13 +610,15 @@ static bool simd_nfa_exec_neon(const simd_nfa_t *nfa, const char *subject,
         uint8x16_t mask = vceqq_u8(hi, vdupq_n_u8((uint8_t)g));
         result = vbslq_u8(mask, tbl_res, result);
       }
-      /* Find first byte where result != 0 (delimiter) */
-      uint8_t max_val = vmaxvq_u8(result);
-      if (max_val != 0) {
+      /* The table marks non-delimiter bytes as 1 — find the first byte where
+       * the table is 0 (the delimiter).  A block of only non-delimiters
+       * yields min_val == 1 and falls through to the scalar tail. */
+      uint8_t min_val = vminvq_u8(result);
+      if (min_val == 0) {
         for (int j = 0; j < 16; j++) {
           uint8_t d = ((const uint8_t *)subject)[i + j];
           unsigned ww = (unsigned)d >> 6;
-          if ((bmap[ww] >> ((unsigned)d & 63u)) & 1ull) {
+          if (!((bmap[ww] >> ((unsigned)d & 63u)) & 1ull)) {
             i += j;
             goto found_break_match;
           }
