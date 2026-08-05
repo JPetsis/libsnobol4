@@ -6,8 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 #include "../../core/include/snobol/snobol_internal.h"
 
