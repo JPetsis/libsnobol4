@@ -425,13 +425,17 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
   if (n > API_MAX_VARS)
     n = API_MAX_VARS;
   m->var_count = n;
-  const char *win_subject = subject + sr.match_start;
-  size_t win_len =
-      (sr.match_start <= len) ? len - sr.match_start : 0;
-  for (int i = 0; i < n; i++) {
-    size_t vs = vm.var_start[i];
-    size_t ve = vm.var_end[i];
-    match_store_capture(m, win_subject, i, vs, ve, win_len);
+  /* Only touch sr.match_start when the search succeeded (it is unset on
+   * failure); a failed match carries no captures anyway. */
+  if (ok && n > 0) {
+    const char *win_subject = subject + sr.match_start;
+    size_t win_len =
+        (sr.match_start <= len) ? len - sr.match_start : 0;
+    for (int i = 0; i < n; i++) {
+      size_t vs = vm.var_start[i];
+      size_t ve = vm.var_end[i];
+      match_store_capture(m, win_subject, i, vs, ve, win_len);
+    }
   }
 
   snobol_buf_free(&out_buf);
@@ -511,8 +515,10 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
   snobol_search_result_t sr;
   bool ok = snobol_search_exec(&vm, subject, len, 0, &meta, dfa, &sr, NULL);
   m->success = ok;
-  m->position = sr.match_start;
-  m->length = sr.match_end - sr.match_start;
+  if (ok) {
+    m->position = sr.match_start;
+    m->length = sr.match_end - sr.match_start;
+  }
 
   if (ok && out_buf.len > 0) {
     m->output = (char *)snobol_malloc(out_buf.len + 1);
@@ -529,13 +535,16 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
   m->var_count = n;
   /* Capture offsets are relative to the match window; anchor var_subject
    * to the window base (subject + match position) so captures materialize
-   * the correct absolute bytes for matches away from offset 0. */
-  const char *win_subject = subject + sr.match_start;
-  size_t win_len = (sr.match_start <= len) ? len - sr.match_start : 0;
-  for (int i = 0; i < n; i++) {
-    size_t vs = vm.var_start[i];
-    size_t ve = vm.var_end[i];
-    match_store_capture(m, win_subject, i, vs, ve, win_len);
+   * the correct absolute bytes for matches away from offset 0.  Only touch
+   * sr.match_start when the search succeeded (it is unset on failure). */
+  if (ok && n > 0) {
+    const char *win_subject = subject + sr.match_start;
+    size_t win_len = (sr.match_start <= len) ? len - sr.match_start : 0;
+    for (int i = 0; i < n; i++) {
+      size_t vs = vm.var_start[i];
+      size_t ve = vm.var_end[i];
+      match_store_capture(m, win_subject, i, vs, ve, win_len);
+    }
   }
 
   snobol_buf_free(&out_buf);
@@ -611,8 +620,10 @@ bool snobol_pattern_search_reuse(snobol_pattern_t *pattern, const char *subject,
   snobol_search_result_t sr;
   bool ok = snobol_search_exec(&vm, subject, len, 0, meta, dfa, &sr, NULL);
   match_out->success = ok;
-  match_out->position = sr.match_start;
-  match_out->length = sr.match_end - sr.match_start;
+  if (ok) {
+    match_out->position = sr.match_start;
+    match_out->length = sr.match_end - sr.match_start;
+  }
 
   if (ok && out_buf.len > 0) {
     match_out->output = (char *)snobol_malloc(out_buf.len + 1);
@@ -629,13 +640,16 @@ bool snobol_pattern_search_reuse(snobol_pattern_t *pattern, const char *subject,
   match_out->var_count = n;
   /* Capture offsets are relative to the match window; anchor var_subject
    * to the window base (subject + match position) so captures materialize
-   * the correct absolute bytes for matches away from offset 0. */
-  const char *win_subject = subject + sr.match_start;
-  size_t win_len = (sr.match_start <= len) ? len - sr.match_start : 0;
-  for (int i = 0; i < n; i++) {
-    size_t vs = vm.var_start[i];
-    size_t ve = vm.var_end[i];
-    match_store_capture(match_out, win_subject, i, vs, ve, win_len);
+   * the correct absolute bytes for matches away from offset 0.  Only touch
+   * sr.match_start when the search succeeded (it is unset on failure). */
+  if (ok && n > 0) {
+    const char *win_subject = subject + sr.match_start;
+    size_t win_len = (sr.match_start <= len) ? len - sr.match_start : 0;
+    for (int i = 0; i < n; i++) {
+      size_t vs = vm.var_start[i];
+      size_t ve = vm.var_end[i];
+      match_store_capture(match_out, win_subject, i, vs, ve, win_len);
+    }
   }
 
   snobol_buf_free(&out_buf);
@@ -836,9 +850,12 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
                                &state->meta, dfa, &sr, NULL);
   state->match.success = ok;
   /* sr.match_start is already an absolute position in the subject
-   * (not relative to start_offset). Do NOT add start_offset again. */
-  state->match.position = sr.match_start;
-  state->match.length = sr.match_end - sr.match_start;
+   * (not relative to start_offset). Do NOT add start_offset again.
+   * Only read it when the search succeeded (unset on failure). */
+  if (ok) {
+    state->match.position = sr.match_start;
+    state->match.length = sr.match_end - sr.match_start;
+  }
 
   if (ok && state->out_buf.len > 0) {
     state->match.output = (char *)snobol_malloc(state->out_buf.len + 1);
@@ -858,13 +875,15 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
    * candidates before the match may have failed.  Anchor var_subject to
    * the match position and bound against the remaining window length so
    * materialization reads the correct absolute span on every call. */
-  const char *win_subject = subject + sr.match_start;
-  size_t win_len =
-      (sr.match_start <= subject_len) ? subject_len - sr.match_start : 0;
-  for (int i = 0; i < n; i++) {
-    size_t vs = state->vm.var_start[i];
-    size_t ve = state->vm.var_end[i];
-    match_store_capture(&state->match, win_subject, i, vs, ve, win_len);
+  if (ok && n > 0) {
+    const char *win_subject = subject + sr.match_start;
+    size_t win_len =
+        (sr.match_start <= subject_len) ? subject_len - sr.match_start : 0;
+    for (int i = 0; i < n; i++) {
+      size_t vs = state->vm.var_start[i];
+      size_t ve = state->vm.var_end[i];
+      match_store_capture(&state->match, win_subject, i, vs, ve, win_len);
+    }
   }
 
   return &state->match;
@@ -948,8 +967,10 @@ snobol_match_t *snobol_pattern_search_ex_anchored(
   bool ok = snobol_search_exec_anchored(&state->vm, subject, subject_len,
                                         &state->meta, dfa, &sr, NULL);
   state->match.success = ok;
-  state->match.position = sr.match_start;
-  state->match.length = sr.match_end - sr.match_start;
+  if (ok) {
+    state->match.position = sr.match_start;
+    state->match.length = sr.match_end - sr.match_start;
+  }
 
   if (ok && state->out_buf.len > 0) {
     state->match.output = (char *)snobol_malloc(state->out_buf.len + 1);

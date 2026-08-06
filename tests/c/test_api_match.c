@@ -298,7 +298,9 @@ void test_cov_api_search_output_captures(void) {
   /* Unanchored captures are window-relative in the VM but must materialize
    * subject-absolute bytes: subject "aax " with a capture of "x " at
    * offset 2 must yield "x " (offsets shifted by the match position). */
-  pat = cova_compile_pattern(cova_cap_eval(SNOBOL_FN_TRIM, "x ", 2));
+  ast = cova_cap_eval(SNOBOL_FN_TRIM, "x ", 2);
+  pat = cova_compile_pattern(ast);
+  snobol_ast_free(ast);
   test_assert(pat != NULL, "probe pattern compiles");
   if (pat) {
     snobol_match_t *mp = snobol_pattern_search(pat, "aax ", 4);
