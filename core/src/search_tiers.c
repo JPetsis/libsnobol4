@@ -3358,6 +3358,54 @@ bool tier_general_fallback(VM *vm, const char *subject, size_t subject_len,
   return false;
 }
 
+/* Anchored automaton pass: walk the DFA once from `offset` with no
+ * DEAD-restart and no BMH shift.  Success only when the accepting run
+ * begins exactly at the anchor.  Mirrors search_automaton_exec minus the
+ * per-position restart loop. */
+static bool search_automaton_exec_anchored(const snobol_dfa_t *dfa,
+                                           const char *subject,
+                                           size_t subject_len, size_t offset,
+                                           snobol_search_result_t *out_result) {
+  if (!dfa || dfa->num_states == 0) {
+    out_result->success = false;
+    return false;
+  }
+
+  const uint16_t *trans = dfa->trans;
+  uint16_t start_state = dfa->start_state;
+  const uint8_t *accepting = dfa->accepting;
+
+  /* Zero-length match at the anchor: the start state itself is accepting. */
+  if (accepting[start_state / 8] & (uint8_t)(1u << (start_state % 8))) {
+    out_result->success = true;
+    out_result->match_start = offset;
+    out_result->match_end = offset;
+    return true;
+  }
+
+  uint16_t state = start_state;
+  size_t pos = offset;
+  while (pos < subject_len) {
+    uint8_t byte = (uint8_t)subject[pos];
+    uint16_t next = trans[(size_t)state * 256 + byte];
+    if (next == SNOBOL_DFA_DEAD) {
+      out_result->success = false;
+      return false;
+    }
+    state = next;
+    pos++;
+    if (accepting[state / 8] & (uint8_t)(1u << (state % 8))) {
+      out_result->success = true;
+      out_result->match_start = offset;
+      out_result->match_end = pos;
+      return true;
+    }
+  }
+
+  out_result->success = false;
+  return false;
+}
+
 /* Tier 7: Automaton path for eligible patterns */
 static bool tier_automaton(VM *vm, const char *subject, size_t subject_len,
                            size_t start_offset,
@@ -3481,10 +3529,32 @@ static bool SNOBOL_HOT dispatch_search_impl(
   /* P5 note: has_bmh_skip is now also set for bushy alternation-of-literals
     * (shared prefix).  Those must stay on the trie path (TIER_ALT_LIT), so the
     * automaton reroute excludes all alt-literals; only flat alternations
-    * (which have no shared prefix and thus no BMH skip) can reach the DFA. */
+    * (which have no shared prefix and thus no BMH skip) can reach the DFA.
+    * Anchored calls skip the override: search_automaton_exec is an unanchored
+    * restart scanner by design, so anchored matching takes the single-pass
+    * automaton walk below instead. */
   if (dfa && meta->automaton_eligible && !meta->is_alt_literals &&
-      meta->has_bmh_skip) {
+      meta->has_bmh_skip && !anchored) {
     dispatch_tier = TIER_AUTOMATON;
+  }
+
+  /* Anchored automaton pass: the DFA is a linear walk, so an anchored call
+   * can still use it as a single pass from the anchor — no DEAD-restart, no
+   * BMH shift, success only when the accepting run begins at start_offset.
+   * On failure (e.g. the DFA cannot express the pattern, as with captures)
+   * fall through to the tier dispatch below, which bounds its attempt to
+   * start_offset when anchored — mirroring tier_automaton's fallback. */
+  if (anchored && dfa && meta->automaton_eligible && !meta->is_alt_literals &&
+      meta->has_bmh_skip) {
+    bool anchored_ok =
+        search_automaton_exec_anchored(dfa, subject, subject_len, start_offset,
+                                       out_result);
+    if (anchored_ok) {
+      if (meta_derived_inline)
+        snobol_search_meta_free(&local_meta);
+      return true;
+    }
+    out_result->success = false;
   }
 
   /* Tier 9 (SIMD NFA) is now selected by select_tier_by_cost for every

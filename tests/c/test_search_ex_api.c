@@ -89,6 +89,53 @@ void test_cov_engine2_state_api(void) {
 /* ── fusion tier entry guards + anchored ──────────────────────────────────── */
 
 
+/* Anchored automaton regression: an anchored search of an automaton-eligible
+ * pattern must never return a match that starts away from the anchor.  The
+ * DFA override used to ignore the anchored flag, so 'ab' SPAN('0-9') matched
+ * "xab12" at offset 1 through snobol_pattern_search_ex_anchored. */
+void test_cov_anchored_automaton(void) {
+  test_suite("Coverage: anchored automaton respects the anchor");
+
+  ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+  parts[0] = snobol_ast_create_lit("ab", 2);
+  parts[1] = snobol_ast_create_span("0-9", 3);
+  ast_node_t *ast = snobol_ast_create_concat(parts, 2);
+  uint8_t *bc = NULL;
+  size_t bc_len = 0;
+  compile_ast_to_bytecode_c(ast, false, &bc, &bc_len);
+  snobol_ast_free(ast);
+  test_assert(bc && bc_len > 0, "automaton pattern compiles");
+
+  snobol_pattern_search_state_t *st =
+      snobol_pattern_search_state_create(bc, bc_len);
+  test_assert(st != NULL, "automaton state created");
+  if (st) {
+    /* Match exists but starts at offset 1: anchored must FAIL. */
+    snobol_match_t *m = snobol_pattern_search_ex_anchored(st, "xab12", 5);
+    test_assert(m && !m->success, "anchored automaton fails off-anchor");
+
+    /* Match starts exactly at 0: anchored must SUCCEED.  (The DFA reports
+     * the shortest accepting run, so SPAN('0-9') accepts right after "ab";
+     * the anchored contract here is the match START, not greedy length.) */
+    m = snobol_pattern_search_ex_anchored(st, "ab123", 5);
+    test_assert(m && m->success, "anchored automaton succeeds at anchor");
+    if (m) {
+      test_assert(snobol_match_get_position(m) == 0,
+                  "anchored automaton position is 0");
+    }
+
+    /* Unanchored control: the same subject matches at offset 1. */
+    m = snobol_pattern_search_ex(st, "xab12", 5, 0);
+    test_assert(m && m->success, "unanchored automaton still matches");
+    if (m)
+      test_assert(snobol_match_get_position(m) == 1,
+                  "unanchored automaton position is 1");
+
+    snobol_pattern_search_state_destroy(st);
+  }
+  free(bc);
+}
+
 void test_search_ex_api_suite(void) {
   test_suite("Search: stateful _ex API");
 
@@ -243,4 +290,5 @@ void test_search_ex_api_suite(void) {
       snobol_pattern_search_state_destroy(s);
   }
   test_cov_engine2_state_api();
+  test_cov_anchored_automaton();
 }
