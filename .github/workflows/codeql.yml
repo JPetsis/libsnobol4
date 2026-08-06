@@ -6,6 +6,8 @@ on:
     paths:
       - 'core/**'
       - 'tests/c/**'
+      - 'bindings/php/src/**'
+      - 'bindings/php/config.m4'
       - 'CMakeLists.txt'
       - '.github/workflows/codeql.yml'
   pull_request:
@@ -13,6 +15,8 @@ on:
     paths:
       - 'core/**'
       - 'tests/c/**'
+      - 'bindings/php/src/**'
+      - 'bindings/php/config.m4'
       - 'CMakeLists.txt'
       - '.github/workflows/codeql.yml'
   schedule:
@@ -41,12 +45,42 @@ jobs:
             paths:
               - core
               - tests/c
+              # The PHP binding is implemented in C (bindings/php/src/*.c)
+              # and built with phpize; the amalgam #includes core sources,
+              # which the path filter above keeps out of the report.
+              - bindings/php/src
 
       - name: Configure with CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DBUILD_BENCH_C=OFF
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          tools: composer
+          coverage: none
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf
+          sudo rm -f /etc/apt/sources.list.d/ondrej-php* /etc/apt/sources.list.d/*ondrej*
+          sudo add-apt-repository --no-update -y ppa:ondrej/php
+          sudo apt-get update
+          sudo apt-get install -y php8.5-dev
+
+      - name: Generate core version header
+        run: ./dev/generate_version_header.sh
+
+      - name: Build PHP extension (compiled with the CodeQL extractor)
+        working-directory: bindings/php
+        run: |
+          phpize
+          ./configure --enable-snobol=shared
+          make -j"$(nproc)"
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
