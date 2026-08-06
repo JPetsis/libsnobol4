@@ -335,6 +335,35 @@ void test_cov_api_search_output_captures(void) {
 }
 
 
+/* Pike fast path must write back the named-variable registers: an unanchored
+ * search of @r1('ab') 'c' on "abc" has no REPEAT and no EVAL, so pike_scan
+ * handles it — the ACCEPT writeback must propagate var_start/var_end/var_count
+ * so the caller sees the capture (regression for the dropped-registers bug). */
+void test_cov_api_search_capture_pike(void) {
+  test_suite("Coverage: search() pike capture writeback");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = NULL;
+  snobol_pattern_t *pat =
+      snobol_pattern_compile(ctx, "@r1('ab') 'c'", 13, &err);
+  test_assert(pat != NULL, "pike capture pattern compiles");
+  if (pat) {
+    snobol_match_t *m = snobol_pattern_search(pat, "abc", 3);
+    test_assert(m && snobol_match_success(m), "pike capture search succeeds");
+    if (m) {
+      size_t clen = 0;
+      const char *cap = snobol_match_get_variable(m, "1", &clen);
+      test_assert(cap && clen == 2 && memcmp(cap, "ab", 2) == 0,
+                  "pike search materializes capture");
+      snobol_match_free(m);
+    }
+    snobol_pattern_free(pat);
+  }
+  free(err);
+  snobol_context_destroy(ctx);
+}
+
+
 void test_cov_api_search_reuse(void) {
   test_suite("Coverage: search_reuse output/capture");
 
@@ -999,6 +1028,7 @@ void test_api_match_suite(void) {
   test_cov_api_match_output_captures();
   test_cov_api_search_prefilter();
   test_cov_api_search_output_captures();
+  test_cov_api_search_capture_pike();
   test_cov_api_search_reuse();
   test_cov_api_search_state();
   test_cov_api_batch();

@@ -2970,11 +2970,16 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
           m_start = th.match_start;
           m_end = tp;
           /* Write captures back to the VM so unanchored capture search stays
-           * consistent with the full VM (mirrors search_vm_writeback_to_vm). */
+           * consistent with the full VM (mirrors search_vm_writeback_to_vm).
+           * The named-variable registers are included: CAP_END/ASSIGN populate
+           * the thread's var registers, and they must reach the caller. */
           if (vm) {
             memcpy(vm->cap_start, th.cap_start, sizeof(th.cap_start));
             memcpy(vm->cap_end, th.cap_end, sizeof(th.cap_end));
             vm->max_cap_used = th.max_cap_used;
+            memcpy(vm->var_start, th.var_start, sizeof(th.var_start));
+            memcpy(vm->var_end, th.var_end, sizeof(th.var_end));
+            vm->var_count = th.var_count;
           }
         }
         goto pike_die;
