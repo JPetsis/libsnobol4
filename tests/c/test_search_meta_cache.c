@@ -1051,6 +1051,80 @@ void test_cov_engine2_derive(void) {
 }
 
 
+/* Malformed/cyclic bytecode: derive_meta must terminate and stay in bounds
+ * (regression for the JMP-cycle hang and the truncated-prefix OOB read). */
+void test_cov_meta_malformed_bytecode(void) {
+  test_suite("Coverage: derive_meta on malformed bytecode");
+
+  /* Cyclic JMP: JMP(0) self-loop used to hang compute_minlength.  The test
+   * completing at all proves termination; minlength must be 0 (conservative
+   * cycle-guard bail) and no literal prefix may be claimed. */
+  {
+    uint8_t bc[8] = {OP_JMP, 0, 0, 0, 0};
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(bc, 5, &meta);
+    test_assert(meta.minlength == 0 && !meta.has_literal_prefix,
+                "JMP self-loop terminates, minlength conservative");
+    snobol_search_meta_free(&meta);
+  }
+
+  /* LIT then JMP back to the LIT: minlength must not spin. */
+  {
+    uint8_t bc[32];
+    size_t ip = 0;
+    bc[ip++] = OP_LIT;
+    covm_emit_u32_be(bc, &ip, (uint32_t)(ip + 8));
+    covm_emit_u32_be(bc, &ip, 1);
+    bc[ip++] = 'a';
+    bc[ip++] = OP_JMP;
+    covm_emit_u32_be(bc, &ip, 0);
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(bc, ip, &meta);
+    test_assert(meta.literal_prefix_len == 1,
+                "LIT JMP(self) terminates, prefix still classified");
+    snobol_search_meta_free(&meta);
+  }
+
+  /* Truncated prefix opcode: {POS, 0} with bc_len 2 must not read OOB. */
+  {
+    uint8_t bc[8] = {OP_POS, 0};
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(bc, 2, &meta);
+    test_assert(!meta.has_literal_prefix,
+                "truncated POS prefix claims no literal prefix");
+    snobol_search_meta_free(&meta);
+  }
+
+  /* NOP-only prefix that consumes the whole buffer: bc[ip] must not be
+   * read when ip reaches bc_len. */
+  {
+    uint8_t bc[8] = {OP_NOP, OP_NOP};
+    snobol_search_meta_t meta;
+    snobol_search_derive_meta(bc, 2, &meta);
+    test_assert(!meta.has_literal_prefix,
+                "NOP-to-end claims no literal prefix");
+    snobol_search_meta_free(&meta);
+  }
+
+  /* Well-formed compiler output equivalence: classification unchanged. */
+  {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = NULL;
+    snobol_pattern_t *pat =
+        snobol_pattern_compile(ctx, "'hello' SPAN('0-9')", 19, &err);
+    test_assert(pat != NULL, "well-formed pattern compiles");
+    if (pat) {
+      const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
+      test_assert(meta->has_literal_prefix && meta->literal_prefix_len == 5 &&
+                      meta->has_bmh_skip,
+                  "well-formed bytecode keeps literal prefix + BMH skip");
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+  }
+}
+
 void test_search_meta_cache_suite(void) {
   test_suite("Search: cached metadata on pattern");
 
@@ -1148,5 +1222,6 @@ void test_search_meta_cache_suite(void) {
   test_cov_meta_alt_and_literal_only();
   test_cov_meta_fusion_failures();
   test_cov_meta_derive_tail();
+  test_cov_meta_malformed_bytecode();
   test_cov_engine2_derive();
 }

@@ -439,8 +439,16 @@ static uint32_t SNOBOL_PURE compute_minlength(const uint8_t *bc, size_t bc_len,
     return 0;
 
   uint32_t len = 0;
+  size_t steps = 0;
 
   while (ip < bc_len) {
+    /* Cycle guard: a JMP loop (e.g. JMP(0) or LIT JMP(self)) must not spin
+     * forever.  Mirrors compute_start_bitmap's step cap; linear bytecode
+     * executes at most bc_len steps per invocation, so the cap only fires
+     * on malformed cyclic input.  Bail conservatively (0) so the minlength
+     * filter can never reject a real match. */
+    if (++steps > bc_len * 8 + 256)
+      return 0;
     uint8_t op = bc[ip]; /* ip points to opcode */
     switch (op) {
 
@@ -1496,14 +1504,14 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   while (ip < bc_len) {
     uint8_t peek = bc[ip];
     if (peek == OP_ANCHOR) {
+      if (ip + 2 > bc_len)
+        break; /* truncated opcode: bail, leave meta unclassified */
       ip += 2;
       continue;
     } /* op + type:u8 */
-    if (peek == OP_POS || peek == OP_RPOS) {
-      ip += 5;
-      continue;
-    } /* op + target:u32 */
-    if (peek == OP_TAB || peek == OP_RTAB) {
+    if (peek == OP_POS || peek == OP_RPOS || peek == OP_TAB || peek == OP_RTAB) {
+      if (ip + 5 > bc_len)
+        break; /* truncated opcode: bail, leave meta unclassified */
       ip += 5;
       continue;
     } /* op + target:u32 */
@@ -1514,11 +1522,9 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     break; /* first consuming opcode */
   }
   /* We peek at the first "real" consuming opcode to classify root behavior. */
+  if (ip >= bc_len)
+    return; /* truncated prefix left no valid opcode: unclassified meta */
 
-  /* -----------------------------------------------------------------------
-   * Root-op classification: look for literal prefix, BREAK/SPAN/BREAKX,
-   * or single-char alternation at the start of the instruction sequence.
-   * ----------------------------------------------------------------------- */
   uint8_t op0 = bc[ip];
 
   /* OP_LIT: extract literal prefix bytes */
