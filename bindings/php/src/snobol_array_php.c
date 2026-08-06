@@ -55,14 +55,6 @@ static void php_snobol_array_unregister(snobol_array_t *arr) {
   }
 }
 
-/** @brief Return the process-global array registry (no binding callers;
- *  kept for symmetry with the table registry). */
-size_t php_snobol_get_all_arrays(snobol_array_t ***out_arrays) {
-  if (out_arrays)
-    *out_arrays = global_php_arrays;
-  return global_php_array_count;
-}
-
 /** @brief Object dtor: unregisters and releases the core array. */
 static void snobol_array_php_free(zend_object *object) {
   snobol_array_php_t *intern = php_snobol_array_fetch(object);

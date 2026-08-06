@@ -60,10 +60,6 @@ static void php_snobol_pattern_dtor(zend_object *object) {
     snobol_free(intern->range_meta);
     intern->range_meta = NULL;
   }
-  if (intern->dfa) {
-    snobol_dfa_free(intern->dfa);
-    intern->dfa = NULL;
-  }
   if (intern->trie_cache) {
     snobol_auto_trie_free(intern->trie_cache);
     intern->trie_cache = NULL;
@@ -88,7 +84,6 @@ static zend_object *snobol_pattern_create(zend_class_entry *ce) {
 
   intern->bc = NULL;
   intern->bc_len = 0;
-  intern->dfa = NULL;
   intern->trie_cache = NULL;
 
   zend_object_std_init(&intern->std, ce);
@@ -338,27 +333,6 @@ PHP_METHOD(Snobol_Pattern, fromString) {
 
   SNOBOL_LOG("Snobol_Pattern::fromString: SUCCESS, intern=%p, bc=%p, len=%zu",
              (void *)intern, (void *)bc, bc_len);
-}
-
-/** @brief Growable output buffer used by php_snobol_emit_cb(). */
-typedef struct {
-  char *buf;  /**< Heap-allocated buffer (erealloc'd). */
-  size_t len; /**< Bytes used. */
-  size_t cap; /**< Allocated capacity. */
-} EmitBuf;
-
-/** @brief Emit callback for the legacy search-VM path: appends to a growable buffer. */
-static void php_snobol_emit_cb(const char *data, size_t len, void *udata) {
-  EmitBuf *eb = (EmitBuf *)udata;
-  if (eb->len + len > eb->cap) {
-    size_t new_cap = eb->cap ? eb->cap * 2 : 1024;
-    while (eb->len + len > new_cap)
-      new_cap *= 2;
-    eb->buf = erealloc(eb->buf, new_cap);
-    eb->cap = new_cap;
-  }
-  memcpy(eb->buf + eb->len, data, len);
-  eb->len += len;
 }
 
 /* ---------------------------------------------------------------------------
@@ -829,37 +803,6 @@ PHP_METHOD(Snobol_Pattern, setJit) {
   ZEND_PARSE_PARAMETERS_END();
 
   RETURN_TRUE;
-}
-
-/* -------------------------------------------------------------------------
- * Helper: initialise a VM from a snobol_pattern_t for search operations
- * (shared setup for searchAll / searchSplit / searchReplace)
- *
- * The VM struct contains many pointer and length fields (write_log,
- * choices, tables, dyn_cache, etc.). The caller declares a stack-allocated
- * VM and passes it here uninitialised, so we MUST memset it to a known
- * state before filling in the search-loop-specific fields. search_reset_vm
- * (in core/src/search.c) handles the per-candidate reset, but it only
- * touches the fields that change between candidates — pointer fields
- * like write_log, choices, etc. must be zeroed once at first init.
- *
- * Optimisation opportunity: callers can avoid this memset by using the
- * stateful snobol_pattern_search_ex() API, which manages the VM state
- * internally. That refactor is captured in the jit-search-perf-baseline
- * change's searchSplit/searchAll/searchReplace paths.
- * ----------------------------------------------------------------------- */
-static void php_snobol_init_vm_for_search(VM *vm, snobol_pattern_t *intern,
-                                          EmitBuf *eb) {
-  memset(vm, 0, sizeof(VM));
-  vm->bc = intern->bc;
-  vm->bc_len = intern->bc_len;
-  /* Copy range metadata so SPAN/BREAK/BREAKX can resolve charclass sets */
-  vm->range_meta = intern->range_meta;
-  vm->range_meta_count = intern->range_meta_count;
-  if (eb) {
-    vm->emit_fn = php_snobol_emit_cb;
-    vm->emit_udata = eb;
-  }
 }
 
 /* ---------------------------------------------------------------------------

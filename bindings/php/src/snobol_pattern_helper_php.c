@@ -208,19 +208,6 @@ static void php_phelper_strip_meta(zval *result) {
                     sizeof("_match_start") - 1);
 }
 
-/* Extract cache option from options */
-/** @brief Read the "cache" option (false disables caching); currently
- *  unused — the slot cache is applied unconditionally. */
-static bool php_phelper_use_cache(zval *options) {
-  if (!options || Z_TYPE_P(options) != IS_ARRAY)
-    return true;
-  zval *zv =
-      zend_hash_str_find(Z_ARRVAL_P(options), "cache", sizeof("cache") - 1);
-  if (!zv)
-    return true;
-  return (Z_TYPE_P(zv) != IS_FALSE);
-}
-
 /* ------------------------------------------------------------------ */
 /*  Argument info                                                      */
 /* ------------------------------------------------------------------ */

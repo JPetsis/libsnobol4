@@ -59,13 +59,6 @@ static void php_snobol_table_unregister(snobol_table_t *tbl) {
   }
 }
 
-/** @brief Implementation of php_snobol_get_all_tables() (see php_snobol.h). */
-size_t php_snobol_get_all_tables(snobol_table_t ***out_tables) {
-  if (out_tables)
-    *out_tables = global_php_tables;
-  return global_php_table_count;
-}
-
 /** @brief Object dtor: unregisters and releases the core table. */
 static void snobol_table_php_free(zend_object *object) {
   snobol_table_php_t *intern = php_snobol_table_fetch(object);

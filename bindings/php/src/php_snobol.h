@@ -68,14 +68,6 @@ int compile_ast_to_bytecode_wrapper(ast_node_t *ast, zval *options,
 typedef struct snobol_table snobol_table_t;
 
 /**
- * @brief Return the process-global table registry.
- *
- * @param[out] out_tables Receives the registry array (may be NULL).
- * @return Number of registered tables.
- */
-size_t php_snobol_get_all_tables(snobol_table_t ***out_tables);
-
-/**
  * @brief Store a value in an array with a refcount bump.
  *
  * PHP 8.5 removed the refcount increment from add_assoc_zval; this helper
@@ -114,11 +106,6 @@ typedef struct snobol_pattern {
   /* Cached charclass range metadata */
   snobol_range_meta_t *range_meta;
   size_t range_meta_count;
-  /* Cached DFA for automaton-eligible patterns (Tier 7).
-     * Built lazily on first Pattern::match() call; freed in dtor.
-     * Independent of core struct snobol_pattern — never accessed via
-     * snobol_pattern_get_automaton() which reads at wrong offsets. */
-  snobol_dfa_t *dfa;
   /* Cached alt-literals trie for 'cat'|'dog'|'fox' patterns (Tier 5).
      * Built lazily on first searchAll/searchSplit call; freed in dtor. */
   snobol_auto_trie_t *trie_cache;
