@@ -9,7 +9,7 @@
 
 .PHONY: all build test clean distclean install uninstall help \
         build-debug build-release build-asan build-pgo-gen build-pgo-use pgo-train \
-        test-verbose test-valgrind test-valgrind-report test-asan bench bench-c docs man install-man format lint warnings \
+        test-verbose test-valgrind test-valgrind-report test-asan bench bench-c docs man install-man format format-php lint warnings \
         gen-unicode-fold
 
 # Default build type
@@ -292,8 +292,18 @@ install-man: man
 format:
 	@echo "==> Formatting code..."
 	@if command -v clang-format >/dev/null 2>&1; then \
-		find core/include core/src tests/c -name '*.c' -o -name '*.h' | xargs clang-format -i; \
+		find core/include core/src tests/c \( -name '*.c' -o -name '*.h' \) | xargs clang-format -i; \
 		echo "Code formatted!"; \
+	else \
+		echo "clang-format not found. Install with: brew install clang-format (macOS) or apt install clang-format (Linux)"; \
+	fi
+
+# Format the PHP binding C sources (bindings/php/src)
+format-php:
+	@echo "==> Formatting PHP binding sources..."
+	@if command -v clang-format >/dev/null 2>&1; then \
+		find bindings/php/src \( -name '*.c' -o -name '*.h' \) | xargs clang-format -i; \
+		echo "PHP binding formatted!"; \
 	else \
 		echo "clang-format not found. Install with: brew install clang-format (macOS) or apt install clang-format (Linux)"; \
 	fi
@@ -395,7 +405,8 @@ help:
 	@echo "  docs           - Generate documentation (requires Doxygen)"
 	@echo "  man            - Generate man pages (section 3) via Doxygen"
 	@echo "  install-man    - Install man pages to INSTALL_PREFIX/share/man/man3"
-	@echo "  format         - Format code (requires clang-format)"
+	@echo "  format         - Format core C code (requires clang-format)"
+	@echo "  format-php     - Format the PHP binding C sources (requires clang-format)"
 	@echo "  lint           - Run clang-tidy (requires LLVM toolchain)"
 	@echo "  warnings       - Build with strict warnings (alternative to lint)"
 	@echo "  help           - Show this help message"
