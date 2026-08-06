@@ -113,7 +113,7 @@ See [Distribution](#distribution) for details and alternative channels.
 
 | Binding                       | Status   | Version  |
 |-------------------------------|----------|----------|
-| [PHP](bindings/php/README.md) | ✅ Stable | v1.0.1  |
+| [PHP](bindings/php/README.md) | ✅ Stable | v1.0.2  |
 
 ## Project Structure
 
@@ -472,8 +472,8 @@ libsnobol4 uses independent versioning for core and each binding:
 
 | Component              | Current | Next        | Status               | Install                               |
 |------------------------|---------|-------------|----------------------|---------------------------------------|
-| **Core**               | v1.0.1 | v1.0.1     | ✅ v1.0.1 shipped    | `brew install JPetsis/homebrew-tap/libsnobol4` |
-| **PHP Binding**        | v1.0.1 | v1.0.1     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
+| **Core**               | v1.0.2 | v1.0.2     | ✅ v1.0.2 shipped    | `brew install JPetsis/homebrew-tap/libsnobol4` |
+| **PHP Binding**        | v1.0.2 | v1.0.2     | ✅ Stable (graduated) | `pie install libsnobol4/snobol`       |
 | **Python (reference)** | —       | —           | Prototype only       | `examples/python-binding/`            |
 
 This allows bindings to evolve at their own pace while maintaining clear compatibility guarantees.
