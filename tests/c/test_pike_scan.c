@@ -8,10 +8,13 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "snobol/search.h"
 #include "snobol/vm.h"
 #include "snobol/snobol.h"
+#include "snobol/ast.h"
+#include "snobol/compiler.h"
 
 extern void test_suite(const char *name);
 extern void test_assert(bool condition, const char *message);
@@ -30,6 +33,40 @@ static void pike_assert(bool cond, const char *name) {
     return;
   }
   fprintf(stderr, "  PIKE FAIL: %s\n", name);
+}
+
+/* Mirror of the core pattern struct (core/src/api.c) so pike_scan can be
+ * driven with AST-compiled bytecode + derived metadata + range metadata. */
+typedef struct {
+  uint8_t *bc;
+  size_t bc_len;
+  bool case_insensitive;
+  snobol_search_meta_t meta;
+  bool meta_initialized;
+  snobol_range_meta_t *range_meta;
+  size_t range_meta_count;
+  snobol_dfa_t *automaton;
+  snobol_auto_trie_t *trie_cache;
+  int trie_cache_refs;
+} pike_pattern_layout;
+
+static snobol_pattern_t *pike_make_pattern(ast_node_t *root) {
+  uint8_t *bc = NULL;
+  size_t bc_len = 0;
+  if (compile_ast_to_bytecode_c(root, false, &bc, &bc_len) != 0)
+    return NULL;
+  pike_pattern_layout *p =
+      (pike_pattern_layout *)calloc(1, sizeof(pike_pattern_layout));
+  if (!p) {
+    free(bc);
+    return NULL;
+  }
+  p->bc = bc;
+  p->bc_len = bc_len;
+  snobol_search_derive_meta(bc, bc_len, &p->meta);
+  p->meta_initialized = true;
+  snobol_build_range_meta(bc, bc_len, &p->range_meta, &p->range_meta_count);
+  return (snobol_pattern_t *)p;
 }
 
 static void pike_test_literal(void) {
@@ -235,6 +272,43 @@ static void pike_test_overflow_short(void) {
   snobol_search_vm_cleanup(&vm);
 }
 
+/* BREAKX retry branch: 'a' BREAKX(',') LEN(1) 'c' on "a,b,c" only matches
+ * via the retry thread (re-execute BREAKX after the first delimiter, then
+ * LEN(1) consumes the second delimiter and 'c' matches).  Regression for the
+ * rt.ip = ip - 2 bug where the retry thread re-decoded an operand byte
+ * (usually 0x00 = OP_ACCEPT) and reported a bogus short match. */
+static void pike_test_breakx_retry(void) {
+  ast_node_t **parts = (ast_node_t **)malloc(4 * sizeof(ast_node_t *));
+  parts[0] = snobol_ast_create_lit("a", 1);
+  parts[1] = snobol_ast_create_breakx(",", 1);
+  parts[2] = snobol_ast_create_len(1);
+  parts[3] = snobol_ast_create_lit("c", 1);
+  ast_node_t *root = snobol_ast_create_concat(parts, 4);
+  snobol_pattern_t *p = pike_make_pattern(root);
+  snobol_ast_free(root);
+  if (!p) {
+    pike_assert(false, "breakx retry compile");
+    return;
+  }
+  const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+  size_t rc = 0;
+  const snobol_range_meta_t *rm = snobol_pattern_get_range_meta(p, &rc);
+  snobol_search_result_t r;
+
+  bool ok = pike_scan(snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p),
+                      "a,b,c", 5, meta, rm, rc, NULL, &r);
+  pike_assert(ok, "breakx retry match succeeds");
+  pike_assert(r.match_start == 0 && r.match_end == 5,
+              "breakx retry match_start == 0, match_end == 5");
+
+  r.success = false;
+  ok = pike_scan(snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p),
+                 "a,b,x", 5, meta, rm, rc, NULL, &r);
+  pike_assert(!ok, "breakx retry no match on a,b,x");
+
+  snobol_pattern_free(p);
+}
+
 void test_pike_scan_suite(void) {
   test_suite("Search: Pike Scan");
   pike_test_count = 0;
@@ -245,6 +319,7 @@ void test_pike_scan_suite(void) {
   pike_test_notany();
   pike_test_multi_capture_alt();
   pike_test_ci_cyrillic();
+  pike_test_breakx_retry();
   pike_test_overflow_long();
   pike_test_overflow_short();
   test_assert(pike_test_pass == pike_test_count, "pike scan: all tests pass");

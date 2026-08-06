@@ -3122,7 +3122,8 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
           utf8_peek_next(subject, subject_len, sp, &bx_cp, &bx_by);
           if (defer_n < PIKE_DEFER_BUF) {
             pike_thread_t rt = th;
-            rt.ip = ip - 2;
+            rt.ip = ip - 3; /* re-execute the OP_BREAKX opcode (opcode sits at
+                             * ip-3 after the u16 operand read) */
             rt.pos = sp + (size_t)bx_by;
             defer[defer_n++] = rt;
           } else {
