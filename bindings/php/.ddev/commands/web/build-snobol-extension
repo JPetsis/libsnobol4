@@ -11,6 +11,12 @@
 
 set -euo pipefail
 
+# --- Optional coverage instrumentation ---
+# SCOBOL_COVERAGE=1 builds with --coverage -O0 (mirroring CI's coverage-php
+# job) and keeps the staged build dir so .gcno/.gcda files remain available
+# for lcov capture after the build.
+COVERAGE_MODE="${SCOBOL_COVERAGE:-0}"
+
 BINDINGS_DIR="/var/www/html"   # = bindings/php/ inside the container
 PROJECT_DIR="/var/www/project-root"  # = project root (mounted from repo root)
 
@@ -145,6 +151,11 @@ echo "Using phpize:     ${PHPIZE_BIN}"
 echo "Using php-config: ${PHP_CONFIG_BIN}"
 
 # --- Step 5: Configure & build ---
+if [ "$COVERAGE_MODE" = "1" ]; then
+    echo "🛰 Coverage instrumentation: CFLAGS=\"--coverage -O0\""
+    export CFLAGS="--coverage -O0"
+    export LDFLAGS="--coverage"
+fi
 "$PHPIZE_BIN"
 ./configure --enable-snobol --with-php-config="$PHP_CONFIG_BIN"
 # Patch phpize's "Don't forget to run 'make test'" to say "ddev test"
@@ -189,7 +200,11 @@ if [ -n "$FPM_PID" ]; then
 fi
 
 # --- Step 9: Cleanup ---
-sudo rm -rf "$BUILD_DIR"
+if [ "$COVERAGE_MODE" = "1" ]; then
+    echo "📁 Keeping staged build dir at ${BUILD_DIR} for lcov capture"
+else
+    sudo rm -rf "$BUILD_DIR"
+fi
 
 # --- Step 10: Verify ---
 if php -m 2>/dev/null | grep -qx "snobol"; then
