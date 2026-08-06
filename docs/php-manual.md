@@ -1153,6 +1153,11 @@ Templates are used in `subst()`, `searchReplace()`, and `PatternHelper::replace(
 | `$TABLE[key]`       | Table lookup by literal key | `$colors['sky']`          |
 | `$TABLE[$v0]`       | Table lookup by capture key | `$STATE[$v0]`             |
 
+The bracketed capture form `$v0[TABLE[key]]` / `$v0[TABLE[v1]]` is
+equivalent and also supported. The table name must be a literal identifier
+(≤ 255 bytes) followed by `[`; an identifier not followed by `[` is emitted
+as literal text (e.g. `$version`).
+
 ### Template Transform Reference
 
 | Expression   | C Format          | Semantics                             |

@@ -687,6 +687,86 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc,
 
 #endif /* !STANDALONE_BUILD — PHP-specific AST compilation above only */
 
+/* Emit OP_EMIT_TABLE for the key part following a table name.  Expects *ip
+ * pointing at the opening '[' of the key and consumes: '[' then a quoted
+ * literal key ("'sky'") or a capture-register key ("v0" / "$v0"), the
+ * closing ']', and an optional outer ']'.  On malformed input, emits a
+ * literal '$' (repositioning *ip to start_of_dollar + 1) and returns false.
+ *
+ * Format (literal key): opcode u8, table_id u16 (0xFFFF=unbound),
+ *   key_type u8 (0=literal), name_len u8, name_bytes[name_len],
+ *   key_len u16, key_bytes[key_len]
+ * Format (capture key): opcode u8, table_id u16 (0xFFFF=unbound),
+ *   key_type u8 (1=capture), name_len u8, name_bytes[name_len], key_reg u8
+ */
+static bool template_emit_table_lookup(CodeBuf *cb, const char *tpl,
+                                       size_t len, size_t *ip,
+                                       size_t start_of_dollar,
+                                       const char *table_name,
+                                       size_t table_name_len) {
+  bool quoted = (*ip < len && tpl[*ip] == '\'');
+  if (quoted) {
+    (*ip)++; /* skip opening quote */
+    size_t key_start = *ip;
+    while (*ip < len && tpl[*ip] != '\'')
+      (*ip)++;
+    if (*ip >= len)
+      goto emit_literal; /* unclosed quote */
+    size_t key_len = *ip - key_start;
+    (*ip)++; /* skip closing quote */
+    if (*ip >= len || tpl[*ip] != ']')
+      goto emit_literal;
+    (*ip)++; /* skip ']' */
+    if (*ip < len && tpl[*ip] == ']')
+      (*ip)++; /* consume outer ']' if present */
+
+    cb_emit_u8(cb, OP_EMIT_TABLE);
+    cb_emit_u16(cb, (uint16_t)SNBL_TABLE_ID_UNBOUND);
+    cb_emit_u8(cb, 0); /* key_type: 0 = literal key */
+    cb_emit_u8(cb, (uint8_t)table_name_len);
+    cb_emit_bytes(cb, (const uint8_t *)table_name, table_name_len);
+    cb_emit_u16(cb, (uint16_t)key_len);
+    cb_emit_bytes(cb, (const uint8_t *)(tpl + key_start), key_len);
+    return true;
+  }
+
+  /* Capture-derived key: accept vN, $vN (documented $TABLE[$v0] form), or
+   * bare digit(s). */
+  if (*ip < len && tpl[*ip] == '$')
+    (*ip)++;
+  bool has_v_prefix = (*ip < len && tpl[*ip] == 'v');
+  if (has_v_prefix)
+    (*ip)++; /* skip optional 'v' */
+  size_t key_reg_start = *ip;
+  while (*ip < len && tpl[*ip] >= '0' && tpl[*ip] <= '9')
+    (*ip)++;
+  if (*ip == key_reg_start || *ip >= len || tpl[*ip] != ']')
+    goto emit_literal;
+  size_t key_reg = 0;
+  for (size_t ki = key_reg_start; ki < *ip; ki++)
+    key_reg = key_reg * 10 + (uint8_t)(tpl[ki] - '0');
+  (*ip)++; /* skip inner ']' */
+  if (*ip < len && tpl[*ip] == ']')
+    (*ip)++; /* consume outer ']' if present */
+
+  cb_emit_u8(cb, OP_EMIT_TABLE);
+  cb_emit_u16(cb, (uint16_t)SNBL_TABLE_ID_UNBOUND);
+  cb_emit_u8(cb, 1); /* key_type: 1 = capture-derived key */
+  cb_emit_u8(cb, (uint8_t)table_name_len);
+  cb_emit_bytes(cb, (const uint8_t *)table_name, table_name_len);
+  cb_emit_u8(cb, (uint8_t)key_reg);
+  return true;
+
+emit_literal:
+  *ip = start_of_dollar + 1;
+  cb_emit_u8(cb, OP_EMIT_LITERAL);
+  size_t off = cb_pos(cb) + 4 + 4;
+  cb_emit_u32(cb, (uint32_t)off);
+  cb_emit_u32(cb, 1);
+  cb_emit_u8(cb, '$');
+  return false;
+}
+
 int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
                                  size_t *out_len) {
   SNOBOL_LOG("compile_template_to_bytecode START: tpl='%.*s'", (int)len, tpl);
@@ -807,7 +887,7 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
             cb_emit_u8(&cb, '$');
           }
         } else if (i < len && tpl[i] == '[') {
-          /* Table-backed replacement: $TABLE[key]
+          /* Table-backed replacement: $v0[TABLE[key]]
            * Parse TABLE name and key, emit OP_EMIT_TABLE */
           i++; /* skip '[' */
 
@@ -841,99 +921,35 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
 
           /* Skip '[' and parse key */
           i++; /* skip '[' */
-          size_t key_start = i;
-
-          /* Key can be: quoted literal or identifier */
-          bool quoted = (i < len && tpl[i] == '\'');
-          if (quoted) {
-            i++; /* skip opening quote */
-            key_start = i;
-            while (i < len && tpl[i] != '\'') {
-              i++;
-            }
-            if (i >= len) {
-              /* Unclosed quote, emit as literal '$' */
-              i = start_of_dollar + 1;
-              cb_emit_u8(&cb, OP_EMIT_LITERAL);
-              size_t off = cb_pos(&cb) + 4 + 4;
-              cb_emit_u32(&cb, (uint32_t)off);
-              cb_emit_u32(&cb, 1);
-              cb_emit_u8(&cb, '$');
-              continue;
-            }
-            /* Key is from key_start to i (exclusive of closing quote) */
-            size_t key_len = i - key_start;
-            i++; /* skip closing quote */
-
-            /* Check for closing ']' */
-            if (i >= len || tpl[i] != ']') {
-              i = start_of_dollar + 1;
-              cb_emit_u8(&cb, OP_EMIT_LITERAL);
-              size_t off = cb_pos(&cb) + 4 + 4;
-              cb_emit_u32(&cb, (uint32_t)off);
-              cb_emit_u32(&cb, 1);
-              cb_emit_u8(&cb, '$');
-              continue;
-            }
-            i++; /* skip ']' */
-            if (i < len && tpl[i] == ']')
-              i++; /* consume outer ']' if present */
-
-            /* Emit OP_EMIT_TABLE with name encoded and literal key
-             * Format: opcode u8, table_id u16 (0xFFFF=unbound),
-             *         key_type u8 (0=literal),
-             *         name_len u8, name_bytes[name_len],
-             *         key_len u16, key_bytes[key_len] */
-            cb_emit_u8(&cb, OP_EMIT_TABLE);
-            cb_emit_u16(&cb, (uint16_t)SNBL_TABLE_ID_UNBOUND);
-            cb_emit_u8(&cb, 0); /* key_type: 0 = literal key */
-            cb_emit_u8(&cb, (uint8_t)table_name_len);
-            cb_emit_bytes(&cb, (const uint8_t *)table_name, table_name_len);
-            cb_emit_u16(&cb, (uint16_t)key_len); /* literal key length */
-            cb_emit_bytes(&cb, (const uint8_t *)(tpl + key_start), key_len);
-          } else {
-            /* Capture-derived key: accept vN or bare digit(s) */
-            bool has_v_prefix = (i < len && tpl[i] == 'v');
-            if (has_v_prefix)
-              i++; /* skip optional 'v' */
-            size_t key_reg_start = i;
-            while (i < len && tpl[i] >= '0' && tpl[i] <= '9') {
-              i++;
-            }
-            if (i == key_reg_start || i >= len || tpl[i] != ']') {
-              i = start_of_dollar + 1;
-              cb_emit_u8(&cb, OP_EMIT_LITERAL);
-              size_t off = cb_pos(&cb) + 4 + 4;
-              cb_emit_u32(&cb, (uint32_t)off);
-              cb_emit_u32(&cb, 1);
-              cb_emit_u8(&cb, '$');
-              continue;
-            }
-            size_t key_reg = 0;
-            for (size_t ki = key_reg_start; ki < i; ki++) {
-              key_reg = key_reg * 10 + (uint8_t)(tpl[ki] - '0');
-            }
-            i++; /* skip inner ']' */
-            if (i < len && tpl[i] == ']')
-              i++; /* consume outer ']' if present */
-
-            /* Emit OP_EMIT_TABLE with name encoded and capture key
-             * Format: opcode u8, table_id u16 (0xFFFF=unbound),
-             *         key_type u8 (1=capture),
-             *         name_len u8, name_bytes[name_len],
-             *         key_reg u8 */
-            cb_emit_u8(&cb, OP_EMIT_TABLE);
-            cb_emit_u16(&cb, (uint16_t)SNBL_TABLE_ID_UNBOUND);
-            cb_emit_u8(&cb, 1); /* key_type: 1 = capture-derived key */
-            cb_emit_u8(&cb, (uint8_t)table_name_len);
-            cb_emit_bytes(&cb, (const uint8_t *)table_name, table_name_len);
-            cb_emit_u8(&cb, (uint8_t)key_reg);
-          }
+          template_emit_table_lookup(&cb, tpl, len, &i, start_of_dollar,
+                                     table_name, table_name_len);
+          continue;
         } else {
           cb_emit_u8(&cb, OP_EMIT_CAPTURE);
           cb_emit_u8(&cb, reg);
         }
       } else {
+        /* Documented table syntax $TABLE[key] / $TABLE[$vM]: an identifier
+         * directly followed by '[' is a table reference (the name is not
+         * bracketed, unlike $v0[TABLE[key]]).  An identifier not followed
+         * by '[' stays literal text (e.g. "$version"). */
+        size_t table_name_start = i;
+        while (i < len && tpl[i] != '.' && tpl[i] != '[' && tpl[i] != ']') {
+          i++;
+        }
+        size_t table_name_len = i - table_name_start;
+        if (table_name_len > 0 && i < len && tpl[i] == '[') {
+          const char *table_name = tpl + table_name_start;
+          /* Reject overlong table names (name_len field is 1 byte) */
+          if (table_name_len > 255) {
+            cb_free(&cb);
+            return -1;
+          }
+          i++; /* skip '[' */
+          template_emit_table_lookup(&cb, tpl, len, &i, start_of_dollar,
+                                     table_name, table_name_len);
+          continue;
+        }
         i = start_of_dollar + 1;
         cb_emit_u8(&cb, OP_EMIT_LITERAL);
         size_t off = cb_pos(&cb) + 4 + 4;

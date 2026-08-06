@@ -71,6 +71,42 @@ class TemplateOpsTest extends TestCase
         $pattern->subst('word', "\$v0[unknownDict['key']]", []);
     }
 
+    public function testSubstDocumentedTableSyntaxLiteralKey(): void
+    {
+        $table = new Table();
+        $table->set('sky', 'blue');
+
+        $pattern = $this->makeCap0Pattern();
+        // Documented bare form $TABLE[key]: identifier directly followed
+        // by '[' (docs/php-manual.md) — must compile to OP_EMIT_TABLE
+        $result = $pattern->subst('anything', "\$colors['sky']", ['colors' => $table]);
+        $this->assertSame('blue', $result);
+    }
+
+    public function testSubstDocumentedTableSyntaxCaptureKey(): void
+    {
+        $table = new Table('STATE');
+        $table->set('CA', 'California');
+        $table->set('NY', 'New York');
+
+        $pattern = $this->makeCap0Pattern();
+        // Documented bare form $TABLE[$v0] with a capture-derived key
+        $result = $pattern->subst('CA', "\$STATE[\$v0]", ['STATE' => $table]);
+        $this->assertSame('California', $result);
+    }
+
+    public function testSubstTableNameTooLongThrows(): void
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Failed to compile template');
+
+        $pattern = $this->makeCap0Pattern();
+        // Table names are limited to 255 bytes (name_len field is 1 byte);
+        // the compiler must fail loudly, not emit a literal '$'
+        $tpl = '$' . str_repeat('x', 256) . "['k']";
+        $pattern->subst('anything', $tpl, []);
+    }
+
     public function testSubstLengthRegression(): void
     {
         $pattern = $this->makeCap0Pattern();

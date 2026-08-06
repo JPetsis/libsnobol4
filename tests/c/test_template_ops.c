@@ -1104,6 +1104,120 @@ void test_cov_tpl_tables(void) {
   }
 }
 
+/* Documented table syntax ($TABLE[key] / $TABLE[$vM], docs/php-manual.md):
+ * the bare identifier form must compile to OP_EMIT_TABLE with the symbolic
+ * name, exactly like the $v0[TABLE[key]] form; identifiers not followed by
+ * '[' stay literal; overlong names fail compilation. */
+static void test_documented_table_syntax(void) {
+  test_suite("Template Ops: documented $TABLE[key] syntax");
+
+  /* $colors['sky']: bare name + literal key */
+  {
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    const char *tpl = "$colors['sky']";
+    int rc = compile_template_to_bytecode(tpl, strlen(tpl), &bc, &bc_len);
+    test_assert(rc == 0, "bare table literal-key compiles");
+    if (rc == 0) {
+      bool found = false;
+      for (size_t i = 0; i + 2 < bc_len; i++) {
+        if (bc[i] == OP_EMIT_TABLE && i + 2 < bc_len) {
+          uint16_t tid = ((uint16_t)bc[i + 1] << 8) | bc[i + 2];
+          if (tid == SNBL_TABLE_ID_UNBOUND) {
+            /* key_type at i+3, name_len at i+4, name bytes after */
+            if (bc[i + 3] == 0 && bc[i + 4] == 6 &&
+                memcmp(bc + i + 5, "colors", 6) == 0)
+              found = true;
+          }
+        }
+      }
+      test_assert(found,
+                  "bare $colors['sky'] emits OP_EMIT_TABLE name 'colors'");
+      compiler_free(bc);
+    }
+  }
+
+  /* $STATE[$v0]: bare name + capture-register key (documented $ form) */
+  {
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    const char *tpl = "$STATE[$v0]";
+    int rc = compile_template_to_bytecode(tpl, strlen(tpl), &bc, &bc_len);
+    test_assert(rc == 0, "bare table capture-key compiles");
+    if (rc == 0) {
+      bool found = false;
+      for (size_t i = 0; i + 2 < bc_len; i++) {
+        if (bc[i] == OP_EMIT_TABLE && i + 2 < bc_len) {
+          uint16_t tid = ((uint16_t)bc[i + 1] << 8) | bc[i + 2];
+          if (tid == SNBL_TABLE_ID_UNBOUND) {
+            /* key_type=1 (capture), name_len=5 'STATE', key_reg=0 */
+            if (bc[i + 3] == 1 && bc[i + 4] == 5 &&
+                memcmp(bc + i + 5, "STATE", 5) == 0 && bc[i + 10] == 0)
+              found = true;
+          }
+        }
+      }
+      test_assert(found,
+                  "bare $STATE[$v0] emits OP_EMIT_TABLE capture key reg 0");
+      compiler_free(bc);
+    }
+  }
+
+  /* Identifier not followed by '[' stays literal text: no OP_EMIT_TABLE. */
+  {
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    const char *tpl = "$version";
+    int rc = compile_template_to_bytecode(tpl, strlen(tpl), &bc, &bc_len);
+    test_assert(rc == 0, "bare identifier compiles");
+    if (rc == 0) {
+      bool found = false;
+      for (size_t i = 0; i + 2 < bc_len; i++) {
+        if (bc[i] == OP_EMIT_TABLE) {
+          found = true;
+          break;
+        }
+      }
+      test_assert(!found, "bare identifier without '[' stays literal");
+      compiler_free(bc);
+    }
+  }
+
+  /* Malformed table ref falls back to a literal '$' (no OP_EMIT_TABLE). */
+  {
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    const char *tpl = "$colors['sky'";
+    int rc = compile_template_to_bytecode(tpl, strlen(tpl), &bc, &bc_len);
+    test_assert(rc == 0, "malformed table ref compiles as literal");
+    if (rc == 0) {
+      bool found = false;
+      for (size_t i = 0; i + 2 < bc_len; i++) {
+        if (bc[i] == OP_EMIT_TABLE) {
+          found = true;
+          break;
+        }
+      }
+      test_assert(!found, "malformed table ref falls back to literal");
+      compiler_free(bc);
+    }
+  }
+
+  /* Overlong table name (>255 bytes) fails compilation loudly. */
+  {
+    char tpl[300];
+    tpl[0] = '$';
+    memset(tpl + 1, 'x', 256);
+    memcpy(tpl + 257, "['k']", 5);
+    uint8_t *bc = NULL;
+    size_t bc_len = 0;
+    int rc = compile_template_to_bytecode(tpl, 262, &bc, &bc_len);
+    test_assert(rc != 0, "overlong bare table name fails compilation");
+    if (bc)
+      compiler_free(bc);
+  }
+}
+
 void test_template_ops_suite(void) {
   test_format_upper();
   test_format_lower();
@@ -1127,6 +1241,7 @@ void test_template_ops_suite(void) {
   test_e2e_table_capture_key();
 #endif
   test_legacy_emit_expr();
+  test_documented_table_syntax();
   test_cov_tpl_substitutions();
   test_cov_tpl_tables();
 }
