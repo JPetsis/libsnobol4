@@ -56,6 +56,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verified under ASan). Rows now track their own capacity (`row_caps[]`),
   double in lockstep with the result arrays, and zero the new tail. Found by
   the coverage-driven API test suite.
+- **Pike BREAKX retry threads decoded an operand byte as an opcode**
+  (`core/src/search_tiers.c`, `pike_scan`): the retry thread resumed at
+  `ip - 2`, which points at the first operand byte after the u16 set-id read
+  (the opcode sits at `ip - 3`); the operand byte (frequently 0x00 =
+  OP_ACCEPT) silently ended the thread, so BREAKX patterns whose match
+  requires the delimiter-consuming retry branch reported a bogus short
+  match. The retry thread now resumes at the OP_BREAKX opcode, matching the
+  search-VM's `svm_breakx`.
+- **Pike dropped all `@r` capture registers on the default search path**
+  (`core/src/search_tiers.c`, `pike_scan`): the ACCEPT writeback copied
+  `cap_start`/`cap_end` but not `var_start`/`var_end`/`var_count`, so every
+  unanchored capture search handled by the Pike fast path reported no named
+  variables. The writeback now propagates the registers (relative to the
+  match start, unifying pike with the restart loop and full VM).
+- **Capture offsets were window-relative in the pattern-object APIs**
+  (`core/src/api.c`): `snobol_pattern_match`, `snobol_pattern_search` and
+  `snobol_pattern_search_reuse` materialized captures against the full
+  subject with match-window-relative offsets, so matches away from offset 0
+  returned wrong bytes ("aax " with a capture of "x " at offset 2 yielded
+  "aa"). `_ex` and batch used the search offset as the window base, wrong
+  when earlier candidates failed. All capture readers now anchor the subject
+  at the match position; the PHP binding's `searchAll` capture-offset base
+  uses the match position too.
+- **Anchored search matched anywhere through the DFA automaton**
+  (`core/src/search_tiers.c`): the TIER_AUTOMATON override ignored the
+  anchored flag, and `search_automaton_exec` is an unanchored restart
+  scanner by design — `snobol_search_exec_anchored` returned matches that
+  did not start at the anchor for automaton-eligible patterns (e.g.
+  `'ab' SPAN('0-9')` on "xab12" matched at offset 1), causing
+  `Pattern::match()` false positives. The override is gated on `!anchored`
+  and anchored calls take a single-pass DFA walk from the anchor.
+- **Pike skipped POS/RPOS/TAB/RTAB as no-ops** (`core/src/search_tiers.c`,
+  `pike_scan`): mid-pattern position constraints were never enforced — e.g.
+  `'ab' POS(5) 'c'` on "abc" incorrectly matched. Position ops are now
+  validated with full-VM semantics (codepoint-walked targets; TAB/RTAB move
+  the cursor, POS/RPOS fail unless the cursor is exactly at the target).
+- **`snobol_search_derive_meta` hung or read OOB on malformed bytecode**
+  (`core/src/search_meta.c`): `compute_minlength` followed JMP targets with
+  no cycle guard, so cyclic bytecode (e.g. `JMP(0)`) hung the derivation;
+  the zero-width prefix skip advanced past truncated prefix opcodes
+  (`{POS,0}` with `bc_len=2`) and read `bc[ip]` out of bounds. A step cap
+  mirrors `compute_start_bitmap`'s and the prefix skip bounds-checks every
+  advance, bailing to unclassified metadata on overrun.
+- **Search-VM ANY never matched without pre-resolved ranges**
+  (`core/src/search_tiers.c`, `svm_any`): ANY read only the `srange` cache
+  while SPAN/BREAK/BREAKX/NOTANY resolved their charclass from the
+  bytecode trailer; ANY now uses the same `search_vm_resolve_range`
+  fallback.
+- **Capture undo was lost across OP_DYNAMIC sub-matches**
+  (`core/src/vm_exec.c`, `op_dynamic`): the nested `vm_run()` saw the outer
+  undo trail (non-NULL, so it cleared instead of allocating) and its ACCEPT
+  freed it — the outer run continued with a dropped trail. The trail is now
+  detached before the inner run and restored afterwards, mirroring the
+  choice-stack/write-log handling.
+- **GOTO/GOTO_F treated a label at bytecode offset 0 as missing**
+  (`core/src/vm_exec.c`): `vm_get_label_offset` returned 0 both for a
+  registered label at offset 0 and for an unknown label id; it now returns
+  a `UINT32_MAX` sentinel for unknown labels.
+- **Documented `$TABLE[key]` template syntax compiled to a literal `$`**
+  (`core/src/compiler.c`): only the bracketed `$v0[TABLE[key]]` form was
+  recognized; the PHP manual's documented `$TABLE[key]` / `$TABLE[$vM]`
+  forms (docs/php-manual.md) now compile to OP_EMIT_TABLE (bare identifier
+  followed by `[`), capture keys accept the documented `$v0` spelling, and
+  overlong (>255 byte) table names fail compilation loudly, surfacing the
+  `subst()` "Failed to compile template" exception.
+- **Removed vestigial PHP binding code** (`bindings/php/src/`):
+  `php_snobol_init_vm_for_search`, `php_snobol_emit_cb` + `EmitBuf`, the
+  never-assigned `intern->dfa` field, `php_snobol_get_all_tables` /
+  `php_snobol_get_all_arrays`, and `php_phelper_use_cache` had no callers
+  after the persistent-search-state migration and were removed.
+
+### Notes
+
+- **BREAK is deterministic and greedy by design** (divergence from classic
+  SNOBOL4, where BREAK may retry shorter matches on backtracking): use
+  `BREAKX` for retry semantics.
+- **RTAB(n) clamps to the subject start instead of failing** when n exceeds
+  the remaining subject length (fails only when the cursor is past the
+  target).
 
 ## ## [0.13.0] - 2026-07-28
 
@@ -433,8 +512,7 @@ stack — the remaining performance lever for the irreducibly stateful residue
 - **Threshold-based dispatch** in `PHP_METHOD(Snobol_Pattern, searchSplit)`:
   the `PHP_METHOD` body is now a thin dispatcher (`if (subject_len < THRESHOLD)
   fast_path else bulk_path`), keeping the per-call hot path small.
-- **Probe before/after numbers** recorded in
-  `openspec/changes/archive/2026-06-20-searchsplit-bulk-result-buffer/tasks.md`:
+- **Probe before/after numbers**:
   C `tokenize` 397 → 385 ns/iter (-3.0%), PHP `tokenize_php` 98,445 → 97,341
   ns/iter (-1.1%), `JitCPhpCouplingTest` unchanged (4 tests, 22 assertions).
 
