@@ -14,7 +14,7 @@ composer_version: "2"
 web_environment: [ ]
 corepack_enable: false
 disable_upload_dirs_warning: true
-webimage_extra_packages: ['php${DDEV_PHP_VERSION}-dev', 'build-essential', 'autoconf']
+webimage_extra_packages: ['php${DDEV_PHP_VERSION}-dev', 'build-essential', 'autoconf', 'lcov']
 hooks:
   post-start:
     # Delegate entirely to the canonical build command so there is only one
