@@ -324,6 +324,7 @@ void test_api_version_suite(void);
 void test_api_match_suite(void);
 void test_api_literal_match_suite(void);
 void test_api_search_next_suite(void);
+void test_builder_compile_suite(void);
 void test_reusable_match_suite(void);
 void test_reuse_search_suite(void);
 void test_break_grammar_suite(void);
@@ -439,6 +440,8 @@ int main(void) {
   RUN_SUITE("API: snobol_pattern_match_literal()",
             test_api_literal_match_suite);
   RUN_SUITE("API: snobol_pattern_search_next()", test_api_search_next_suite);
+  RUN_SUITE("Builder: snobol_pattern_build_compile()",
+            test_builder_compile_suite);
   RUN_SUITE("API: snobol_match_reset() / search_reuse()",
             test_reusable_match_suite);
   RUN_SUITE("Reuse Search: _ex parity with search()", test_reuse_search_suite);

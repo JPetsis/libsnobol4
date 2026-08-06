@@ -61,6 +61,7 @@ add_executable(snobol4_tests
     test_api_match.c
     test_api_literal_match.c
     test_api_search_next.c
+    test_builder_compile.c
     test_reusable_match.c
     test_reuse_search.c
     test_break_grammar.c
