@@ -117,5 +117,31 @@ class PatternCacheTest extends TestCase
 
         $this->assertTrue($cache->has('test'));
     }
+
+    public function testCacheFactoryExceptionNotStored(): void
+    {
+        $cache = new PatternCache(2);
+        try {
+            $cache->get('k', function (): never {
+                throw new \Exception('factory boom');
+            });
+            $this->fail('Expected factory exception to propagate');
+        } catch (\Exception $e) {
+            $this->assertSame('factory boom', $e->getMessage());
+        }
+        $this->assertFalse($cache->has('k'));
+        $this->assertSame(0, $cache->size());
+    }
+
+    public function testCacheSizeAfterOperations(): void
+    {
+        $cache = new PatternCache(4);
+        $this->assertSame(0, $cache->size());
+        $cache->get('a', fn() => PatternHelper::fromString("'a'"));
+        $cache->get('b', fn() => PatternHelper::fromString("'b'"));
+        $this->assertSame(2, $cache->size());
+        $cache->clear();
+        $this->assertSame(0, $cache->size());
+    }
 }
 

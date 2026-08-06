@@ -467,4 +467,113 @@ class ConvenienceApiTest extends TestCase
         $this->assertIsArray($res);
         $this->assertCount(2, $res);
     }
+
+    /* ============================================================
+     *  PatternHelper: evalPattern / tableSubst / formattedSubst
+     *  and resolve-failure contracts (coverage)
+     * ============================================================ */
+
+    public function testEvalPatternMatch(): void
+    {
+        $result = PatternHelper::evalPattern("'a'", "abc");
+        $this->assertIsArray($result);
+        $this->assertSame(1, $result['_match_len']);
+    }
+
+    public function testEvalPatternNoMatchReturnsFalse(): void
+    {
+        $this->assertFalse(PatternHelper::evalPattern("'z'", "abc"));
+    }
+
+    public function testEvalPatternInvalidPatternThrows(): void
+    {
+        $this->expectException(\Exception::class);
+        PatternHelper::evalPattern("bareword", "abc");
+    }
+
+    public function testTableSubstWithTemplate(): void
+    {
+        $table = new Table();
+        $table->set('k', 'V');
+        $result = PatternHelper::tableSubst($table, "'k'", '[$v1]', 'k k');
+        $this->assertSame('[] []', $result);
+    }
+
+    public function testTableSubstInvalidPatternReturnsSubject(): void
+    {
+        $table = new Table();
+        $this->expectException(\Exception::class);
+        PatternHelper::tableSubst($table, "bareword", '[x]', 'abc');
+    }
+
+    public function testFormattedSubstLiteralTemplate(): void
+    {
+        $result = PatternHelper::formattedSubst("'a'", '[X]', 'aaa');
+        $this->assertSame('[X][X][X]', $result);
+    }
+
+    public function testFormattedSubstCaptureTemplate(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::cap(0, Builder::lit('a')));
+        $this->assertSame('aaa', PatternHelper::formattedSubst($pattern, '$v0', 'aaa'));
+        $this->assertSame('a!', PatternHelper::formattedSubst($pattern, '$v0!', 'a'));
+    }
+
+    public function testFormattedSubstResolveFailureReturnsSubject(): void
+    {
+        $this->assertSame('abc', PatternHelper::formattedSubst(123, 'X', 'abc'));
+    }
+
+    public function testReplaceWithDollarTemplateUsesSubst(): void
+    {
+        // Replacement containing '$' routes to subst; no captures -> empty
+        $this->assertSame('', PatternHelper::replace("'a'", '$v0', 'aaa'));
+        $this->assertSame('abc', PatternHelper::replace(123, 'X', 'abc'));
+    }
+
+    public function testMatchOnceOptionsAffectCacheKey(): void
+    {
+        $this->assertIsArray(PatternHelper::matchOnce("'a'", 'a', [
+            'captures' => 'offsets',
+            'metrics' => 1,
+        ]));
+        $this->assertIsArray(PatternHelper::matchOnce("'a'", 'a', ['cache' => false]));
+    }
+
+    public function testMatchOnceResolveFailures(): void
+    {
+        $this->assertFalse(PatternHelper::matchOnce(123, 'x'));
+        $this->expectException(\Exception::class);
+        PatternHelper::matchOnce(['type' => 'nope'], 'x');
+    }
+
+    public function testMatchOnceInvalidStringPatternThrows(): void
+    {
+        $this->expectException(\Exception::class);
+        PatternHelper::matchOnce('bareword', 'x');
+    }
+
+    public function testMatchOnceFullOptionAsLong(): void
+    {
+        // 'full' given as int (non-zero long) counts as true
+        $this->assertIsArray(PatternHelper::matchOnce("'abc'", 'abc', ['full' => 1]));
+        $this->assertFalse(PatternHelper::matchOnce("'a'", 'abc', ['full' => 1]));
+    }
+
+    public function testMatchAllResolveFailureReturnsEmpty(): void
+    {
+        $this->assertSame([], PatternHelper::matchAll(123, 'x'));
+        $this->assertSame([], PatternHelper::matchAll(new Pattern(), 'x'));
+    }
+
+    public function testSplitResolveFailureReturnsEmpty(): void
+    {
+        $this->assertSame([], PatternHelper::split(123, 'x'));
+    }
+
+    public function testFromAstInvalidNodeThrowsValueError(): void
+    {
+        $this->expectException(\ValueError::class);
+        PatternHelper::fromAst(['type' => 'nope']);
+    }
 }

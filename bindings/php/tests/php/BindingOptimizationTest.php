@@ -324,6 +324,155 @@ class BindingOptimizationTest extends TestCase
     }
 
     /* ============================================================
+     *  Iterator edge states (coverage)
+     * ============================================================ */
+
+    public function testSearchIteratorCurrentBeforeRewindIsNull(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = $p->searchAllGenerator('aba');
+        $this->assertNull($it->current());
+        $this->assertFalse($it->valid());
+    }
+
+    public function testSearchIteratorManualIteration(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = $p->searchAllGenerator('aba');
+        $it->rewind();
+        $this->assertSame(0, $it->key());
+        $this->assertSame(0, $it->current()['_match_start']);
+        $it->next();
+        $this->assertSame(1, $it->key());
+        $this->assertSame(2, $it->current()['_match_start']);
+        $it->next();
+        $this->assertFalse($it->valid());
+        $it->next();
+        $this->assertSame(3, $it->key());
+    }
+
+    public function testSearchIteratorNextBeforeRewindInvalidates(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = $p->searchAllGenerator('aba');
+        $it->next();
+        $this->assertFalse($it->valid());
+    }
+
+    public function testSearchIteratorRewindResetsState(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = $p->searchAllGenerator('aba');
+        $it->rewind();
+        $this->assertSame(0, $it->current()['_match_start']);
+        $it->next();
+        $it->rewind();
+        $this->assertSame(0, $it->current()['_match_start']);
+    }
+
+    public function testSearchIteratorEmptySubject(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = $p->searchAllGenerator('');
+        $it->rewind();
+        $this->assertFalse($it->valid());
+    }
+
+    public function testSearchIteratorWithEmitOutput(): void
+    {
+        $p = Pattern::compileFromAst(
+            Builder::concat([Builder::lit('x'), Builder::emit('OUT')])
+        );
+        $seen = [];
+        foreach ($p->searchAllGenerator('xx') as $k => $m) {
+            $seen[$k] = $m['_output'];
+        }
+        $this->assertSame([0 => 'OUT', 1 => 'OUT'], $seen);
+    }
+
+    public function testSearchIteratorEmptyCaptureIsNull(): void
+    {
+        $p = Pattern::compileFromAst(
+            Builder::concat([Builder::cap(0, Builder::lit('')), Builder::lit('x')])
+        );
+        foreach ($p->searchAllGenerator('x') as $m) {
+            $this->assertNull($m['v0']);
+        }
+    }
+
+    public function testSearchIteratorFromPatternStatic(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = \Snobol\SearchIterator::fromPattern($p, 'aba');
+        $this->assertInstanceOf(\Snobol\SearchIterator::class, $it);
+        $this->assertSame(0, $it->key());
+        $this->assertFalse($it->valid());
+    }
+
+    public function testSearchIteratorFromPatternNotCompiledThrows(): void
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Pattern not compiled');
+        \Snobol\SearchIterator::fromPattern(new Pattern(), 'x');
+    }
+
+    public function testSplitIteratorFromPatternStatic(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = \Snobol\SplitIterator::fromPattern($p, 'a-b');
+        $this->assertInstanceOf(\Snobol\SplitIterator::class, $it);
+        $segments = [];
+        foreach ($it as $seg) {
+            $segments[] = $seg;
+        }
+        $this->assertSame(['', '-b'], $segments);
+    }
+
+    public function testSplitIteratorFromPatternNotCompiledThrows(): void
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Pattern not compiled');
+        \Snobol\SplitIterator::fromPattern(new Pattern(), 'x');
+    }
+
+    public function testSplitIteratorTrailingSegment(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $segments = [];
+        foreach ($p->searchSplitGenerator('a-b-') as $seg) {
+            $segments[] = $seg;
+        }
+        $this->assertSame(['', '-b-'], $segments);
+    }
+
+    public function testSplitIteratorEdgeStates(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = $p->searchSplitGenerator('a-b');
+        // Before rewind: no current segment, next() invalidates
+        $this->assertNull($it->current());
+        $it->next();
+        $this->assertFalse($it->valid());
+        // Full manual iteration: segment, trailing segment, exhaustion
+        $it->rewind();
+        $this->assertSame('', $it->current());
+        $it->next();
+        $this->assertSame('-b', $it->current());
+        $it->next();
+        $this->assertFalse($it->valid());
+    }
+
+    public function testSplitIteratorEmptySubject(): void
+    {
+        $p = Pattern::fromString("'a'");
+        $it = $p->searchSplitGenerator('');
+        $it->rewind();
+        $this->assertFalse($it->valid());
+        $it->next();
+        $this->assertFalse($it->valid());
+    }
+
+    /* ============================================================
      *  10. Lean tokenize API (P2)
      * ============================================================ */
 
