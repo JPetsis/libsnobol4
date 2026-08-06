@@ -19,16 +19,17 @@
 
 /* Standard PHP Custom Object Pattern: zend_object at the END */
 typedef struct {
-    snobol_table_t *table;  /* Owned: the C table object */
-    zend_object std;
+  snobol_table_t *table; /* Owned: the C table object */
+  zend_object std;
 } snobol_table_php_t;
 
 extern zend_class_entry *snobol_table_ce;
 static zend_object_handlers snobol_table_object_handlers;
 
 /** @brief Recover the snobol_table_php_t from a zend_object pointer. */
-static inline snobol_table_php_t* php_snobol_table_fetch(zend_object *obj) {
-    return (snobol_table_php_t *)((char *)(obj) - XtOffsetOf(snobol_table_php_t, std));
+static inline snobol_table_php_t *php_snobol_table_fetch(zend_object *obj) {
+  return (
+      snobol_table_php_t *)((char *)(obj)-XtOffsetOf(snobol_table_php_t, std));
 }
 
 /* Table registry to support pattern binding */
@@ -38,79 +39,84 @@ static size_t global_php_table_cap = 0;
 
 /** @brief Add a table to the process-global registry (grows the array). */
 static void php_snobol_table_register(snobol_table_t *tbl) {
-    if (global_php_table_count == global_php_table_cap) {
-        global_php_table_cap = global_php_table_cap ? global_php_table_cap * 2 : 16;
-        global_php_tables = realloc(global_php_tables, global_php_table_cap * sizeof(snobol_table_t *));
-    }
-    global_php_tables[global_php_table_count++] = tbl;
+  if (global_php_table_count == global_php_table_cap) {
+    global_php_table_cap = global_php_table_cap ? global_php_table_cap * 2 : 16;
+    global_php_tables = realloc(
+        global_php_tables, global_php_table_cap * sizeof(snobol_table_t *));
+  }
+  global_php_tables[global_php_table_count++] = tbl;
 }
 
 /** @brief Remove a table from the registry (used by the dtor). */
 static void php_snobol_table_unregister(snobol_table_t *tbl) {
-    for (size_t i = 0; i < global_php_table_count; i++) {
-        if (global_php_tables[i] == tbl) {
-            memmove(global_php_tables + i, global_php_tables + i + 1, (global_php_table_count - i - 1) * sizeof(snobol_table_t *));
-            global_php_table_count--;
-            break;
-        }
+  for (size_t i = 0; i < global_php_table_count; i++) {
+    if (global_php_tables[i] == tbl) {
+      memmove(global_php_tables + i, global_php_tables + i + 1,
+              (global_php_table_count - i - 1) * sizeof(snobol_table_t *));
+      global_php_table_count--;
+      break;
     }
+  }
 }
 
 /** @brief Implementation of php_snobol_get_all_tables() (see php_snobol.h). */
 size_t php_snobol_get_all_tables(snobol_table_t ***out_tables) {
-    if (out_tables) *out_tables = global_php_tables;
-    return global_php_table_count;
+  if (out_tables)
+    *out_tables = global_php_tables;
+  return global_php_table_count;
 }
 
 /** @brief Object dtor: unregisters and releases the core table. */
 static void snobol_table_php_free(zend_object *object) {
-    snobol_table_php_t *intern = php_snobol_table_fetch(object);
-    SNOBOL_LOG("snobol_table_php_free: intern=%p table=%p", (void*)intern, (void*)intern->table);
+  snobol_table_php_t *intern = php_snobol_table_fetch(object);
+  SNOBOL_LOG("snobol_table_php_free: intern=%p table=%p", (void *)intern,
+             (void *)intern->table);
 
-    if (intern->table) {
-        php_snobol_table_unregister(intern->table);
-        table_release(intern->table);
-        intern->table = NULL;
-    }
+  if (intern->table) {
+    php_snobol_table_unregister(intern->table);
+    table_release(intern->table);
+    intern->table = NULL;
+  }
 
-    zend_object_std_dtor(object);
-    SNOBOL_LOG("snobol_table_php_free: done");
+  zend_object_std_dtor(object);
+  SNOBOL_LOG("snobol_table_php_free: done");
 }
 
 /** @brief Object factory for Snobol\Table. */
 static zend_object *snobol_table_php_create(zend_class_entry *ce) {
-    snobol_table_php_t *intern = zend_object_alloc(sizeof(snobol_table_php_t), ce);
-    SNOBOL_LOG("snobol_table_php_create: intern=%p", (void*)intern);
+  snobol_table_php_t *intern =
+      zend_object_alloc(sizeof(snobol_table_php_t), ce);
+  SNOBOL_LOG("snobol_table_php_create: intern=%p", (void *)intern);
 
-    intern->table = NULL;
+  intern->table = NULL;
 
-    zend_object_std_init(&intern->std, ce);
-    object_properties_init(&intern->std, ce);
-    intern->std.handlers = &snobol_table_object_handlers;
+  zend_object_std_init(&intern->std, ce);
+  object_properties_init(&intern->std, ce);
+  intern->std.handlers = &snobol_table_object_handlers;
 
-    return &intern->std;
+  return &intern->std;
 }
 
 /* Argument info */
 ZEND_BEGIN_ARG_INFO_EX(ai_table_construct, 0, 0, 0)
-    ZEND_ARG_TYPE_INFO(0, name, IS_STRING, 1)
+ZEND_ARG_TYPE_INFO(0, name, IS_STRING, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_table_get, 0, 0, 1)
-    ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
+ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_table_set, 0, 0, 2)
-    ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
-    ZEND_ARG_TYPE_INFO(0, value, IS_STRING, 1)
+ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
+ZEND_ARG_TYPE_INFO(0, value, IS_STRING, 1)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_table_has, 0, 0, 1)
-    ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
+ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_table_delete, 0, 0, 1)
-    ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
+ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_table_clear, 0, 0, 0)
@@ -127,28 +133,28 @@ ZEND_END_ARG_INFO()
  * @param name
  */
 PHP_METHOD(Snobol_Table, __construct) {
-    char *name = NULL;
-    size_t name_len = 0;
-    
-    ZEND_PARSE_PARAMETERS_START(0, 1)
-        Z_PARAM_OPTIONAL
-        Z_PARAM_STRING(name, name_len)
-    ZEND_PARSE_PARAMETERS_END();
+  char *name = NULL;
+  size_t name_len = 0;
 
-    snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
-    
-    const char *table_name = name ? name : NULL;
-    intern->table = table_create(table_name);
-    
-    if (!intern->table) {
-        zend_throw_exception(zend_ce_exception, "Failed to create table", 0);
-        RETURN_NULL();
-    }
+  ZEND_PARSE_PARAMETERS_START(0, 1)
+  Z_PARAM_OPTIONAL
+  Z_PARAM_STRING(name, name_len)
+  ZEND_PARSE_PARAMETERS_END();
 
-    php_snobol_table_register(intern->table);
-    
-    SNOBOL_LOG("Snobol_Table::__construct: table=%p name=%s", 
-               (void*)intern->table, table_name ? table_name : "(unnamed)");
+  snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
+
+  const char *table_name = name ? name : NULL;
+  intern->table = table_create(table_name);
+
+  if (!intern->table) {
+    zend_throw_exception(zend_ce_exception, "Failed to create table", 0);
+    RETURN_NULL();
+  }
+
+  php_snobol_table_register(intern->table);
+
+  SNOBOL_LOG("Snobol_Table::__construct: table=%p name=%s",
+             (void *)intern->table, table_name ? table_name : "(unnamed)");
 }
 
 /**
@@ -157,27 +163,27 @@ PHP_METHOD(Snobol_Table, __construct) {
  * @return Value, or null for an unset key.
  */
 PHP_METHOD(Snobol_Table, get) {
-    char *key;
-    size_t key_len;
-    
-    ZEND_PARSE_PARAMETERS_START(1, 1)
-        Z_PARAM_STRING(key, key_len)
-    ZEND_PARSE_PARAMETERS_END();
+  char *key;
+  size_t key_len;
 
-    snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
-    
-    if (!intern->table) {
-        zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
-        RETURN_NULL();
-    }
-    
-    const char *value = table_get(intern->table, key);
-    
-    if (!value) {
-        RETURN_NULL();
-    }
-    
-    RETVAL_STRING(value);
+  ZEND_PARSE_PARAMETERS_START(1, 1)
+  Z_PARAM_STRING(key, key_len)
+  ZEND_PARSE_PARAMETERS_END();
+
+  snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
+
+  if (!intern->table) {
+    zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
+    RETURN_NULL();
+  }
+
+  const char *value = table_get(intern->table, key);
+
+  if (!value) {
+    RETURN_NULL();
+  }
+
+  RETVAL_STRING(value);
 }
 
 /**
@@ -188,40 +194,40 @@ PHP_METHOD(Snobol_Table, get) {
  * @return true on success.
  */
 PHP_METHOD(Snobol_Table, set) {
-    char *key;
-    size_t key_len;
-    zval *value_zv;
-    
-    ZEND_PARSE_PARAMETERS_START(2, 2)
-        Z_PARAM_STRING(key, key_len)
-        Z_PARAM_ZVAL(value_zv)
-    ZEND_PARSE_PARAMETERS_END();
+  char *key;
+  size_t key_len;
+  zval *value_zv;
 
-    snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
-    
-    if (!intern->table) {
-        zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
-        RETURN_NULL();
-    }
-    
-    const char *val_to_set = NULL;
-    if (Z_TYPE_P(value_zv) == IS_NULL) {
-        val_to_set = NULL;
-    } else if (Z_TYPE_P(value_zv) == IS_STRING) {
-        val_to_set = Z_STRVAL_P(value_zv);
-    } else {
-        zend_throw_exception(zend_ce_exception, "Value must be string or null", 0);
-        RETURN_FALSE;
-    }
-    
-    bool result = table_set(intern->table, key, val_to_set);
-    
-    if (!result) {
-        zend_throw_exception(zend_ce_exception, "Failed to set table value", 0);
-        RETURN_FALSE;
-    }
-    
-    RETURN_TRUE;
+  ZEND_PARSE_PARAMETERS_START(2, 2)
+  Z_PARAM_STRING(key, key_len)
+  Z_PARAM_ZVAL(value_zv)
+  ZEND_PARSE_PARAMETERS_END();
+
+  snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
+
+  if (!intern->table) {
+    zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
+    RETURN_NULL();
+  }
+
+  const char *val_to_set = NULL;
+  if (Z_TYPE_P(value_zv) == IS_NULL) {
+    val_to_set = NULL;
+  } else if (Z_TYPE_P(value_zv) == IS_STRING) {
+    val_to_set = Z_STRVAL_P(value_zv);
+  } else {
+    zend_throw_exception(zend_ce_exception, "Value must be string or null", 0);
+    RETURN_FALSE;
+  }
+
+  bool result = table_set(intern->table, key, val_to_set);
+
+  if (!result) {
+    zend_throw_exception(zend_ce_exception, "Failed to set table value", 0);
+    RETURN_FALSE;
+  }
+
+  RETURN_TRUE;
 }
 
 /**
@@ -230,22 +236,22 @@ PHP_METHOD(Snobol_Table, set) {
  * @return true when the key is set.
  */
 PHP_METHOD(Snobol_Table, has) {
-    char *key;
-    size_t key_len;
-    
-    ZEND_PARSE_PARAMETERS_START(1, 1)
-        Z_PARAM_STRING(key, key_len)
-    ZEND_PARSE_PARAMETERS_END();
+  char *key;
+  size_t key_len;
 
-    snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
-    
-    if (!intern->table) {
-        zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
-        RETURN_FALSE;
-    }
-    
-    bool result = table_has(intern->table, key);
-    RETURN_BOOL(result);
+  ZEND_PARSE_PARAMETERS_START(1, 1)
+  Z_PARAM_STRING(key, key_len)
+  ZEND_PARSE_PARAMETERS_END();
+
+  snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
+
+  if (!intern->table) {
+    zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
+    RETURN_FALSE;
+  }
+
+  bool result = table_has(intern->table, key);
+  RETURN_BOOL(result);
 }
 
 /**
@@ -254,38 +260,38 @@ PHP_METHOD(Snobol_Table, has) {
  * @return true when the key existed and was removed.
  */
 PHP_METHOD(Snobol_Table, delete) {
-    char *key;
-    size_t key_len;
-    
-    ZEND_PARSE_PARAMETERS_START(1, 1)
-        Z_PARAM_STRING(key, key_len)
-    ZEND_PARSE_PARAMETERS_END();
+  char *key;
+  size_t key_len;
 
-    snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
-    
-    if (!intern->table) {
-        zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
-        RETURN_FALSE;
-    }
-    
-    bool result = table_delete(intern->table, key);
-    RETURN_BOOL(result);
+  ZEND_PARSE_PARAMETERS_START(1, 1)
+  Z_PARAM_STRING(key, key_len)
+  ZEND_PARSE_PARAMETERS_END();
+
+  snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
+
+  if (!intern->table) {
+    zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
+    RETURN_FALSE;
+  }
+
+  bool result = table_delete(intern->table, key);
+  RETURN_BOOL(result);
 }
 
 /**
  * @brief Table::clear(): void
  */
 PHP_METHOD(Snobol_Table, clear) {
-    ZEND_PARSE_PARAMETERS_NONE();
+  ZEND_PARSE_PARAMETERS_NONE();
 
-    snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
-    
-    if (!intern->table) {
-        zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
-        RETURN_NULL();
-    }
-    
-    table_clear(intern->table);
+  snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
+
+  if (!intern->table) {
+    zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
+    RETURN_NULL();
+  }
+
+  table_clear(intern->table);
 }
 
 /**
@@ -293,30 +299,29 @@ PHP_METHOD(Snobol_Table, clear) {
  * @return Number of set keys.
  */
 PHP_METHOD(Snobol_Table, size) {
-    ZEND_PARSE_PARAMETERS_NONE();
+  ZEND_PARSE_PARAMETERS_NONE();
 
-    snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
-    
-    if (!intern->table) {
-        zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
-        RETURN_LONG(0);
-    }
-    
-    size_t size = table_size(intern->table);
-    RETURN_LONG((zend_long)size);
+  snobol_table_php_t *intern = php_snobol_table_fetch(Z_OBJ_P(getThis()));
+
+  if (!intern->table) {
+    zend_throw_exception(zend_ce_exception, "Table not initialized", 0);
+    RETURN_LONG(0);
+  }
+
+  size_t size = table_size(intern->table);
+  RETURN_LONG((zend_long)size);
 }
 
 /* Method table */
 static const zend_function_entry snobol_table_methods[] = {
     PHP_ME(Snobol_Table, __construct, ai_table_construct, ZEND_ACC_PUBLIC)
-    PHP_ME(Snobol_Table, get, ai_table_get, ZEND_ACC_PUBLIC)
-    PHP_ME(Snobol_Table, set, ai_table_set, ZEND_ACC_PUBLIC)
-    PHP_ME(Snobol_Table, has, ai_table_has, ZEND_ACC_PUBLIC)
-    PHP_ME(Snobol_Table, delete, ai_table_delete, ZEND_ACC_PUBLIC)
-    PHP_ME(Snobol_Table, clear, ai_table_clear, ZEND_ACC_PUBLIC)
-    PHP_ME(Snobol_Table, size, ai_table_size, ZEND_ACC_PUBLIC)
-    PHP_FE_END
-};
+        PHP_ME(Snobol_Table, get, ai_table_get, ZEND_ACC_PUBLIC)
+            PHP_ME(Snobol_Table, set, ai_table_set, ZEND_ACC_PUBLIC)
+                PHP_ME(Snobol_Table, has, ai_table_has, ZEND_ACC_PUBLIC) PHP_ME(
+                    Snobol_Table, delete, ai_table_delete, ZEND_ACC_PUBLIC)
+                    PHP_ME(Snobol_Table, clear, ai_table_clear, ZEND_ACC_PUBLIC)
+                        PHP_ME(Snobol_Table, size, ai_table_size,
+                               ZEND_ACC_PUBLIC) PHP_FE_END};
 
 zend_class_entry *snobol_table_ce;
 
@@ -326,25 +331,28 @@ zend_class_entry *snobol_table_ce;
  * Table object or if the internal pointer has not been initialised.
  */
 snobol_table_t *php_snobol_get_table_from_zval(zval *zv) {
-    if (!zv || Z_TYPE_P(zv) != IS_OBJECT) return NULL;
-    zend_object *obj = Z_OBJ_P(zv);
-    if (!obj || obj->ce != snobol_table_ce) return NULL;
-    snobol_table_php_t *intern = php_snobol_table_fetch(obj);
-    return intern ? intern->table : NULL;
+  if (!zv || Z_TYPE_P(zv) != IS_OBJECT)
+    return NULL;
+  zend_object *obj = Z_OBJ_P(zv);
+  if (!obj || obj->ce != snobol_table_ce)
+    return NULL;
+  snobol_table_php_t *intern = php_snobol_table_fetch(obj);
+  return intern ? intern->table : NULL;
 }
 
 /** @brief Register the Snobol\Table class (MINIT). */
 void snobol_table_php_minit(void) {
-    SNOBOL_LOG("snobol_table_php_minit: START");
-    zend_class_entry ce;
+  SNOBOL_LOG("snobol_table_php_minit: START");
+  zend_class_entry ce;
 
-    memcpy(&snobol_table_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
-    snobol_table_object_handlers.offset = XtOffsetOf(snobol_table_php_t, std);
-    snobol_table_object_handlers.free_obj = snobol_table_php_free;
+  memcpy(&snobol_table_object_handlers, zend_get_std_object_handlers(),
+         sizeof(zend_object_handlers));
+  snobol_table_object_handlers.offset = XtOffsetOf(snobol_table_php_t, std);
+  snobol_table_object_handlers.free_obj = snobol_table_php_free;
 
-    INIT_CLASS_ENTRY(ce, "Snobol\\Table", snobol_table_methods);
-    snobol_table_ce = zend_register_internal_class(&ce);
-    snobol_table_ce->create_object = snobol_table_php_create;
-    
-    SNOBOL_LOG("snobol_table_php_minit: DONE");
+  INIT_CLASS_ENTRY(ce, "Snobol\\Table", snobol_table_methods);
+  snobol_table_ce = zend_register_internal_class(&ce);
+  snobol_table_ce->create_object = snobol_table_php_create;
+
+  SNOBOL_LOG("snobol_table_php_minit: DONE");
 }

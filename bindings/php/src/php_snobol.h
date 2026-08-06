@@ -46,7 +46,8 @@ PHP_MINIT_FUNCTION(snobol);
  * @param[out] out_len  Receives the bytecode length on success.
  * @return 0 on success, -1 on compilation failure (exception thrown).
  */
-int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *out_len);
+int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc,
+                            size_t *out_len);
 
 /**
  * @brief Compile a C AST node to core bytecode.
@@ -60,7 +61,8 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *
  * @param[out] out_len  Receives the bytecode length on success.
  * @return 0 on success, -1 on compilation failure (exception thrown).
  */
-int compile_ast_to_bytecode_wrapper(ast_node_t *ast, zval *options, uint8_t **out_bc, size_t *out_len);
+int compile_ast_to_bytecode_wrapper(ast_node_t *ast, zval *options,
+                                    uint8_t **out_bc, size_t *out_len);
 
 /** @brief Opaque core table type (snobol/table.h). */
 typedef struct snobol_table snobol_table_t;
@@ -85,10 +87,10 @@ size_t php_snobol_get_all_tables(snobol_table_t ***out_tables);
  * @param value   zval to store (copied, refcount bumped).
  */
 static zend_always_inline void snobol_assoc_zval(zval *arr, const char *key,
-                                                   size_t key_len, zval *value) {
-    zval copy;
-    ZVAL_COPY(&copy, value);
-    zend_hash_str_update(Z_ARRVAL_P(arr), key, key_len, &copy);
+                                                 size_t key_len, zval *value) {
+  zval copy;
+  ZVAL_COPY(&copy, value);
+  zend_hash_str_update(Z_ARRVAL_P(arr), key, key_len, &copy);
 }
 
 /**
@@ -104,30 +106,30 @@ static zend_always_inline void snobol_assoc_zval(zval *arr, const char *key,
  *       read from this struct at core offsets.
  */
 typedef struct snobol_pattern {
-    uint8_t *bc;
-    size_t bc_len;
-    /* Cached search metadata (derived once at compile time) */
-    snobol_search_meta_t meta;
-    bool meta_initialized;
-    /* Cached charclass range metadata */
-    snobol_range_meta_t *range_meta;
-    size_t range_meta_count;
-    /* Cached DFA for automaton-eligible patterns (Tier 7).
+  uint8_t *bc;
+  size_t bc_len;
+  /* Cached search metadata (derived once at compile time) */
+  snobol_search_meta_t meta;
+  bool meta_initialized;
+  /* Cached charclass range metadata */
+  snobol_range_meta_t *range_meta;
+  size_t range_meta_count;
+  /* Cached DFA for automaton-eligible patterns (Tier 7).
      * Built lazily on first Pattern::match() call; freed in dtor.
      * Independent of core struct snobol_pattern — never accessed via
      * snobol_pattern_get_automaton() which reads at wrong offsets. */
-    snobol_dfa_t *dfa;
-    /* Cached alt-literals trie for 'cat'|'dog'|'fox' patterns (Tier 5).
+  snobol_dfa_t *dfa;
+  /* Cached alt-literals trie for 'cat'|'dog'|'fox' patterns (Tier 5).
      * Built lazily on first searchAll/searchSplit call; freed in dtor. */
-    snobol_auto_trie_t *trie_cache;
-    /* Persistent search state reused across calls, avoiding per-call
+  snobol_auto_trie_t *trie_cache;
+  /* Persistent search state reused across calls, avoiding per-call
      * state create/destroy and DFA rebuild.  Lazily created. */
-    snobol_pattern_search_state_t *search_state;
-    /* Cached eval callbacks registered via setEvalCallbacks().
+  snobol_pattern_search_state_t *search_state;
+  /* Cached eval callbacks registered via setEvalCallbacks().
      * Stored as a PHP array mapping fn_id => callable.
      * Initialized to ZVAL_UNDEF; freed in dtor. */
-    zval eval_callbacks;
-    zend_object std;
+  zval eval_callbacks;
+  zend_object std;
 } snobol_pattern_t;
 
 /**
@@ -136,8 +138,8 @@ typedef struct snobol_pattern {
  * @param obj zend_object embedded in the pattern struct.
  * @return Pointer to the containing snobol_pattern_t.
  */
-static inline snobol_pattern_t* php_snobol_fetch(zend_object *obj) {
-    return (snobol_pattern_t *)((char *)(obj) - XtOffsetOf(snobol_pattern_t, std));
+static inline snobol_pattern_t *php_snobol_fetch(zend_object *obj) {
+  return (snobol_pattern_t *)((char *)(obj)-XtOffsetOf(snobol_pattern_t, std));
 }
 
 /**
@@ -147,17 +149,17 @@ static inline snobol_pattern_t* php_snobol_fetch(zend_object *obj) {
  * (no metrics, string captures, array-of-arrays result).
  */
 typedef struct php_snobol_match_options {
-    bool   metrics;    /* true to include _metrics hash */
-    int    captures;   /* 0='strings', 1='offsets'      */
-    int    result;     /* 0='arrays', 1='flat'          */
+  bool metrics; /* true to include _metrics hash */
+  int captures; /* 0='strings', 1='offsets'      */
+  int result;   /* 0='arrays', 1='flat'          */
 } php_snobol_match_options_t;
 
 /** @brief Capture materialization modes (the $options['captures'] value). */
 enum {
-    PHP_SNOBOL_CAPTURES_STRINGS = 0, /**< Captures as plain strings. */
-    PHP_SNOBOL_CAPTURES_OFFSETS = 1, /**< Captures as [offset, length] pairs. */
-    PHP_SNOBOL_RESULT_ARRAYS    = 0, /**< Result as array of match arrays. */
-    PHP_SNOBOL_RESULT_FLAT      = 1, /**< Result as parallel flat arrays. */
+  PHP_SNOBOL_CAPTURES_STRINGS = 0, /**< Captures as plain strings. */
+  PHP_SNOBOL_CAPTURES_OFFSETS = 1, /**< Captures as [offset, length] pairs. */
+  PHP_SNOBOL_RESULT_ARRAYS = 0,    /**< Result as array of match arrays. */
+  PHP_SNOBOL_RESULT_FLAT = 1,      /**< Result as parallel flat arrays. */
 };
 
 /**
@@ -170,7 +172,7 @@ enum {
  * @param opts       Destination struct, always fully populated.
  */
 void php_snobol_parse_match_options(zval *options_zv,
-                                     php_snobol_match_options_t *opts);
+                                    php_snobol_match_options_t *opts);
 
 /**
  * @brief Create a Snobol\SearchIterator for lazy match iteration.
@@ -183,9 +185,8 @@ void php_snobol_parse_match_options(zval *options_zv,
  * @param subject_len  Subject length in bytes.
  */
 void php_snobol_create_search_iterator(zval *return_value,
-                                        snobol_pattern_t *pattern,
-                                        const char *subject,
-                                        size_t subject_len);
+                                       snobol_pattern_t *pattern,
+                                       const char *subject, size_t subject_len);
 
 /**
  * @brief Create a Snobol\SplitIterator for lazy split iteration.
@@ -198,9 +199,8 @@ void php_snobol_create_search_iterator(zval *return_value,
  * @param subject_len  Subject length in bytes.
  */
 void php_snobol_create_split_iterator(zval *return_value,
-                                       snobol_pattern_t *pattern,
-                                       const char *subject,
-                                       size_t subject_len);
+                                      snobol_pattern_t *pattern,
+                                      const char *subject, size_t subject_len);
 
 /** @brief Register the Snobol\SplitIterator class (MINIT). */
 void snobol_split_iterator_minit(void);
@@ -220,10 +220,9 @@ extern zend_class_entry *snobol_split_iterator_ce;
  * @param result      zval to populate with the result array.
  * @param opts        Parsed match options.
  */
-void php_snobol_do_search_all(snobol_pattern_t *intern,
-                               const char *subject_val, size_t subject_len,
-                               zval *result,
-                               const php_snobol_match_options_t *opts);
+void php_snobol_do_search_all(snobol_pattern_t *intern, const char *subject_val,
+                              size_t subject_len, zval *result,
+                              const php_snobol_match_options_t *opts);
 
 /**
  * @brief Anchored first-match via the persistent search state.
@@ -240,9 +239,8 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
  * @return true and populates @p result on success; false on no match
  *         (@p result is uninitialised in that case).
  */
-bool php_snobol_do_match(snobol_pattern_t *intern,
-                          const char *subject_val, size_t subject_len,
-                          zval *result,
-                          const php_snobol_match_options_t *opts);
+bool php_snobol_do_match(snobol_pattern_t *intern, const char *subject_val,
+                         size_t subject_len, zval *result,
+                         const php_snobol_match_options_t *opts);
 
 #endif /* PHP_SNOBOL_H */
