@@ -1765,6 +1765,10 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
                 if (match_len == 0) match_len = 1;
                 last_match_end = match_start + match_len;
             }
+            /* A trailing zero-length match advances last_match_end past the
+             * subject; clamp so the remainder append cannot underflow. */
+            if (last_match_end > subject_len)
+                last_match_end = subject_len;
             snobol_buf_append(&out, subject_val + last_match_end,
                               subject_len - last_match_end);
 
@@ -1873,6 +1877,10 @@ PHP_METHOD(Snobol_Pattern, searchReplace) {
         last_match_end = search_offset;
     }
 
+    /* A trailing zero-length match advances last_match_end past the subject;
+     * clamp so the remainder append cannot underflow. */
+    if (last_match_end > subject_len)
+        last_match_end = subject_len;
     snobol_buf_append(&out, subject_val + last_match_end,
                       subject_len - last_match_end);
 
