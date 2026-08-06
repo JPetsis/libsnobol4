@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Pattern::searchReplace()` corrupted the heap on trailing zero-length
+  matches** (`bindings/php/src/snobol_pattern.c`): a zero-length match at
+  end-of-subject (BREAK-family patterns without the delimiter, EVAL patterns,
+  empty patterns) advanced `last_match_end` past `subject_len`; the final
+  remainder append then underflowed the length and `memcpy`'d past the
+  `snobol_buf` allocation (heap corruption / double-free / SIGABRT, verified
+  under valgrind). `last_match_end` is now clamped to `subject_len` in both
+  the batch fast path and the per-call loop. Found by the coverage-driven
+  PHP binding test suite.
+- **EVAL callbacks were ignored on the first `Pattern::match()` call**
+  (`core/src/api.c`): the lazy search-state VM init `memset`s `state->vm`
+  on first use, wiping the `eval_fn`/`eval_udata` wired by
+  `snobol_pattern_search_state_set_eval_fn()` before the search. The
+  callback pointer is now preserved across the init memset in
+  `snobol_pattern_search_ex()`, `snobol_pattern_search_ex_anchored()` and
+  `batch_run()`. Found by the coverage-driven EVAL callback tests.
 - **Parser leaked the label-name string on labelled patterns** (`core/src/parser.c`,
   `parse_statement`): `snobol_ast_create_label` copies the name and returns
   ownership to the caller, but the parser passed its malloc'd `label_name` to
