@@ -747,7 +747,15 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
   }
 
   if (!state->vm_inited) {
+    /* Preserve a pre-wired EVAL callback across the init memset: callers
+     * may set it via snobol_pattern_search_state_set_eval_fn() before the
+     * first search call, and a wipe here silently disables host callbacks. */
+    bool (*saved_eval_fn)(int fn_id, const char *s, size_t start, size_t end,
+                          void *udata) = state->vm.eval_fn;
+    void *saved_eval_udata = state->vm.eval_udata;
     memset(&state->vm, 0, sizeof(VM));
+    state->vm.eval_fn = saved_eval_fn;
+    state->vm.eval_udata = saved_eval_udata;
     state->vm.bc = (uint8_t *)state->bc;
     state->vm.bc_len = state->bc_len;
     state->vm.pattern = state->pattern;
@@ -865,7 +873,12 @@ snobol_match_t *snobol_pattern_search_ex_anchored(
   }
 
   if (!state->vm_inited) {
+    bool (*saved_eval_fn)(int fn_id, const char *s, size_t start, size_t end,
+                          void *udata) = state->vm.eval_fn;
+    void *saved_eval_udata = state->vm.eval_udata;
     memset(&state->vm, 0, sizeof(VM));
+    state->vm.eval_fn = saved_eval_fn;
+    state->vm.eval_udata = saved_eval_udata;
     state->vm.bc = (uint8_t *)state->bc;
     state->vm.bc_len = state->bc_len;
     state->vm.pattern = state->pattern;
@@ -1010,7 +1023,12 @@ static bool batch_run(snobol_pattern_search_state_t *state, const char *subject,
   const snobol_search_meta_t *meta = &state->meta;
 
   if (!state->vm_inited) {
+    bool (*saved_eval_fn)(int fn_id, const char *s, size_t start, size_t end,
+                          void *udata) = state->vm.eval_fn;
+    void *saved_eval_udata = state->vm.eval_udata;
     memset(vm, 0, sizeof(VM));
+    vm->eval_fn = saved_eval_fn;
+    vm->eval_udata = saved_eval_udata;
     vm->bc = (uint8_t *)state->bc;
     vm->bc_len = state->bc_len;
     vm->pattern = state->pattern;
