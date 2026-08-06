@@ -2846,6 +2846,45 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
           continue;
         }
         if (op == OP_POS || op == OP_RPOS || op == OP_TAB || op == OP_RTAB) {
+          /* Position constraints must be validated, mirroring the full VM:
+           * POS/RPOS fail unless the cursor is exactly at the codepoint
+           * target; TAB fails if the target is beyond the subject or the
+           * cursor is past it (then moves the cursor); RTAB fails if the
+           * cursor is past the target (then moves the cursor). */
+          uint32_t n = ((uint32_t)bc[ip + 1] << 24) |
+                       ((uint32_t)bc[ip + 2] << 16) |
+                       ((uint32_t)bc[ip + 3] << 8) | (uint32_t)bc[ip + 4];
+          size_t target;
+          if (op == OP_POS || op == OP_TAB) {
+            target = 0;
+            for (uint32_t i = 0; i < n && target < subject_len; i++) {
+              uint32_t cp;
+              int by = 1;
+              if (!utf8_peek_next(subject, subject_len, target, &cp, &by))
+                break;
+              target += (size_t)by;
+            }
+          } else {
+            target = subject_len;
+            for (uint32_t i = 0; i < n && target > 0; i++) {
+              target--;
+              while (target > 0 &&
+                     ((unsigned char)subject[target] & 0xC0) == 0x80)
+                target--;
+            }
+          }
+          if (op == OP_POS || op == OP_RPOS) {
+            if (tp != target)
+              goto pike_die;
+          } else if (op == OP_TAB) {
+            if ((target >= subject_len && n > 0) || tp > target)
+              goto pike_die;
+            tp = target;
+          } else { /* OP_RTAB */
+            if (tp > target)
+              goto pike_die;
+            tp = target;
+          }
           ip += 5;
           continue;
         }

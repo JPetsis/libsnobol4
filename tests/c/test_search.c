@@ -1020,12 +1020,15 @@ void test_cov_pike_main_loop(void) {
   test_suite("Coverage: pike main-loop opcodes");
 
   /* Layout:
-   *   0: NOP 1: FENCE 2: ANCHOR(0) 4: POS(0) 9: TAB(1) 14: RTAB(0)
-   *   19: RPOS(0) 24: CAP_START(0) 26: CAP_END(0) 28: ASSIGN(0,0)
+   *   0: NOP 1: FENCE 2: ANCHOR(0) 4: POS(0) 9: TAB(0) 14: RTAB(5)
+   *   19: RPOS(5) 24: CAP_START(0) 26: CAP_END(0) 28: ASSIGN(0,0)
    *   32: SPLIT(a=41, b=52)  41: LIT(inline 'a') 51: ACCEPT
    *   52: SPAN(1) 55: NOTANY(1) 58: ANY(1) 61: BREAK(1) 64: BREAKX(1)
    *   67: LEN(1) 72: FAIL 73: ACCEPT
-   * Range data at 100: CpRange('a','a'). */
+   * Range data at 100: CpRange('a','a').
+   * The position ops are all satisfiable at cursor 0 on a 5-byte subject
+   * (POS(0), TAB(0), RTAB(5)→target 0, RPOS(5)→target 0) and keep the
+   * cursor at 0 so the SPLIT/LIT branch can match. */
   uint8_t bc[256];
   size_t ip = 0;
   bc[ip++] = OP_NOP;
@@ -1035,11 +1038,11 @@ void test_cov_pike_main_loop(void) {
   bc[ip++] = OP_POS;
   covt_emit_u32_be(bc, &ip, 0);
   bc[ip++] = OP_TAB;
-  covt_emit_u32_be(bc, &ip, 1);
+  covt_emit_u32_be(bc, &ip, 0);
   bc[ip++] = OP_RTAB;
-  covt_emit_u32_be(bc, &ip, 0);
+  covt_emit_u32_be(bc, &ip, 5);
   bc[ip++] = OP_RPOS;
-  covt_emit_u32_be(bc, &ip, 0);
+  covt_emit_u32_be(bc, &ip, 5);
   bc[ip++] = OP_CAP_START;
   bc[ip++] = 0;
   bc[ip++] = OP_CAP_END;

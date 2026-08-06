@@ -309,6 +309,61 @@ static void pike_test_breakx_retry(void) {
   snobol_pattern_free(p);
 }
 
+/* Mid-pattern position constraints: pike must validate POS/RPOS/TAB/RTAB
+ * instead of skipping them as no-ops.  'ab' moves the cursor to 2, so:
+ *   POS(5)  → target 5  → fail (cursor != 5)
+ *   TAB(5)  → target 5 ≥ len 3 → fail
+ *   RPOS(0) → target 3  → fail (cursor != 3)
+ *   RTAB(2) → target 1  → fail (cursor past target)
+ * while POS(2) and RTAB(1) are satisfied and must still match. */
+static void pike_test_position_ops(void) {
+  const char *subject = "abc";
+  snobol_search_result_t r;
+
+  struct {
+    ast_node_t *pos_op;
+    const char *label;
+  } cases[] = {
+      {snobol_ast_create_pos(5), "POS(5)"},
+      {snobol_ast_create_tab(5), "TAB(5)"},
+      {snobol_ast_create_rpos(0), "RPOS(0)"},
+      {snobol_ast_create_rtab(2), "RTAB(2)"},
+      {snobol_ast_create_pos(2), "POS(2)"},
+      {snobol_ast_create_rtab(1), "RTAB(1)"},
+  };
+  const bool expect[] = {false, false, false, false, true, true};
+
+  for (size_t i = 0; i < 6; i++) {
+    ast_node_t **pp = (ast_node_t **)malloc(3 * sizeof(ast_node_t *));
+    pp[0] = snobol_ast_create_lit("ab", 2);
+    pp[1] = cases[i].pos_op;
+    pp[2] = snobol_ast_create_lit("c", 1);
+    ast_node_t *root = snobol_ast_create_concat(pp, 3);
+    snobol_pattern_t *p = pike_make_pattern(root);
+    snobol_ast_free(root);
+    if (!p) {
+      pike_assert(false, "position-op compile");
+      continue;
+    }
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+    size_t rc = 0;
+    const snobol_range_meta_t *rm = snobol_pattern_get_range_meta(p, &rc);
+    bool ok = pike_scan(snobol_pattern_get_bc(p),
+                        snobol_pattern_get_bc_len(p), subject, 3, meta, rm, rc,
+                        NULL, &r);
+    if (expect[i]) {
+      pike_assert(ok, "position-op positive control matches");
+      pike_assert(r.match_start == 0 && r.match_end == 3,
+                  "position-op positive control spans subject");
+    } else {
+      char msg[64];
+      snprintf(msg, sizeof(msg), "pike enforces %s", cases[i].label);
+      pike_assert(!ok, msg);
+    }
+    snobol_pattern_free(p);
+  }
+}
+
 void test_pike_scan_suite(void) {
   test_suite("Search: Pike Scan");
   pike_test_count = 0;
@@ -320,6 +375,7 @@ void test_pike_scan_suite(void) {
   pike_test_multi_capture_alt();
   pike_test_ci_cyrillic();
   pike_test_breakx_retry();
+  pike_test_position_ops();
   pike_test_overflow_long();
   pike_test_overflow_short();
   test_assert(pike_test_pass == pike_test_count, "pike scan: all tests pass");
