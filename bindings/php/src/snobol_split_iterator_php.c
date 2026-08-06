@@ -7,6 +7,16 @@
 
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
+/**
+ * @file snobol_split_iterator_php.c
+ * @brief The Snobol\SplitIterator class: lazy split iteration (backing
+ *        Pattern::searchSplitGenerator()).
+ *
+ * Segments are materialized one at a time via the lean tokenize API
+ * (snobol_pattern_search_next), so early breaks pay nothing for the
+ * remaining delimiters.
+ */
+
 zend_class_entry *snobol_split_iterator_ce;
 extern zend_class_entry *snobol_pattern_ce;
 
@@ -30,6 +40,7 @@ snobol_split_iterator_t *php_si_split_fetch(zend_object *obj) {
     return (snobol_split_iterator_t *)((char *)(obj) - XtOffsetOf(snobol_split_iterator_t, std));
 }
 
+/** @brief Object dtor: releases the current segment and the search state. */
 static void si_dtor(zend_object *object) {
     snobol_split_iterator_t *iter = php_si_split_fetch(object);
     zval_ptr_dtor(&iter->current_segment);
@@ -40,6 +51,7 @@ static void si_dtor(zend_object *object) {
     zend_object_std_dtor(object);
 }
 
+/** @brief Object factory for Snobol\SplitIterator. */
 static zend_object *si_create(zend_class_entry *ce) {
     snobol_split_iterator_t *iter = zend_object_alloc(sizeof(snobol_split_iterator_t), ce);
     zend_object_std_init(&iter->std, ce);
@@ -49,6 +61,9 @@ static zend_object *si_create(zend_class_entry *ce) {
     return &iter->std;
 }
 
+/** @brief Materialize the next segment (delimiter match or trailing
+ *  remainder) into iter->current_segment.
+ *  @return true when a delimiter match was found; false at the end. */
 static bool si_fetch_next(snobol_split_iterator_t *iter) {
     if (!iter->state)
         return false;
@@ -84,6 +99,11 @@ static bool si_fetch_next(snobol_split_iterator_t *iter) {
     return found;
 }
 
+/**
+ * @brief SplitIterator::current(): mixed
+ *  The current segment string, or null before the first fetch.
+ * @return Segment or null.
+ */
 PHP_METHOD(Snobol_SplitIterator, current) {
     snobol_split_iterator_t *iter = php_si_split_fetch(Z_OBJ_P(ZEND_THIS));
     if (Z_TYPE(iter->current_segment) == IS_STRING) {
@@ -92,11 +112,21 @@ PHP_METHOD(Snobol_SplitIterator, current) {
     RETURN_NULL();
 }
 
+/**
+ * @brief SplitIterator::key(): int
+ *  Zero-based segment index.
+ * @return Index.
+ */
 PHP_METHOD(Snobol_SplitIterator, key) {
     snobol_split_iterator_t *iter = php_si_split_fetch(Z_OBJ_P(ZEND_THIS));
     RETURN_LONG(iter->key);
 }
 
+/**
+ * @brief SplitIterator::next(): void
+ *  Advances to the next segment; invalidates the iterator after the
+ *  trailing segment is consumed.
+ */
 PHP_METHOD(Snobol_SplitIterator, next) {
     snobol_split_iterator_t *iter = php_si_split_fetch(Z_OBJ_P(ZEND_THIS));
     iter->key++;
@@ -116,11 +146,19 @@ PHP_METHOD(Snobol_SplitIterator, next) {
         iter->valid = false;
 }
 
+/**
+ * @brief SplitIterator::valid(): bool
+ * @return true while a segment is current.
+ */
 PHP_METHOD(Snobol_SplitIterator, valid) {
     snobol_split_iterator_t *iter = php_si_split_fetch(Z_OBJ_P(ZEND_THIS));
     RETURN_BOOL(iter->valid);
 }
 
+/**
+ * @brief SplitIterator::rewind(): void
+ *  Resets the segment cursor and recreates the search state.
+ */
 PHP_METHOD(Snobol_SplitIterator, rewind) {
     snobol_split_iterator_t *iter = php_si_split_fetch(Z_OBJ_P(ZEND_THIS));
     iter->key = 0;
@@ -147,6 +185,12 @@ ZEND_BEGIN_ARG_INFO_EX(ai_split_fromPattern, 0, 0, 2)
     ZEND_ARG_TYPE_INFO(0, subject, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
+/**
+ * @brief SplitIterator::fromPattern(Pattern $pattern, string $subject): SplitIterator
+ *  Static constructor; throws for un-compiled patterns.
+ * @param pattern, subject
+ * @return Iterator object.
+ */
 PHP_METHOD(Snobol_SplitIterator, fromPattern) {
     zval *pattern_zv;
     zend_string *subject;
@@ -207,6 +251,7 @@ static const zend_function_entry snobol_split_iterator_methods[] = {
     PHP_FE_END
 };
 
+/** @brief Implementation of php_snobol_create_split_iterator() (see php_snobol.h). */
 void php_snobol_create_split_iterator(zval *return_value,
                                        snobol_pattern_t *pattern,
                                        const char *subject,
@@ -238,6 +283,7 @@ void php_snobol_create_split_iterator(zval *return_value,
     }
 }
 
+/** @brief Register the Snobol\SplitIterator class as an Iterator (MINIT). */
 void snobol_split_iterator_minit(void) {
     memcpy(&snobol_split_iterator_handlers, zend_get_std_object_handlers(),
            sizeof(zend_object_handlers));

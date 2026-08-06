@@ -42,6 +42,7 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
 extern zend_class_entry *snobol_pattern_ce;
 static zend_object_handlers snobol_pattern_object_handlers;
 
+/** @brief Free a Pattern object: releases bytecode, caches, search state and eval callbacks. */
 static void php_snobol_pattern_dtor(zend_object *object) {
     snobol_pattern_t *intern = php_snobol_fetch(object);
     SNOBOL_LOG("php_snobol_pattern_dtor: intern=%p, bc=%p", (void*)intern, (void*)intern->bc);
@@ -79,6 +80,7 @@ static void php_snobol_pattern_dtor(zend_object *object) {
     SNOBOL_LOG("php_snobol_pattern_dtor: done");
 }
 
+/** @brief Object factory for Snobol\Pattern: zeroes the internals and installs handlers. */
 static zend_object *snobol_pattern_create(zend_class_entry *ce) {
     snobol_pattern_t *intern = zend_object_alloc(sizeof(snobol_pattern_t), ce);
     SNOBOL_LOG("snobol_pattern_create: intern=%p", (void*)intern);
@@ -152,6 +154,7 @@ ZEND_END_ARG_INFO()
 
 /* Parse the $options array into a php_snobol_match_options_t.
  * Fields not present in the array keep their default (legacy) value. */
+/** @brief Implementation of php_snobol_parse_match_options() (see php_snobol.h). */
 void php_snobol_parse_match_options(zval *options_zv,
                                      php_snobol_match_options_t *opts) {
     opts->metrics  = false;
@@ -182,6 +185,8 @@ void php_snobol_parse_match_options(zval *options_zv,
 
 /* PHP Methods */
 
+/** @brief Pattern::compileFromAst(array $ast, ?array $options = null): Pattern
+ *  Compiles a Builder-format PHP AST to bytecode and returns a Pattern. */
 PHP_METHOD(Snobol_Pattern, compileFromAst) {
     zval *ast;
     zval *options = NULL;
@@ -321,12 +326,14 @@ PHP_METHOD(Snobol_Pattern, fromString) {
     SNOBOL_LOG("Snobol_Pattern::fromString: SUCCESS, intern=%p, bc=%p, len=%zu", (void*)intern, (void*)bc, bc_len);
 }
 
+/** @brief Growable output buffer used by php_snobol_emit_cb(). */
 typedef struct {
-    char *buf;
-    size_t len;
-    size_t cap;
+    char *buf;  /**< Heap-allocated buffer (erealloc'd). */
+    size_t len; /**< Bytes used. */
+    size_t cap; /**< Allocated capacity. */
 } EmitBuf;
 
+/** @brief Emit callback for the legacy search-VM path: appends to a growable buffer. */
 static void php_snobol_emit_cb(const char *data, size_t len, void *udata) {
     EmitBuf *eb = (EmitBuf *)udata;
     if (eb->len + len > eb->cap) {
@@ -492,6 +499,9 @@ bool php_snobol_do_match(snobol_pattern_t *intern,
     return true;
 }
 
+/** @brief Pattern::match(string $subject, ?array $options = null): array|false
+ *  Anchored first match. Literal-only patterns take a direct memcmp fast
+ *  path; everything else routes through the persistent search state. */
 PHP_METHOD(Snobol_Pattern, match) {
     zend_string *input;
     zval *options = NULL;
@@ -573,6 +583,9 @@ PHP_METHOD(Snobol_Pattern, match) {
     RETURN_FALSE;
 }
 
+/** @brief Pattern::subst(string $subject, string $template, ?array $tables = null): string
+ *  Replaces every match with the compiled template (captures, format specs,
+ *  optional table bindings) in a single pass. */
 PHP_METHOD(Snobol_Pattern, subst) {
     zend_string *subject, *tpl_str;
     zval *tables_zval = NULL;
@@ -743,6 +756,8 @@ PHP_METHOD(Snobol_Pattern, subst) {
     snobol_buf_free(&out);
 }
 
+/** @brief Pattern::setEvalCallbacks(array $callbacks): true
+ *  Caches the fn_id => callable map on the pattern for OP_EVAL dispatch. */
 PHP_METHOD(Snobol_Pattern, setEvalCallbacks) {
     zval *callbacks;
     ZEND_PARSE_PARAMETERS_START(1,1)
@@ -764,6 +779,8 @@ PHP_METHOD(Snobol_Pattern, setEvalCallbacks) {
     RETURN_TRUE;
 }
 
+/** @brief Pattern::setJit(bool $enabled): true
+ *  Accepted for API compatibility; JIT state is managed by the core. */
 PHP_METHOD(Snobol_Pattern, setJit) {
     bool enabled;
     ZEND_PARSE_PARAMETERS_START(1,1)
@@ -1043,6 +1060,7 @@ static bool php_snobol_try_batch(
  *
  * Batch-search fast path: for eligible patterns, snobol_pattern_search_batch()
  * collects all matches in a single pass, eliminating per-match API overhead. */
+/** @brief Implementation of php_snobol_do_search_all() (see php_snobol.h). */
 void php_snobol_do_search_all(snobol_pattern_t *intern,
                                 const char *subject_val, size_t subject_len,
                                 zval *result,
@@ -1245,6 +1263,8 @@ void php_snobol_do_search_all(snobol_pattern_t *intern,
  * Find all non-overlapping matches using one native C search loop.
  * Returns an array of match-result arrays (same structure as match()).
  */
+/** @brief Pattern::searchAll(string $subject, ?array $options = null): array
+ *  All non-overlapping matches via the shared search loop. */
 PHP_METHOD(Snobol_Pattern, searchAll) {
     zend_string *subject;
     zval *options = NULL;
@@ -1363,11 +1383,13 @@ PHP_METHOD(Snobol_Pattern, matchLiteral) {
  * pairs — zero zend_string allocation for token data.
  */
 
+/** @brief One recorded match as a subject span [start, end). */
 typedef struct {
-    size_t start;
-    size_t end;
+    size_t start; /**< Absolute subject offset of the match start. */
+    size_t end;   /**< Absolute subject offset of the match end. */
 } snobol_match_record_t;
 
+/** @brief SNOBOL zero-length-match advance: empty matches consume one byte. */
 static inline size_t snobol_searchsplit_advance_len(size_t m) {
     return m == 0 ? 1 : m;
 }
@@ -1550,6 +1572,8 @@ PHP_METHOD(Snobol_Pattern, searchSplit) {
         subject_len - last_match_end);
 }
 
+/** @brief Pattern::searchSplitOffsets(string $subject, ?array $options = null): array
+ *  Split segments as [offset, length] pairs; no segment strings allocated. */
 PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
     zend_string *subject;
     zval *options = NULL;
@@ -1654,6 +1678,8 @@ PHP_METHOD(Snobol_Pattern, searchSplitOffsets) {
  * Example: subject "a b c", pattern "' '" (split on space)
  *   => [1, 3, 5]   (segments: "a", "b", "c")
  */
+/** @brief Pattern::searchSplitCuts(string $subject): array
+ *  Flat array of cut points: each match's end position. */
 PHP_METHOD(Snobol_Pattern, searchSplitCuts) {
     zend_string *subject;
     ZEND_PARSE_PARAMETERS_START(1,1)
@@ -1969,6 +1995,7 @@ static const zend_function_entry snobol_pattern_methods[] = {
 
 zend_class_entry *snobol_pattern_ce;
 
+/** @brief Register the Snobol\Pattern class (MINIT). */
 void snobol_pattern_minit(void) {
     SNOBOL_LOG("snobol_pattern_minit: START");
     zend_class_entry ce;
@@ -1987,6 +2014,9 @@ void snobol_pattern_minit(void) {
 static ast_node_t* php_ast_to_c(zval *php_ast);
 
 /* Convert PHP AST array to C AST */
+/** @brief Convert a PHP Builder-format AST array into a core C AST node.
+ *  @return Heap-allocated node (or NULL for unknown/malformed nodes);
+ *          the caller owns the result. */
 static ast_node_t* php_ast_to_c(zval *php_ast) {
     if (Z_TYPE_P(php_ast) != IS_ARRAY) {
         return NULL;
@@ -2246,6 +2276,7 @@ static ast_node_t* php_ast_to_c(zval *php_ast) {
 }
 
 /* PHP AST compilation - converts PHP Builder AST to C AST then compiles */
+/** @brief Implementation of compile_ast_to_bytecode() (see php_snobol.h). */
 int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *out_len) {
     /* Convert PHP AST to C AST */
     ast_node_t *c_ast = php_ast_to_c(ast);
@@ -2276,6 +2307,7 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc, size_t *
  * The PHP-side duplicate has been removed; template compilation is
  * handled entirely by the core. */
 #if 0 /* REMOVED: duplicate template compiler – delegate to core */
+/** @brief Placeholder for a removed template compiler (see core/compiler.c). */
 int compile_template_to_bytecode_REMOVED(const char *tpl, size_t len, uint8_t **out_bc, size_t *out_len) {
     SNOBOL_LOG("compile_template_to_bytecode START: tpl='%.*s'", (int)len, tpl);
     CodeBuf cb;

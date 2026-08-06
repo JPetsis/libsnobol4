@@ -26,6 +26,7 @@ typedef struct {
 extern zend_class_entry *snobol_table_ce;
 static zend_object_handlers snobol_table_object_handlers;
 
+/** @brief Recover the snobol_table_php_t from a zend_object pointer. */
 static inline snobol_table_php_t* php_snobol_table_fetch(zend_object *obj) {
     return (snobol_table_php_t *)((char *)(obj) - XtOffsetOf(snobol_table_php_t, std));
 }
@@ -35,6 +36,7 @@ static snobol_table_t **global_php_tables = NULL;
 static size_t global_php_table_count = 0;
 static size_t global_php_table_cap = 0;
 
+/** @brief Add a table to the process-global registry (grows the array). */
 static void php_snobol_table_register(snobol_table_t *tbl) {
     if (global_php_table_count == global_php_table_cap) {
         global_php_table_cap = global_php_table_cap ? global_php_table_cap * 2 : 16;
@@ -43,6 +45,7 @@ static void php_snobol_table_register(snobol_table_t *tbl) {
     global_php_tables[global_php_table_count++] = tbl;
 }
 
+/** @brief Remove a table from the registry (used by the dtor). */
 static void php_snobol_table_unregister(snobol_table_t *tbl) {
     for (size_t i = 0; i < global_php_table_count; i++) {
         if (global_php_tables[i] == tbl) {
@@ -53,11 +56,13 @@ static void php_snobol_table_unregister(snobol_table_t *tbl) {
     }
 }
 
+/** @brief Implementation of php_snobol_get_all_tables() (see php_snobol.h). */
 size_t php_snobol_get_all_tables(snobol_table_t ***out_tables) {
     if (out_tables) *out_tables = global_php_tables;
     return global_php_table_count;
 }
 
+/** @brief Object dtor: unregisters and releases the core table. */
 static void snobol_table_php_free(zend_object *object) {
     snobol_table_php_t *intern = php_snobol_table_fetch(object);
     SNOBOL_LOG("snobol_table_php_free: intern=%p table=%p", (void*)intern, (void*)intern->table);
@@ -72,6 +77,7 @@ static void snobol_table_php_free(zend_object *object) {
     SNOBOL_LOG("snobol_table_php_free: done");
 }
 
+/** @brief Object factory for Snobol\Table. */
 static zend_object *snobol_table_php_create(zend_class_entry *ce) {
     snobol_table_php_t *intern = zend_object_alloc(sizeof(snobol_table_php_t), ce);
     SNOBOL_LOG("snobol_table_php_create: intern=%p", (void*)intern);
@@ -115,6 +121,11 @@ ZEND_END_ARG_INFO()
 
 /* PHP Methods */
 
+/**
+ * @brief Table::__construct(?string $name = null)
+ *  Creates the core table (optionally named) and registers it.
+ * @param name
+ */
 PHP_METHOD(Snobol_Table, __construct) {
     char *name = NULL;
     size_t name_len = 0;
@@ -140,6 +151,11 @@ PHP_METHOD(Snobol_Table, __construct) {
                (void*)intern->table, table_name ? table_name : "(unnamed)");
 }
 
+/**
+ * @brief Table::get(string $key): ?string
+ * @param key
+ * @return Value, or null for an unset key.
+ */
 PHP_METHOD(Snobol_Table, get) {
     char *key;
     size_t key_len;
@@ -164,6 +180,13 @@ PHP_METHOD(Snobol_Table, get) {
     RETVAL_STRING(value);
 }
 
+/**
+ * @brief Table::set(string $key, ?string $value): bool
+ *  Setting null deletes the key (SNOBOL semantics). Non-string, non-null
+ *  values are rejected with an Exception.
+ * @param key, value
+ * @return true on success.
+ */
 PHP_METHOD(Snobol_Table, set) {
     char *key;
     size_t key_len;
@@ -201,6 +224,11 @@ PHP_METHOD(Snobol_Table, set) {
     RETURN_TRUE;
 }
 
+/**
+ * @brief Table::has(string $key): bool
+ * @param key
+ * @return true when the key is set.
+ */
 PHP_METHOD(Snobol_Table, has) {
     char *key;
     size_t key_len;
@@ -220,6 +248,11 @@ PHP_METHOD(Snobol_Table, has) {
     RETURN_BOOL(result);
 }
 
+/**
+ * @brief Table::delete(string $key): bool
+ * @param key
+ * @return true when the key existed and was removed.
+ */
 PHP_METHOD(Snobol_Table, delete) {
     char *key;
     size_t key_len;
@@ -239,6 +272,9 @@ PHP_METHOD(Snobol_Table, delete) {
     RETURN_BOOL(result);
 }
 
+/**
+ * @brief Table::clear(): void
+ */
 PHP_METHOD(Snobol_Table, clear) {
     ZEND_PARSE_PARAMETERS_NONE();
 
@@ -252,6 +288,10 @@ PHP_METHOD(Snobol_Table, clear) {
     table_clear(intern->table);
 }
 
+/**
+ * @brief Table::size(): int
+ * @return Number of set keys.
+ */
 PHP_METHOD(Snobol_Table, size) {
     ZEND_PARSE_PARAMETERS_NONE();
 
@@ -293,6 +333,7 @@ snobol_table_t *php_snobol_get_table_from_zval(zval *zv) {
     return intern ? intern->table : NULL;
 }
 
+/** @brief Register the Snobol\Table class (MINIT). */
 void snobol_table_php_minit(void) {
     SNOBOL_LOG("snobol_table_php_minit: START");
     zend_class_entry ce;

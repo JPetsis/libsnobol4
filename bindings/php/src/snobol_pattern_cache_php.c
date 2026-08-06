@@ -5,6 +5,12 @@
 
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
+/**
+ * @file snobol_pattern_cache_php.c
+ * @brief The Snobol\PatternCache class: an LRU cache with a per-key
+ *        factory callback (get() computes and caches on miss).
+ */
+
 #define PCACHE_DEFAULT_CAPACITY 128
 
 zend_class_entry *snobol_pattern_cache_ce;
@@ -39,6 +45,7 @@ static zend_object *php_pcache_create(zend_class_entry *ce) {
     return &intern->std;
 }
 
+/** @brief Evict the least-recently-used entry (oldest in access_order). */
 static void php_pcache_evict_lru(snobol_pattern_cache_php_t *intern) {
     HashTable *ao = Z_ARRVAL_P(&intern->access_order);
     if (zend_hash_num_elements(ao) == 0) return;
@@ -64,6 +71,7 @@ static void php_pcache_evict_lru(snobol_pattern_cache_php_t *intern) {
     }
 }
 
+/** @brief Move a key to the back of the LRU access order (no-op if absent). */
 static void php_pcache_touch(snobol_pattern_cache_php_t *intern, const char *key, size_t key_len) {
     HashTable *ao = Z_ARRVAL_P(&intern->access_order);
     uint32_t count = zend_hash_num_elements(ao);
@@ -119,6 +127,11 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(ai_pcache_size, 0, 0, 0)
 ZEND_END_ARG_INFO()
 
+/**
+ * @brief PatternCache::__construct(?int $capacity = null)
+ *  Capacities below 1 raise ValueError.
+ * @param capacity
+ */
 PHP_METHOD(Snobol_PatternCache, __construct) {
     zend_long capacity = PCACHE_DEFAULT_CAPACITY;
     ZEND_PARSE_PARAMETERS_START(0, 1)
@@ -136,6 +149,14 @@ PHP_METHOD(Snobol_PatternCache, __construct) {
     intern->capacity = capacity;
 }
 
+/**
+ * @brief PatternCache::get(string $key, callable $factory): mixed
+ *  Returns the cached value on hit (refreshing LRU order); otherwise
+ *  calls the factory, caches and returns its result. Factory exceptions
+ *  propagate and nothing is cached.
+ * @param key, factory
+ * @return Cached/factory value.
+ */
 PHP_METHOD(Snobol_PatternCache, get) {
     char *key; size_t key_len;
     zend_fcall_info fci;
@@ -181,6 +202,11 @@ PHP_METHOD(Snobol_PatternCache, get) {
     }
 }
 
+/**
+ * @brief PatternCache::has(string $key): bool
+ * @param key
+ * @return true when the key is cached.
+ */
 PHP_METHOD(Snobol_PatternCache, has) {
     char *key; size_t key_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -191,6 +217,10 @@ PHP_METHOD(Snobol_PatternCache, has) {
     RETURN_BOOL(zend_hash_str_exists(Z_ARRVAL_P(&intern->cache), key, key_len));
 }
 
+/**
+ * @brief PatternCache::clear(): void
+ *  Empties the cache and the LRU access order.
+ */
 PHP_METHOD(Snobol_PatternCache, clear) {
     ZEND_PARSE_PARAMETERS_NONE();
     snobol_pattern_cache_php_t *intern = php_pcache_fetch(Z_OBJ_P(getThis()));
@@ -198,6 +228,11 @@ PHP_METHOD(Snobol_PatternCache, clear) {
     zend_hash_clean(Z_ARRVAL_P(&intern->access_order));
 }
 
+/**
+ * @brief PatternCache::size(): int
+ *  Number of cached entries.
+ * @return Entry count.
+ */
 PHP_METHOD(Snobol_PatternCache, size) {
     ZEND_PARSE_PARAMETERS_NONE();
     snobol_pattern_cache_php_t *intern = php_pcache_fetch(Z_OBJ_P(getThis()));
@@ -213,6 +248,7 @@ static const zend_function_entry snobol_pattern_cache_methods[] = {
     PHP_FE_END
 };
 
+/** @brief Register the Snobol\PatternCache class (MINIT). */
 void snobol_pattern_cache_php_minit(void) {
     zend_class_entry ce;
     memcpy(&snobol_pattern_cache_object_handlers, zend_get_std_object_handlers(),

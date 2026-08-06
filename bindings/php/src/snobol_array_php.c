@@ -8,6 +8,13 @@
 
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
+/**
+ * @file snobol_array_php.c
+ * @brief The Snobol\Array_ internal class: marshals a core snobol_array_t
+ *        to PHP and keeps a process-global registry of live arrays.
+ */
+
+/** @brief Object struct: core array pointer plus the zend_object tail. */
 typedef struct {
     snobol_array_t *array;
     zend_object std;
@@ -16,6 +23,7 @@ typedef struct {
 extern zend_class_entry *snobol_array_ce;
 static zend_object_handlers snobol_array_object_handlers;
 
+/** @brief Recover the snobol_array_php_t from a zend_object pointer. */
 static inline snobol_array_php_t* php_snobol_array_fetch(zend_object *obj) {
     return (snobol_array_php_t *)((char *)(obj) - XtOffsetOf(snobol_array_php_t, std));
 }
@@ -24,6 +32,7 @@ static snobol_array_t **global_php_arrays = NULL;
 static size_t global_php_array_count = 0;
 static size_t global_php_array_cap = 0;
 
+/** @brief Add an array to the process-global registry (grows the array). */
 static void php_snobol_array_register(snobol_array_t *arr) {
     if (global_php_array_count == global_php_array_cap) {
         global_php_array_cap = global_php_array_cap ? global_php_array_cap * 2 : 16;
@@ -32,6 +41,7 @@ static void php_snobol_array_register(snobol_array_t *arr) {
     global_php_arrays[global_php_array_count++] = arr;
 }
 
+/** @brief Remove an array from the registry (used by the dtor). */
 static void php_snobol_array_unregister(snobol_array_t *arr) {
     for (size_t i = 0; i < global_php_array_count; i++) {
         if (global_php_arrays[i] == arr) {
@@ -42,11 +52,14 @@ static void php_snobol_array_unregister(snobol_array_t *arr) {
     }
 }
 
+/** @brief Return the process-global array registry (no binding callers;
+ *  kept for symmetry with the table registry). */
 size_t php_snobol_get_all_arrays(snobol_array_t ***out_arrays) {
     if (out_arrays) *out_arrays = global_php_arrays;
     return global_php_array_count;
 }
 
+/** @brief Object dtor: unregisters and releases the core array. */
 static void snobol_array_php_free(zend_object *object) {
     snobol_array_php_t *intern = php_snobol_array_fetch(object);
     SNOBOL_LOG("snobol_array_php_free: intern=%p array=%p", (void*)intern, (void*)intern->array);
@@ -60,6 +73,7 @@ static void snobol_array_php_free(zend_object *object) {
     zend_object_std_dtor(object);
 }
 
+/** @brief Object factory for Snobol\Array_. */
 static zend_object *snobol_array_php_create(zend_class_entry *ce) {
     snobol_array_php_t *intern = zend_object_alloc(sizeof(snobol_array_php_t), ce);
     intern->array = NULL;
@@ -104,6 +118,11 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(ai_array_values, 0, 0, 0)
 ZEND_END_ARG_INFO()
 
+/**
+ * @brief Array_::__construct(int $size = 0)
+ *  Creates the core array and registers it in the global registry.
+ * @param size
+ */
 PHP_METHOD(Snobol_Array_, __construct) {
     zend_long size = 0;
 
@@ -124,6 +143,11 @@ PHP_METHOD(Snobol_Array_, __construct) {
     php_snobol_array_register(intern->array);
 }
 
+/**
+ * @brief Array_::get(int $key): ?string
+ * @param key
+ * @return Value at the key, or null when unset.
+ */
 PHP_METHOD(Snobol_Array_, get) {
     zend_long key;
 
@@ -147,6 +171,11 @@ PHP_METHOD(Snobol_Array_, get) {
     RETVAL_STRING(value);
 }
 
+/**
+ * @brief Array_::set(int $key, string $value): bool
+ * @param key, value
+ * @return true on success.
+ */
 PHP_METHOD(Snobol_Array_, set) {
     zend_long key;
     char *value;
@@ -174,6 +203,11 @@ PHP_METHOD(Snobol_Array_, set) {
     RETURN_TRUE;
 }
 
+/**
+ * @brief Array_::has(int $key): bool
+ * @param key
+ * @return true when the key is set.
+ */
 PHP_METHOD(Snobol_Array_, has) {
     zend_long key;
 
@@ -192,6 +226,11 @@ PHP_METHOD(Snobol_Array_, has) {
     RETURN_BOOL(result);
 }
 
+/**
+ * @brief Array_::delete(int $key): bool
+ * @param key
+ * @return true when the key existed and was removed.
+ */
 PHP_METHOD(Snobol_Array_, delete) {
     zend_long key;
 
@@ -210,6 +249,9 @@ PHP_METHOD(Snobol_Array_, delete) {
     RETURN_BOOL(result);
 }
 
+/**
+ * @brief Array_::clear(): void
+ */
 PHP_METHOD(Snobol_Array_, clear) {
     ZEND_PARSE_PARAMETERS_NONE();
 
@@ -223,6 +265,10 @@ PHP_METHOD(Snobol_Array_, clear) {
     snobol_array_clear(intern->array);
 }
 
+/**
+ * @brief Array_::size(): int
+ * @return Number of set keys.
+ */
 PHP_METHOD(Snobol_Array_, size) {
     ZEND_PARSE_PARAMETERS_NONE();
 
@@ -237,6 +283,10 @@ PHP_METHOD(Snobol_Array_, size) {
     RETURN_LONG((zend_long)size);
 }
 
+/**
+ * @brief Array_::keys(): array
+ * @return Array of set keys as ints.
+ */
 PHP_METHOD(Snobol_Array_, keys) {
     ZEND_PARSE_PARAMETERS_NONE();
 
@@ -260,6 +310,10 @@ PHP_METHOD(Snobol_Array_, keys) {
     }
 }
 
+/**
+ * @brief Array_::values(): array
+ * @return Array of values (NULL entries skipped).
+ */
 PHP_METHOD(Snobol_Array_, values) {
     ZEND_PARSE_PARAMETERS_NONE();
 
@@ -301,6 +355,7 @@ static const zend_function_entry snobol_array_methods[] = {
 
 zend_class_entry *snobol_array_ce;
 
+/** @brief Register the Snobol\Array_ class (MINIT). */
 void snobol_array_php_minit(void) {
     SNOBOL_LOG("snobol_array_php_minit: START");
     zend_class_entry ce;

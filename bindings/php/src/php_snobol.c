@@ -47,6 +47,17 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
 /* No-op macro to disable logging */
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
+/**
+ * @file php_snobol.c
+ * @brief Module entry point and global function exports for the snobol
+ *        PHP extension.
+ *
+ * Registers the extension (MINIT: classes + version check) and the global
+ * snobol_text_* functions that wrap the core string/type built-ins for the
+ * Snobol\Text PHP helper class. Also exports the version and choice
+ * statistics functions.
+ */
+
 /* Extern declaration from snobol_pattern.c */
 void snobol_pattern_minit(void);
 
@@ -74,6 +85,10 @@ void snobol_split_iterator_minit(void);
 
 PHP_MINFO_FUNCTION(snobol);
 
+/**
+ * @brief phpinfo() handler: reports the extension version and profiling
+ *        status in a module table.
+ */
 PHP_MINFO_FUNCTION(snobol) {
     php_info_print_table_start();
     php_info_print_table_header(2, "snobol support", "enabled");
@@ -86,6 +101,15 @@ PHP_MINFO_FUNCTION(snobol) {
     php_info_print_table_end();
 }
 
+/**
+ * @brief Module initialization: registers all internal classes.
+ *
+ * Verifies the linked core's major API version matches the compiled-in
+ * SNOBOL_VERSION_MAJOR (a mismatch aborts module load), then registers
+ * every class the extension exposes: Pattern, Table, Array_, Builder,
+ * DynamicPatternCache, PatternCache, PatternHelper, SearchIterator and
+ * SplitIterator.
+ */
 PHP_MINIT_FUNCTION(snobol) {
     SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): START");
 
@@ -189,12 +213,22 @@ ZEND_END_ARG_INFO()
 
 /* --- STRING FUNCTIONS --- */
 
+/**
+ * @brief Size of a string in characters.
+ * @param s
+ * @return Character count (zend_long).
+ */
 PHP_FUNCTION(snobol_text_size) {
     char  *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
     RETURN_LONG((zend_long)snobol_size(s, slen));
 }
 
+/**
+ * @brief Trim trailing whitespace from a string.
+ * @param s
+ * @return Trimmed string; the input when nothing to trim.
+ */
 PHP_FUNCTION(snobol_text_trim) {
     char  *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
@@ -207,6 +241,12 @@ PHP_FUNCTION(snobol_text_trim) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Duplicate a string n times.
+ * @param s
+ * @param n
+ * @return Duplicated string (empty when n <= 0).
+ */
 PHP_FUNCTION(snobol_text_dupl) {
     char *s; size_t slen; zend_long n;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "sl", &s, &slen, &n) == FAILURE) return;
@@ -219,6 +259,11 @@ PHP_FUNCTION(snobol_text_dupl) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Reverse a string.
+ * @param s
+ * @return Reversed string.
+ */
 PHP_FUNCTION(snobol_text_reverse) {
     char *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
@@ -231,6 +276,13 @@ PHP_FUNCTION(snobol_text_reverse) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Extract a substring starting at 1-based position.
+ * @param s
+ * @param pos
+ * @param len
+ * @return Substring; false when pos < 1 or the request fails.
+ */
 PHP_FUNCTION(snobol_text_substr) {
     char *s; size_t slen; zend_long pos, len;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "sll", &s, &slen, &pos, &len) == FAILURE) return;
@@ -243,6 +295,13 @@ PHP_FUNCTION(snobol_text_substr) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Replace all occurrences of one substring with another.
+ * @param s
+ * @param from
+ * @param to
+ * @return Replaced string.
+ */
 PHP_FUNCTION(snobol_text_replace) {
     char *s, *f, *t; size_t slen, flen, tlen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "sss", &s, &slen, &f, &flen, &t, &tlen) == FAILURE) return;
@@ -255,6 +314,13 @@ PHP_FUNCTION(snobol_text_replace) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Replace all occurrences of one character with another.
+ * @param s
+ * @param from
+ * @param to
+ * @return Replaced string.
+ */
 PHP_FUNCTION(snobol_text_replace_char) {
     char *s, *f, *t; size_t slen, flen, tlen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "sss", &s, &slen, &f, &flen, &t, &tlen) == FAILURE) return;
@@ -267,6 +333,13 @@ PHP_FUNCTION(snobol_text_replace_char) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Left-pad a string to a width with a fill character.
+ * @param s
+ * @param width
+ * @param pad
+ * @return Padded string.
+ */
 PHP_FUNCTION(snobol_text_lpad) {
     char *s, *pad = " "; size_t slen, padlen = 1; zend_long width;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "sl|s", &s, &slen, &width, &pad, &padlen) == FAILURE) return;
@@ -280,6 +353,13 @@ PHP_FUNCTION(snobol_text_lpad) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Right-pad a string to a width with a fill character.
+ * @param s
+ * @param width
+ * @param pad
+ * @return Padded string.
+ */
 PHP_FUNCTION(snobol_text_rpad) {
     char *s, *pad = " "; size_t slen, padlen = 1; zend_long width;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "sl|s", &s, &slen, &width, &pad, &padlen) == FAILURE) return;
@@ -293,6 +373,11 @@ PHP_FUNCTION(snobol_text_rpad) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Convert a codepoint to its UTF-8 encoding.
+ * @param cp
+ * @return UTF-8 string; false for invalid codepoints.
+ */
 PHP_FUNCTION(snobol_text_char) {
     zend_long cp;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "l", &cp) == FAILURE) return;
@@ -305,6 +390,11 @@ PHP_FUNCTION(snobol_text_char) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Codepoint of the first character of a string.
+ * @param s
+ * @return Codepoint; false for empty input.
+ */
 PHP_FUNCTION(snobol_text_ord) {
     char *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
@@ -316,6 +406,11 @@ PHP_FUNCTION(snobol_text_ord) {
     }
 }
 
+/**
+ * @brief Unicode-aware uppercase conversion.
+ * @param s
+ * @return Uppercased string.
+ */
 PHP_FUNCTION(snobol_text_upper) {
     char *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
@@ -328,6 +423,11 @@ PHP_FUNCTION(snobol_text_upper) {
     snobol_buf_free(&b);
 }
 
+/**
+ * @brief Unicode-aware lowercase conversion.
+ * @param s
+ * @return Lowercased string.
+ */
 PHP_FUNCTION(snobol_text_lower) {
     char *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
@@ -342,30 +442,60 @@ PHP_FUNCTION(snobol_text_lower) {
 
 /* --- COMPARISON / TYPE-CHECK FUNCTIONS --- */
 
+/**
+ * @brief SNOBOL IDENT: true when both strings are identical.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_ident) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_ident(a, alen, b_s, blen));
 }
 
+/**
+ * @brief SNOBOL DIFFER: true when the strings differ.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_differ) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_differ(a, alen, b_s, blen));
 }
 
+/**
+ * @brief SNOBOL LEXEQ: lexicographic equality.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_lexeq) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_lexeq(a, alen, b_s, blen));
 }
 
+/**
+ * @brief SNOBOL LEXLT: lexicographic less-than.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_lexlt) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_lexlt(a, alen, b_s, blen));
 }
 
+/**
+ * @brief SNOBOL LEXGT: lexicographic greater-than.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_lexgt) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
@@ -373,54 +503,105 @@ PHP_FUNCTION(snobol_text_lexgt) {
 }
 
 /* Numeric comparison functions */
+/**
+ * @brief SNOBOL EQ: numeric equality.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_eq) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_eq(a, alen, b_s, blen));
 }
 
+/**
+ * @brief SNOBOL NE: numeric inequality.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_ne) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_ne(a, alen, b_s, blen));
 }
 
+/**
+ * @brief SNOBOL LT: numeric less-than.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_lt) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_lt(a, alen, b_s, blen));
 }
 
+/**
+ * @brief SNOBOL GT: numeric greater-than.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_gt) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_gt(a, alen, b_s, blen));
 }
 
+/**
+ * @brief SNOBOL LE: numeric less-or-equal.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_le) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_le(a, alen, b_s, blen));
 }
 
+/**
+ * @brief SNOBOL GE: numeric greater-or-equal.
+ * @param a
+ * @param b
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_ge) {
     char *a, *b_s; size_t alen, blen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "ss", &a, &alen, &b_s, &blen) == FAILURE) return;
     RETURN_BOOL(snobol_ge(a, alen, b_s, blen));
 }
 
+/**
+ * @brief True when the string parses as an integer.
+ * @param s
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_integer) {
     char *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
     RETURN_BOOL(snobol_integer(s, slen));
 }
 
+/**
+ * @brief True when the string parses as a real number.
+ * @param s
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_real) {
     char *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
     RETURN_BOOL(snobol_real(s, slen));
 }
 
+/**
+ * @brief True when the string is numeric (integer or real).
+ * @param s
+ * @return Boolean.
+ */
 PHP_FUNCTION(snobol_text_numeric) {
     char *s; size_t slen;
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "s", &s, &slen) == FAILURE) return;
@@ -430,6 +611,10 @@ PHP_FUNCTION(snobol_text_numeric) {
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_api_version, 0, 0, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
+/**
+ * @brief Encoded core API version (MAJOR<<16 | MINOR<<8 | PATCH).
+ * @return zend_long.
+ */
 PHP_FUNCTION(snobol_get_api_version) {
     if (zend_parse_parameters_none() == FAILURE) {
         return;
@@ -440,6 +625,10 @@ PHP_FUNCTION(snobol_get_api_version) {
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_abi_version, 0, 0, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
+/**
+ * @brief Core ABI version.
+ * @return zend_long.
+ */
 PHP_FUNCTION(snobol_get_abi_version) {
     if (zend_parse_parameters_none() == FAILURE) {
         return;
@@ -450,6 +639,10 @@ PHP_FUNCTION(snobol_get_abi_version) {
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(ai_snobol_get_choice_stats, 0, 0, IS_ARRAY, 0)
 ZEND_END_ARG_INFO()
 
+/**
+ * @brief Global choice-point statistics (all zeros; per-match metrics are precise).
+ * @return Associative array of counters.
+ */
 PHP_FUNCTION(snobol_get_choice_stats) {
     if (zend_parse_parameters_none() == FAILURE) {
         return;

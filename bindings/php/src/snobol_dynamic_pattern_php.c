@@ -8,6 +8,12 @@ extern zend_class_entry *snobol_pattern_ce;
 
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
+/**
+ * @file snobol_dynamic_pattern_php.c
+ * @brief The Snobol\DynamicPatternCache class: an LRU cache of compiled
+ *        dynamic patterns keyed by their source text.
+ */
+
 #define DYN_CACHE_DEFAULT_CAPACITY 128
 
 zend_class_entry *snobol_dynamic_pattern_cache_ce;
@@ -46,6 +52,7 @@ static zend_object *php_dyncache_create(zend_class_entry *ce) {
     return &intern->std;
 }
 
+/** @brief Evict the least-recently-used cache entry (oldest in access_order). */
 static void php_dyncache_evict_lru(snobol_dyn_cache_php_t *intern) {
     HashTable *ao = Z_ARRVAL_P(&intern->access_order);
     if (zend_hash_num_elements(ao) == 0) return;
@@ -71,6 +78,7 @@ static void php_dyncache_evict_lru(snobol_dyn_cache_php_t *intern) {
     }
 }
 
+/** @brief Move a key to the back of the LRU access order (no-op if absent). */
 static void php_dyncache_touch(snobol_dyn_cache_php_t *intern, const char *key, size_t key_len) {
     HashTable *ao = Z_ARRVAL_P(&intern->access_order);
     uint32_t count = zend_hash_num_elements(ao);
@@ -124,6 +132,11 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(ai_dyn_cache_stats, 0, 0, 0)
 ZEND_END_ARG_INFO()
 
+/**
+ * @brief DynamicPatternCache::__construct(?int $capacity = null)
+ *  Negative capacities raise ValueError; zero falls back to the default.
+ * @param capacity
+ */
 PHP_METHOD(Snobol_DynamicPatternCache, __construct) {
     zend_long capacity = DYN_CACHE_DEFAULT_CAPACITY;
     ZEND_PARSE_PARAMETERS_START(0, 1)
@@ -141,6 +154,13 @@ PHP_METHOD(Snobol_DynamicPatternCache, __construct) {
     intern->capacity = (capacity > 0) ? capacity : DYN_CACHE_DEFAULT_CAPACITY;
 }
 
+/**
+ * @brief DynamicPatternCache::compile(string $pattern_source): array
+ *  Returns ['cached' => bool, 'pattern' => source, 'compiled' => bool];
+ *  failed compiles add an 'error' key instead of throwing.
+ * @param pattern_source
+ * @return Result array.
+ */
 PHP_METHOD(Snobol_DynamicPatternCache, compile) {
     char *pattern_source; size_t pattern_source_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -199,6 +219,13 @@ PHP_METHOD(Snobol_DynamicPatternCache, compile) {
     zval_ptr_dtor(&args[1]);
 }
 
+/**
+ * @brief DynamicPatternCache::evaluate(string $pattern_source, string $subject): array
+ *  Compiles (or reuses) the pattern and matches it against the subject.
+ *  Returns ['cached' => bool, 'evaluated' => bool, 'matches' => ?array].
+ * @param pattern_source, subject
+ * @return Result array.
+ */
 PHP_METHOD(Snobol_DynamicPatternCache, evaluate) {
     char *pattern_source, *subject;
     size_t pattern_source_len, subject_len;
@@ -278,6 +305,12 @@ PHP_METHOD(Snobol_DynamicPatternCache, evaluate) {
     zval_ptr_dtor(&pattern_zv);
 }
 
+/**
+ * @brief DynamicPatternCache::get(string $pattern_source): array
+ *  Returns ["found" => bool, "pattern" => ?Pattern].
+ * @param pattern_source
+ * @return Result array.
+ */
 PHP_METHOD(Snobol_DynamicPatternCache, get) {
     char *pattern_source; size_t pattern_source_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -300,6 +333,10 @@ PHP_METHOD(Snobol_DynamicPatternCache, get) {
     }
 }
 
+/**
+ * @brief DynamicPatternCache::clear(): void
+ *  Empties the cache and the LRU access order.
+ */
 PHP_METHOD(Snobol_DynamicPatternCache, clear) {
     ZEND_PARSE_PARAMETERS_NONE();
     snobol_dyn_cache_php_t *intern = php_dyncache_fetch(Z_OBJ_P(getThis()));
@@ -307,6 +344,11 @@ PHP_METHOD(Snobol_DynamicPatternCache, clear) {
     zend_hash_clean(Z_ARRVAL_P(&intern->access_order));
 }
 
+/**
+ * @brief DynamicPatternCache::stats(): array
+ *  Returns size, max_size, compile_count and evaluate_count.
+ * @return Stats array.
+ */
 PHP_METHOD(Snobol_DynamicPatternCache, stats) {
     ZEND_PARSE_PARAMETERS_NONE();
     snobol_dyn_cache_php_t *intern = php_dyncache_fetch(Z_OBJ_P(getThis()));
@@ -328,6 +370,7 @@ static const zend_function_entry snobol_dynamic_pattern_cache_methods[] = {
     PHP_FE_END
 };
 
+/** @brief Register the Snobol\DynamicPatternCache class (MINIT). */
 void snobol_dynamic_pattern_cache_php_minit(void) {
     zend_class_entry ce;
     memcpy(&snobol_dynamic_pattern_cache_object_handlers, zend_get_std_object_handlers(),

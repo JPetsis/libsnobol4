@@ -7,6 +7,16 @@
 
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
+/**
+ * @file snobol_search_iterator_php.c
+ * @brief The Snobol\SearchIterator class: lazy iteration over pattern
+ *        matches (backing Pattern::searchAllGenerator()).
+ *
+ * The iterator holds its own persistent search state and fetches the next
+ * match only when the caller advances, so early breaks pay nothing for the
+ * remaining matches.
+ */
+
 zend_class_entry *snobol_search_iterator_ce;
 extern zend_class_entry *snobol_pattern_ce;
 
@@ -26,10 +36,12 @@ typedef struct {
     zend_object std;
 } snobol_search_iterator_t;
 
+/** @brief Recover the iterator struct from a zend_object pointer. */
 static inline snobol_search_iterator_t* php_si_fetch(zend_object *obj) {
     return (snobol_search_iterator_t *)((char *)(obj) - XtOffsetOf(snobol_search_iterator_t, std));
 }
 
+/** @brief Object dtor: releases the current match and the search state. */
 static void si_dtor(zend_object *object) {
     snobol_search_iterator_t *iter = php_si_fetch(object);
     zval_ptr_dtor(&iter->current_match);
@@ -40,6 +52,7 @@ static void si_dtor(zend_object *object) {
     zend_object_std_dtor(object);
 }
 
+/** @brief Object factory for Snobol\SearchIterator. */
 static zend_object *si_create(zend_class_entry *ce) {
     snobol_search_iterator_t *iter = zend_object_alloc(sizeof(snobol_search_iterator_t), ce);
     zend_object_std_init(&iter->std, ce);
@@ -50,6 +63,10 @@ static zend_object *si_create(zend_class_entry *ce) {
 }
 
 /* ---- Internal: fetch next match and store in iter->current_match ---- */
+/** @brief Fetch the next match at or after @p search_offset into
+ *  iter->current_match.
+ *  @return true when a match was stored; false on exhaustion (the previous
+ *          match is left in place). */
 static bool si_fetch_next(snobol_search_iterator_t *iter, size_t search_offset) {
     if (!iter->state || search_offset > iter->subject_len) return false;
 
@@ -85,6 +102,12 @@ static bool si_fetch_next(snobol_search_iterator_t *iter, size_t search_offset) 
 
 /* ---- Iterator methods implemented on the class itself ---- */
 
+/**
+ * @brief SearchIterator::current(): mixed
+ *  The current match array, or null before the first fetch / after
+ *  exhaustion the last match is retained (undefined per Iterator).
+ * @return Match array or null.
+ */
 PHP_METHOD(Snobol_SearchIterator, current) {
     snobol_search_iterator_t *iter = php_si_fetch(Z_OBJ_P(ZEND_THIS));
     if (Z_TYPE(iter->current_match) == IS_ARRAY) {
@@ -93,11 +116,20 @@ PHP_METHOD(Snobol_SearchIterator, current) {
     RETURN_NULL();
 }
 
+/**
+ * @brief SearchIterator::key(): int
+ *  Zero-based match index.
+ * @return Index.
+ */
 PHP_METHOD(Snobol_SearchIterator, key) {
     snobol_search_iterator_t *iter = php_si_fetch(Z_OBJ_P(ZEND_THIS));
     RETURN_LONG(iter->key);
 }
 
+/**
+ * @brief SearchIterator::next(): void
+ *  Advances to the next match; marks the iterator invalid at the end.
+ */
 PHP_METHOD(Snobol_SearchIterator, next) {
     snobol_search_iterator_t *iter = php_si_fetch(Z_OBJ_P(ZEND_THIS));
     iter->key++;
@@ -120,11 +152,19 @@ PHP_METHOD(Snobol_SearchIterator, next) {
     iter->valid = si_fetch_next(iter, search_offset);
 }
 
+/**
+ * @brief SearchIterator::valid(): bool
+ * @return true while a match is current.
+ */
 PHP_METHOD(Snobol_SearchIterator, valid) {
     snobol_search_iterator_t *iter = php_si_fetch(Z_OBJ_P(ZEND_THIS));
     RETURN_BOOL(iter->valid);
 }
 
+/**
+ * @brief SearchIterator::rewind(): void
+ *  Resets the key and recreates the search state (no API reset exists).
+ */
 PHP_METHOD(Snobol_SearchIterator, rewind) {
     snobol_search_iterator_t *iter = php_si_fetch(Z_OBJ_P(ZEND_THIS));
     iter->key = 0;
@@ -149,6 +189,7 @@ PHP_METHOD(Snobol_SearchIterator, rewind) {
 
 /* ---- Public API: create SearchIterator ---- */
 
+/** @brief Implementation of php_snobol_create_search_iterator() (see php_snobol.h). */
 void php_snobol_create_search_iterator(zval *return_value,
                                         snobol_pattern_t *pattern,
                                         const char *subject,
@@ -178,6 +219,12 @@ void php_snobol_create_search_iterator(zval *return_value,
     }
 }
 
+/**
+ * @brief SearchIterator::fromPattern(Pattern $pattern, string $subject): SearchIterator
+ *  Static constructor; throws for un-compiled patterns.
+ * @param pattern, subject
+ * @return Iterator object.
+ */
 PHP_METHOD(Snobol_SearchIterator, fromPattern) {
     zval *pattern_zv;
     zend_string *subject;
@@ -225,6 +272,7 @@ static const zend_function_entry snobol_search_iterator_methods[] = {
     PHP_FE_END
 };
 
+/** @brief Register the Snobol\SearchIterator class as an Iterator (MINIT). */
 void snobol_search_iterator_minit(void) {
     memcpy(&snobol_search_iterator_handlers, zend_get_std_object_handlers(),
            sizeof(zend_object_handlers));

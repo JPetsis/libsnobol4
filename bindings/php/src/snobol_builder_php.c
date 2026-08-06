@@ -5,6 +5,16 @@
 
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
+/**
+ * @file snobol_builder_php.c
+ * @brief Static AST node constructors for the Snobol\Builder class.
+ *
+ * Every method returns a plain PHP array in the Builder node format
+ * (e.g. ['type' => 'lit', 'text' => ...]) that Pattern::compileFromAst()
+ * can compile. Methods are thin wrappers: they validate arguments via the
+ * arginfo and emit the node shape.
+ */
+
 zend_class_entry *snobol_builder_ce;
 
 ZEND_BEGIN_ARG_INFO_EX(ai_builder_lit, 0, 0, 1)
@@ -160,6 +170,8 @@ ZEND_BEGIN_ARG_INFO_EX(ai_builder_rtab, 0, 0, 1)
     ZEND_ARG_TYPE_INFO(0, n, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
+/** @brief Builder::lit(text): array
+ *  Emits a 'lit' AST node: string literal text. */
 PHP_METHOD(Snobol_Builder, lit) {
     char *s; size_t s_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -170,6 +182,8 @@ PHP_METHOD(Snobol_Builder, lit) {
     add_assoc_stringl(return_value, "text", s, s_len);
 }
 
+/** @brief Builder::span(set): array
+ *  Emits a 'span' AST node: character set (range syntax X-Y supported). */
 PHP_METHOD(Snobol_Builder, span) {
     char *set; size_t set_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -180,6 +194,8 @@ PHP_METHOD(Snobol_Builder, span) {
     add_assoc_stringl(return_value, "set", set, set_len);
 }
 
+/** @brief Builder::brk(set): array
+ *  Emits a 'break' AST node: break set. */
 PHP_METHOD(Snobol_Builder, brk) {
     char *set; size_t set_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -190,6 +206,8 @@ PHP_METHOD(Snobol_Builder, brk) {
     add_assoc_stringl(return_value, "set", set, set_len);
 }
 
+/** @brief Builder::any(set): array
+ *  Emits a 'any' AST node: any-of set (optional). */
 PHP_METHOD(Snobol_Builder, any) {
     char *set = NULL; size_t set_len = 0;
     ZEND_PARSE_PARAMETERS_START(0, 1)
@@ -203,6 +221,8 @@ PHP_METHOD(Snobol_Builder, any) {
     }
 }
 
+/** @brief Builder::notany(set): array
+ *  Emits a 'notany' AST node: not-any set. */
 PHP_METHOD(Snobol_Builder, notany) {
     char *set; size_t set_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -213,6 +233,8 @@ PHP_METHOD(Snobol_Builder, notany) {
     add_assoc_stringl(return_value, "set", set, set_len);
 }
 
+/** @brief Builder::len(n): array
+ *  Emits a 'len' AST node: exact length to consume. */
 PHP_METHOD(Snobol_Builder, len) {
     zend_long n;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -223,6 +245,8 @@ PHP_METHOD(Snobol_Builder, len) {
     add_assoc_long(return_value, "n", n);
 }
 
+/** @brief Builder::arbno(sub): array
+ *  Emits a 'arbno' AST node: sub-pattern repeated zero or more times. */
 PHP_METHOD(Snobol_Builder, arbno) {
     zval *sub;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -233,6 +257,8 @@ PHP_METHOD(Snobol_Builder, arbno) {
     snobol_assoc_zval(return_value, "sub", 3, sub);
 }
 
+/** @brief Builder::cap(reg, sub): array
+ *  Emits a 'cap' AST node: capture register and sub-pattern. */
 PHP_METHOD(Snobol_Builder, cap) {
     zend_long reg; zval *sub;
     ZEND_PARSE_PARAMETERS_START(2, 2)
@@ -245,6 +271,8 @@ PHP_METHOD(Snobol_Builder, cap) {
     snobol_assoc_zval(return_value, "sub", 3, sub);
 }
 
+/** @brief Builder::assign(var, reg): array
+ *  Emits a 'assign' AST node: variable id and capture register. */
 PHP_METHOD(Snobol_Builder, assign) {
     zend_long var, reg;
     ZEND_PARSE_PARAMETERS_START(2, 2)
@@ -257,6 +285,8 @@ PHP_METHOD(Snobol_Builder, assign) {
     add_assoc_long(return_value, "reg", reg);
 }
 
+/** @brief Builder::concat(parts): array
+ *  Emits a 'concat' AST node: ordered list of sub-patterns. */
 PHP_METHOD(Snobol_Builder, concat) {
     zval *parts;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -271,6 +301,8 @@ PHP_METHOD(Snobol_Builder, concat) {
     }
 }
 
+/** @brief Builder::alt(left, right): array
+ *  Emits a 'alt' AST node: left/right alternatives. */
 PHP_METHOD(Snobol_Builder, alt) {
     zval *left, *right;
     ZEND_PARSE_PARAMETERS_START(2, 2)
@@ -304,6 +336,8 @@ PHP_METHOD(Snobol_Builder, alt) {
     }
 }
 
+/** @brief Builder::eval(fn, reg): array
+ *  Emits a 'eval' AST node: built-in function id and capture register. */
 PHP_METHOD(Snobol_Builder, eval) {
     zend_long fn, reg;
     ZEND_PARSE_PARAMETERS_START(2, 2)
@@ -316,6 +350,8 @@ PHP_METHOD(Snobol_Builder, eval) {
     add_assoc_long(return_value, "reg", reg);
 }
 
+/** @brief Builder::anchor(atype): array
+ *  Emits a 'anchor' AST node: anchor type: "start" or "end". */
 PHP_METHOD(Snobol_Builder, anchor) {
     char *atype; size_t atype_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -326,6 +362,8 @@ PHP_METHOD(Snobol_Builder, anchor) {
     add_assoc_stringl(return_value, "atype", atype, atype_len);
 }
 
+/** @brief Builder::repeat(sub, min, max): array
+ *  Emits a 'repeat' AST node: bounded repetition. */
 PHP_METHOD(Snobol_Builder, repeat) {
     zval *sub; zend_long min; zend_long max = -1;
     ZEND_PARSE_PARAMETERS_START(2, 3)
@@ -341,6 +379,8 @@ PHP_METHOD(Snobol_Builder, repeat) {
     add_assoc_long(return_value, "max", max);
 }
 
+/** @brief Builder::emit(text): array
+ *  Emits a 'emit' AST node: literal text to emit. */
 PHP_METHOD(Snobol_Builder, emit) {
     char *text; size_t text_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -351,6 +391,8 @@ PHP_METHOD(Snobol_Builder, emit) {
     add_assoc_stringl(return_value, "text", text, text_len);
 }
 
+/** @brief Builder::emitRef(reg): array
+ *  Emits a 'emit' AST node: capture register to emit. */
 PHP_METHOD(Snobol_Builder, emitRef) {
     zend_long reg;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -361,6 +403,8 @@ PHP_METHOD(Snobol_Builder, emitRef) {
     add_assoc_long(return_value, "reg", reg);
 }
 
+/** @brief Builder::label(name, target): array
+ *  Emits a 'label' AST node: named label with target sub-pattern. */
 PHP_METHOD(Snobol_Builder, label) {
     char *name; size_t name_len; zval *target;
     ZEND_PARSE_PARAMETERS_START(2, 2)
@@ -373,6 +417,8 @@ PHP_METHOD(Snobol_Builder, label) {
     snobol_assoc_zval(return_value, "target", 6, target);
 }
 
+/** @brief Builder::goto(label): array
+ *  Emits a 'goto' AST node: label name to jump to. */
 PHP_METHOD(Snobol_Builder, goto) {
     char *label; size_t label_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -383,6 +429,8 @@ PHP_METHOD(Snobol_Builder, goto) {
     add_assoc_stringl(return_value, "label", label, label_len);
 }
 
+/** @brief Builder::dynamicEval(expr): array
+ *  Emits a 'dynamic_eval' AST node: expression compiled at match time. */
 PHP_METHOD(Snobol_Builder, dynamicEval) {
     zval *expr;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -393,6 +441,8 @@ PHP_METHOD(Snobol_Builder, dynamicEval) {
     snobol_assoc_zval(return_value, "expr", 4, expr);
 }
 
+/** @brief Builder::tableAccess(table, key): array
+ *  Emits a 'table_access' AST node: table name and key expression. */
 PHP_METHOD(Snobol_Builder, tableAccess) {
     char *table; size_t table_len; zval *key;
     ZEND_PARSE_PARAMETERS_START(2, 2)
@@ -405,6 +455,8 @@ PHP_METHOD(Snobol_Builder, tableAccess) {
     snobol_assoc_zval(return_value, "key", 3, key);
 }
 
+/** @brief Builder::tableUpdate(table, key, value): array
+ *  Emits a 'table_update' AST node: table name, key and value expressions. */
 PHP_METHOD(Snobol_Builder, tableUpdate) {
     char *table; size_t table_len; zval *key, *value;
     ZEND_PARSE_PARAMETERS_START(3, 3)
@@ -419,6 +471,8 @@ PHP_METHOD(Snobol_Builder, tableUpdate) {
     snobol_assoc_zval(return_value, "value", 5, value);
 }
 
+/** @brief Builder::arrayAccess(array, index): array
+ *  Emits a 'array_access' AST node: array name and index expression. */
 PHP_METHOD(Snobol_Builder, arrayAccess) {
     char *name; size_t name_len; zval *index;
     ZEND_PARSE_PARAMETERS_START(2, 2)
@@ -431,6 +485,8 @@ PHP_METHOD(Snobol_Builder, arrayAccess) {
     snobol_assoc_zval(return_value, "index", 5, index);
 }
 
+/** @brief Builder::arrayUpdate(array, index, value): array
+ *  Emits a 'array_update' AST node: array name, index and value expressions. */
 PHP_METHOD(Snobol_Builder, arrayUpdate) {
     char *name; size_t name_len; zval *index, *value;
     ZEND_PARSE_PARAMETERS_START(3, 3)
@@ -445,6 +501,8 @@ PHP_METHOD(Snobol_Builder, arrayUpdate) {
     snobol_assoc_zval(return_value, "value", 5, value);
 }
 
+/** @brief Builder::arrayCreate(array, size): array
+ *  Emits a 'array_create' AST node: array name and optional size. */
 PHP_METHOD(Snobol_Builder, arrayCreate) {
     char *name; size_t name_len; zend_long size = 0;
     ZEND_PARSE_PARAMETERS_START(1, 2)
@@ -458,6 +516,8 @@ PHP_METHOD(Snobol_Builder, arrayCreate) {
     add_assoc_long(return_value, "size", size);
 }
 
+/** @brief Builder::breakx(set): array
+ *  Emits a 'breakx' AST node: break set with retry semantics. */
 PHP_METHOD(Snobol_Builder, breakx) {
     char *set; size_t set_len;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -468,6 +528,8 @@ PHP_METHOD(Snobol_Builder, breakx) {
     add_assoc_stringl(return_value, "set", set, set_len);
 }
 
+/** @brief Builder::bal(open, close): array
+ *  Emits a 'bal' AST node: balanced-delimiter pattern. */
 PHP_METHOD(Snobol_Builder, bal) {
     char *open = "(", *close = ")";
     size_t open_len = 1, close_len = 1;
@@ -484,18 +546,24 @@ PHP_METHOD(Snobol_Builder, bal) {
     add_assoc_stringl(return_value, "close", close, close_len);
 }
 
+/** @brief Builder::fence(): array
+ *  Emits a 'fence' AST node: no arguments. */
 PHP_METHOD(Snobol_Builder, fence) {
     ZEND_PARSE_PARAMETERS_NONE();
     array_init(return_value);
     add_assoc_stringl(return_value, "type", "fence", 5);
 }
 
+/** @brief Builder::rem(): array
+ *  Emits a 'rem' AST node: no arguments. */
 PHP_METHOD(Snobol_Builder, rem) {
     ZEND_PARSE_PARAMETERS_NONE();
     array_init(return_value);
     add_assoc_stringl(return_value, "type", "rem", 3);
 }
 
+/** @brief Builder::rpos(n): array
+ *  Emits a 'rpos' AST node: relative position from the end. */
 PHP_METHOD(Snobol_Builder, rpos) {
     zend_long n;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -506,6 +574,8 @@ PHP_METHOD(Snobol_Builder, rpos) {
     add_assoc_long(return_value, "n", n);
 }
 
+/** @brief Builder::rtab(n): array
+ *  Emits a 'rtab' AST node: tab to a position relative to the end. */
 PHP_METHOD(Snobol_Builder, rtab) {
     zend_long n;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -516,6 +586,8 @@ PHP_METHOD(Snobol_Builder, rtab) {
     add_assoc_long(return_value, "n", n);
 }
 
+/** @brief Builder::arb(): array
+ *  Emits a 'arb' AST node: no arguments (arbitrary substring). */
 PHP_METHOD(Snobol_Builder, arb) {
     array_init(return_value);
     add_assoc_stringl(return_value, "type", "arbno", 5);
@@ -529,6 +601,8 @@ PHP_METHOD(Snobol_Builder, arb) {
     }
 }
 
+/** @brief Builder::pos(n): array
+ *  Emits a 'pos' AST node: absolute position. */
 PHP_METHOD(Snobol_Builder, pos) {
     zend_long n;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -539,6 +613,8 @@ PHP_METHOD(Snobol_Builder, pos) {
     add_assoc_long(return_value, "n", n);
 }
 
+/** @brief Builder::tab(n): array
+ *  Emits a 'tab' AST node: tab to an absolute position. */
 PHP_METHOD(Snobol_Builder, tab) {
     zend_long n;
     ZEND_PARSE_PARAMETERS_START(1, 1)
@@ -549,18 +625,24 @@ PHP_METHOD(Snobol_Builder, tab) {
     add_assoc_long(return_value, "n", n);
 }
 
+/** @brief Builder::abort(): array
+ *  Emits a 'abort' AST node: no arguments. */
 PHP_METHOD(Snobol_Builder, abort) {
     ZEND_PARSE_PARAMETERS_NONE();
     array_init(return_value);
     add_assoc_stringl(return_value, "type", "abort", 5);
 }
 
+/** @brief Builder::fail(): array
+ *  Emits a 'fail' AST node: no arguments. */
 PHP_METHOD(Snobol_Builder, fail) {
     ZEND_PARSE_PARAMETERS_NONE();
     array_init(return_value);
     add_assoc_stringl(return_value, "type", "fail", 4);
 }
 
+/** @brief Builder::succeed(): array
+ *  Emits a 'succeed' AST node: no arguments. */
 PHP_METHOD(Snobol_Builder, succeed) {
     ZEND_PARSE_PARAMETERS_NONE();
     array_init(return_value);
@@ -607,6 +689,7 @@ static const zend_function_entry snobol_builder_methods[] = {
     PHP_FE_END
 };
 
+/** @brief Register the Snobol\Builder class (MINIT). */
 void snobol_builder_php_minit(void) {
     zend_class_entry ce;
     INIT_CLASS_ENTRY(ce, "Snobol\\Builder", snobol_builder_methods);

@@ -7,6 +7,15 @@
 
 #define SNOBOL_LOG(fmt, ...) ((void)0)
 
+/**
+ * @file snobol_pattern_helper_php.c
+ * @brief The static Snobol\PatternHelper facade.
+ *
+ * Convenience entry points over the Pattern class (matchOnce, matchAll,
+ * split, replace, subst variants) plus a small slot cache that avoids
+ * recompiling the same pattern string.
+ */
+
 extern zend_class_entry *snobol_pattern_ce;
 zend_class_entry *snobol_pattern_helper_ce;
 
@@ -14,6 +23,8 @@ zend_class_entry *snobol_pattern_helper_ce;
 /*  Internal helpers                                                   */
 /* ------------------------------------------------------------------ */
 
+/** @brief Compile a pattern source string via Pattern::fromString.
+ *  @return SUCCESS when @p ret holds a Pattern object. */
 static int php_phelper_call_from_string(zval *pattern_str, zval *options, zval *ret) {
     zval args[2];
     ZVAL_COPY(&args[0], pattern_str);
@@ -29,6 +40,8 @@ static int php_phelper_call_from_string(zval *pattern_str, zval *options, zval *
     return (Z_TYPE_P(ret) == IS_OBJECT) ? SUCCESS : FAILURE;
 }
 
+/** @brief Compile a Builder AST via Pattern::compileFromAst.
+ *  @return SUCCESS when @p ret holds a Pattern object. */
 static int php_phelper_call_from_ast(zval *ast, zval *options, zval *ret) {
     zval args[2];
     ZVAL_COPY(&args[0], ast);
@@ -60,6 +73,8 @@ typedef struct {
 static php_phelper_cache_slot_t ph_cache[PH_CACHE_SLOTS];
 
 /* djb2-style hash for the raw pattern string (with or without options). */
+/** @brief djb2-style hash over the pattern source and (optionally) the
+ *  string/long values of the options array. */
 static uint32_t php_phelper_cache_hash(zval *pattern, zval *options) {
     const char *p = Z_STRVAL_P(pattern);
     size_t plen = Z_STRLEN_P(pattern);
@@ -91,6 +106,8 @@ static uint32_t php_phelper_cache_hash(zval *pattern, zval *options) {
 }
 
 /* Compare a cache slot against the given pattern+options. */
+/** @brief Check a cache slot against a pattern source (options are not
+ *  compared beyond the hash — a rough check for the benchmark cache). */
 static bool php_phelper_cache_match(php_phelper_cache_slot_t *slot,
                                      zval *pattern, zval *options)
 {
@@ -108,6 +125,9 @@ static bool php_phelper_cache_match(php_phelper_cache_slot_t *slot,
 /* Resolve a pattern spec to a Pattern object.
  * Returns SUCCESS and fills `out` (with refcount bumped) or FAILURE.
  * Uses an internal slot-based cache to avoid recompiling the same pattern. */
+/** @brief Resolve a pattern spec (Pattern object, string, or AST array) to
+ *  a Pattern object, consulting and filling the slot cache.
+ *  @return SUCCESS with a refcounted Pattern in @p out, or FAILURE. */
 static int php_phelper_resolve(zval *pattern_or_ast, zval *options, zval *out) {
     if (Z_TYPE_P(pattern_or_ast) == IS_OBJECT &&
         instanceof_function(Z_OBJCE_P(pattern_or_ast), snobol_pattern_ce)) {
@@ -151,6 +171,7 @@ static int php_phelper_resolve(zval *pattern_or_ast, zval *options, zval *out) {
 }
 
 /* Clear the internal pattern cache */
+/** @brief Drop every valid slot (used by PatternHelper::clearCache). */
 static void php_phelper_cache_clear(void) {
     for (int i = 0; i < PH_CACHE_SLOTS; i++) {
         if (ph_cache[i].valid) {
@@ -162,6 +183,7 @@ static void php_phelper_cache_clear(void) {
 }
 
 /* Extract boolean option from options array */
+/** @brief Read a boolean option: true for IS_TRUE or any non-zero long. */
 static bool php_phelper_get_opt_bool(zval *options, const char *name) {
     if (!options || Z_TYPE_P(options) != IS_ARRAY) return false;
     zval *zv = zend_hash_str_find(Z_ARRVAL_P(options), name, strlen(name));
@@ -171,6 +193,7 @@ static bool php_phelper_get_opt_bool(zval *options, const char *name) {
 }
 
 /* Strip _match_len and _match_start keys from a match result array */
+/** @brief Remove _match_len/_match_start keys from a match result array. */
 static void php_phelper_strip_meta(zval *result) {
     if (Z_TYPE_P(result) != IS_ARRAY) return;
     zend_hash_str_del(Z_ARRVAL_P(result), "_match_len", sizeof("_match_len")-1);
@@ -178,6 +201,8 @@ static void php_phelper_strip_meta(zval *result) {
 }
 
 /* Extract cache option from options */
+/** @brief Read the "cache" option (false disables caching); currently
+ *  unused — the slot cache is applied unconditionally. */
 static bool php_phelper_use_cache(zval *options) {
     if (!options || Z_TYPE_P(options) != IS_ARRAY) return true;
     zval *zv = zend_hash_str_find(Z_ARRVAL_P(options), "cache", sizeof("cache")-1);
@@ -251,6 +276,11 @@ ZEND_END_ARG_INFO()
 /*  PHP methods                                                        */
 /* ------------------------------------------------------------------ */
 
+/**
+ * @brief PatternHelper::fromString(string $pattern, ?array $options = null): Pattern
+ * @param pattern, options
+ * @return Pattern object.
+ */
 PHP_METHOD(Snobol_PatternHelper, fromString) {
     char *pattern; size_t pattern_len;
     zval *options = NULL;
@@ -267,6 +297,12 @@ PHP_METHOD(Snobol_PatternHelper, fromString) {
     zval_ptr_dtor(&pattern_zv);
 }
 
+/**
+ * @brief PatternHelper::fromAst(array $ast, ?array $options = null): Pattern
+ *  Throws ValueError for ASTs without a "type" field or when compilation fails.
+ * @param ast, options
+ * @return Pattern object.
+ */
 PHP_METHOD(Snobol_PatternHelper, fromAst) {
     zval *ast;
     zval *options = NULL;
@@ -293,6 +329,13 @@ PHP_METHOD(Snobol_PatternHelper, fromAst) {
     }
 }
 
+/**
+ * @brief PatternHelper::matchOnce($patternOrAst, string $subject, ?array $options = null): ?array
+ *  Anchored first match; the "full" option restricts to whole-subject
+ *  matches. Returns false on no match.
+ * @param patternOrAst, subject, options
+ * @return Match array or false.
+ */
 PHP_METHOD(Snobol_PatternHelper, matchOnce) {
     zval *pattern_or_ast;
     char *subject; size_t subject_len;
@@ -341,6 +384,12 @@ PHP_METHOD(Snobol_PatternHelper, matchOnce) {
     zval_ptr_dtor(&pattern_obj);
 }
 
+/**
+ * @brief PatternHelper::matchAll($patternOrAst, string $subject, ?array $options = null): array
+ *  All matches with _match_len/_match_start stripped.
+ * @param patternOrAst, subject, options
+ * @return Array of match arrays.
+ */
 PHP_METHOD(Snobol_PatternHelper, matchAll) {
     zval *pattern_or_ast;
     char *subject; size_t subject_len;
@@ -390,6 +439,12 @@ PHP_METHOD(Snobol_PatternHelper, matchAll) {
     zval_ptr_dtor(&pattern_obj);
 }
 
+/**
+ * @brief PatternHelper::split($patternOrAst, string $subject, ?array $options = null): array
+ *  Split segments on non-overlapping matches.
+ * @param patternOrAst, subject, options
+ * @return Array of segment strings.
+ */
 PHP_METHOD(Snobol_PatternHelper, split) {
     zval *pattern_or_ast;
     char *subject; size_t subject_len;
@@ -423,6 +478,13 @@ PHP_METHOD(Snobol_PatternHelper, split) {
     zval_ptr_dtor(&pattern_obj);
 }
 
+/**
+ * @brief PatternHelper::replace($patternOrAst, string $replacement, string $subject, ?array $options = null): string
+ *  Replacements containing '$' route to subst (template); others use
+ *  searchReplace.
+ * @param patternOrAst, replacement, subject, options
+ * @return Replaced string.
+ */
 PHP_METHOD(Snobol_PatternHelper, replace) {
     zval *pattern_or_ast;
     char *replacement; size_t replacement_len;
@@ -463,11 +525,22 @@ PHP_METHOD(Snobol_PatternHelper, replace) {
     zval_ptr_dtor(&pattern_obj);
 }
 
+/**
+ * @brief PatternHelper::clearCache(): void
+ *  Empties the internal slot cache.
+ */
 PHP_METHOD(Snobol_PatternHelper, clearCache) {
     ZEND_PARSE_PARAMETERS_NONE();
     php_phelper_cache_clear();
 }
 
+/**
+ * @brief PatternHelper::evalPattern(string $patternExpr, string $subject, ?array $options = null): mixed
+ *  Compiles and matches in one step; parse failures propagate as
+ *  exceptions.
+ * @param patternExpr, subject, options
+ * @return Match array or false.
+ */
 PHP_METHOD(Snobol_PatternHelper, evalPattern) {
     char *pattern_expr; size_t pattern_expr_len;
     char *subject; size_t subject_len;
@@ -506,6 +579,12 @@ PHP_METHOD(Snobol_PatternHelper, evalPattern) {
     zval_ptr_dtor(&pattern_zv);
 }
 
+/**
+ * @brief PatternHelper::tableSubst(Table $table, string $keyPattern, string $template, string $subject): string
+ *  Substitute matches of $keyPattern using $template (see Pattern::subst).
+ * @param table, keyPattern, template, subject
+ * @return Replaced string.
+ */
 PHP_METHOD(Snobol_PatternHelper, tableSubst) {
     zval *table_zv;
     char *key_pattern; size_t key_pattern_len;
@@ -548,6 +627,12 @@ PHP_METHOD(Snobol_PatternHelper, tableSubst) {
     zval_ptr_dtor(&pattern_zv);
 }
 
+/**
+ * @brief PatternHelper::formattedSubst($patternOrAst, string $template, string $subject, ?array $options = null): string
+ *  Template substitution (captures/format specs) over all matches.
+ * @param patternOrAst, template, subject, options
+ * @return Replaced string.
+ */
 PHP_METHOD(Snobol_PatternHelper, formattedSubst) {
     zval *pattern_or_ast;
     char *template_str; size_t template_str_len;
@@ -599,6 +684,7 @@ static const zend_function_entry snobol_pattern_helper_methods[] = {
     PHP_FE_END
 };
 
+/** @brief Register the Snobol\PatternHelper class (MINIT). */
 void snobol_pattern_helper_php_minit(void) {
     zend_class_entry ce;
     INIT_CLASS_ENTRY(ce, "Snobol\\PatternHelper", snobol_pattern_helper_methods);
