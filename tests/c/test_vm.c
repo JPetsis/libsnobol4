@@ -1395,6 +1395,26 @@ void test_cov_vm_goto(void) {
     vm_free_labels(&vm);
   }
 
+  /* GOTO_F targeting a label genuinely emitted at bytecode offset 0: the
+   * jump must succeed (offset 0 is a valid target, distinct from "missing").
+   * The second pass through GOTO_F sees in_goto_fail cleared, so it falls
+   * through to ACCEPT — no loop.  Regression for the 0-vs-missing
+   * ambiguity in vm_get_label_offset. */
+  {
+    uint8_t bc[8] = {OP_LABEL, 0, 1, OP_GOTO_F, 0, 1, OP_ACCEPT};
+    VM vm;
+    memset(&vm, 0, sizeof(vm));
+    vm.bc = bc;
+    vm.bc_len = 7;
+    vm.s = "a";
+    vm.len = 1;
+    vm_register_label(&vm, 1, 0);
+    vm.in_goto_fail = true;
+    bool ok = vm_exec(&vm);
+    test_assert(ok, "GOTO_F to label at offset 0 succeeds");
+    vm_free_labels(&vm);
+  }
+
   /* GOTO_F with in_goto_fail and unknown label → fail. */
   {
     uint8_t bc[8] = {OP_GOTO_F, 0, 9, OP_ACCEPT};
@@ -2016,7 +2036,8 @@ void test_cov_engine2_vm_exec_round5(void) {
     snobol_buf_free(&cb);
   }
 
-  /* GOTO invalid target with a live choice (pop restore). */
+  /* GOTO invalid target with a live choice (pop restore).  Label 5 is
+   * unregistered, so vm_get_label_offset returns the invalid sentinel. */
   {
     uint8_t bc[16] = {OP_SPLIT, 0, 0,       0, 9, 0,        0,
                       0,        9, OP_GOTO, 0, 5, OP_ACCEPT};
@@ -2026,7 +2047,7 @@ void test_cov_engine2_vm_exec_round5(void) {
     vm.bc_len = 13;
     vm.s = "";
     vm.len = 0;
-    vm_register_label(&vm, 5, 0); /* target 0 → invalid path */
+    /* label 5 intentionally NOT registered → invalid path */
     bool ok = vm_exec(&vm);
     test_assert(!ok, "GOTO invalid target fails");
     vm_free_labels(&vm);

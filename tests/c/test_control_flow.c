@@ -84,9 +84,9 @@ static void test_label_registration(void) {
   offset = vm_get_label_offset(&vm, 2);
   test_assert(offset == 200, "second label offset is correct");
 
-  /* Invalid label returns 0 */
+  /* Invalid label returns the sentinel (offset 0 is a valid target) */
   offset = vm_get_label_offset(&vm, 99);
-  test_assert(offset == 0, "invalid label returns 0");
+  test_assert(offset == UINT32_MAX, "invalid label returns sentinel");
 
   vm_free_labels(&vm);
   test_assert(true, "vm_free_labels completes");
@@ -164,7 +164,12 @@ static void test_invalid_label_fails(void) {
 
   /* Don't register any labels */
   uint32_t offset = vm_get_label_offset(&vm, 1);
-  test_assert(offset == 0, "unregistered label returns 0");
+  test_assert(offset == UINT32_MAX, "unregistered label returns sentinel");
+
+  /* A label genuinely registered at offset 0 must be distinguishable. */
+  test_assert(vm_register_label(&vm, 2, 0), "label 2 registered at 0");
+  offset = vm_get_label_offset(&vm, 2);
+  test_assert(offset == 0, "label at offset 0 returns 0, not the sentinel");
 
   vm_free_labels(&vm);
 }

@@ -1415,7 +1415,7 @@ bool vm_run(VM *vm) {
     uint16_t label_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
     uint32_t target = vm_get_label_offset(vm, label_id);
 
-    if (target == 0 && label_id != 0) {
+    if (target == UINT32_MAX) {
       /* Invalid label - fail without restoring backtracking state */
       vm->in_goto_fail = true;
       if (!vm_pop_choice(vm))
@@ -1446,7 +1446,7 @@ bool vm_run(VM *vm) {
 
     if (vm->in_goto_fail) {
       uint32_t target = vm_get_label_offset(vm, label_id);
-      if (target == 0 && label_id != 0) {
+      if (target == UINT32_MAX) {
         if (!vm_pop_choice(vm))
           goto fail_ret;
       } else {
@@ -2503,7 +2503,7 @@ uint32_t vm_get_label_offset(VM *vm, uint16_t label_id) {
   if (label_id < vm->label_count && vm->label_offsets) {
     return vm->label_offsets[label_id];
   }
-  return 0; /* Invalid label - will cause fail */
+  return UINT32_MAX; /* Invalid label sentinel — offset 0 is a valid target */
 }
 
 #ifdef SNOBOL_DYNAMIC_PATTERN
