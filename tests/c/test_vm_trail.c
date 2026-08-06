@@ -372,8 +372,8 @@ void test_cov_misc_write_log_trail(void) {
   vm.use_compact_choice = true;
   vm_write_log_init(&vm);
   vm.write_log_cap = MAX_CAPS;
-  vm.write_log = (WriteLogEntry *)snobol_malloc(vm.write_log_cap *
-                                                sizeof(WriteLogEntry));
+  vm.write_log =
+      (WriteLogEntry *)snobol_malloc(vm.write_log_cap * sizeof(WriteLogEntry));
   test_assert(vm.write_log != NULL, "write log allocated");
 
   /* Track with wrap-around: >64 entries rotate the circular buffer. */
@@ -432,7 +432,6 @@ void test_cov_misc_write_log_trail(void) {
 /* ── string functions ─────────────────────────────────────────────────────── */
 
 
-
 void test_cov_misc_write_log_round2(void) {
   test_suite("Coverage: write-log existing-entry + trail growth");
 
@@ -441,8 +440,8 @@ void test_cov_misc_write_log_round2(void) {
   vm.use_compact_choice = true;
   vm_write_log_init(&vm);
   vm.write_log_cap = MAX_CAPS;
-  vm.write_log = (WriteLogEntry *)snobol_malloc(vm.write_log_cap *
-                                                sizeof(WriteLogEntry));
+  vm.write_log =
+      (WriteLogEntry *)snobol_malloc(vm.write_log_cap * sizeof(WriteLogEntry));
 
   /* Tracking the same cap twice updates the existing entry in place. */
   vm_write_log_track_cap_start(&vm, 3, 100);
@@ -474,7 +473,6 @@ void test_cov_misc_write_log_round2(void) {
 }
 
 
-
 void test_cov_misc_round3_trail(void) {
   /* VM capture: cap_write sub 0/1 + trail push growth with writes. */
   VM vm;
@@ -484,9 +482,9 @@ void test_cov_misc_round3_trail(void) {
   vm.trail_cap = 2;
   vm.trail = (UndoRecord *)snobol_malloc(vm.trail_cap * sizeof(UndoRecord));
   vm.cap_start[4] = 111;
-  vm_trail_cap_write(&vm, 4, 0, 111, 0);   /* sub 0: start only */
+  vm_trail_cap_write(&vm, 4, 0, 111, 0); /* sub 0: start only */
   vm.cap_end[4] = 222;
-  vm_trail_cap_write(&vm, 4, 1, 0, 222);   /* sub 1: end only */
+  vm_trail_cap_write(&vm, 4, 1, 0, 222); /* sub 1: end only */
   vm.cap_start[5] = 333;
   vm.cap_end[5] = 444;
   vm_trail_cap_write(&vm, 5, 2, 333, 444); /* sub 2: both */
@@ -511,8 +509,8 @@ void test_cov_misc_round3_trail(void) {
   vm.use_compact_choice = true;
   vm_write_log_init(&vm);
   vm.write_log_cap = 8;
-  vm.write_log = (WriteLogEntry *)snobol_malloc(vm.write_log_cap *
-                                                sizeof(WriteLogEntry));
+  vm.write_log =
+      (WriteLogEntry *)snobol_malloc(vm.write_log_cap * sizeof(WriteLogEntry));
   for (int i = 0; i < 30; i++)
     vm_write_log_track_cap_end(&vm, (uint8_t)i, (size_t)i);
   test_assert(vm_write_log_count_entries(&vm) == 8, "write-log wrapped");

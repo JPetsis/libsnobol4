@@ -120,10 +120,9 @@ void test_cov_codegen_emit_all(void) {
                    &bc_len);
   test_assert(bc && bc_len > 0, "ARBNO emits");
   compiler_free(bc);
-  bc = cov_compile(
-      snobol_ast_create_alt(snobol_ast_create_lit("a", 1),
-                            snobol_ast_create_lit("b", 1)),
-      &bc_len);
+  bc = cov_compile(snobol_ast_create_alt(snobol_ast_create_lit("a", 1),
+                                         snobol_ast_create_lit("b", 1)),
+                   &bc_len);
   test_assert(bc && bc_len > 0, "ALT emits");
   compiler_free(bc);
   {
@@ -175,18 +174,22 @@ void test_cov_codegen_emit_all(void) {
 }
 
 
-
 void test_cov_codegen_labels(void) {
   test_suite("Coverage: codegen label table + goto");
 
   /* Nested labels grow the codegen label table past its initial capacity. */
   {
     ast_node_t **parts = (ast_node_t **)malloc(6 * sizeof(ast_node_t *));
-    parts[0] = snobol_ast_create_label((char *)"a", snobol_ast_create_lit("A", 1));
-    parts[1] = snobol_ast_create_label((char *)"b", snobol_ast_create_lit("B", 1));
-    parts[2] = snobol_ast_create_label((char *)"c", snobol_ast_create_lit("C", 1));
-    parts[3] = snobol_ast_create_label((char *)"d", snobol_ast_create_lit("D", 1));
-    parts[4] = snobol_ast_create_label((char *)"e", snobol_ast_create_lit("E", 1));
+    parts[0] =
+        snobol_ast_create_label((char *)"a", snobol_ast_create_lit("A", 1));
+    parts[1] =
+        snobol_ast_create_label((char *)"b", snobol_ast_create_lit("B", 1));
+    parts[2] =
+        snobol_ast_create_label((char *)"c", snobol_ast_create_lit("C", 1));
+    parts[3] =
+        snobol_ast_create_label((char *)"d", snobol_ast_create_lit("D", 1));
+    parts[4] =
+        snobol_ast_create_label((char *)"e", snobol_ast_create_lit("E", 1));
     parts[5] = snobol_ast_create_goto("a");
     ast_node_t *ast = snobol_ast_create_concat(parts, 6);
     uint8_t *bc = NULL;
@@ -219,9 +222,12 @@ void test_cov_engine2_fuse_shapes(void) {
   test_suite("Coverage: SPLIT->ANY fusion shape matrix");
 
   /* ANY-arm and mixed arms. */
-  const char *pats[] = {"ANY('a') | ANY('b')", "ANY('a') | 'b'",
-                        "'a' | ANY('b')", "NOTANY('a') | 'b'",
-                        "('a' | 'b') | ('a' | 'b')", "'a' | 'b' | 'a'"};
+  const char *pats[] = {"ANY('a') | ANY('b')",
+                        "ANY('a') | 'b'",
+                        "'a' | ANY('b')",
+                        "NOTANY('a') | 'b'",
+                        "('a' | 'b') | ('a' | 'b')",
+                        "'a' | 'b' | 'a'"};
   for (size_t i = 0; i < sizeof(pats) / sizeof(pats[0]); i++) {
     snobol_context_t *ctx = snobol_context_create();
     char *err = NULL;
@@ -268,8 +274,7 @@ void test_cov_engine2_fuse_shapes(void) {
       memcpy(src + sl, "SPAN('0-9') ", 12);
       sl += 12;
     }
-    snobol_pattern_t *p =
-        snobol_pattern_compile_ex(ctx, src, sl, 0, &err);
+    snobol_pattern_t *p = snobol_pattern_compile_ex(ctx, src, sl, 0, &err);
     test_assert(p != NULL, "long chain compiles");
     if (p)
       snobol_pattern_free(p);

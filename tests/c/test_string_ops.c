@@ -37,8 +37,7 @@ void test_cov_misc_string_fn(void) {
 
   /* REVERSE: empty + non-empty. */
   test_assert(snobol_reverse("", 0, &out) && out.len == 0, "reverse empty");
-  test_assert(snobol_reverse("abc", 3, &out) &&
-                  memcmp(out.data, "cba", 3) == 0,
+  test_assert(snobol_reverse("abc", 3, &out) && memcmp(out.data, "cba", 3) == 0,
               "reverse abc");
 
   /* SUBSTR: edge positions. */
@@ -54,8 +53,8 @@ void test_cov_misc_string_fn(void) {
   test_assert(snobol_replace("aXbXc", 5, "X", 1, "Y", 1, &out) &&
                   out.len == 5 && memcmp(out.data, "aYbYc", 5) == 0,
               "replace all");
-  test_assert(snobol_replace("abc", 3, "z", 1, "q", 1, &out) &&
-                  out.len == 3 && memcmp(out.data, "abc", 3) == 0,
+  test_assert(snobol_replace("abc", 3, "z", 1, "q", 1, &out) && out.len == 3 &&
+                  memcmp(out.data, "abc", 3) == 0,
               "replace none");
   test_assert(snobol_replace(NULL, 0, "x", 1, "y", 1, &out) && out.len == 0,
               "replace NULL");
@@ -106,7 +105,6 @@ void test_cov_misc_string_fn(void) {
 /* ── fusion executor ──────────────────────────────────────────────────────── */
 
 
-
 void test_cov_misc_string_round2(void) {
   test_suite("Coverage: string function UTF-8 edge cases");
 
@@ -120,7 +118,10 @@ void test_cov_misc_string_round2(void) {
               "upper truncated UTF-8");
   test_assert(snobol_lower("a\xE2", 2, &out) && out.len == 2,
               "lower truncated UTF-8");
-  test_assert(snobol_substr("a\xC3\xA9" "b", 4, 2, 1, &out) && out.len == 2,
+  test_assert(snobol_substr("a\xC3\xA9"
+                            "b",
+                            4, 2, 1, &out) &&
+                  out.len == 2,
               "substr multibyte codepoint");
   test_assert(snobol_dupl("", 0, 5, &out) && out.len == 0, "dupl empty");
 
@@ -151,7 +152,6 @@ void test_cov_misc_string_round2(void) {
 }
 
 
-
 void test_cov_misc_round3_string(void) {
   test_suite("Coverage: string round 3");
 
@@ -171,7 +171,9 @@ void test_cov_misc_round3_string(void) {
   test_assert(!snobol_ord(NULL, 0, &cp), "ord(NULL)");
   test_assert(!snobol_upper("ab", 2, NULL), "upper(NULL out)");
   test_assert(!snobol_lower("ab", 2, NULL), "lower(NULL out)");
-  test_assert(snobol_size("\xFF" "x", 2) == 2,
+  test_assert(snobol_size("\xFF"
+                          "x",
+                          2) == 2,
               "size treats invalid byte as one");
   test_assert(snobol_lpad("ab", 2, 2, '0', &out) && out.len == 2,
               "lpad width == len");
@@ -183,7 +185,6 @@ void test_cov_misc_round3_string(void) {
                   out.len == 3,
               "replace_char empty replacement keeps text");
   snobol_buf_free(&out);
-
 }
 
 
@@ -194,16 +195,17 @@ void test_cov_misc_round4_string(void) {
   snobol_buf_init(&out);
 
   /* size/reverse/substr/replace/ord UTF-8 and boundary paths. */
-  test_assert(snobol_size("\xE2\x82\xAC", 3) == 1,
-              "size counts codepoints");
-  test_assert(snobol_reverse("\xE2\x82\xAC" "x", 4, &out) && out.len == 4,
+  test_assert(snobol_size("\xE2\x82\xAC", 3) == 1, "size counts codepoints");
+  test_assert(snobol_reverse("\xE2\x82\xAC"
+                             "x",
+                             4, &out) &&
+                  out.len == 4,
               "reverse multibyte subject");
   test_assert(!snobol_substr("abc", 3, 4, 1, &out), "substr pos out of range");
   test_assert(snobol_replace("aXbXc", 5, "X", 1, "YY", 2, &out) &&
                   out.len == 7 && memcmp(out.data, "aYYbYYc", 7) == 0,
               "replace growing replacement");
-  test_assert(snobol_replace_char("abc", 3, "", 0, "", 0, &out) &&
-                  out.len == 3,
+  test_assert(snobol_replace_char("abc", 3, "", 0, "", 0, &out) && out.len == 3,
               "replace_char empty maps identity");
   test_assert(snobol_replace_char("abc", 3, "ab", 2, "z", 1, &out) &&
                   out.len == 3 && memcmp(out.data, "zbc", 3) == 0,
@@ -219,7 +221,6 @@ void test_cov_misc_round4_string(void) {
   test_assert(snobol_ord("\xF0\x9F\x98\x80", 4, &cp) && cp == 0x1F600,
               "ord 4-byte codepoint");
   snobol_buf_free(&out);
-
 }
 
 void test_string_ops_suite(void) {

@@ -42,8 +42,8 @@ static void covv_emit_u32_be(uint8_t *bc, size_t *ip, uint32_t v) {
 
 /* Compile an AST and run it through the FULL VM (vm_exec → vm_run). */
 static bool covv_run_ast(ast_node_t *root, const char *subject, size_t len,
-                        int *out_pos, int *out_caps, VM *out_vm,
-                        snobol_buf *out_buf) {
+                         int *out_pos, int *out_caps, VM *out_vm,
+                         snobol_buf *out_buf) {
   uint8_t *bc = NULL;
   size_t bc_len = 0;
   if (compile_ast_to_bytecode_c(root, false, &bc, &bc_len) != 0)
@@ -82,7 +82,7 @@ static bool covv_run_ast(ast_node_t *root, const char *subject, size_t len,
 }
 
 static bool covv_run_bc(const uint8_t *bc, size_t bc_len, const char *subject,
-                       size_t len, int *out_pos, VM *vm_out) {
+                        size_t len, int *out_pos, VM *vm_out) {
   VM vm;
   memset(&vm, 0, sizeof(vm));
   vm.bc = bc;
@@ -172,7 +172,6 @@ void test_cov_vm_charclass_utf8(void) {
 }
 
 
-
 void test_cov_vm_break_variants(void) {
   test_suite("Coverage: full-VM BREAK scan variants");
 
@@ -197,7 +196,6 @@ void test_cov_vm_break_variants(void) {
 }
 
 /* ── Position ops ─────────────────────────────────────────────────────────── */
-
 
 
 void test_cov_vm_position_ops(void) {
@@ -308,7 +306,6 @@ void test_cov_vm_position_ops(void) {
 /* ── Captures / assign / LEN / EVAL / ANCHOR ──────────────────────────────── */
 
 
-
 void test_cov_vm_caps_assign(void) {
   test_suite("Coverage: full-VM capture/assign paths");
 
@@ -349,7 +346,7 @@ void test_cov_vm_caps_assign(void) {
 }
 
 static bool covv_eval_callback(int fn_id, const char *s, size_t start,
-                              size_t end, void *udata) {
+                               size_t end, void *udata) {
   (void)fn_id;
   (void)s;
   (void)start;
@@ -360,7 +357,6 @@ static bool covv_eval_callback(int fn_id, const char *s, size_t start,
 }
 
 static void covv_emit_cb(const char *data, size_t len, void *udata);
-
 
 
 void test_cov_vm_eval(void) {
@@ -478,7 +474,7 @@ void test_cov_vm_eval(void) {
     bc[ip++] = 0;
     bc[ip++] = OP_EVAL;
     covv_emit_u16_be(bc, &ip, 0); /* fn = SNOBOL_FN_NONE */
-    bc[ip++] = 0;                /* reg */
+    bc[ip++] = 0;                 /* reg */
     bc[ip++] = OP_ACCEPT;
     VM vm;
     memset(&vm, 0, sizeof(vm));
@@ -498,7 +494,6 @@ void test_cov_vm_eval(void) {
     snobol_buf_free(&out);
   }
 }
-
 
 
 void test_cov_vm_anchor_fail(void) {
@@ -538,14 +533,13 @@ void test_cov_vm_anchor_fail(void) {
 /* ── REPEAT paths ─────────────────────────────────────────────────────────── */
 
 
-
 void test_cov_vm_repeat(void) {
   test_suite("Coverage: full-VM REPEAT_INIT/STEP paths");
 
   /* min=2 max=2: count<min jump path, then max-bound fallthrough. */
   {
-    ast_node_t *ast = snobol_ast_create_repeat(snobol_ast_create_lit("a", 1),
-                                               2, 2);
+    ast_node_t *ast =
+        snobol_ast_create_repeat(snobol_ast_create_lit("a", 1), 2, 2);
     int pos = 0, caps = 0;
     bool ok = covv_run_ast(ast, "aa", 2, &pos, &caps, NULL, NULL);
     test_assert(ok && pos == 2, "repeat(2,2) matches 'aa'");
@@ -554,8 +548,8 @@ void test_cov_vm_repeat(void) {
 
   /* min=0: zero-iteration skip choice pushed (SPLIT backtracks). */
   {
-    ast_node_t *ast = snobol_ast_create_repeat(snobol_ast_create_lit("a", 1),
-                                               0, 1);
+    ast_node_t *ast =
+        snobol_ast_create_repeat(snobol_ast_create_lit("a", 1), 0, 1);
     int pos = 0, caps = 0;
     bool ok = covv_run_ast(ast, "b", 1, &pos, &caps, NULL, NULL);
     test_assert(ok && pos == 0, "repeat(0,1) zero-iteration succeeds");
@@ -564,8 +558,8 @@ void test_cov_vm_repeat(void) {
 
   /* Unbounded repeat: zero-progress exit (''*) in O(1). */
   {
-    ast_node_t *ast = snobol_ast_create_repeat(snobol_ast_create_lit("", 0), 1,
-                                               (int32_t)-1);
+    ast_node_t *ast =
+        snobol_ast_create_repeat(snobol_ast_create_lit("", 0), 1, (int32_t)-1);
     int pos = 0, caps = 0;
     bool ok = covv_run_ast(ast, "abc", 3, &pos, &caps, NULL, NULL);
     test_assert(ok && pos == 0, "empty-body repeat exits without looping");
@@ -574,8 +568,8 @@ void test_cov_vm_repeat(void) {
 
   /* Greedy-span optimisation: ARBNO(SPAN('a')) + 'b' style via 'a'* 'b'. */
   {
-    ast_node_t *ast = snobol_ast_create_repeat(snobol_ast_create_lit("a", 1),
-                                               1, (int32_t)-1);
+    ast_node_t *ast =
+        snobol_ast_create_repeat(snobol_ast_create_lit("a", 1), 1, (int32_t)-1);
     int pos = 0, caps = 0;
     bool ok = covv_run_ast(ast, "aaa", 3, &pos, &caps, NULL, NULL);
     test_assert(ok && pos == 3, "unbounded repeat consumes the run");
@@ -585,8 +579,8 @@ void test_cov_vm_repeat(void) {
   /* Repeat with a failing tail: choice pop restores then accept. */
   {
     ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
-    parts[0] = snobol_ast_create_repeat(snobol_ast_create_lit("a", 1), 1,
-                                        (int32_t)-1);
+    parts[0] =
+        snobol_ast_create_repeat(snobol_ast_create_lit("a", 1), 1, (int32_t)-1);
     parts[1] = snobol_ast_create_lit("b", 1);
     ast_node_t *ast = snobol_ast_create_concat(parts, 2);
     int pos = 0, caps = 0;
@@ -602,7 +596,6 @@ static void covv_emit_cb(const char *data, size_t len, void *udata) {
   snobol_buf *b = (snobol_buf *)udata;
   snobol_buf_append(b, data, len);
 }
-
 
 
 void test_cov_vm_emit(void) {
@@ -704,8 +697,7 @@ void test_cov_vm_emit(void) {
     bool ok = vm_exec(&vm);
     test_assert(ok && out.len > 0, "EMIT_EXPR emits");
     if (et == 1)
-      test_assert(out.len == 3 && out.data[0] == 'A',
-                  "EMIT_EXPR upper-cases");
+      test_assert(out.len == 3 && out.data[0] == 'A', "EMIT_EXPR upper-cases");
     else if (et == 2)
       test_assert(strncmp(out.data, "3", out.len) == 0,
                   "EMIT_EXPR emits length");
@@ -740,7 +732,7 @@ void test_cov_vm_emit(void) {
     bc[ip++] = 0;
     bc[ip++] = SNBL_FMT_LPAD;
     covv_emit_u16_be(bc, &ip, 5); /* width */
-    bc[ip++] = '-';              /* fill */
+    bc[ip++] = '-';               /* fill */
     bc[ip++] = OP_EMIT_FORMAT;
     bc[ip++] = 0;
     bc[ip++] = SNBL_FMT_RPAD;
@@ -827,7 +819,6 @@ void test_cov_vm_emit(void) {
 }
 
 /* ── TABLE / ARRAY ops via crafted bytecode ───────────────────────────────── */
-
 
 
 void test_cov_vm_table_array(void) {
@@ -1014,7 +1005,6 @@ void test_cov_vm_table_array(void) {
 /* ── DYNAMIC patterns ─────────────────────────────────────────────────────── */
 
 
-
 void test_cov_vm_dynamic(void) {
   test_suite("Coverage: full-VM DYNAMIC_DEF/DYNAMIC");
 
@@ -1130,7 +1120,6 @@ void test_cov_vm_dynamic(void) {
 /* ── Primitives: BREAKX/BAL/FENCE/ABORT/SUCCEED/FAIL/NOP/GOTO ─────────────── */
 
 
-
 void test_cov_vm_primitives(void) {
   test_suite("Coverage: full-VM primitive opcodes");
 
@@ -1226,7 +1215,8 @@ void test_cov_vm_primitives(void) {
     left_parts[0] = snobol_ast_create_lit("x", 1);
     left_parts[1] = snobol_ast_create_fail();
     ast_node_t *left = snobol_ast_create_concat(left_parts, 2);
-    ast_node_t *ast = snobol_ast_create_alt(left, snobol_ast_create_lit("y", 1));
+    ast_node_t *ast =
+        snobol_ast_create_alt(left, snobol_ast_create_lit("y", 1));
     int pos = 0, caps = 0;
     bool ok = covv_run_ast(ast, "y", 1, &pos, &caps, NULL, NULL);
     test_assert(ok && pos == 1, "FAIL backtracks to the alternative");
@@ -1280,7 +1270,6 @@ void test_cov_vm_primitives(void) {
     vm_free_labels(&vm);
   }
 }
-
 
 
 void test_cov_vm_goto(void) {
@@ -1362,7 +1351,6 @@ void test_cov_vm_goto(void) {
 }
 
 /* ── Format detection / range meta / misc helpers ─────────────────────────── */
-
 
 
 void test_cov_vm_helpers(void) {
@@ -1523,9 +1511,8 @@ void test_cov_engine2_vm_exec(void) {
 
   /* EVAL with invalid capture bounds (cap_end < cap_start). */
   {
-    uint8_t bc[16] = {OP_CAP_START, 0, OP_LIT, 0, 0, 0, 8, 1,
-                      'x',          OP_CAP_END, 0, OP_EVAL, 0, 1, 0,
-                      OP_ACCEPT};
+    uint8_t bc[16] = {OP_CAP_START, 0, OP_LIT,  0, 0, 0, 8,        1, 'x',
+                      OP_CAP_END,   0, OP_EVAL, 0, 1, 0, OP_ACCEPT};
     VM vm;
     memset(&vm, 0, sizeof(vm));
     vm.bc = bc;
@@ -1668,8 +1655,8 @@ void test_cov_engine2_vm_exec(void) {
 
   /* GOTO_F failure path with a live choice (target missing). */
   {
-    uint8_t bc[16] = {OP_SPLIT, 0, 0, 0, 4, 0, 0, 0, 4,
-                      OP_GOTO_F, 0, 9, OP_ACCEPT};
+    uint8_t bc[16] = {OP_SPLIT, 0, 0,         0, 4, 0,        0,
+                      0,        4, OP_GOTO_F, 0, 9, OP_ACCEPT};
     VM vm;
     memset(&vm, 0, sizeof(vm));
     vm.bc = bc;
@@ -1732,7 +1719,7 @@ void test_cov_engine2_vm_exec(void) {
     bc[ip++] = 0;
     bc[ip++] = OP_TABLE_SET;
     cove_emit_u16_be(bc, &ip, 0);
-    bc[ip++] = 0; /* key_reg */
+    bc[ip++] = 0;  /* key_reg */
     bc[ip++] = 99; /* value_reg >= MAX_CAPS */
     bc[ip++] = 1;
     bc[ip++] = 't';
@@ -1786,7 +1773,8 @@ void test_cov_engine2_vm_exec(void) {
     memset(&vm, 0, sizeof(vm));
     vm.bc = bc;
     vm.bc_len = bc_len;
-    vm.s = "a\xC3\xA9" "b";
+    vm.s = "a\xC3\xA9"
+           "b";
     vm.len = 4;
     ok = vm_exec(&vm);
     test_assert(ok, "POS(2) at byte offset 3 on multibyte subject");
@@ -1802,7 +1790,8 @@ void test_cov_engine2_vm_exec(void) {
     memset(&vm, 0, sizeof(vm));
     vm.bc = bc;
     vm.bc_len = bc_len;
-    vm.s = "a\xC3\xA9" "b";
+    vm.s = "a\xC3\xA9"
+           "b";
     vm.len = 4;
     ok = vm_exec(&vm);
     test_assert(!ok, "TAB beyond subject fails");
@@ -1859,9 +1848,8 @@ void test_cov_engine2_vm_exec_round5(void) {
 
   /* EVAL cap_ok failure (cap_end > len). */
   {
-    uint8_t bc[16] = {OP_CAP_START, 0, OP_LIT, 0, 0, 0, 8, 1,
-                      'x',          OP_CAP_END, 0, OP_EVAL, 0, 1, 0,
-                      OP_ACCEPT};
+    uint8_t bc[16] = {OP_CAP_START, 0, OP_LIT,  0, 0, 0, 8,        1, 'x',
+                      OP_CAP_END,   0, OP_EVAL, 0, 1, 0, OP_ACCEPT};
     VM vm;
     memset(&vm, 0, sizeof(vm));
     vm.bc = bc;
@@ -1881,8 +1869,7 @@ void test_cov_engine2_vm_exec_round5(void) {
 
   /* EMIT_LITERAL with inline data + emit_fn. */
   {
-    uint8_t bc[16] = {OP_EMIT_LITERAL, 0, 0, 0, 9, 0, 0, 0, 1,
-                      'Z', OP_ACCEPT};
+    uint8_t bc[16] = {OP_EMIT_LITERAL, 0, 0, 0, 9, 0, 0, 0, 1, 'Z', OP_ACCEPT};
     VM vm;
     memset(&vm, 0, sizeof(vm));
     vm.bc = bc;
@@ -1970,8 +1957,8 @@ void test_cov_engine2_vm_exec_round5(void) {
 
   /* GOTO invalid target with a live choice (pop restore). */
   {
-    uint8_t bc[16] = {OP_SPLIT, 0, 0, 0, 9, 0, 0, 0, 9, OP_GOTO,
-                      0, 5, OP_ACCEPT};
+    uint8_t bc[16] = {OP_SPLIT, 0, 0,       0, 9, 0,        0,
+                      0,        9, OP_GOTO, 0, 5, OP_ACCEPT};
     VM vm;
     memset(&vm, 0, sizeof(vm));
     vm.bc = bc;
@@ -2074,7 +2061,6 @@ void test_cov_engine2_vm_exec_round5(void) {
 
 
 /* ── state API capture cleanup + anchored output ──────────────────────────── */
-
 
 
 void test_vm_suite(void) {

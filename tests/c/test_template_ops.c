@@ -831,7 +831,6 @@ void test_cov_tpl_substitutions(void) {
 }
 
 
-
 void test_cov_tpl_tables(void) {
   test_suite("Coverage: template table-backed substitutions");
 
@@ -854,12 +853,12 @@ void test_cov_tpl_tables(void) {
 
   /* Error fallbacks: every bad shape emits a literal '$'. */
   {
-    const char *bad[] = {"$v1[x]",          /* empty table name */
-                         "$v1[tbl",         /* no bracket */
+    const char *bad[] = {"$v1[x]",            /* empty table name */
+                         "$v1[tbl",           /* no bracket */
                          "$v1[tbl['unclosed", /* unclosed quote */
-                         "$v1[tbl['k'",     /* missing close bracket */
-                         "$v1[tbl[v",       /* capture key without digits */
-                         "$v1[tbl[x]"};     /* non-digit unquoted key */
+                         "$v1[tbl['k'",       /* missing close bracket */
+                         "$v1[tbl[v",         /* capture key without digits */
+                         "$v1[tbl[x]"};       /* non-digit unquoted key */
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
       bc = cov_compile_tpl(bad[i], &bc_len, &rc);
       test_assert(bc && rc == 0, "malformed table ref falls back");
@@ -895,8 +894,8 @@ void test_cov_tpl_tables(void) {
       compiler_free(bc);
 
       /* Fresh bytecode with no bindings → unbound table reported. */
-      uint8_t *bc2 = cov_compile_tpl("$v1[tbl['key']] $v1[tbl[v1]]", &bc_len,
-                                     &rc);
+      uint8_t *bc2 =
+          cov_compile_tpl("$v1[tbl['key']] $v1[tbl[v1]]", &bc_len, &rc);
       test_assert(bc2 != NULL, "second template compiles");
       res = snobol_template_bind_tables(bc2, bc_len, NULL, NULL, 0);
       test_assert(res == -1, "unbound table reported");

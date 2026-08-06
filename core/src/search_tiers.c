@@ -3470,9 +3470,9 @@ static bool SNOBOL_HOT dispatch_search_impl(
   /* Direct tier dispatch for the chosen tier.  For anchored matching each
    * tier handler bounds its attempt to a single position (start_offset), so a
    * successful match always begins at the anchor — no post-filter needed. */
-  bool dispatched = tier_table[dispatch_tier](vm, subject, subject_len,
-                                              start_offset, meta, dfa,
-                                              out_result, diag, anchored);
+  bool dispatched =
+      tier_table[dispatch_tier](vm, subject, subject_len, start_offset, meta,
+                                dfa, out_result, diag, anchored);
   if (meta_derived_inline)
     snobol_search_meta_free(&local_meta);
   return dispatched;

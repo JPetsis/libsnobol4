@@ -184,7 +184,7 @@ static void covt_emit_u16_be(uint8_t *bc, size_t *ip, uint16_t v) {
 
 /* SPLIT(LIT(s1) ACCEPT) (LIT(s2) ACCEPT) — shared-prefix-capable tree. */
 static size_t covt_build_split_lit_lit(uint8_t *bc, const char *s1, size_t len1,
-                                      const char *s2, size_t len2) {
+                                       const char *s2, size_t len2) {
   size_t ip = 0;
   bc[ip++] = OP_SPLIT;
   uint32_t branch_a = (uint32_t)(1 + 4 + 4);
@@ -228,7 +228,7 @@ static size_t covt_build_oversized_lit(uint8_t *bc) {
  * so the alt-literals walker is driven directly (no derive_meta on crafted
  * bytecode). Returns the search result. */
 static bool covt_search_crafted(const uint8_t *bc, size_t bc_len,
-                               const char *subject, size_t subj_len) {
+                                const char *subject, size_t subj_len) {
   snobol_search_meta_t meta;
   memset(&meta, 0, sizeof(meta));
   meta.is_alt_literals = true; /* force TIER_ALT_LIT via cost model */
@@ -240,8 +240,8 @@ static bool covt_search_crafted(const uint8_t *bc, size_t bc_len,
   vm.bc_len = bc_len;
   snobol_search_result_t result;
   memset(&result, 0, sizeof(result));
-  bool ok = snobol_search_exec(&vm, subject, subj_len, 0, &meta, NULL, &result,
-                               NULL);
+  bool ok =
+      snobol_search_exec(&vm, subject, subj_len, 0, &meta, NULL, &result, NULL);
   snobol_search_vm_cleanup(&vm);
   return ok;
 }
@@ -290,7 +290,6 @@ void test_cov_trie_bushy_via_pattern(void) {
 }
 
 
-
 void test_cov_trie_flat_via_pattern(void) {
   test_suite("Coverage: flat alternation (no cache)");
 
@@ -317,7 +316,6 @@ void test_cov_trie_flat_via_pattern(void) {
   free(err);
   snobol_context_destroy(ctx);
 }
-
 
 
 void test_cov_trie_vm_cache(void) {
@@ -349,7 +347,6 @@ void test_cov_trie_vm_cache(void) {
 }
 
 
-
 void test_cov_trie_no_match_end(void) {
   test_suite("Coverage: trie_match end-of-subject exit");
 
@@ -371,7 +368,6 @@ void test_cov_trie_no_match_end(void) {
 }
 
 /* ── 2.3 Crafted-bytecode bounds guards ───────────────────────────────────── */
-
 
 
 void test_cov_walker_truncated_bc(void) {
@@ -397,7 +393,6 @@ void test_cov_walker_truncated_bc(void) {
   ok = covt_search_crafted(bc4, 8, "abc", 3);
   test_assert(!ok, "unsupported root opcode fails closed");
 }
-
 
 
 void test_cov_walker_bad_offsets(void) {
@@ -435,7 +430,6 @@ void test_cov_walker_bad_offsets(void) {
 }
 
 
-
 void test_cov_walker_stack_overflow(void) {
   test_suite("Coverage: alt-lit walker explicit-stack overflow");
 
@@ -454,7 +448,6 @@ void test_cov_walker_stack_overflow(void) {
 }
 
 
-
 void test_cov_trie_node_cap(void) {
   test_suite("Coverage: trie_insert node-cap exhaustion");
 
@@ -465,7 +458,6 @@ void test_cov_trie_node_cap(void) {
 }
 
 /* ── 2.2 Automaton promotion/demotion ─────────────────────────────────────── */
-
 
 
 void test_cov_automaton_bmh_gate(void) {
@@ -511,8 +503,8 @@ void test_cov_automaton_bmh_gate(void) {
   if (dfa) {
     snobol_search_result_t result;
     snobol_search_diag_t diag;
-    bool ok = snobol_search_exec(&vm, "xxab34", 6, 0, meta, dfa, &result,
-                                 &diag);
+    bool ok =
+        snobol_search_exec(&vm, "xxab34", 6, 0, meta, dfa, &result, &diag);
     test_assert(ok && result.match_start == 2, "automaton matches 'ab34'");
     test_assert(diag.automaton_tests >= 1, "automaton_tests counted");
 
@@ -526,7 +518,6 @@ void test_cov_automaton_bmh_gate(void) {
   free(err);
   snobol_context_destroy(ctx);
 }
-
 
 
 void test_cov_automaton_demotion(void) {
@@ -589,7 +580,6 @@ void test_cov_automaton_demotion(void) {
 /* ── Scan-tier diagnostics paths ──────────────────────────────────────────── */
 
 
-
 void test_cov_break_scan_diag(void) {
   test_suite("Coverage: BREAK scan tier with diagnostics");
 
@@ -599,8 +589,8 @@ void test_cov_break_scan_diag(void) {
    * literal must be the delimiter itself. On subjects without a delimiter the
    * scan consumes everything and the trailing op fails — the no-match path. */
   const char *src = "BREAK(',') ','";
-  snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, src, strlen(src), 0,
-                                                    &err);
+  snobol_pattern_t *pat =
+      snobol_pattern_compile_ex(ctx, src, strlen(src), 0, &err);
   test_assert(pat != NULL, "compile BREAK pattern");
   if (!pat) {
     free(err);
@@ -646,14 +636,13 @@ void test_cov_break_scan_diag(void) {
 }
 
 
-
 void test_cov_span_scan_diag(void) {
   test_suite("Coverage: SPAN scan tier with diagnostics");
 
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
-  snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, "SPAN('a-z')", 11, 0,
-                                                    &err);
+  snobol_pattern_t *pat =
+      snobol_pattern_compile_ex(ctx, "SPAN('a-z')", 11, 0, &err);
   test_assert(pat != NULL, "compile SPAN pattern");
   if (!pat) {
     free(err);
@@ -691,7 +680,6 @@ void test_cov_span_scan_diag(void) {
 }
 
 
-
 void test_cov_literal_prefix_tiers(void) {
   test_suite("Coverage: literal-prefix scan tier");
 
@@ -713,8 +701,8 @@ void test_cov_literal_prefix_tiers(void) {
     vm.bc_len = snobol_pattern_get_bc_len(pat);
     snobol_search_result_t result;
     snobol_search_diag_t diag;
-    bool ok = snobol_search_exec(&vm, "xxab12", 6, 0, meta, NULL, &result,
-                                 &diag);
+    bool ok =
+        snobol_search_exec(&vm, "xxab12", 6, 0, meta, NULL, &result, &diag);
     test_assert(ok && result.match_start == 2, "prefix search matches");
     test_assert(diag.candidates_tested >= 1, "candidates tested");
     ok = snobol_search_exec(&vm, "qqqqq", 5, 0, meta, NULL, &result, &diag);
@@ -736,7 +724,8 @@ void test_cov_literal_prefix_tiers(void) {
     vm.bc = snobol_pattern_get_bc(pat);
     vm.bc_len = snobol_pattern_get_bc_len(pat);
     snobol_search_result_t result;
-    bool ok = snobol_search_exec(&vm, "zzabcx", 6, 0, meta, NULL, &result, NULL);
+    bool ok =
+        snobol_search_exec(&vm, "zzabcx", 6, 0, meta, NULL, &result, NULL);
     test_assert(ok && result.match_start == 2, "memmem prefix matches");
     snobol_search_vm_cleanup(&vm);
     snobol_pattern_free(pat);
@@ -745,7 +734,6 @@ void test_cov_literal_prefix_tiers(void) {
 
   snobol_context_destroy(ctx);
 }
-
 
 
 void test_cov_literal_only_paths(void) {
@@ -766,8 +754,8 @@ void test_cov_literal_only_paths(void) {
     snobol_search_result_t result;
     snobol_search_diag_t diag;
 
-    bool ok = snobol_search_exec(&vm, "xxhelloyy", 9, 0, meta, NULL, &result,
-                                 &diag);
+    bool ok =
+        snobol_search_exec(&vm, "xxhelloyy", 9, 0, meta, NULL, &result, &diag);
     test_assert(ok && result.match_start == 2, "unanchored literal match");
     test_assert(diag.candidates_tested >= 1, "literal-only diag tested");
 
@@ -801,7 +789,8 @@ void test_cov_literal_only_paths(void) {
     vm.bc = bc;
     vm.bc_len = 8;
     snobol_search_result_t result;
-    bool ok = snobol_search_exec(&vm, "hello", 5, 0, &meta, NULL, &result, NULL);
+    bool ok =
+        snobol_search_exec(&vm, "hello", 5, 0, &meta, NULL, &result, NULL);
     test_assert(!ok, "literal-only fallback on non-LIT bytecode");
     snobol_search_vm_cleanup(&vm);
   }
@@ -810,14 +799,13 @@ void test_cov_literal_only_paths(void) {
 }
 
 
-
 void test_cov_bitmap_tier(void) {
   test_suite("Coverage: candidate-bitmap tier");
 
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
-  snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, "'a' | 'b'", 9, 0,
-                                                    &err);
+  snobol_pattern_t *pat =
+      snobol_pattern_compile_ex(ctx, "'a' | 'b'", 9, 0, &err);
   test_assert(pat != NULL, "compile single-char alt");
   if (!pat) {
     free(err);
@@ -849,7 +837,6 @@ void test_cov_bitmap_tier(void) {
 }
 
 /* ── Search-VM (Tier 6) choice growth + misc ─────────────────────────────── */
-
 
 
 void test_cov_search_vm_choice_growth(void) {
@@ -913,7 +900,6 @@ void test_cov_search_vm_choice_growth(void) {
 }
 
 
-
 void test_cov_search_vm_anchored(void) {
   test_suite("Coverage: search-VM anchored path");
 
@@ -942,8 +928,8 @@ void test_cov_search_vm_anchored(void) {
   vm.bc = bc;
   vm.bc_len = bc_len;
   snobol_search_result_t result;
-  bool ok = snobol_search_exec_anchored(&vm, "xab", 3, &meta, NULL, &result,
-                                        NULL);
+  bool ok =
+      snobol_search_exec_anchored(&vm, "xab", 3, &meta, NULL, &result, NULL);
   test_assert(ok && result.match_end == 3, "anchored search-VM match");
   ok = snobol_search_exec_anchored(&vm, "zzy", 3, &meta, NULL, &result, NULL);
   test_assert(!ok, "anchored mismatch at offset 0");
@@ -951,7 +937,6 @@ void test_cov_search_vm_anchored(void) {
   snobol_search_meta_free(&meta);
   free(bc);
 }
-
 
 
 void test_cov_search_exec_misc(void) {
@@ -985,7 +970,6 @@ void test_cov_search_exec_misc(void) {
 }
 
 /* ── snobol_build_alt_trie failure paths ──────────────────────────────────── */
-
 
 
 void test_cov_build_alt_trie_failures(void) {
@@ -1169,9 +1153,8 @@ void test_cov_pike_overflow_restart(void) {
 /* Runner: force TIER_SEARCH_VM with crafted meta; pike overflows on the
  * REPEAT_INIT prefix so the restart loop executes the crafted bytecode. */
 static bool covt_search_vm_run(uint8_t *bc, size_t bc_len, const char *subject,
-                              size_t subj_len,
-                              const snobol_range_meta_t *rm,
-                              size_t rm_count, snobol_search_result_t *res) {
+                               size_t subj_len, const snobol_range_meta_t *rm,
+                               size_t rm_count, snobol_search_result_t *res) {
   snobol_search_meta_t meta;
   memset(&meta, 0, sizeof(meta));
   meta.search_vm_eligible = true;
@@ -1182,15 +1165,15 @@ static bool covt_search_vm_run(uint8_t *bc, size_t bc_len, const char *subject,
   vm.range_meta = rm;
   vm.range_meta_count = rm_count;
   memset(res, 0, sizeof(*res));
-  bool ok = snobol_search_exec(&vm, subject, subj_len, 0, &meta, NULL, res,
-                               NULL);
+  bool ok =
+      snobol_search_exec(&vm, subject, subj_len, 0, &meta, NULL, res, NULL);
   snobol_search_vm_cleanup(&vm);
   return ok;
 }
 
 /* Emit REPEAT_INIT(min,max) + return the bytecode offset of its skip field. */
 static size_t covt_emit_repeat_init(uint8_t *bc, size_t *ip, uint8_t loop_id,
-                                   uint32_t min, uint32_t max) {
+                                    uint32_t min, uint32_t max) {
   bc[(*ip)++] = OP_REPEAT_INIT;
   bc[(*ip)++] = loop_id;
   covt_emit_u32_be(bc, ip, min);
@@ -1206,7 +1189,6 @@ static void covt_patch_u32(uint8_t *bc, size_t at, uint32_t v) {
   bc[at + 2] = (uint8_t)((v >> 8) & 0xFF);
   bc[at + 3] = (uint8_t)(v & 0xFF);
 }
-
 
 
 void test_cov_search_vm_position_ops(void) {
@@ -1258,7 +1240,6 @@ void test_cov_search_vm_position_ops(void) {
   ok = covt_search_vm_run(bc, bc_len, "zz", 2, NULL, 0, &result);
   test_assert(!ok, "no-match subject fails");
 }
-
 
 
 void test_cov_search_vm_fail_paths(void) {
@@ -1315,7 +1296,6 @@ void test_cov_search_vm_fail_paths(void) {
   ok = covt_search_vm_run(bc, bc_len, "ab", 2, NULL, 0, &result);
   test_assert(ok && result.match_end == 1, "SUCCEED terminates early");
 }
-
 
 
 void test_cov_search_vm_split_fail(void) {
@@ -1506,7 +1486,6 @@ void test_cov_search_vm_charclass(void) {
    *   test_assert(!ok, "BREAKX retry thread must not report a false match");
    */
 }
-
 
 
 void test_cov_search_vm_breakx_retry(void) {

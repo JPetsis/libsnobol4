@@ -55,7 +55,7 @@ static void covm_derive(const uint8_t *bc, size_t bc_len) {
 
 /* Old-format charclass trailer: u16 count, u16 case, CpRange(s). */
 static size_t covm_append_ascii_class(uint8_t *bc, size_t at, char lo,
-                                     char hi) {
+                                      char hi) {
   size_t ip = at;
   covm_emit_u16_be(bc, &ip, 1);
   covm_emit_u16_be(bc, &ip, 0);
@@ -132,7 +132,7 @@ void test_cov_meta_root_classification(void) {
     size_t data_off = ip;
     size_t at = covm_append_ascii_class(bc, ip, 'a', 'a');
     covm_emit_u32_be(bc, &at, (uint32_t)data_off); /* offset table */
-    covm_emit_u32_be(bc, &at, 1);                   /* class_count */
+    covm_emit_u32_be(bc, &at, 1);                  /* class_count */
     snobol_search_meta_t meta;
     snobol_search_derive_meta(bc, at, &meta);
     test_assert(meta.has_candidate_bitmap && meta.is_single_char_alt,
@@ -154,7 +154,7 @@ void test_cov_meta_root_classification(void) {
     covm_emit_u32_be(bc, &at, 300); /* non-ASCII range */
     covm_emit_u32_be(bc, &at, 400);
     covm_emit_u32_be(bc, &at, (uint32_t)ip); /* offset table -> data */
-    covm_emit_u32_be(bc, &at, 1);             /* class_count */
+    covm_emit_u32_be(bc, &at, 1);            /* class_count */
     snobol_search_meta_t meta;
     snobol_search_derive_meta(bc, at, &meta);
     test_assert(!meta.ascii_class_only, "NOTANY non-ASCII class flagged");
@@ -219,14 +219,12 @@ void test_cov_meta_root_classification(void) {
     snobol_search_derive_meta(bc, ip, &meta);
     test_assert(meta.is_single_char_alt && meta.has_candidate_bitmap,
                 "single-char alt detected");
-    test_assert(meta.candidate_bitmap[1] != 0,
-                "upper-word candidate bits set");
+    test_assert(meta.candidate_bitmap[1] != 0, "upper-word candidate bits set");
     snobol_search_meta_free(&meta);
   }
 }
 
 /* ── compute_start_bitmap edge cases ──────────────────────────────────────── */
-
 
 
 void test_cov_meta_start_bitmap(void) {
@@ -373,7 +371,6 @@ void test_cov_meta_start_bitmap(void) {
 /* ── compute_minlength edge cases ─────────────────────────────────────────── */
 
 
-
 void test_cov_meta_minlength(void) {
   test_suite("Coverage: minlength edge cases");
 
@@ -437,8 +434,7 @@ void test_cov_meta_minlength(void) {
     covm_emit_u32_be(bc, &b_at, (uint32_t)branch_b);
     snobol_search_meta_t meta;
     snobol_search_derive_meta(bc, ip, &meta);
-    test_assert(meta.minlength == 2,
-                "FAIL branch ignored in minlength");
+    test_assert(meta.minlength == 2, "FAIL branch ignored in minlength");
     snobol_search_meta_free(&meta);
   }
 
@@ -486,7 +482,6 @@ void test_cov_meta_minlength(void) {
 }
 
 /* ── eligibility checkers: truncation paths ───────────────────────────────── */
-
 
 
 void test_cov_meta_eligibility(void) {
@@ -596,7 +591,6 @@ void test_cov_meta_eligibility(void) {
 /* ── check_alt_literals / check_literal_only malformed shapes ─────────────── */
 
 
-
 void test_cov_meta_alt_and_literal_only(void) {
   test_suite("Coverage: alt-literals + literal-only malformed shapes");
 
@@ -694,7 +688,6 @@ void test_cov_meta_alt_and_literal_only(void) {
 }
 
 /* ── fusion builder failure paths ─────────────────────────────────────────── */
-
 
 
 void test_cov_meta_fusion_failures(void) {
@@ -839,7 +832,6 @@ void test_cov_meta_fusion_failures(void) {
 }
 
 /* ── derive tail: tier classification, required-literal bypass, cleanup ───── */
-
 
 
 void test_cov_meta_derive_tail(void) {

@@ -116,8 +116,7 @@ void test_cov_api_null_contracts(void) {
   test_assert(!snobol_pattern_search_reuse(NULL, "x", 1, NULL),
               "search_reuse(NULL)");
   test_assert(!snobol_match_success(NULL), "match_success(NULL)");
-  test_assert(snobol_match_get_output(NULL, NULL) == NULL,
-              "get_output(NULL)");
+  test_assert(snobol_match_get_output(NULL, NULL) == NULL, "get_output(NULL)");
   test_assert(snobol_match_get_variable(NULL, "1", NULL) == NULL,
               "get_variable(NULL)");
   test_assert(snobol_match_get_position(NULL) == 0, "get_position(NULL)");
@@ -156,14 +155,12 @@ void test_cov_api_null_contracts(void) {
 /* ── match_literal ────────────────────────────────────────────────────────── */
 
 
-
 void test_cov_api_match_literal(void) {
   test_suite("Coverage: match_literal paths");
 
   snobol_context_t *ctx = snobol_context_create();
   char *err = NULL;
-  snobol_pattern_t *pat =
-      snobol_pattern_compile_ex(ctx, "'hello'", 7, 0, &err);
+  snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, "'hello'", 7, 0, &err);
   test_assert(pat != NULL, "compile literal");
   if (pat) {
     snobol_literal_match_t r =
@@ -184,8 +181,7 @@ void test_cov_api_match_literal(void) {
   pat = snobol_pattern_compile_ex(ctx, "'ab' SPAN('0-9')", 16, 0, &err);
   test_assert(pat != NULL, "compile non-literal");
   if (pat) {
-    snobol_literal_match_t r =
-        snobol_pattern_match_literal(pat, "ab12", 4);
+    snobol_literal_match_t r = snobol_pattern_match_literal(pat, "ab12", 4);
     test_assert(!r.success, "non-literal pattern returns no literal match");
     snobol_pattern_free(pat);
   }
@@ -194,7 +190,6 @@ void test_cov_api_match_literal(void) {
 }
 
 /* ── pattern-object match/search/reuse with output + captures ─────────────── */
-
 
 
 void test_cov_api_match_output_captures(void) {
@@ -237,7 +232,6 @@ void test_cov_api_match_output_captures(void) {
 }
 
 
-
 void test_cov_api_search_prefilter(void) {
   test_suite("Coverage: search() required-byte prefilter");
 
@@ -276,7 +270,6 @@ void test_cov_api_search_prefilter(void) {
   free(err);
   snobol_context_destroy(ctx);
 }
-
 
 
 void test_cov_api_search_output_captures(void) {
@@ -318,8 +311,8 @@ void test_cov_api_search_output_captures(void) {
   /* Capture-only pattern through search (capture copy path).  The repeat
    * overflows pike so the capture-aware restart loop records the variable
    * registers (pike's ACCEPT writeback drops them today). */
-  ast = snobol_ast_create_cap(1, snobol_ast_create_repeat(
-                                     snobol_ast_create_lit("a", 1), 1, -1));
+  ast = snobol_ast_create_cap(
+      1, snobol_ast_create_repeat(snobol_ast_create_lit("a", 1), 1, -1));
   ast_node_t **tail = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
   tail[0] = ast;
   tail[1] = snobol_ast_create_lit("b", 1);
@@ -342,7 +335,6 @@ void test_cov_api_search_output_captures(void) {
 }
 
 
-
 void test_cov_api_search_reuse(void) {
   test_suite("Coverage: search_reuse output/capture");
 
@@ -360,8 +352,7 @@ void test_cov_api_search_reuse(void) {
     test_assert(mr->success, "reuse result success flag");
     size_t olen = 0;
     const char *out = snobol_match_get_output(mr, &olen);
-    test_assert(olen == 1 && out && out[0] == 'x',
-                "reuse copies EVAL output");
+    test_assert(olen == 1 && out && out[0] == 'x', "reuse copies EVAL output");
     const char *cap = snobol_match_get_variable(mr, "1", NULL);
     test_assert(cap && cap[0] == 'x', "reuse materializes capture");
 
@@ -375,7 +366,6 @@ void test_cov_api_search_reuse(void) {
 }
 
 /* ── stateful _ex API ─────────────────────────────────────────────────────── */
-
 
 
 void test_cov_api_search_state(void) {
@@ -412,8 +402,7 @@ void test_cov_api_search_state(void) {
   if (m) {
     size_t olen = 0;
     const char *out = snobol_match_get_output(m, &olen);
-    test_assert(olen == 1 && out && out[0] == 'x',
-                "_ex window output copy");
+    test_assert(olen == 1 && out && out[0] == 'x', "_ex window output copy");
     const char *cap = snobol_match_get_variable(m, "1", NULL);
     test_assert(cap && cap[0] == 'x', "_ex window capture");
     test_assert(snobol_match_get_position(m) == 2, "_ex absolute position");
@@ -431,9 +420,8 @@ void test_cov_api_search_state(void) {
     test_assert(pat != NULL, "compile automaton-eligible pattern");
     if (pat) {
       const uint8_t *pbc = snobol_pattern_get_bc(pat);
-      snobol_pattern_search_state_t *st2 =
-          snobol_pattern_search_state_create(pbc,
-                                             snobol_pattern_get_bc_len(pat));
+      snobol_pattern_search_state_t *st2 = snobol_pattern_search_state_create(
+          pbc, snobol_pattern_get_bc_len(pat));
       test_assert(st2 != NULL, "state for anchored pattern");
       if (st2) {
         m = snobol_pattern_search_ex_anchored(st2, "ab12", 4);
@@ -524,7 +512,6 @@ void test_cov_api_search_state(void) {
 /* ── batch API ────────────────────────────────────────────────────────────── */
 
 
-
 void test_cov_api_batch(void) {
   test_suite("Coverage: batch API growth/captures/cleanup");
 
@@ -543,11 +530,9 @@ void test_cov_api_batch(void) {
       }
       snobol_batch_result_t out;
       memset(&out, 0, sizeof(out));
-      bool ok = snobol_pattern_search_batch(snobol_pattern_get_bc(pat),
-                                            snobol_pattern_get_bc_len(pat),
-                                            subject, slen,
-                                            snobol_pattern_get_meta(pat),
-                                            &out);
+      bool ok = snobol_pattern_search_batch(
+          snobol_pattern_get_bc(pat), snobol_pattern_get_bc_len(pat), subject,
+          slen, snobol_pattern_get_meta(pat), &out);
       test_assert(ok, "batch finds many matches");
       test_assert(out.eligible, "batch eligible");
       test_assert(out.match_count == 100, "all 100 matches collected");
@@ -579,17 +564,14 @@ void test_cov_api_batch(void) {
       }
       snobol_batch_result_t out;
       memset(&out, 0, sizeof(out));
-      bool ok = snobol_pattern_search_batch(snobol_pattern_get_bc(pat),
-                                            snobol_pattern_get_bc_len(pat),
-                                            subject, slen,
-                                            snobol_pattern_get_meta(pat),
-                                            &out);
+      bool ok = snobol_pattern_search_batch(
+          snobol_pattern_get_bc(pat), snobol_pattern_get_bc_len(pat), subject,
+          slen, snobol_pattern_get_meta(pat), &out);
       test_assert(ok, "capture batch succeeds");
       test_assert(out.var_count >= 1, "capture rows reported");
       test_assert(out.captures != NULL, "capture rows collected");
       if (out.captures && out.captures[1] && out.match_count > 0) {
-        test_assert(out.captures[1][1] == 3,
-                    "first capture length is 3 bytes");
+        test_assert(out.captures[1][1] == 3, "first capture length is 3 bytes");
       }
       snobol_batch_result_free(&out);
       snobol_pattern_free(pat);
@@ -606,11 +588,9 @@ void test_cov_api_batch(void) {
     if (pat) {
       snobol_batch_result_t out;
       memset(&out, 0, sizeof(out));
-      bool ok = snobol_pattern_search_batch(snobol_pattern_get_bc(pat),
-                                            snobol_pattern_get_bc_len(pat),
-                                            "no commas here", 14,
-                                            snobol_pattern_get_meta(pat),
-                                            &out);
+      bool ok = snobol_pattern_search_batch(
+          snobol_pattern_get_bc(pat), snobol_pattern_get_bc_len(pat),
+          "no commas here", 14, snobol_pattern_get_meta(pat), &out);
       test_assert(!ok && out.eligible, "zero-match batch done, eligible");
       snobol_batch_result_free(&out);
       snobol_pattern_free(pat);
@@ -674,7 +654,6 @@ void test_cov_api_batch(void) {
 /* ── match accessors ──────────────────────────────────────────────────────── */
 
 
-
 void test_cov_api_accessors(void) {
   test_suite("Coverage: match accessor edge cases");
 
@@ -714,8 +693,7 @@ void test_cov_api_accessors(void) {
               "unset register 0 materializes as empty string");
   test_assert(snobol_match_get_variable(m, "", &l) == NULL && l == 0,
               "empty name rejected");
-  test_assert(snobol_match_get_variable(m, "v", &l) == NULL,
-              "bare v rejected");
+  test_assert(snobol_match_get_variable(m, "v", &l) == NULL, "bare v rejected");
   test_assert(snobol_match_get_variable(m, "abc", &l) == NULL,
               "non-numeric name rejected");
   test_assert(snobol_match_get_variable(m, "-3", &l) == NULL,
@@ -741,13 +719,11 @@ void test_cov_api_accessors(void) {
 /* ── one-shot snobol_match() ──────────────────────────────────────────────── */
 
 
-
 void test_cov_api_one_shot(void) {
   test_suite("Coverage: one-shot snobol_match()");
 
   /* Success with captures. */
-  snobol_match_result_t *r =
-      snobol_match("@r1('ab') 'c'", 13, "abc", 3, 0);
+  snobol_match_result_t *r = snobol_match("@r1('ab') 'c'", 13, "abc", 3, 0);
   test_assert(r != NULL, "one-shot result allocated");
   if (r) {
     test_assert(r->success, "one-shot match succeeds");
@@ -756,8 +732,7 @@ void test_cov_api_one_shot(void) {
     test_assert(r->captures && r->captures[1] &&
                     strcmp(r->captures[1], "ab") == 0,
                 "capture copied");
-    test_assert(r->capture_lens && r->capture_lens[1] == 2,
-                "capture length");
+    test_assert(r->capture_lens && r->capture_lens[1] == 2, "capture length");
     snobol_match_result_free(r);
   }
 
@@ -788,7 +763,6 @@ void test_cov_api_one_shot(void) {
 }
 
 /* ── builder API ──────────────────────────────────────────────────────────── */
-
 
 
 void test_cov_api_builder(void) {
@@ -829,10 +803,10 @@ void test_cov_api_builder(void) {
 
   /* concat + alt + emit passthrough. */
   ast_node_t **parts = (ast_node_t **)malloc(4 * sizeof(ast_node_t *));
-  parts[0] = n8;   /* cap(0, lit "abc") */
-  parts[1] = n9;   /* assign(1, 0) */
-  parts[2] = n10;  /* pos(0) */
-  parts[3] = n16;  /* fence */
+  parts[0] = n8;  /* cap(0, lit "abc") */
+  parts[1] = n9;  /* assign(1, 0) */
+  parts[2] = n10; /* pos(0) */
+  parts[3] = n16; /* fence */
   ast_node_t *root = snobol_pattern_build_concat(b, parts, 4);
   ast_node_t *alt = snobol_pattern_build_alt(b, root, n7);
   test_assert(root && alt, "concat and alt build");

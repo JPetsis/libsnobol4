@@ -232,8 +232,7 @@ void test_cov_misc_array(void) {
 
   /* Negative and zero keys. */
   test_assert(snobol_array_set(a, -5, "neg"), "negative key set");
-  test_assert(strcmp(snobol_array_get(a, -5), "neg") == 0,
-              "negative key get");
+  test_assert(strcmp(snobol_array_get(a, -5), "neg") == 0, "negative key get");
   test_assert(snobol_array_set(a, 0, "zero"), "zero key set");
   test_assert(strcmp(snobol_array_get(a, 0), "zero") == 0, "zero key get");
 
@@ -282,7 +281,6 @@ void test_cov_misc_array(void) {
 }
 
 /* ── choice-stack arena + write-log + trail ───────────────────────────────── */
-
 
 
 void test_cov_misc_array_round2(void) {
@@ -335,7 +333,6 @@ void test_cov_misc_array_round2(void) {
 }
 
 
-
 void test_cov_misc_round3_array(void) {
   /* Array negative-key hashing + tombstone-heavy ops. */
   snobol_array_t *a = snobol_array_create(4);
@@ -375,7 +372,6 @@ void test_cov_misc_round4_array(void) {
     snobol_array_set(a, i, NULL); /* tombstones beyond threshold */
   test_assert(snobol_array_has(a, 49), "resize preserves live entries");
   snobol_array_release(a);
-
 }
 
 void test_array_suite(void) {

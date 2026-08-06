@@ -247,13 +247,11 @@ void test_cov_ast_clone_all_types(void) {
               "all node constructors succeed");
 
   /* Clone each and verify the copy frees cleanly. */
-  ast_node_t *nodes[] = {lit,      span,    brk,      any,     notany,
-                         len,      assign,  eval,     anchor,  bal,
-                         rpos,     rtab,    pos,      tab,     fence,
-                         rem,      abort,   fail,     succeed, emit,
-                         dyn,      breakx,  cap,      arbno,   repeat,
-                         alt,      label,   goto_node, tab_acc, tab_upd,
-                         anchor_start};
+  ast_node_t *nodes[] = {
+      lit,    span, brk,     any,       notany,  len,     assign,      eval,
+      anchor, bal,  rpos,    rtab,      pos,     tab,     fence,       rem,
+      abort,  fail, succeed, emit,      dyn,     breakx,  cap,         arbno,
+      repeat, alt,  label,   goto_node, tab_acc, tab_upd, anchor_start};
   for (size_t i = 0; i < sizeof(nodes) / sizeof(nodes[0]); i++) {
     ast_node_t *c = snobol_ast_clone(nodes[i]);
     test_assert(c != NULL, "clone of each node type succeeds");
@@ -299,7 +297,7 @@ void test_cov_ast_clone_all_types(void) {
     s_parts[1] = s18;
     ast_node_t *s31 = snobol_ast_create_concat(s_parts, 2);
 
-    snobol_ast_free(s31);  /* frees s17 + s18 + parts array */
+    snobol_ast_free(s31); /* frees s17 + s18 + parts array */
     snobol_ast_free(s19);
     snobol_ast_free(s20);
     snobol_ast_free(s21);
@@ -312,12 +310,12 @@ void test_cov_ast_clone_all_types(void) {
     snobol_ast_free(s28);
     snobol_ast_free(s29);
     snobol_ast_free(s30);
-    snobol_ast_free(s15);  /* frees s8 -> s1 */
-    snobol_ast_free(s16);  /* frees s9, s10 -> s2 */
-    snobol_ast_free(s11);  /* frees s3 */
-    snobol_ast_free(s12);  /* frees s4 */
-    snobol_ast_free(s13);  /* frees s5 */
-    snobol_ast_free(s14);  /* frees s6 + s7 */
+    snobol_ast_free(s15); /* frees s8 -> s1 */
+    snobol_ast_free(s16); /* frees s9, s10 -> s2 */
+    snobol_ast_free(s11); /* frees s3 */
+    snobol_ast_free(s12); /* frees s4 */
+    snobol_ast_free(s13); /* frees s5 */
+    snobol_ast_free(s14); /* frees s6 + s7 */
   }
 
   /* Concat clone (parts array) + free. */
@@ -336,16 +334,16 @@ void test_cov_ast_clone_all_types(void) {
   test_assert(snobol_ast_clone(NULL) == NULL, "clone(NULL)");
 
   /* Free the shared tree once via its owners. */
-  snobol_ast_free(dyn);      /* frees lit */
+  snobol_ast_free(dyn); /* frees lit */
   snobol_ast_free(emit);
   snobol_ast_free(breakx);
-  snobol_ast_free(arbno);    /* frees len */
-  snobol_ast_free(repeat);   /* frees any */
-  snobol_ast_free(alt);      /* frees brk + notany */
-  snobol_ast_free(label);    /* frees succeed */
+  snobol_ast_free(arbno);  /* frees len */
+  snobol_ast_free(repeat); /* frees any */
+  snobol_ast_free(alt);    /* frees brk + notany */
+  snobol_ast_free(label);  /* frees succeed */
   snobol_ast_free(goto_node);
-  snobol_ast_free(tab_acc);  /* frees cap -> span */
-  snobol_ast_free(tab_upd);  /* frees assign + eval */
+  snobol_ast_free(tab_acc); /* frees cap -> span */
+  snobol_ast_free(tab_upd); /* frees assign + eval */
   snobol_ast_free(anchor);
   snobol_ast_free(bal);
   snobol_ast_free(rpos);
@@ -364,47 +362,43 @@ void test_cov_ast_clone_all_types(void) {
 /* ── type names, dump, aliases, NULL branches ─────────────────────────────── */
 
 
-
 void test_cov_ast_type_names_and_dump(void) {
   test_suite("Coverage: type names + dump");
 
-  test_assert(strcmp(snobol_ast_type_name(AST_LITERAL), "LITERAL") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_CONCAT), "CONCAT") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_ALT), "ALT") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_REPETITION),
-                         "REPETITION") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_SPAN), "SPAN") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_BREAK), "BREAK") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_ANY), "ANY") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_NOTANY), "NOTANY") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_ARBNO), "ARBNO") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_CAP), "CAP") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_ASSIGN), "ASSIGN") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_LEN), "LEN") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_EVAL), "EVAL") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_DYNAMIC_EVAL),
-                         "DYNAMIC_EVAL") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_ANCHOR), "ANCHOR") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_EMIT), "EMIT") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_LABEL), "LABEL") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_GOTO), "GOTO") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_TABLE_ACCESS),
-                         "TABLE_ACCESS") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_TABLE_UPDATE),
-                         "TABLE_UPDATE") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_BREAKX), "BREAKX") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_BAL), "BAL") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_FENCE), "FENCE") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_REM), "REM") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_RPOS), "RPOS") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_RTAB), "RTAB") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_POS), "POS") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_TAB), "TAB") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_ABORT), "ABORT") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_FAIL), "FAIL") == 0 &&
-                  strcmp(snobol_ast_type_name(AST_SUCCEED), "SUCCEED") == 0 &&
-                  strcmp(snobol_ast_type_name((ast_type_t)999), "UNKNOWN") == 0,
-              "every type name resolves");
+  test_assert(
+      strcmp(snobol_ast_type_name(AST_LITERAL), "LITERAL") == 0 &&
+          strcmp(snobol_ast_type_name(AST_CONCAT), "CONCAT") == 0 &&
+          strcmp(snobol_ast_type_name(AST_ALT), "ALT") == 0 &&
+          strcmp(snobol_ast_type_name(AST_REPETITION), "REPETITION") == 0 &&
+          strcmp(snobol_ast_type_name(AST_SPAN), "SPAN") == 0 &&
+          strcmp(snobol_ast_type_name(AST_BREAK), "BREAK") == 0 &&
+          strcmp(snobol_ast_type_name(AST_ANY), "ANY") == 0 &&
+          strcmp(snobol_ast_type_name(AST_NOTANY), "NOTANY") == 0 &&
+          strcmp(snobol_ast_type_name(AST_ARBNO), "ARBNO") == 0 &&
+          strcmp(snobol_ast_type_name(AST_CAP), "CAP") == 0 &&
+          strcmp(snobol_ast_type_name(AST_ASSIGN), "ASSIGN") == 0 &&
+          strcmp(snobol_ast_type_name(AST_LEN), "LEN") == 0 &&
+          strcmp(snobol_ast_type_name(AST_EVAL), "EVAL") == 0 &&
+          strcmp(snobol_ast_type_name(AST_DYNAMIC_EVAL), "DYNAMIC_EVAL") == 0 &&
+          strcmp(snobol_ast_type_name(AST_ANCHOR), "ANCHOR") == 0 &&
+          strcmp(snobol_ast_type_name(AST_EMIT), "EMIT") == 0 &&
+          strcmp(snobol_ast_type_name(AST_LABEL), "LABEL") == 0 &&
+          strcmp(snobol_ast_type_name(AST_GOTO), "GOTO") == 0 &&
+          strcmp(snobol_ast_type_name(AST_TABLE_ACCESS), "TABLE_ACCESS") == 0 &&
+          strcmp(snobol_ast_type_name(AST_TABLE_UPDATE), "TABLE_UPDATE") == 0 &&
+          strcmp(snobol_ast_type_name(AST_BREAKX), "BREAKX") == 0 &&
+          strcmp(snobol_ast_type_name(AST_BAL), "BAL") == 0 &&
+          strcmp(snobol_ast_type_name(AST_FENCE), "FENCE") == 0 &&
+          strcmp(snobol_ast_type_name(AST_REM), "REM") == 0 &&
+          strcmp(snobol_ast_type_name(AST_RPOS), "RPOS") == 0 &&
+          strcmp(snobol_ast_type_name(AST_RTAB), "RTAB") == 0 &&
+          strcmp(snobol_ast_type_name(AST_POS), "POS") == 0 &&
+          strcmp(snobol_ast_type_name(AST_TAB), "TAB") == 0 &&
+          strcmp(snobol_ast_type_name(AST_ABORT), "ABORT") == 0 &&
+          strcmp(snobol_ast_type_name(AST_FAIL), "FAIL") == 0 &&
+          strcmp(snobol_ast_type_name(AST_SUCCEED), "SUCCEED") == 0 &&
+          strcmp(snobol_ast_type_name((ast_type_t)999), "UNKNOWN") == 0,
+      "every type name resolves");
 
   /* Dump every node shape to a throwaway stream. */
   FILE *sink = tmpfile();
@@ -440,9 +434,8 @@ void test_cov_ast_type_names_and_dump(void) {
         snobol_ast_create_label((char *)"L", snobol_ast_create_lit("a", 1));
     dump_nodes[dn++] =
         snobol_ast_create_table_access("t", snobol_ast_create_lit("k", 1));
-    dump_nodes[dn++] =
-        snobol_ast_create_table_update("t", snobol_ast_create_lit("k", 1),
-                                       snobol_ast_create_lit("v", 1));
+    dump_nodes[dn++] = snobol_ast_create_table_update(
+        "t", snobol_ast_create_lit("k", 1), snobol_ast_create_lit("v", 1));
     dump_nodes[dn++] =
         snobol_ast_create_dynamic_eval(snobol_ast_create_lit("x", 1));
     dump_nodes[dn++] = snobol_ast_create_arbno(snobol_ast_create_lit("q", 1));
@@ -463,7 +456,6 @@ void test_cov_ast_type_names_and_dump(void) {
   }
   test_assert(true, "dump of all node shapes ran");
 }
-
 
 
 void test_cov_ast_aliases_and_null_args(void) {
@@ -503,7 +495,7 @@ void test_cov_ast_aliases_and_null_args(void) {
                   a20->type == AST_TABLE_UPDATE,
               "alias types correct");
 
-  snobol_ast_free(a7); /* frees a1 */
+  snobol_ast_free(a7);  /* frees a1 */
   snobol_ast_free(a19); /* frees a2 */
   snobol_ast_free(a20); /* frees a3 + a4 */
   snobol_ast_free(a5);
@@ -539,7 +531,6 @@ void test_cov_ast_aliases_and_null_args(void) {
 }
 
 /* ── arena binding and exhaustion fallback ────────────────────────────────── */
-
 
 
 void test_cov_ast_arena(void) {

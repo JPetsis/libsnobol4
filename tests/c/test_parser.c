@@ -287,7 +287,7 @@ extern void test_assert(bool condition, const char *message);
 
 /* Parse a source string; returns the AST (caller frees) or NULL. */
 static ast_node_t *covp_parse(snobol_parser_t *parser, const char *src,
-                             bool *has_error) {
+                              bool *has_error) {
   snobol_lexer_t *lexer = snobol_lexer_create(src, strlen(src));
   ast_node_t *ast = snobol_parser_parse(parser, lexer);
   if (has_error)
@@ -381,7 +381,6 @@ void test_cov_parser_labels_and_gotos(void) {
 }
 
 
-
 void test_cov_parser_repetition_and_primary(void) {
   test_suite("Coverage: parser repetition + primary errors");
 
@@ -430,8 +429,7 @@ void test_cov_parser_repetition_and_primary(void) {
     snobol_parser_t *parser = snobol_parser_create();
     bool err = false;
     ast_node_t *ast = covp_parse(parser, "^'a'", &err);
-    test_assert(ast && !err && ast->type == AST_CONCAT,
-                "start anchor parses");
+    test_assert(ast && !err && ast->type == AST_CONCAT, "start anchor parses");
     if (ast)
       snobol_ast_free(ast);
     snobol_parser_destroy(parser);
@@ -480,7 +478,6 @@ void test_cov_parser_repetition_and_primary(void) {
 }
 
 
-
 void test_cov_parser_functions(void) {
   test_suite("Coverage: parser function-call validation");
 
@@ -498,8 +495,9 @@ void test_cov_parser_functions(void) {
   /* Argument-type errors for each builtin. */
   {
     /* Bare digits are skipped by the lexer, so these must use identifiers. */
-    const char *bad[] = {"SPAN(foo)", "BREAK(foo)", "BREAKX(foo)", "ANY(foo)",
-                         "NOTANY(foo)", "POS(foo)", "TAB(foo)", "FOO('x')"};
+    const char *bad[] = {"SPAN(foo)", "BREAK(foo)",  "BREAKX(foo)",
+                         "ANY(foo)",  "NOTANY(foo)", "POS(foo)",
+                         "TAB(foo)",  "FOO('x')"};
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
       snobol_parser_t *parser = snobol_parser_create();
       bool err = false;
@@ -511,9 +509,9 @@ void test_cov_parser_functions(void) {
 
   /* Missing closing paren after the argument. */
   {
-    const char *bad[] = {"SPAN('a'", "BREAK('a'", "BREAKX('a'", "ANY('a'",
-                         "NOTANY('a'", "LEN('5'", "POS('2'", "TAB('3'",
-                         "ABORT(x)", "ABORT(", "FAIL(", "SUCCEED("};
+    const char *bad[] = {"SPAN('a'",   "BREAK('a'", "BREAKX('a'", "ANY('a'",
+                         "NOTANY('a'", "LEN('5'",   "POS('2'",    "TAB('3'",
+                         "ABORT(x)",   "ABORT(",    "FAIL(",      "SUCCEED("};
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
       snobol_parser_t *parser = snobol_parser_create();
       bool err = false;
@@ -590,7 +588,6 @@ void test_cov_parser_functions(void) {
     snobol_parser_destroy(parser);
   }
 }
-
 
 
 void test_cov_parser_round3(void) {

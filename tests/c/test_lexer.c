@@ -248,22 +248,21 @@ void test_cov_misc_lexer(void) {
   test_assert(true, "lexer NULL guards");
 
   /* Token names for every single-char operator. */
-  test_assert(strcmp(snobol_token_name(TOKEN_STAR), "STAR") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_PLUS), "PLUS") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_QUESTION), "QUESTION") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_ANCHOR_START),
-                         "ANCHOR_START") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_ANCHOR_END), "ANCHOR_END") ==
-                      0 &&
-                  strcmp(snobol_token_name(TOKEN_AT), "AT") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_COLON), "COLON") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_LBRACKET), "LBRACKET") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_RBRACKET), "RBRACKET") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_EQUALS), "EQUALS") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_COMMA), "COMMA") == 0 &&
-                  strcmp(snobol_token_name(TOKEN_EOF), "EOF") == 0 &&
-                  strcmp(snobol_token_name((token_type_t)99), "UNKNOWN") == 0,
-              "operator token names resolve");
+  test_assert(
+      strcmp(snobol_token_name(TOKEN_STAR), "STAR") == 0 &&
+          strcmp(snobol_token_name(TOKEN_PLUS), "PLUS") == 0 &&
+          strcmp(snobol_token_name(TOKEN_QUESTION), "QUESTION") == 0 &&
+          strcmp(snobol_token_name(TOKEN_ANCHOR_START), "ANCHOR_START") == 0 &&
+          strcmp(snobol_token_name(TOKEN_ANCHOR_END), "ANCHOR_END") == 0 &&
+          strcmp(snobol_token_name(TOKEN_AT), "AT") == 0 &&
+          strcmp(snobol_token_name(TOKEN_COLON), "COLON") == 0 &&
+          strcmp(snobol_token_name(TOKEN_LBRACKET), "LBRACKET") == 0 &&
+          strcmp(snobol_token_name(TOKEN_RBRACKET), "RBRACKET") == 0 &&
+          strcmp(snobol_token_name(TOKEN_EQUALS), "EQUALS") == 0 &&
+          strcmp(snobol_token_name(TOKEN_COMMA), "COMMA") == 0 &&
+          strcmp(snobol_token_name(TOKEN_EOF), "EOF") == 0 &&
+          strcmp(snobol_token_name((token_type_t)99), "UNKNOWN") == 0,
+      "operator token names resolve");
 
   /* Unterminated charclass still yields a CHARCLASS token. */
   {

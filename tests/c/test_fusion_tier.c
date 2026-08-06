@@ -385,8 +385,8 @@ void test_cov_misc_fusion(void) {
    * not fusible: the builder advances past the SPLIT by 9 bytes into branch
    * A.  See dev/coverage-findings.md.) */
   const char *src = "ANY('a') 'x' NOTANY('0-9')";
-  snobol_pattern_t *pat = snobol_pattern_compile_ex(ctx, src, strlen(src), 0,
-                                                    &err);
+  snobol_pattern_t *pat =
+      snobol_pattern_compile_ex(ctx, src, strlen(src), 0, &err);
   test_assert(pat != NULL, "fusion pattern compiles");
   if (pat) {
     const snobol_search_meta_t *meta = snobol_pattern_get_meta(pat);
@@ -455,7 +455,6 @@ void test_cov_misc_fusion(void) {
 }
 
 
-
 /* ===== test_coverage_engine2 (part): coverage-driven tests merged into test_fusion_tier.c ===== */
 #include "../../core/include/snobol/ast.h"
 #include "../../core/include/snobol/compiler.h"
@@ -493,8 +492,8 @@ void test_cov_engine2_fusion_entry(void) {
       vm.bc = (uint8_t *)snobol_pattern_get_bc(pat);
       vm.bc_len = snobol_pattern_get_bc_len(pat);
       size_t rmc = 0;
-      vm.range_meta = (snobol_range_meta_t *)snobol_pattern_get_range_meta(
-          pat, &rmc);
+      vm.range_meta =
+          (snobol_range_meta_t *)snobol_pattern_get_range_meta(pat, &rmc);
       vm.range_meta_count = rmc;
       bool ok = tier_fusion(&vm, "axq", 3, 0, m, NULL, &res, NULL, true);
       test_assert(ok && res.match_end == 3, "anchored fusion match");
@@ -508,7 +507,6 @@ void test_cov_engine2_fusion_entry(void) {
 }
 
 /* ── SPLIT→ANY fusion pass ────────────────────────────────────────────────── */
-
 
 
 void test_cov_engine2_fusion_pass(void) {
