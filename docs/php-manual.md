@@ -164,6 +164,14 @@ Patterns can also be constructed directly via the **Builder API** (PHP arrays â†
 
 `Snobol\Builder` is a **final class with all static methods**. Each method returns an **associative array** representing an AST node. Pass these arrays to `Pattern::compileFromAst()` or `PatternHelper::fromAst()`.
 
+**C counterpart:** C users composing patterns programmatically build `ast_node_t`
+trees with the `snobol_pattern_build_*()` functions (`core/include/snobol/snobol.h`)
+and compile them in one call with `snobol_pattern_build_compile(ctx, root, flags,
+error)` â€” the C equivalent of `compileFromAst()`. It takes ownership of the AST
+root, runs the same post-AST pipeline as `snobol_pattern_compile_ex()`, and
+returns a ready-to-match `snobol_pattern_t` (or `NULL` with a malloc'd error
+string).
+
 ### Literal
 
 ```php

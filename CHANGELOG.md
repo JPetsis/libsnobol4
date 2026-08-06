@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`snobol_pattern_build_compile()`** (`core/src/api.c`,
+  `core/include/snobol/snobol.h`): one-call AST→pattern compilation for the
+  C Builder API. Compiles an `ast_node_t` root from
+  `snobol_pattern_build_emit()` into a fully initialized `snobol_pattern_t`
+  (bytecode, search metadata, range metadata) via the same shared
+  post-bytecode pipeline as `snobol_pattern_compile_ex()` — `pattern_finalize()`
+  extracted from `do_compile()` so the two paths cannot drift. Takes ownership
+  of the AST root (freed on success and failure); returns NULL with a malloc'd
+  error string on compile failure, mirroring `snobol_pattern_compile_ex()`.
+  C users get a complete create → build → emit → compile → match flow without
+  touching internal struct fields. Test suite: `tests/c/test_builder_compile.c`
+  (42 assertions incl. source-parity checks for concat/alt/cap/span/repeat/
+  anchor with captures, failure paths, and AST ownership).
+
 ## [1.0.2] - 2026-08-06
 
 ### Fixed
@@ -137,6 +153,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RTAB(n) clamps to the subject start instead of failing** when n exceeds
   the remaining subject length (fails only when the cursor is past the
   target).
+
+## [1.0.1] - 2026-08-02
+
+### Changed
+
+- **Version bumped to 1.0.1** across the project (top-level `CMakeLists.txt`,
+  `core/CMakeLists.txt`, `bindings/php/src/php_snobol.h`, PHP/C API version
+  tests, READMEs).
+
+### Fixed
+
+- **PIE release asset naming matched exactly** (`.github/workflows/release.yml`):
+  the published asset name pattern now matches what PIE expects, and
+  **PHP 8.5 builds** were added to the release matrix.
+- **`snobol/version.h` generated at configure time when missing**
+  (`bindings/php/config.m4`): the PHP binding's build no longer requires a
+  pre-existing generated header, fixing out-of-tree configure runs.
+
+## [1.0.0] - 2026-08-02
+
+First Packagist/PIE release of the 1.x series. The engine is functionally
+the 0.13.0 codebase; this release is the distribution/CI hardening that made
+standalone packaging viable.
+
+### Added
+
+- **CMake guards for examples/bench subdirectories** (`CMakeLists.txt`):
+  distributed source tarballs configure cleanly when the examples and
+  benchmark targets are not built.
+- **LTO behind an option** (`core/CMakeLists.txt`): `SNOBOL_LTO` defaults
+  to OFF for standalone builds, keeping distributed builds toolchain-agnostic.
+
+### Changed
+
+- **Version bumped to 1.0.0** (`CMakeLists.txt`, `core/CMakeLists.txt`):
+  the 0.13.0 engine is released as the first 1.x version; the PHP binding
+  API version test encoding was updated to match.
+
+### Fixed
+
+- **Windows CI builds the PHP extension via a direct dev-pack build**
+  (`.github/workflows/`): the php-windows-builder action was replaced with
+  the native Windows dev-pack flow, and the Windows `arch` input now uses
+  `x64` (was `x86_64`).
+- **macos arm64 jobs moved to `macos-15` runners** (`.github/workflows/`):
+  the arm64 matrix entries previously pinned `macos-14`.
+- **PIE builder upgraded to `pie-ext-binary-builder@0.0.3`** with a
+  `build-path` input so the extension binary lands at the expected path.
 
 ## ## [0.13.0] - 2026-07-28
 

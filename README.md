@@ -231,6 +231,48 @@ int main(void) {
 }
 ```
 
+#### Builder API (programmatic pattern construction)
+
+For patterns composed from named, maintainable pieces instead of source
+strings, build an AST with `snobol_pattern_build_*()` and compile it in one
+call with `snobol_pattern_build_compile()`:
+
+```c
+#include <snobol/snobol.h>
+
+int main(void) {
+    snobol_context_t* ctx = snobol_context_create();
+    snobol_pattern_build_t* b = snobol_pattern_build_create();
+
+    ast_node_t* lit = snobol_pattern_build_lit(b, "hello", 5);
+    ast_node_t* root = snobol_pattern_build_emit(b, lit);
+
+    char* err = NULL;
+    snobol_pattern_t* pat = snobol_pattern_build_compile(ctx, root, 0, &err);
+    if (!pat) {
+        fprintf(stderr, "compile failed: %s\n", err ? err : "unknown");
+        free(err);
+        return 1;
+    }
+    // root is consumed by compile; the builder can be reused or destroyed.
+    snobol_pattern_build_destroy(b);
+
+    snobol_match_t* m = snobol_pattern_search(pat, "say hello world", 15);
+    if (m && snobol_match_success(m)) {
+        printf("matched at offset %zu\n", snobol_match_get_position(m));
+    }
+    snobol_match_free(m);
+    snobol_pattern_free(pat);
+    snobol_context_destroy(ctx);
+    return 0;
+}
+```
+
+The AST root's ownership transfers to `snobol_pattern_build_compile()` (it is
+freed on both success and failure); the returned pattern matches identically
+to the same pattern compiled from source and frees with
+`snobol_pattern_free()`.
+
 #### Using from C++
 
 All public headers are wrapped in `extern "C"` guards, so libsnobol4 can be
