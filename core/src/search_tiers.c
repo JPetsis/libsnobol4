@@ -1182,23 +1182,31 @@ static bool SNOBOL_HOT search_vm_exec(search_vm_t *SNOBOL_RESTRICT vm,
   {
     uint16_t set_id = read_u16(bc, bc_len, &ip);
     bool ok = false;
+    const uint8_t *rp = NULL;
+    uint16_t cnt = 0;
     if (set_id > 0 && (size_t)(set_id - 1) < srange_count) {
-      const uint8_t *rp = srange[set_id - 1].ranges_ptr;
-      uint16_t cnt = srange[set_id - 1].count;
-      if (rp) {
-        if (pos < len) {
-          uint8_t c = (uint8_t)s[pos];
-          uint64_t map[2];
-          if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
-              bitmap_test(map, c)) {
+      rp = srange[set_id - 1].ranges_ptr;
+      cnt = srange[set_id - 1].count;
+    } else if (set_id > 0 && vm->bc) {
+      /* Range-resolve fallback from the bytecode trailer, like
+       * SPAN/BREAK/BREAKX/NOTANY: callers passing raw bytecode without
+       * range_meta must still get a working ANY. */
+      uint16_t cflag;
+      rp = search_vm_resolve_range(vm, set_id, &cnt, &cflag);
+    }
+    if (rp) {
+      if (pos < len) {
+        uint8_t c = (uint8_t)s[pos];
+        uint64_t map[2];
+        if (c <= 127 && ranges_to_ascii_bitmap(rp, cnt, map) &&
+            bitmap_test(map, c)) {
+          ok = true;
+        } else {
+          uint32_t cp;
+          int bytes;
+          if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
+              range_contains(rp, cnt, cp)) {
             ok = true;
-          } else {
-            uint32_t cp;
-            int bytes;
-            if (utf8_peek_next(s, len, pos, &cp, &bytes) &&
-                range_contains(rp, cnt, cp)) {
-              ok = true;
-            }
           }
         }
       }

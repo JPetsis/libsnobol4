@@ -1925,6 +1925,12 @@ bool vm_run(VM *vm) {
     uint64_t saved_wlog_bitmap = vm->write_log_bitmap;
     size_t saved_wlog_cc = vm->write_log_compressed_count;
     bool saved_wlog_dirty = vm->write_log_dirty;
+    /* The undo trail has the same lifecycle: vm_run() frees it on exit, so
+     * detach the outer trail before the inner run (it allocates its own) and
+     * restore it afterwards, preserving capture undo across the boundary. */
+    UndoRecord *saved_trail = vm->trail;
+    size_t saved_trail_cap = vm->trail_cap;
+    size_t saved_trail_top = vm->trail_top;
     /* Null out so vm_run() allocates fresh state for the inner run */
     vm->choices_arena = nullptr;
     vm->choices_top = 0;
@@ -1934,6 +1940,9 @@ bool vm_run(VM *vm) {
     vm->write_log_bitmap = 0;
     vm->write_log_compressed_count = 0;
     vm->write_log_dirty = false;
+    vm->trail = nullptr;
+    vm->trail_cap = 0;
+    vm->trail_top = 0;
 
     /* Execute dynamic pattern bytecode through the VM */
     const uint8_t *saved_bc = vm->bc;
@@ -1961,6 +1970,10 @@ bool vm_run(VM *vm) {
     vm->write_log_bitmap = saved_wlog_bitmap;
     vm->write_log_compressed_count = saved_wlog_cc;
     vm->write_log_dirty = saved_wlog_dirty;
+    /* Restore the outer undo trail (the inner run freed its own) */
+    vm->trail = saved_trail;
+    vm->trail_cap = saved_trail_cap;
+    vm->trail_top = saved_trail_top;
 
     if (!dynamic_result) {
       /* Dynamic pattern failed - restore captures and position */

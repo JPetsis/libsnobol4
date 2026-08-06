@@ -1434,15 +1434,12 @@ void test_cov_search_vm_charclass(void) {
   ok = covt_search_vm_run(bc, bc_len, "zb", 2, rm, 1, &result);
   test_assert(!ok, "ANY fail path fails closed");
 
-  /* Probe: ANY should resolve its charclass from the bytecode trailer when
-   * range_meta is absent, exactly like SPAN/BREAK/BREAKX/NOTANY do.  Today
-   * ANY reads only the srange cache and never matches without range_meta, so
-   * blob 2 on "ab" with rm=NULL returns no match.  Correct behavior: match.
-   * Disabled until the engine is fixed; see dev/coverage-findings.md.
-   *
-   *   ok = covt_search_vm_run(bc, bc_len, "ab", 2, NULL, 0, &result);
-   *   test_assert(ok, "ANY resolves ranges via the bytecode trailer");
-   */
+  /* ANY resolves its charclass from the bytecode trailer when range_meta is
+   * absent, exactly like SPAN/BREAK/BREAKX/NOTANY. */
+  ok = covt_search_vm_run(bc, bc_len, "ab", 2, NULL, 0, &result);
+  test_assert(ok, "ANY resolves ranges via the bytecode trailer");
+  ok = covt_search_vm_run(bc, bc_len, "zb", 2, NULL, 0, &result);
+  test_assert(!ok, "ANY trailer resolve fails closed");
 
   /* Blob 3: SPAN(1) LIT('a') — SPAN then LIT: SPAN consumes the run so the
    * trailing LIT fails at the first non-class byte (choice-pop + fail_ret). */

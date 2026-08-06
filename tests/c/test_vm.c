@@ -1048,15 +1048,76 @@ void test_cov_vm_dynamic(void) {
   ok = vm_exec(&vm);
   test_assert(ok, "DYNAMIC cache-hit match succeeds");
 
-  /* Probe: OP_DYNAMIC runs the nested vm_run without saving vm->trail; the
-   * inner ACCEPT frees it, so the outer run continues with a dropped trail
-   * (capture undo across the dynamic boundary is lost).  Correct behavior:
-   * the outer trail survives.  Disabled until the engine is fixed; see
-   * dev/coverage-findings.md.
-   *
-   *   test_assert(vm.trail != NULL,
-   *               "outer undo trail survives a DYNAMIC sub-match");
-   */
+  /* Capture undo across a DYNAMIC sub-match: a choice pushed BEFORE a
+   * capture set must undo the capture when backtracking through the
+   * dynamic boundary.  The buggy op_dynamic let the inner run clear and
+   * free the outer trail, so the pop had nothing to undo and the capture
+   * stuck at the branch-A value (cap_end[0] == 1 instead of 0). */
+  {
+    uint8_t bc4[256];
+    size_t ip4 = 0;
+    const char *src4 = "'a'";
+    bc4[ip4++] = OP_SPLIT;
+    size_t split_a_off = ip4;
+    covv_emit_u32_be(bc4, &ip4, 0); /* branch A target: patch below */
+    size_t split_b_off = ip4;
+    covv_emit_u32_be(bc4, &ip4, 0); /* branch B target: patch below */
+    size_t branch_a = ip4;
+    bc4[ip4++] = OP_CAP_START;
+    bc4[ip4++] = 0;
+    bc4[ip4++] = OP_LIT;
+    covv_emit_u32_be(bc4, &ip4, (uint32_t)(ip4 + 8));
+    covv_emit_u32_be(bc4, &ip4, 1);
+    bc4[ip4++] = 'a';
+    bc4[ip4++] = OP_CAP_END;
+    bc4[ip4++] = 0;
+    bc4[ip4++] = OP_DYNAMIC_DEF;
+    covv_emit_u32_be(bc4, &ip4, (uint32_t)strlen(src4));
+    memcpy(bc4 + ip4, src4, strlen(src4));
+    ip4 += strlen(src4);
+    covv_emit_u32_be(bc4, &ip4, 11); /* inner bc_len */
+    /* Inner bytecode lives in its own copied buffer: LIT at offset 0,
+     * data at offset 9 ('a'), ACCEPT at offset 10. */
+    bc4[ip4++] = OP_LIT;
+    covv_emit_u32_be(bc4, &ip4, 9);
+    covv_emit_u32_be(bc4, &ip4, 1);
+    bc4[ip4++] = 'a';
+    bc4[ip4++] = OP_ACCEPT;
+    bc4[ip4++] = OP_DYNAMIC;
+    bc4[ip4++] = OP_FAIL;
+    size_t branch_b = ip4;
+    bc4[ip4++] = OP_ACCEPT;
+    size_t bc4_len = ip4;
+    /* Patch SPLIT branch targets (big-endian u32). */
+    bc4[split_a_off] = (uint8_t)(branch_a >> 24);
+    bc4[split_a_off + 1] = (uint8_t)(branch_a >> 16);
+    bc4[split_a_off + 2] = (uint8_t)(branch_a >> 8);
+    bc4[split_a_off + 3] = (uint8_t)branch_a;
+    bc4[split_b_off] = (uint8_t)(branch_b >> 24);
+    bc4[split_b_off + 1] = (uint8_t)(branch_b >> 16);
+    bc4[split_b_off + 2] = (uint8_t)(branch_b >> 8);
+    bc4[split_b_off + 3] = (uint8_t)branch_b;
+
+    VM vm4;
+    memset(&vm4, 0, sizeof(vm4));
+    vm4.bc = bc4;
+    vm4.bc_len = bc4_len;
+    vm4.s = "aa";
+    vm4.len = 2;
+    dynamic_pattern_cache_t c4;
+    dynamic_pattern_cache_init(&c4, 0);
+    vm4.dyn_cache = &c4;
+    snobol_buf ob4;
+    snobol_buf_init(&ob4);
+    vm4.out = &ob4;
+    bool ok4 = vm_exec(&vm4);
+    test_assert(ok4, "DYNAMIC backtrack + branch-B accept succeeds");
+    test_assert(vm4.cap_end[0] == 0,
+                "capture undone across the DYNAMIC boundary");
+    vm_free_labels(&vm4);
+    snobol_buf_free(&ob4);
+    dynamic_pattern_cache_destroy(&c4);
+  }
   vm_free_labels(&vm);
   snobol_buf_free(&out);
   dynamic_pattern_cache_destroy(&cache);
