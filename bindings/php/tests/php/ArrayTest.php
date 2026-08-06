@@ -141,4 +141,25 @@ class ArrayTest extends TestCase
         gc_collect_cycles();
         $this->assertTrue(true);
     }
+
+    public function testTypeMismatchMatrixThrowsTypeError(): void
+    {
+        $array = new Array_();
+        $cases = [
+            fn () => new Array_('x'),
+            fn () => $array->get('x'),
+            fn () => $array->set('x', 'v'),
+            fn () => $array->set(1, []),
+            fn () => $array->has('x'),
+            fn () => $array->delete('x'),
+        ];
+        foreach ($cases as $case) {
+            try {
+                $case();
+                $this->fail('Expected TypeError');
+            } catch (\TypeError $e) {
+                $this->assertTrue(true);
+            }
+        }
+    }
 }

@@ -843,6 +843,60 @@ class PatternTest extends TestCase
         $this->assertTrue($pattern->setJit(false));
     }
 
+    // === 5.x Type-mismatch matrix and state after failures ===
+
+    public function testTypeMismatchMatrixThrowsTypeError(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $cases = [
+            fn () => Pattern::compileFromAst(123),
+            fn () => Pattern::compileFromAst('x'),
+            fn () => Pattern::fromString("'a'", 'nope'),
+            fn () => $pattern->match('a', 'nope'),
+            fn () => $pattern->subst('a', 'x', 'nope'),
+            fn () => $pattern->setEvalCallbacks('x'),
+            fn () => $pattern->setEvalCallbacks(null),
+            fn () => $pattern->setJit([]),
+        ];
+        foreach ($cases as $case) {
+            try {
+                $case();
+                $this->fail('Expected TypeError');
+            } catch (\TypeError $e) {
+                $this->assertTrue(true);
+            }
+        }
+    }
+
+    public function testMatchInvalidOptionBitsFallBackToDefaults(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::cap(0, Builder::lit('a')));
+        $result = $pattern->match('a', [
+            'captures' => 'bogus',
+            'result' => 'bogus',
+            'metrics' => 'yes',
+        ]);
+        $this->assertIsArray($result);
+        $this->assertSame('a', $result['v0']);
+        // Empty options array behaves like no options
+        $this->assertIsArray($pattern->match('a', []));
+    }
+
+    public function testPatternUsableAfterArgumentErrors(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        try {
+            $pattern->match(123);
+        } catch (\Throwable $e) {
+        }
+        try {
+            $pattern->setEvalCallbacks('x');
+        } catch (\TypeError $e) {
+        }
+        $this->assertIsArray($pattern->match('a'));
+        $this->assertIsArray($pattern->searchAll('aba'));
+    }
+
     // === Search loops for batch-ineligible patterns (EVAL/EMIT) ===
 
     public function testSearchAllPerCallLoopWithEvalPattern(): void

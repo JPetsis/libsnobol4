@@ -368,4 +368,34 @@ class DynamicPatternCacheTest extends TestCase
         $this->assertTrue($cache->get("'E3'")['found']);
         $this->assertSame(2, $cache->stats()['size']);
     }
+
+    public function testTypeMismatchMatrixThrowsTypeError(): void
+    {
+        $cache = new DynamicPatternCache();
+        $cases = [
+            fn () => $cache->compile([]),
+            fn () => $cache->evaluate([], 'x'),
+            fn () => $cache->evaluate("'a'", []),
+            fn () => $cache->get([]),
+        ];
+        foreach ($cases as $case) {
+            try {
+                $case();
+                $this->fail('Expected TypeError');
+            } catch (\TypeError $e) {
+                $this->assertTrue(true);
+            }
+        }
+    }
+
+    public function testCacheUsableAfterErrors(): void
+    {
+        $cache = new DynamicPatternCache();
+        try {
+            $cache->compile([]);
+        } catch (\TypeError $e) {
+        }
+        $this->assertTrue($cache->evaluate("'a'", 'a')['evaluated']);
+        $this->assertSame(1, $cache->stats()['size']);
+    }
 }

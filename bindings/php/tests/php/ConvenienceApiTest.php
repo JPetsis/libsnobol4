@@ -576,4 +576,22 @@ class ConvenienceApiTest extends TestCase
         $this->expectException(\ValueError::class);
         PatternHelper::fromAst(['type' => 'nope']);
     }
+
+    public function testTypeMismatchMatrixThrowsTypeError(): void
+    {
+        $cases = [
+            fn () => PatternHelper::fromAst('x'),
+            fn () => PatternHelper::fromString("'a'", 'nope'),
+            fn () => PatternHelper::matchOnce("'a'", 'a', 'nope'),
+            fn () => PatternHelper::tableSubst('not-a-table', "'k'", '[v]', 'abc'),
+        ];
+        foreach ($cases as $case) {
+            try {
+                $case();
+                $this->fail('Expected TypeError');
+            } catch (\TypeError $e) {
+                $this->assertTrue(true);
+            }
+        }
+    }
 }

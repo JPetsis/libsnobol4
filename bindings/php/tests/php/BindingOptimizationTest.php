@@ -472,6 +472,24 @@ class BindingOptimizationTest extends TestCase
         $this->assertFalse($it->valid());
     }
 
+    public function testIteratorTypeMismatchMatrixThrowsTypeError(): void
+    {
+        $cases = [
+            fn () => \Snobol\SearchIterator::fromPattern('x', 'y'),
+            fn () => \Snobol\SearchIterator::fromPattern(new Pattern(), []),
+            fn () => \Snobol\SplitIterator::fromPattern('x', 'y'),
+            fn () => \Snobol\SplitIterator::fromPattern(new Pattern(), []),
+        ];
+        foreach ($cases as $case) {
+            try {
+                $case();
+                $this->fail('Expected TypeError');
+            } catch (\TypeError $e) {
+                $this->assertTrue(true);
+            }
+        }
+    }
+
     /* ============================================================
      *  10. Lean tokenize API (P2)
      * ============================================================ */
