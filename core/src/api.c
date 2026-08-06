@@ -91,6 +91,45 @@ void snobol_context_destroy(snobol_context_t *ctx) {
  * ---------------------------------------------------------------------------
  */
 
+/** Copy a static message into the caller's malloc'd error out-param. */
+static void set_error(char **error, const char *msg) {
+  if (!error)
+    return;
+  size_t mlen = strlen(msg) + 1;
+  *error = (char *)malloc(mlen);
+  if (*error)
+    memcpy(*error, msg, mlen);
+}
+
+/**
+ * Shared post-bytecode pattern initialization: derive search metadata and
+ * range metadata, then allocate and initialize the pattern struct.  Takes
+ * ownership of @p bc (freed on failure).  Single source of truth for the
+ * tail of pattern compilation so the source-string and builder paths cannot
+ * drift.
+ */
+static snobol_pattern_t *pattern_finalize(uint8_t *bc, size_t bc_len,
+                                          bool case_insensitive, char **error) {
+  snobol_pattern_t *pat =
+      (snobol_pattern_t *)snobol_malloc(sizeof(snobol_pattern_t));
+  if (!pat) {
+    compiler_free(bc);
+    set_error(error, "out of memory");
+    return NULL;
+  }
+  memset(pat, 0, sizeof(snobol_pattern_t));
+  pat->bc = bc;
+  pat->bc_len = bc_len;
+  pat->case_insensitive = case_insensitive;
+  /* Derive search metadata once at compile time so snobol_pattern_search()
+   * and snobol_pattern_search_ex() don't re-walk the bytecode per call. */
+  snobol_search_derive_meta(pat->bc, pat->bc_len, &pat->meta);
+  pat->meta_initialized = true;
+  snobol_build_range_meta(pat->bc, pat->bc_len, &pat->range_meta,
+                          &pat->range_meta_count);
+  return pat;
+}
+
 /**
  * Core compilation helper: lex → parse → compile → allocate pattern.
  */
@@ -122,12 +161,7 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
     const char *msg = snobol_parser_get_error(parser);
     if (!msg)
       msg = "unknown parse error";
-    if (error) {
-      size_t mlen = strlen(msg) + 1;
-      *error = (char *)malloc(mlen);
-      if (*error)
-        memcpy(*error, msg, mlen);
-    }
+    set_error(error, msg);
     snobol_ast_free(ast);
     goto cleanup;
   }
@@ -138,38 +172,11 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
   snobol_ast_free(ast);
 
   if (rc != 0) {
-    if (error) {
-      const char *msg = "compilation failed";
-      size_t mlen = strlen(msg) + 1;
-      *error = (char *)malloc(mlen);
-      if (*error)
-        memcpy(*error, msg, mlen);
-    }
+    set_error(error, "compilation failed");
     goto cleanup;
   }
 
-  snobol_pattern_t *pat =
-      (snobol_pattern_t *)snobol_malloc(sizeof(snobol_pattern_t));
-  if (!pat) {
-    compiler_free(bc);
-    if (error) {
-      *error = (char *)malloc(32);
-      if (*error)
-        memcpy(*error, "out of memory", 14);
-    }
-    goto cleanup;
-  }
-  memset(pat, 0, sizeof(snobol_pattern_t));
-  pat->bc = bc;
-  pat->bc_len = bc_len;
-  pat->case_insensitive = case_insensitive;
-  /* Derive search metadata once at compile time so snobol_pattern_search()
-   * and snobol_pattern_search_ex() don't re-walk the bytecode per call. */
-  snobol_search_derive_meta(pat->bc, pat->bc_len, &pat->meta);
-  pat->meta_initialized = true;
-  snobol_build_range_meta(pat->bc, pat->bc_len, &pat->range_meta,
-                          &pat->range_meta_count);
-  result = pat;
+  result = pattern_finalize(bc, bc_len, case_insensitive, error);
 
 cleanup:
   snobol_parser_destroy(parser);
@@ -1727,4 +1734,26 @@ ast_node_t *snobol_pattern_build_emit(snobol_pattern_build_t *build,
   (void)build;
   /* Ownership is transferred to the caller; just return the root. */
   return root;
+}
+
+snobol_pattern_t *snobol_pattern_build_compile(snobol_context_t *ctx,
+                                               ast_node_t *root,
+                                               uint32_t flags, char **error) {
+  (void)ctx; /* context owns the pattern conceptually; no registry yet */
+  if (error)
+    *error = NULL;
+
+  bool case_insensitive = (flags & SNOBOL_FLAG_CASE_INSENSITIVE) != 0;
+  /* Unknown flag bits are intentionally ignored (forward-compatible). */
+  uint8_t *bc = NULL;
+  size_t bc_len = 0;
+  int rc = compile_ast_to_bytecode_c(root, case_insensitive, &bc, &bc_len);
+  snobol_ast_free(root); /* AST ownership consumed on both outcomes */
+
+  if (rc != 0) {
+    set_error(error, "compilation failed");
+    return NULL;
+  }
+
+  return pattern_finalize(bc, bc_len, case_insensitive, error);
 }

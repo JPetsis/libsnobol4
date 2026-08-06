@@ -781,16 +781,22 @@ void snobol_match_result_free(snobol_match_result_t *result);
  * Each snobol_pattern_build_*() function creates a single AST node of the
  * corresponding type.  Compound functions (concat, alt, cap, etc.) accept
  * child AST nodes and take ownership of them.  Use snobol_pattern_build_emit()
- * to finalize the root node, then compile with compile_ast_to_bytecode_c()
- * or snobol_pattern_compile() via the multi-step API.
+ * to finalize the root node, then snobol_pattern_build_compile() to turn it
+ * into a ready-to-use pattern.
  *
- * Example:
+ * Example (create → build → emit → compile → match):
+ *   snobol_context_t *ctx = snobol_context_create();
  *   snobol_pattern_build_t *b = snobol_pattern_build_create();
  *   ast_node_t *lit = snobol_pattern_build_lit(b, "hello", 5);
  *   ast_node_t *root = snobol_pattern_build_emit(b, lit);
- *   // root is ready for compile_ast_to_bytecode_c(root, ...)
- *   // Ownership of root transferred; b can be destroyed or reused.
+ *   char *err = NULL;
+ *   snobol_pattern_t *pat = snobol_pattern_build_compile(ctx, root, 0, &err);
+ *   // root is consumed by compile; b can be destroyed or reused.
  *   snobol_pattern_build_destroy(b);
+ *   // pat is a fully initialized pattern: match, search, free.
+ *   snobol_match_t *m = snobol_pattern_search(pat, "hello world", 11);
+ *   snobol_pattern_free(pat);
+ *   snobol_context_destroy(ctx);
  * ----------------------------------------------------------------------- */
 
 /**
@@ -914,6 +920,31 @@ ast_node_t *snobol_pattern_build_succeed(snobol_pattern_build_t *build);
  */
 ast_node_t *snobol_pattern_build_emit(snobol_pattern_build_t *build,
                                       ast_node_t *root);
+
+/**
+ * @brief Compile a built AST root into a compiled pattern object.
+ *
+ * Runs the same post-AST pipeline as snobol_pattern_compile_ex() — bytecode
+ * generation, search metadata derivation, and range metadata construction —
+ * so builder-composed patterns are fully initialized and match identically
+ * to their source-compiled equivalents.  No internal struct fields are
+ * exposed or hand-populated by the caller.
+ *
+ * @param[in]  ctx    Context that will own the returned pattern.
+ * @param[in]  root   Root AST node from snobol_pattern_build_emit().
+ *                    Ownership is transferred: the tree is freed by this
+ *                    call on both success and failure, and must NOT be
+ *                    freed by the caller afterwards.
+ * @param[in]  flags  Bitmask of SNOBOL_FLAG_* constants (unknown bits are
+ *                    ignored).
+ * @param[out] error  On failure, *error is set to a malloc'd error string
+ *                    that the caller must free.  Set to NULL on success.
+ * @return Compiled pattern owned by @p ctx, or NULL on compile error.
+ *         Free with snobol_pattern_free() before destroying the context.
+ */
+snobol_pattern_t *snobol_pattern_build_compile(snobol_context_t *ctx,
+                                               ast_node_t *root,
+                                               uint32_t flags, char **error);
 
 #ifdef __cplusplus
 }
