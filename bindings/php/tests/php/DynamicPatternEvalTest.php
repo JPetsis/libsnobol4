@@ -3,6 +3,7 @@
 namespace Snobol\Tests;
 
 use PHPUnit\Framework\TestCase;
+use Snobol\Builder;
 use Snobol\Pattern;
 
 /**
@@ -106,5 +107,67 @@ class DynamicPatternEvalTest extends TestCase
         $this->assertNotFalse($pattern2->match('SECOND'));
         $this->assertFalse($pattern1->match('SECOND'));
         $this->assertFalse($pattern2->match('FIRST'));
+    }
+
+    public function testEvalCallbacksInvokedWithCapturedSubstring(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::concat([Builder::cap(0, Builder::lit('abc')), Builder::eval(0, 0)])
+        );
+        $seen = null;
+        $pattern->setEvalCallbacks([function (string $sub) use (&$seen): bool {
+            $seen = $sub;
+            return true;
+        }]);
+        $result = $pattern->match('abcdef');
+        $this->assertIsArray($result);
+        $this->assertSame('abc', $seen);
+    }
+
+    public function testEvalCallbacksReturnFalseFailsMatch(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $pattern->setEvalCallbacks([fn (): bool => false]);
+        $this->assertFalse($pattern->match('x'));
+    }
+
+    public function testEvalCallbacksNonCallableEntryFailsMatch(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $pattern->setEvalCallbacks([42]);
+        $this->assertFalse($pattern->match('x'));
+    }
+
+    public function testEvalCallbacksReplaceExistingCallbacks(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $first = null;
+        $second = null;
+        $pattern->setEvalCallbacks([function (string $s) use (&$first): bool {
+            $first = 'old';
+            return true;
+        }]);
+        $pattern->setEvalCallbacks([function (string $s) use (&$second): bool {
+            $second = 'new';
+            return true;
+        }]);
+        $this->assertIsArray($pattern->match('x'));
+        $this->assertNull($first);
+        $this->assertSame('new', $second);
+    }
+
+    public function testEvalBuiltinFnIdDispatchesWithoutCallback(): void
+    {
+        // fn=1 is SNOBOL_FN_SIZE: dispatched natively, host callback never called
+        $pattern = Pattern::compileFromAst(
+            Builder::concat([Builder::cap(0, Builder::lit('a')), Builder::eval(1, 0)])
+        );
+        $called = false;
+        $pattern->setEvalCallbacks([null, function () use (&$called): bool {
+            $called = true;
+            return true;
+        }]);
+        $this->assertIsArray($pattern->match('a'));
+        $this->assertFalse($called);
     }
 }

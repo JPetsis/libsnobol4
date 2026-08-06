@@ -584,4 +584,369 @@ class PatternTest extends TestCase
         // Clear cache before each test to ensure isolation
         PatternHelper::clearCache();
     }
+
+    // === 2.1 Pattern API surface: compile flags, options, error contracts ===
+
+    public function testFromStringWithCaseInsensitiveOption(): void
+    {
+        $pattern = Pattern::fromString("'abc'", ['caseInsensitive' => true]);
+        $this->assertIsArray($pattern->match('ABC'));
+        $this->assertFalse($pattern->match('xyz'));
+    }
+
+    public function testCompileFromAstWithOptionsArray(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::lit('hello'), ['caseInsensitive' => true]);
+        $this->assertIsArray($pattern->match('HELLO'));
+    }
+
+    public function testCompileFromAstUnknownNodeThrows(): void
+    {
+        $this->expectException(\Exception::class);
+        Pattern::compileFromAst(['type' => 'no_such_node']);
+    }
+
+    public function testFromStringEmptyPatternMatchesEmpty(): void
+    {
+        $pattern = Pattern::fromString("''");
+        $result = $pattern->match('');
+        $this->assertIsArray($result);
+        $this->assertSame(0, $result['_match_len']);
+    }
+
+    public function testMatchExplicitNullOptions(): void
+    {
+        $pattern = Pattern::fromString("'abc'");
+        $this->assertIsArray($pattern->match('abc', null));
+    }
+
+    public function testMatchMetricsOption(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $result = $pattern->match('a', ['metrics' => true]);
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('_metrics', $result);
+    }
+
+    public function testMatchMetricsOnCapturePattern(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::concat([Builder::cap(0, Builder::lit('ab')), Builder::lit('c')])
+        );
+        $result = $pattern->match('abc', ['metrics' => true]);
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('_metrics', $result);
+        $this->assertSame(3, $result['_match_len']);
+    }
+
+    public function testMatchCapturesOffsetsOption(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::cap(0, Builder::lit('abc')));
+        $result = $pattern->match('abc', ['captures' => 'offsets']);
+        $this->assertIsArray($result);
+        $this->assertSame([0, 3], $result['v0']);
+    }
+
+    public function testMatchEmptyCaptureIsNull(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::concat([Builder::cap(0, Builder::lit('')), Builder::lit('x')])
+        );
+        $result = $pattern->match('x');
+        $this->assertIsArray($result);
+        $this->assertNull($result['v0']);
+    }
+
+    public function testMatchLiteralSuccess(): void
+    {
+        $pattern = Pattern::fromString("'hello'");
+        $result = $pattern->matchLiteral('hello');
+        $this->assertIsArray($result);
+        $this->assertTrue($result['success']);
+        $this->assertSame(5, $result['length']);
+    }
+
+    public function testMatchLiteralNoMatch(): void
+    {
+        $pattern = Pattern::fromString("'hello'");
+        $result = $pattern->matchLiteral('nope');
+        $this->assertIsArray($result);
+        $this->assertFalse($result['success']);
+        $this->assertSame(0, $result['length']);
+    }
+
+    public function testMatchLiteralOnNonLiteralPattern(): void
+    {
+        $pattern = Pattern::fromString("'a' 'b'");
+        $result = $pattern->matchLiteral('ab');
+        $this->assertIsArray($result);
+        $this->assertFalse($result['success']);
+    }
+
+    public function testSearchAllFlatResult(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $result = $pattern->searchAll('banana', ['result' => 'flat']);
+        $this->assertArrayHasKey('match_start', $result);
+        $this->assertSame([1, 3, 5], $result['match_start']);
+        $this->assertSame([1, 1, 1], $result['match_len']);
+    }
+
+    public function testSearchAllWithMetricsOption(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $result = $pattern->searchAll('banana', ['metrics' => true]);
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('_metrics', $result[0]);
+    }
+
+    public function testSearchSplitFlatResult(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $result = $pattern->searchSplit('banana', ['result' => 'flat']);
+        $this->assertSame([0, 1, 2, 1, 4, 1, 6, 0], $result);
+    }
+
+    public function testSearchSplitCutsResult(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $this->assertSame([2, 4, 6], $pattern->searchSplitCuts('banana'));
+    }
+
+    public function testSearchSplitCutsEmptySubject(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $this->assertSame([], $pattern->searchSplitCuts(''));
+    }
+
+    public function testSearchReplaceNoMatchReturnsSubject(): void
+    {
+        $pattern = Pattern::fromString("'z'");
+        $this->assertSame('banana', $pattern->searchReplace('banana', 'X'));
+    }
+
+    public function testSearchReplaceIneligiblePerCallLoop(): void
+    {
+        // EVAL patterns are not batch-eligible: exercises the per-call loop.
+        // Zero-length matches occur at every position, including at the end
+        // of the subject (regression for the remainder-append underflow).
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $this->assertSame('XXXX', $pattern->searchReplace('abc', 'X'));
+    }
+
+    public function testSearchReplaceTrailingZeroLengthMatch(): void
+    {
+        // BREAK pattern that matches up to end-of-subject followed by a
+        // zero-length match: batch path must not underflow the remainder.
+        $pattern = Pattern::compileFromAst(Builder::brk('x'));
+        $this->assertSame('XX', $pattern->searchReplace('abc', 'X'));
+    }
+
+    public function testSearchReplaceLargeSubjectCountPass(): void
+    {
+        // Non-literal pattern, subject > 1 KB: exercises the count pass + pre-size
+        $pattern = Pattern::fromString("'a' 'b'");
+        $subject = str_repeat('ab', 600);
+        $replaced = $pattern->searchReplace($subject, 'X');
+        $this->assertSame(str_repeat('X', 600), $replaced);
+    }
+
+    public function testSearchReplaceLargeLiteralSubjectPresize(): void
+    {
+        // Literal-only pattern, subject > 1 KB: exercises the literal pre-size path
+        $pattern = Pattern::fromString("'ab'");
+        $subject = str_repeat('ab', 600);
+        $replaced = $pattern->searchReplace($subject, 'X');
+        $this->assertSame(str_repeat('X', 600), $replaced);
+    }
+
+    public function testSubstMultipleMatches(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $this->assertSame('X-X-X', $pattern->subst('a-a-a', 'X'));
+    }
+
+    public function testSubstWithTablesParameter(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $table = new \Snobol\Table();
+        $table->set('a', 'value');
+        // Tables bind without error; template still substitutes normally
+        $this->assertSame('X-X', $pattern->subst('a-a', 'X', ['T' => $table]));
+    }
+
+    // === 2.3 Pattern lifecycle: reuse, state creation/destruction ===
+
+    public function testPatternReuseAcrossManyMatches(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        for ($i = 0; $i < 50; $i++) {
+            $this->assertIsArray($pattern->match('a'));
+            $this->assertFalse($pattern->match('b'));
+        }
+    }
+
+    public function testPatternSearchStateReuseAcrossMethods(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $this->assertIsArray($pattern->match('a'));
+        $this->assertIsArray($pattern->searchAll('ba'));
+        $this->assertSame(['b', ''], $pattern->searchSplit('ba'));
+        $this->assertSame('Xb', $pattern->searchReplace('ab', 'X'));
+    }
+
+    public function testPatternDestructionReleasesResources(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::alt(
+                Builder::alt(Builder::lit('cat'), Builder::lit('car')),
+                Builder::lit('cab')
+            )
+        );
+        $pattern->setEvalCallbacks([fn (string $s): bool => true]);
+        $pattern->searchAll('cat car cab');
+        $this->assertIsArray($pattern->matchLiteral('cat'));
+        unset($pattern);
+        gc_collect_cycles();
+        $this->assertTrue(true);
+    }
+
+    public function testPatternNotCompiledThrows(): void
+    {
+        $pattern = new Pattern();
+        $methods = [
+            'match' => ['x'],
+            'searchAll' => ['x'],
+            'searchSplit' => ['x'],
+            'searchSplitOffsets' => ['x'],
+            'searchSplitCuts' => ['x'],
+            'searchReplace' => ['x', 'y'],
+            'matchLiteral' => ['x'],
+            'subst' => ['x', 'y'],
+            'searchSplitGenerator' => ['x'],
+            'searchAllGenerator' => ['x'],
+        ];
+        foreach ($methods as $method => $args) {
+            try {
+                $pattern->{$method}(...$args);
+                $this->fail("Expected exception from {$method}()");
+            } catch (\Exception $e) {
+                $this->assertSame('Pattern not compiled', $e->getMessage());
+            }
+        }
+    }
+
+    public function testSetJitToggle(): void
+    {
+        $pattern = Pattern::fromString("'a'");
+        $this->assertTrue($pattern->setJit(true));
+        $this->assertTrue($pattern->setJit(false));
+    }
+
+    // === Search loops for batch-ineligible patterns (EVAL/EMIT) ===
+
+    public function testSearchAllPerCallLoopWithEvalPattern(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $result = $pattern->searchAll('abc');
+        $this->assertCount(4, $result);
+        $this->assertSame(0, $result[0]['_match_len']);
+        $this->assertSame(3, $result[3]['_match_start']);
+    }
+
+    public function testSearchAllFlatPerCallLoopWithEvalPattern(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $result = $pattern->searchAll('abc', ['result' => 'flat']);
+        $this->assertSame([0, 1, 2, 3], $result['match_start']);
+        $this->assertSame([0, 0, 0, 0], $result['match_len']);
+    }
+
+    public function testSearchAllMetricsPerCallLoop(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $result = $pattern->searchAll('abc', ['metrics' => true]);
+        $this->assertCount(4, $result);
+        $this->assertArrayHasKey('_metrics', $result[0]);
+    }
+
+    public function testSearchAllArrayCapturesPerCallLoop(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::concat([Builder::cap(0, Builder::lit('a')), Builder::eval(0, 0)])
+        );
+        $result = $pattern->searchAll('ab');
+        $this->assertCount(1, $result);
+        $this->assertSame('a', $result[0]['v0']);
+    }
+
+    public function testSearchAllFlatCapturesOffsetsPerCallLoop(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::concat([Builder::cap(0, Builder::lit('a')), Builder::eval(0, 0)])
+        );
+        $result = $pattern->searchAll('ab', ['result' => 'flat', 'captures' => 'offsets']);
+        $this->assertSame([0], $result['match_start']);
+        $this->assertSame([[0, 1]], $result['captures']['v0']);
+    }
+
+    public function testSearchAllWithEmitPatternOutput(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::concat([Builder::lit('x'), Builder::emit('OUT')])
+        );
+        $result = $pattern->searchAll('xx');
+        $this->assertCount(2, $result);
+        $this->assertSame('OUT', $result[0]['_output']);
+        $this->assertSame('OUT', $result[1]['_output']);
+    }
+
+    public function testSearchAllFlatWithEmitPatternOutput(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::concat([Builder::lit('x'), Builder::emit('OUT')])
+        );
+        $result = $pattern->searchAll('xx', ['result' => 'flat']);
+        $this->assertSame(['OUT', 'OUT'], $result['_output']);
+    }
+
+    public function testSearchSplitPerCallLoopWithEvalPattern(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $this->assertSame(['', 'a', 'b', 'c', ''], $pattern->searchSplit('abc'));
+    }
+
+    public function testSearchSplitOffsetsPerCallLoopWithEvalPattern(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $this->assertSame(
+            [[0, 0], [0, 1], [1, 1], [2, 1], [3, 0]],
+            $pattern->searchSplitOffsets('abc')
+        );
+    }
+
+    public function testSearchSplitCutsPerCallLoopWithEvalPattern(): void
+    {
+        $pattern = Pattern::compileFromAst(Builder::eval(0, 0));
+        $this->assertSame([0, 1, 2, 3], $pattern->searchSplitCuts('abc'));
+    }
+
+    public function testSearchSplitCutsWithAltLiteralsTrieCache(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::alt(Builder::lit('ab'), Builder::lit('cd'))
+        );
+        $this->assertSame([2, 5], $pattern->searchSplitCuts('abxcd'));
+    }
+
+    public function testSearchSplitOffsetsWithAltLiteralsTrieCache(): void
+    {
+        $pattern = Pattern::compileFromAst(
+            Builder::alt(Builder::lit('ab'), Builder::lit('cd'))
+        );
+        $this->assertSame(
+            [[0, 0], [2, 1], [5, 0]],
+            $pattern->searchSplitOffsets('abxcd')
+        );
+    }
 }

@@ -60,5 +60,38 @@ class ApiVersionTest extends TestCase
         $v = snobol_get_abi_version();
         $this->assertSame(1, $v, 'Initial ABI version must be 1');
     }
+
+    public function testChoiceStatsShape(): void
+    {
+        $stats = snobol_get_choice_stats();
+        $this->assertIsArray($stats);
+        $this->assertArrayHasKey('choice_push_count', $stats);
+        $this->assertArrayHasKey('choice_allocated', $stats);
+        $this->assertArrayHasKey('choice_stack_depth', $stats);
+        $this->assertArrayHasKey('choice_stack_memory_usage', $stats);
+    }
+
+    public function testPhpInfoReportsModule(): void
+    {
+        // MINFO branch: module table rendered into the captured output
+        ob_start();
+        phpinfo(INFO_MODULES);
+        $output = ob_get_clean();
+        $this->assertIsString($output);
+        $this->assertStringContainsString('snobol support', $output);
+    }
+
+    public function testExtraArgumentsRejected(): void
+    {
+        // Zero-arg functions reject extra arguments before entering the body
+        foreach (['snobol_get_api_version', 'snobol_get_abi_version', 'snobol_get_choice_stats'] as $fn) {
+            try {
+                $fn(1);
+                $this->fail("Expected ArgumentCountError from {$fn}(1)");
+            } catch (\ArgumentCountError $e) {
+                $this->assertTrue(true);
+            }
+        }
+    }
 }
 

@@ -320,5 +320,30 @@ class TextTest extends TestCase
         $this->assertSame('hi   ', \snobol_text_rpad('hi', 5, ' '));
         $this->assertSame('hello', \snobol_text_rpad('hello', 3, ' ')); // already wide enough
     }
+
+    // === Fallback branches: functions that cannot transform return the input ===
+
+    public function testEmptyInputFallbacks(): void
+    {
+        $this->assertSame('', \snobol_text_trim(''));
+        $this->assertSame('', \snobol_text_reverse(''));
+        $this->assertSame('', \snobol_text_replace('', 'a', 'b'));
+        $this->assertSame('', \snobol_text_replace_char('', 'a', 'b'));
+        $this->assertSame('', \snobol_text_upper(''));
+        $this->assertSame('', \snobol_text_lower(''));
+    }
+
+    public function testPadEmptyInputFallback(): void
+    {
+        // Empty input pads up to the requested width
+        $this->assertSame('     ', \snobol_text_lpad('', 5));
+        $this->assertSame('     ', \snobol_text_rpad('', 5));
+    }
+
+    public function testReplaceNoOccurrenceReturnsInput(): void
+    {
+        $this->assertSame('abc', \snobol_text_replace('abc', 'z', 'X'));
+        $this->assertSame('abc', \snobol_text_replace_char('abc', 'z', 'X'));
+    }
 }
 
