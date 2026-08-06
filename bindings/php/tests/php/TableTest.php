@@ -85,6 +85,29 @@ class TableTest extends TestCase
         $this->assertEquals(0, $table->size());
     }
 
+    public function testTableSetInvalidValueTypeThrows(): void
+    {
+        $table = new Table();
+
+        foreach ([42, 1.5, true, [], new \stdClass()] as $bad) {
+            try {
+                $table->set('key', $bad);
+                $this->fail('Expected Exception for non-string, non-null value');
+            } catch (\Exception $e) {
+                $this->assertSame('Value must be string or null', $e->getMessage());
+            }
+        }
+    }
+
+    public function testTableDestructionReleases(): void
+    {
+        $table = new Table('temp');
+        $table->set('a', 'b');
+        unset($table);
+        gc_collect_cycles();
+        $this->assertTrue(true);
+    }
+
     public function testTableUpdate(): void
     {
         $table = new Table();

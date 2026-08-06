@@ -317,4 +317,55 @@ class DynamicPatternCacheTest extends TestCase
         $this->assertFalse($result['evaluated']);
         $this->assertEmpty($result['matches']);
     }
+
+    public function testNegativeCapacityThrows(): void
+    {
+        try {
+            new DynamicPatternCache(-1);
+            $this->fail('Expected ValueError for negative capacity');
+        } catch (\ValueError $e) {
+            $this->assertSame('Cache capacity must be non-negative', $e->getMessage());
+        }
+    }
+
+    public function testCompileInvalidPatternReturnsError(): void
+    {
+        $cache = new DynamicPatternCache();
+        $result = $cache->compile('bareword');
+        $this->assertFalse($result['compiled']);
+        $this->assertArrayHasKey('error', $result);
+    }
+
+    public function testEvaluateInvalidPatternReturnsError(): void
+    {
+        $cache = new DynamicPatternCache();
+        $result = $cache->evaluate('bareword', 'x');
+        $this->assertFalse($result['evaluated']);
+        $this->assertArrayHasKey('error', $result);
+    }
+
+    public function testLruTouchReordersAccessOrder(): void
+    {
+        $cache = new DynamicPatternCache(2);
+        $cache->compile("'A'");
+        $cache->compile("'B'");
+        // Re-compiling A moves it to the back of the LRU order
+        $cache->compile("'A'");
+        // Adding C now evicts B (least recently used), not A
+        $cache->compile("'C'");
+        $this->assertFalse($cache->get("'B'")['found']);
+        $this->assertTrue($cache->get("'A'")['found']);
+        $this->assertTrue($cache->get("'C'")['found']);
+    }
+
+    public function testEvaluateEvictsLru(): void
+    {
+        $cache = new DynamicPatternCache(2);
+        $cache->evaluate("'E1'", 'E1');
+        $cache->evaluate("'E2'", 'E2');
+        $cache->evaluate("'E3'", 'E3');
+        $this->assertFalse($cache->get("'E1'")['found']);
+        $this->assertTrue($cache->get("'E3'")['found']);
+        $this->assertSame(2, $cache->stats()['size']);
+    }
 }
