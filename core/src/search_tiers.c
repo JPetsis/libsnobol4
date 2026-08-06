@@ -3019,13 +3019,25 @@ bool pike_scan(const uint8_t *bc, size_t bc_len, const char *subject,
           /* Write captures back to the VM so unanchored capture search stays
            * consistent with the full VM (mirrors search_vm_writeback_to_vm).
            * The named-variable registers are included: CAP_END/ASSIGN populate
-           * the thread's var registers, and they must reach the caller. */
+           * the thread's var registers, and they must reach the caller.
+           * Thread positions are absolute in the subject; store them
+           * relative to the match start like the restart loop and full VM do
+           * (the match-window convention used by every capture reader). */
           if (vm) {
-            memcpy(vm->cap_start, th.cap_start, sizeof(th.cap_start));
-            memcpy(vm->cap_end, th.cap_end, sizeof(th.cap_end));
+            size_t base = th.match_start;
+            for (size_t ci = 0; ci < MAX_CAPS; ci++) {
+              if (ci < th.max_cap_used) {
+                vm->cap_start[ci] = th.cap_start[ci] - base;
+                vm->cap_end[ci] = th.cap_end[ci] - base;
+              }
+            }
             vm->max_cap_used = th.max_cap_used;
-            memcpy(vm->var_start, th.var_start, sizeof(th.var_start));
-            memcpy(vm->var_end, th.var_end, sizeof(th.var_end));
+            for (size_t vi = 0; vi < MAX_VARS; vi++) {
+              if (vi < th.var_count) {
+                vm->var_start[vi] = th.var_start[vi] - base;
+                vm->var_end[vi] = th.var_end[vi] - base;
+              }
+            }
             vm->var_count = th.var_count;
           }
         }

@@ -416,15 +416,22 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
     }
   }
 
-  /* Copy named variables (1-based: var_start[0] = variable "1") */
+  /* Copy named variables (1-based: var_start[0] = variable "1").
+   * The VM computes capture offsets relative to the match window (its
+   * subject base is subject + match position); anchor var_subject to the
+   * window base and bound against the window length so materialization
+   * reads the correct absolute span for matches away from offset 0. */
   int n = (int)vm.var_count;
   if (n > API_MAX_VARS)
     n = API_MAX_VARS;
   m->var_count = n;
+  const char *win_subject = subject + sr.match_start;
+  size_t win_len =
+      (sr.match_start <= len) ? len - sr.match_start : 0;
   for (int i = 0; i < n; i++) {
     size_t vs = vm.var_start[i];
     size_t ve = vm.var_end[i];
-    match_store_capture(m, subject, i, vs, ve, len);
+    match_store_capture(m, win_subject, i, vs, ve, win_len);
   }
 
   snobol_buf_free(&out_buf);
@@ -520,10 +527,15 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
   if (n > API_MAX_VARS)
     n = API_MAX_VARS;
   m->var_count = n;
+  /* Capture offsets are relative to the match window; anchor var_subject
+   * to the window base (subject + match position) so captures materialize
+   * the correct absolute bytes for matches away from offset 0. */
+  const char *win_subject = subject + sr.match_start;
+  size_t win_len = (sr.match_start <= len) ? len - sr.match_start : 0;
   for (int i = 0; i < n; i++) {
     size_t vs = vm.var_start[i];
     size_t ve = vm.var_end[i];
-    match_store_capture(m, subject, i, vs, ve, len);
+    match_store_capture(m, win_subject, i, vs, ve, win_len);
   }
 
   snobol_buf_free(&out_buf);
@@ -615,10 +627,15 @@ bool snobol_pattern_search_reuse(snobol_pattern_t *pattern, const char *subject,
   if (n > API_MAX_VARS)
     n = API_MAX_VARS;
   match_out->var_count = n;
+  /* Capture offsets are relative to the match window; anchor var_subject
+   * to the window base (subject + match position) so captures materialize
+   * the correct absolute bytes for matches away from offset 0. */
+  const char *win_subject = subject + sr.match_start;
+  size_t win_len = (sr.match_start <= len) ? len - sr.match_start : 0;
   for (int i = 0; i < n; i++) {
     size_t vs = vm.var_start[i];
     size_t ve = vm.var_end[i];
-    match_store_capture(match_out, subject, i, vs, ve, len);
+    match_store_capture(match_out, win_subject, i, vs, ve, win_len);
   }
 
   snobol_buf_free(&out_buf);
@@ -836,13 +853,14 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
   if (n > API_MAX_VARS)
     n = API_MAX_VARS;
   state->match.var_count = n;
-  /* The VM computes capture offsets relative to start_offset (the window
-   * base), but the caller passes the full subject.  Anchor var_subject to
-   * the window base and bound against the window length so materialization
-   * reads the correct absolute span on every reuse call. */
-  const char *win_subject = subject + start_offset;
+  /* The VM computes capture offsets relative to the match window (its
+   * subject base is subject + match position), not to start_offset:
+   * candidates before the match may have failed.  Anchor var_subject to
+   * the match position and bound against the remaining window length so
+   * materialization reads the correct absolute span on every call. */
+  const char *win_subject = subject + sr.match_start;
   size_t win_len =
-      (start_offset <= subject_len) ? subject_len - start_offset : 0;
+      (sr.match_start <= subject_len) ? subject_len - sr.match_start : 0;
   for (int i = 0; i < n; i++) {
     size_t vs = state->vm.var_start[i];
     size_t ve = state->vm.var_end[i];
@@ -1138,9 +1156,10 @@ static bool batch_run(snobol_pattern_search_state_t *state, const char *subject,
     lengths[count] = mlen;
     output_lens[count] = 0;
 
-    /* Collect captures. VM stores offsets relative to the search window
-     * (start_offset), so add `offset` (the window base) to get absolute
-     * subject positions. */
+    /* Collect captures. The VM stores offsets relative to the match window
+     * (the candidate where the match succeeded — candidates before it may
+     * have failed), so add sr.match_start (the match position) to get
+     * absolute subject positions. */
     if (has_caps && captures) {
       int nv = (int)vm->var_count;
       if (nv > (int)max_var_count)
@@ -1170,7 +1189,7 @@ static bool batch_run(snobol_pattern_search_state_t *state, const char *subject,
         }
         size_t vs = vm->var_start[ri];
         size_t ve = vm->var_end[ri];
-        captures[ri][count * 2] = offset + vs;
+        captures[ri][count * 2] = sr.match_start + vs;
         captures[ri][count * 2 + 1] = (ve > vs) ? (ve - vs) : 0;
       }
     }

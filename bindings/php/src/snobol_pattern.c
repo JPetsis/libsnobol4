@@ -1238,11 +1238,10 @@ void php_snobol_do_search_all(snobol_pattern_t *intern, const char *subject_val,
 
     zval match_arr;
     array_init(&match_arr);
-    /* var_off[i] is window-relative (anchored at start_offset passed
-         * to snobol_search_exec).  match_start is the absolute position
-         * of the match, which equals start_offset + (match's offset into
-         * the window).  Use match_start as the window base. */
-    size_t cap_off_base = search_offset;
+    /* var_off[i] is relative to the match window (the position where the
+     * match succeeded), not to the search offset: candidates before the
+     * match may have failed.  Use match_start as the window base. */
+    size_t cap_off_base = match_start;
     for (size_t i = 0; i < m->var_count; ++i) {
       char key[32];
       snprintf(key, sizeof(key), "v%u", (unsigned)i);

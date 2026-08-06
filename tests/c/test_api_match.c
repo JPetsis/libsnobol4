@@ -295,18 +295,22 @@ void test_cov_api_search_output_captures(void) {
   }
   snobol_ast_free(ast);
 
-  /* Probe: unanchored captures are window-relative but copied against the
-   * full subject, so matches away from offset 0 materialize wrong bytes.
-   * Correct behavior: subject "aax " yields the capture "x " (offsets
-   * shifted by the match position).  Disabled until the engine is fixed;
-   * see dev/coverage-findings.md.
-   *
-   *   pat = cova_compile_pattern(cova_cap_eval(SNOBOL_FN_TRIM, "x ", 2));
-   *   m = snobol_pattern_search(pat, "aax ", 4);
-   *   cap = snobol_match_get_variable(m, "1", NULL);
-   *   test_assert(cap && strcmp(cap, "x ") == 0,
-   *               "capture offsets are subject-absolute");
-   */
+  /* Unanchored captures are window-relative in the VM but must materialize
+   * subject-absolute bytes: subject "aax " with a capture of "x " at
+   * offset 2 must yield "x " (offsets shifted by the match position). */
+  pat = cova_compile_pattern(cova_cap_eval(SNOBOL_FN_TRIM, "x ", 2));
+  test_assert(pat != NULL, "probe pattern compiles");
+  if (pat) {
+    snobol_match_t *mp = snobol_pattern_search(pat, "aax ", 4);
+    test_assert(mp && snobol_match_success(mp), "probe search succeeds");
+    if (mp) {
+      const char *cap = snobol_match_get_variable(mp, "1", NULL);
+      test_assert(cap && strcmp(cap, "x ") == 0,
+                  "capture offsets are subject-absolute");
+      snobol_match_free(mp);
+    }
+    snobol_pattern_free(pat);
+  }
 
   /* Capture-only pattern through search (capture copy path).  The repeat
    * overflows pike so the capture-aware restart loop records the variable
@@ -877,6 +881,89 @@ void test_cov_api_builder(void) {
   snobol_pattern_build_destroy(b);
 }
 
+/* Capture offsets are subject-absolute on every path: match/search/reuse,
+ * the stateful _ex API, and batch must all report the same capture for a
+ * match away from offset 0.  (Subject "id:12345,name:foo": the capture
+ * SPAN('0-9') matches "12345" at position 3.) */
+void test_cov_api_capture_absolute_equivalence(void) {
+  test_suite("Coverage: capture offsets subject-absolute across APIs");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = NULL;
+  snobol_pattern_t *pat =
+      snobol_pattern_compile(ctx, "@r(SPAN('0-9'))", 15, &err);
+  test_assert(pat != NULL, "equivalence pattern compiles");
+  if (!pat) {
+    free(err);
+    snobol_context_destroy(ctx);
+    return;
+  }
+  const char *subject = "id:12345,name:foo";
+  size_t slen = 17;
+  size_t clen = 0;
+  const char *cap = NULL;
+
+  /* snobol_pattern_search */
+  {
+    snobol_match_t *m = snobol_pattern_search(pat, subject, slen);
+    test_assert(m && snobol_match_success(m), "search succeeds off-anchor");
+    if (m) {
+      test_assert(snobol_match_get_position(m) == 3, "search position is 3");
+      cap = snobol_match_get_variable(m, "1", &clen);
+      test_assert(cap && clen == 5 && memcmp(cap, "12345", 5) == 0,
+                  "search capture is subject-absolute");
+      snobol_match_free(m);
+    }
+  }
+
+  /* snobol_pattern_search_reuse */
+  {
+    snobol_match_t *mr = snobol_match_create();
+    bool ok = snobol_pattern_search_reuse(pat, subject, slen, mr);
+    test_assert(ok && mr->success, "reuse succeeds off-anchor");
+    cap = snobol_match_get_variable(mr, "1", &clen);
+    test_assert(cap && clen == 5 && memcmp(cap, "12345", 5) == 0,
+                "reuse capture is subject-absolute");
+    snobol_match_free(mr);
+  }
+
+  /* snobol_pattern_search_ex (stateful) */
+  {
+    snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(
+        snobol_pattern_get_bc(pat), snobol_pattern_get_bc_len(pat));
+    test_assert(st != NULL, "state created");
+    if (st) {
+      snobol_match_t *m = snobol_pattern_search_ex(st, subject, slen, 0);
+      test_assert(m && m->success, "_ex succeeds off-anchor");
+      cap = snobol_match_get_variable(m, "1", &clen);
+      test_assert(cap && clen == 5 && memcmp(cap, "12345", 5) == 0,
+                  "_ex capture is subject-absolute");
+      snobol_pattern_search_state_destroy(st);
+    }
+  }
+
+  /* snobol_pattern_search_batch */
+  {
+    snobol_batch_result_t out;
+    memset(&out, 0, sizeof(out));
+    bool ok = snobol_pattern_search_batch(
+        snobol_pattern_get_bc(pat), snobol_pattern_get_bc_len(pat), subject,
+        slen, snobol_pattern_get_meta(pat), &out);
+    test_assert(ok && out.match_count > 0, "batch succeeds off-anchor");
+    test_assert(out.captures && out.captures[1], "batch capture rows exist");
+    if (out.captures && out.captures[1] && out.match_count > 0) {
+      test_assert(out.captures[1][0] == 3,
+                  "batch capture start is subject-absolute (3)");
+      test_assert(out.captures[1][1] == 5, "batch capture length is 5");
+    }
+    snobol_batch_result_free(&out);
+  }
+
+  snobol_pattern_free(pat);
+  free(err);
+  snobol_context_destroy(ctx);
+}
+
 void test_api_match_suite(void) {
   test_suite("API: snobol_match()");
 
@@ -1029,6 +1116,7 @@ void test_api_match_suite(void) {
   test_cov_api_search_prefilter();
   test_cov_api_search_output_captures();
   test_cov_api_search_capture_pike();
+  test_cov_api_capture_absolute_equivalence();
   test_cov_api_search_reuse();
   test_cov_api_search_state();
   test_cov_api_batch();
