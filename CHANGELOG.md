@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`docs/c-manual.md`** — full C/C++ manual mirroring the PHP manual's
+  structure: installation and linking (CMake/pkg-config/Homebrew), the
+  compilation/match/search API, the Builder API with its ownership contract,
+  batch search, the tier dispatch system, error handling and memory
+  ownership rules, thread safety, C++ interop, version/ABI, and worked
+  common-use-case examples. Every code example was compiled and executed
+  against the library as part of the writing process. Linked from the
+  README's Documentation section.
 - **`snobol_pattern_build_compile()`** (`core/src/api.c`,
   `core/include/snobol/snobol.h`): one-call AST→pattern compilation for the
   C Builder API. Compiles an `ast_node_t` root from
