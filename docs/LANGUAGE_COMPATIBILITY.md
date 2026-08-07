@@ -16,30 +16,30 @@ The engine now supports full SNOBOL language compatibility including:
 
 ### ✅ Completed Features
 
-| Feature                                       | Status     | Notes                                         |
-|-----------------------------------------------|------------|-----------------------------------------------|
-| Parser: Generic comma-separated arguments     | ✅ Complete | Arity validation in semantic layer            |
-| Parser: `EVAL(...)` syntax                    | ✅ Complete | Parses dynamic evaluation expressions         |
-| Parser: Table access `TABLE[key]`             | ✅ Complete | Supports literal and capture-derived keys     |
-| Runtime: Dynamic pattern cache                | ✅ Complete | With retain/release ownership semantics       |
-| Runtime: `OP_DYNAMIC_DEF` / `OP_DYNAMIC`      | ✅ Complete | Source-based cache keying, bytecode execution |
-| Runtime: Full pattern semantics in EVAL       | ✅ Complete | Alternation, backtracking, nested EVAL        |
-| Runtime: Table-backed templates               | ✅ Complete | Literal keys stored in bytecode               |
-| Runtime: Capture-derived table lookups        | ✅ Complete | Key from capture register                     |
-| Runtime: Formatted substitutions              | ✅ Complete | upper, lower, length operations               |
-| Helper API: `PatternHelper::evalPattern()`    | ✅ Complete | Routes through core runtime with caching      |
-| Helper API: `PatternHelper::tableSubst()`     | ✅ Complete | Table-backed substitution helper              |
-| Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                     |
-| Helper API: `DynamicPatternCache`            | ✅ Complete | Truthful runtime-backed cache interface       |
-| Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)    |
-| Test coverage                                 | ✅ Complete | 516 PHP tests, 74883 C assertions (custom runner) |
+| Feature                                       | Status      | Notes                                             |
+|-----------------------------------------------|-------------|---------------------------------------------------|
+| Parser: Generic comma-separated arguments     | ✅ Complete | Arity validation in semantic layer                |
+| Parser: `EVAL(...)` syntax                    | ✅ Complete | Parses dynamic evaluation expressions             |
+| Parser: Table access `TABLE[key]`             | ✅ Complete | Supports literal and capture-derived keys         |
+| Runtime: Dynamic pattern cache                | ✅ Complete | With retain/release ownership semantics           |
+| Runtime: `OP_DYNAMIC_DEF` / `OP_DYNAMIC`      | ✅ Complete | Source-based cache keying, bytecode execution     |
+| Runtime: Full pattern semantics in EVAL       | ✅ Complete | Alternation, backtracking, nested EVAL            |
+| Runtime: Table-backed templates               | ✅ Complete | Literal keys stored in bytecode                   |
+| Runtime: Capture-derived table lookups        | ✅ Complete | Key from capture register                         |
+| Runtime: Formatted substitutions              | ✅ Complete | upper, lower, length operations                   |
+| Helper API: `PatternHelper::evalPattern()`    | ✅ Complete | Routes through core runtime with caching          |
+| Helper API: `PatternHelper::tableSubst()`     | ✅ Complete | Table-backed substitution helper                  |
+| Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                         |
+| Helper API: `DynamicPatternCache`             | ✅ Complete | Truthful runtime-backed cache interface           |
+| Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)        |
+| Test coverage                                 | ✅ Complete | 516 PHP tests, 74895 C assertions (custom runner) |
 
 ### ⚠️ Known Limitations
 
-| Feature            | Limitation                                                     | Workaround                       | Future                    |
-|--------------------|----------------------------------------------------------------|----------------------------------|---------------------------|
-| Table registration | Placeholder `table_id=0`                                       | Runtime resolves by name         | Explicit registration API |
-| Recursive EVAL     | `EVAL(EVAL(...))` parsed but not optimized                     | Avoid deep nesting               | Optimize recursive evaluation |
+| Feature            | Limitation                                                          | Workaround                                                                       | Future                        |
+|--------------------|---------------------------------------------------------------------|----------------------------------------------------------------------------------|-------------------------------|
+| Table registration | (resolved) unbound `OP_EMIT_TABLE` entries are patched at bind time | `snobol_template_bind_tables()` resolves names to IDs before execution (v0.5.0+) | —                             |
+| Recursive EVAL     | `EVAL(EVAL(...))` parsed but not optimized                          | Avoid deep nesting                                                               | Optimize recursive evaluation |
 
 > **Note:** The SLJIT method-JIT and tracing-JIT subsystems described in older
 > revisions of this document were **retired in v0.13.0**. The engine now executes
@@ -277,12 +277,12 @@ The `tests/compat/` directory contains reference programs demonstrating the feat
 
 | Fixture                       | Features Used                                                            | Runtime-Backed |
 |-------------------------------|--------------------------------------------------------------------------|----------------|
-| `WordCounter.php`             | Tables for counting                                                      | ✅ Yes          |
-| `TextTransformer.php`         | Dynamic patterns via `PatternHelper::evalPattern()`                      | ✅ Yes          |
-| `TemplateEngine.php`          | Table-backed variables                                                   | ✅ Yes          |
-| `WordCounterWithGoto.php`     | `Builder::label` / `Builder::goto` for labelled control flow             | ✅ Yes          |
-| `TextTransformerWithGoto.php` | Labelled classification patterns + forward goto via `Builder` API        | ✅ Yes          |
-| `TemplateEngineWithGoto.php`  | Label-wrapped variable detection + forward `goto` for structure checking | ✅ Yes          |
+| `WordCounter.php`             | Tables for counting                                                      | ✅ Yes         |
+| `TextTransformer.php`         | Dynamic patterns via `PatternHelper::evalPattern()`                      | ✅ Yes         |
+| `TemplateEngine.php`          | Table-backed variables                                                   | ✅ Yes         |
+| `WordCounterWithGoto.php`     | `Builder::label` / `Builder::goto` for labelled control flow             | ✅ Yes         |
+| `TextTransformerWithGoto.php` | Labelled classification patterns + forward goto via `Builder` API        | ✅ Yes         |
+| `TemplateEngineWithGoto.php`  | Label-wrapped variable detection + forward `goto` for structure checking | ✅ Yes         |
 
 Run compatibility tests with:
 
@@ -382,11 +382,15 @@ All runtime objects (tables, dynamic patterns) use reference counting:
 
 ## Test Coverage
 
-| Suite         | Tests | Status    |
-|---------------|-------|-----------|
-| C Tests       | 357   | ✅ Pass   |
-| PHP Tests     | 516   | ✅ Pass   |
-| Compatibility | 40    | ✅ Pass   |
+| Suite         | Tests                                          | Status  |
+|---------------|------------------------------------------------|---------|
+| C Tests       | 358 cases / 74,895 assertions                  | ✅ Pass |
+| PHP Tests     | 516 (last recorded — refresh with `ddev test`) | ✅ Pass |
+| Compatibility | 40                                             | ✅ Pass |
+
+The C numbers are produced by the custom runner (`make test`). The PHP and
+compatibility counts come from PHPUnit inside DDEV (`ddev test` from
+`bindings/php/`); refresh them there after adding PHP tests.
 
 ## Case-Insensitive Matching
 

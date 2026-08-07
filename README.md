@@ -453,6 +453,7 @@ See `bench/` directory for benchmark scripts and `bench/results_builtin.json` fo
 - **[Why SNOBOL4 vs PCRE](docs/why-snobol-vs-pcre.md)** — comparison guide with side-by-side examples
 - **[C/C++ Manual](docs/c-manual.md)** — full C API reference: compile, match, search, builder, batch, tiers, C++ interop
 - **[PHP Manual](docs/php-manual.md)** — full PHP binding reference
+- **[Language Compatibility](docs/LANGUAGE_COMPATIBILITY.md)** — which classic SNOBOL4 language features are implemented (tables, labelled control flow, EVAL, templates) with bytecode and fixture details
 - **Hosted Doxygen**: [JPetsis.github.io/libsnobol4](https://JPetsis.github.io/libsnobol4/) — auto-deployed on push to main
 - **Core API**: Headers in `core/include/snobol/`
 - **PHP Binding**: [bindings/php/README.md](bindings/php/README.md)
