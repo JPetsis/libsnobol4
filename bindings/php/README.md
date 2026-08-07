@@ -5,7 +5,7 @@ pattern matching capabilities.
 
 ## Requirements
 
-- PHP 8.0+ (developed with PHP 8.5)
+- PHP 8.3+ (developed with PHP 8.5)
 - CMake 3.16+
 - C compiler (GCC, Clang, or MSVC)
 
@@ -21,7 +21,7 @@ compatibility matrix is documented in the [main README](../../README.md):
   `extern "C"` guards and are self-contained, so the core builds and links
   cleanly from C++ (g++/clang++). A CI job (`header-cxx`) compiles the full
   header set as C++ to keep this guarantee green.
-- **PHP**: PHP 8.0+ (8.5 tested). The extension is built with `phpize` (DDEV
+- **PHP**: PHP 8.3+ (8.5 tested). The extension is built with `phpize` (DDEV
   path) or the CMake `BUILD_PHP=ON` path; on macOS the linker uses
   `-undefined dynamic_lookup` so PHP runtime symbols resolve when the
   extension loads.
@@ -61,7 +61,7 @@ The extension is published on [Packagist](https://packagist.org) as
 [PIE](https://github.com/php/pie) — the official PHP extension installer:
 
 ```bash
-# Requires PHP 8.1+ and, for source builds, autoconf/make/gcc + php-dev
+# Requires PHP 8.3+ and, for source builds, autoconf/make/gcc + php-dev
 pie install libsnobol4/snobol
 ```
 

@@ -8,12 +8,12 @@ minor of each component.
 
 | Component        | Supported            |
 | ---------------- | -------------------- |
-| C core (`core/`) | Latest `0.x` release |
-| PHP binding      | Latest `0.x` release |
+| C core (`core/`) | Latest `1.x` release |
+| PHP binding      | Latest `1.x` release |
 
-Pre-1.0 releases do not carry long-term support guarantees; please track the
-latest tag. Once 1.0 is released this table will be updated to a
-version-range policy.
+Security fixes are provided for the latest `1.x` release of each component.
+Older releases do not carry long-term support guarantees; please track the
+latest tag.
 
 ## Reporting a Vulnerability
 

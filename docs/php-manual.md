@@ -1,6 +1,6 @@
 # libsnobol4 PHP Binding — Complete Reference
 
-> **Version:** 0.13.0 · **API:** 0x000C00 · **ABI:** 1 · **Namespaces:** `Snobol\`
+> **Version:** 1.0.2 · **API:** 0x010002 · **ABI:** 1 · **Namespaces:** `Snobol\`
 
 ---
 

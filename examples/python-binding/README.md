@@ -24,7 +24,7 @@ This is a **proof-of-concept** showing how to create a Python binding for the SN
 └──────────────────────────┼──────────────────────────────┘
                            │
 ┌──────────────────────────┼──────────────────────────────┐
-│              SNOBOL4 C Core (snobol4-core/)             │
+│              SNOBOL4 C Core (core/)                     │
 │                          │                              │
 │  ┌──────────────┐  ┌─────▼──────┐  ┌──────────────┐     │
 │  │ Lexer (C)    │─▶│ Parser (C) │─▶│  Compiler    │     │
@@ -43,10 +43,11 @@ This is a **proof-of-concept** showing how to create a Python binding for the SN
 ```c
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include "snobol_lexer.h"
-#include "snobol_parser.h"
-#include "snobol_compiler.h"
-#include "snobol_vm.h"
+#include <snobol/snobol.h>
+#include <snobol/lexer.h>
+#include <snobol/parser.h>
+#include <snobol/compiler.h>
+#include <snobol/vm.h>
 
 typedef struct {
     PyObject_HEAD
@@ -95,7 +96,7 @@ static int Pattern_init(PatternObject* self, PyObject* args, PyObject* kwds) {
     }
     
     /* Compile to bytecode */
-    if (compile_ast_to_bytecode_c(ast, NULL, &self->bytecode, &self->bytecode_len) != 0) {
+    if (compile_ast_to_bytecode_c(ast, false, &self->bytecode, &self->bytecode_len) != 0) {
         PyErr_SetString(PyExc_RuntimeError, "Compilation failed");
         snobol_ast_free(ast);
         snobol_lexer_destroy(lexer);
@@ -357,16 +358,16 @@ from setuptools import setup, Extension
 import os
 
 # Get the absolute path to the C core
-CORE_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'snobol4-core')
+CORE_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'core')
 
 core_sources = [
-    'snobol_ast.c',
-    'snobol_lexer.c',
-    'snobol_parser.c',
-    'snobol_compiler.c',
-    'snobol_vm.c',
-    'snobol_table.c',
-    'snobol_dynamic_pattern.c',
+    'src/ast.c',
+    'src/lexer.c',
+    'src/parser.c',
+    'src/compiler.c',
+    'src/vm_exec.c',
+    'src/table.c',
+    'src/dynamic_pattern.c',
 ]
 
 module = Extension(
@@ -490,8 +491,8 @@ python3 example.py
 1. **Memory Management**: The C core uses `snobol_malloc()` / `snobol_free()` for VM memory. The Python binding must
    respect this.
 
-2. **Thread Safety**: The C core is not thread-safe by default. For thread safety, add mutex protection around VM
-   execution.
+2. **Thread Safety**: VMs and pattern compilation are fully reentrant (v0.11.0+). Check the
+   "Thread Safety" section in the main `README.md` for per-component guarantees.
 
 3. **Error Handling**: Parse errors are raised as Python `ValueError` exceptions.
 

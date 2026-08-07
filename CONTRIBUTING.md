@@ -251,22 +251,6 @@ Starting with **v0.11.0**, libsnobol4 makes the following stability guarantees:
 - **Internal headers** — Everything inside `core/include/snobol/` not in `snobol.h` or the public API section is subject to change without notice.
 - **PHP binding** — Follows the major/minor/patch scheme independently. The PHP extension version `PHP_SNOBOL_VERSION` tracks the binding, not the core.
 
-> ⚠️ Pre-v1.0.0: While the project is still below v1.0.0, minor bumps may include breaking changes to internal interfaces. The declared public API (`snobol.h`) is kept stable within a minor version, but the ABI version is the authoritative compatibility signal.
-
-### Public API audit (v0.11.0)
-
-The v0.11.0 public surface (declared in `core/include/snobol/snobol.h`) was audited before the v0.11.0 tag:
-
-- Context/pattern/match lifecycle: `snobol_context_create`, `snobol_context_destroy`, `snobol_pattern_compile`, `snobol_pattern_compile_ex`, `snobol_pattern_free`, `snobol_match_free` — stable.
-- Pattern execution: `snobol_pattern_match`, `snobol_pattern_search`, `snobol_pattern_search_state_create`, `snobol_pattern_search_state_destroy`, `snobol_pattern_search_ex` — stable; no reshape before v1.0.
-- Match accessors: `snobol_match_success`, `snobol_match_get_output`, `snobol_match_get_variable`, `snobol_match_get_position`, `snobol_match_get_length` — stable.
-- One-shot API: `snobol_match`, `snobol_match_result_free` — stable.
-- Builder API: `snobol_pattern_build_*` family — stable shape; returns `NULL` on allocation failure (without setting an error channel — the caller should check the return value).
-- Flag constants: `SNOBOL_FLAG_CASE_INSENSITIVE` — value stable (any new flags must use previously free bits).
-- Version macros: `SNOBOL_VERSION_MAJOR/MINOR/PATCH/STRING`, `SNOBOL_ABI_VERSION` — stable shape.
-
-No functions were deprecated or marked for removal in v0.11.0. The next minor bump (v0.12) MAY deprecate a function (with `SNOBOL_DEPRECATED`) — that deprecation will appear in `CHANGELOG.md` for that release.
-
 ## Error Handling Convention
 
 The C core libsnobol4 makes the following stability guarantees around allocation failures:
@@ -283,8 +267,8 @@ The C core libsnobol4 makes the following stability guarantees around allocation
 libsnobol4 uses independent versioning for core and bindings and follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 
-- **Core**: `v<major>.<minor>.<patch>` (e.g., `v0.13.0`)
-- **PHP Binding**: `v<major>.<minor>.<patch>` (e.g., `v0.13.0`)
+- **Core**: `v<major>.<minor>.<patch>` (e.g., `v1.0.2`)
+- **PHP Binding**: `v<major>.<minor>.<patch>` (e.g., `v1.0.2`)
 
 The core version has a **single source of truth**: the
 `project(libsnobol4 VERSION X.Y.Z)` declaration in the top-level
@@ -300,8 +284,8 @@ hand-edit version literals in any header.
    `CHANGELOG.md`.
 3. Create git tags:
    ```bash
-   git tag core/v0.13.0
-   git tag php/v0.13.0
+   git tag core/v1.0.2
+   git tag php/v1.0.2
    git push origin --tags
    ```
 4. Create GitHub release with changelog

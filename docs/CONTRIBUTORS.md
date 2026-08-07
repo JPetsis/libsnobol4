@@ -77,7 +77,7 @@ snobol_lexer_destroy(lexer);
 **Key Features:**
 
 - Recursive descent parser
-- Follows grammar in `grammar/snobol.ebnf`
+- Follows grammar in `core/grammar/snobol.ebnf`
 - Produces tagged union AST (`ast_node_t`)
 - Error reporting with line/column information
 
@@ -155,7 +155,7 @@ translation units sharing `compiler_internal.h`:
 ```c
 int compile_ast_to_bytecode_c(
     ast_node_t* ast,      // Input AST
-    zval *options,        // Compilation options (can be NULL)
+    bool case_insensitive, // Case-insensitive compilation flag
     uint8_t **out_bc,     // Output: bytecode buffer
     size_t *out_len       // Output: bytecode length
 );
@@ -179,7 +179,7 @@ three translation units: `vm_exec.c` (main dispatch loop), `vm_choice.c`
 - Catastrophic backtracking protection
 - Capture registers
 
-### 6. Grammar (`grammar/snobol.ebnf`)
+### 6. Grammar (`core/grammar/snobol.ebnf`)
 
 **Purpose:** Formal definition of SNOBOL pattern syntax.
 
@@ -228,7 +228,7 @@ static PyObject* pattern_from_string(PyObject* self, PyObject* args) {
     // Compile to bytecode
     uint8_t* bc;
     size_t bc_len;
-    compile_ast_to_bytecode_c(ast, NULL, &bc, &bc_len);
+    compile_ast_to_bytecode_c(ast, false, &bc, &bc_len);
     
     // Create Python Pattern object with bytecode
     // ...
@@ -280,7 +280,7 @@ To add new syntax to SNOBOL patterns:
 
 ### 1. Update EBNF Grammar
 
-Edit `grammar/snobol.ebnf`:
+Edit `core/grammar/snobol.ebnf`:
 
 ```ebnf
 (* Add new production *)
@@ -475,18 +475,18 @@ fprintf(stderr, "PARSE: %s\n", __func__);
 ### C Tests
 
 ```bash
-cd tests/c
-make clean
-make test
+make build
+make test            # runs build/tests/c/snobol4_tests directly
+# or
+ctest --test-dir build
 ```
 
 ### PHP Tests
 
 ```bash
-cd /path/to/project
 make test
-# or
-ddev exec vendor/bin/phpunit
+# or, from the repo root:
+./vendor/bin/phpunit bindings/php/tests/php
 ```
 
 ### Adding New Tests
@@ -536,7 +536,7 @@ class MyFeatureTest extends TestCase
 
 ## Questions?
 
-- Check `grammar/snobol.ebnf` for grammar reference
+- Check `core/grammar/snobol.ebnf` for grammar reference
 - Check `snobol_*.h` files for API documentation
 - Check existing tests for usage examples
 - Open an issue on GitHub for questions

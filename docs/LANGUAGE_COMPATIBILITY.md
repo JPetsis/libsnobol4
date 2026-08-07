@@ -32,7 +32,7 @@ The engine now supports full SNOBOL language compatibility including:
 | Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                     |
 | Helper API: `DynamicPatternCache`            | ✅ Complete | Truthful runtime-backed cache interface       |
 | Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)    |
-| Test coverage                                 | ✅ Complete | 319 PHP tests, 67350 C assertions (custom runner) |
+| Test coverage                                 | ✅ Complete | 516 PHP tests, 74883 C assertions (custom runner) |
 
 ### ⚠️ Known Limitations
 
@@ -292,7 +292,7 @@ make test
 ./vendor/bin/phpunit tests/compat
 ```
 
-**Results:** All 26 compatibility tests pass.
+**Results:** All 40 compatibility tests pass.
 
 ### Labelled Control Flow in Compatibility Fixtures
 
@@ -382,11 +382,11 @@ All runtime objects (tables, dynamic patterns) use reference counting:
 
 ## Test Coverage
 
-| Suite         | Tests | Status   |
-|---------------|-------|----------|
-| C Tests       | 2166  | ✅ Pass   |
-| PHP Tests     | 315   | ✅ Pass   |
-| Compatibility | 26    | ✅ Pass   |
+| Suite         | Tests | Status    |
+|---------------|-------|-----------|
+| C Tests       | 357   | ✅ Pass   |
+| PHP Tests     | 516   | ✅ Pass   |
+| Compatibility | 40    | ✅ Pass   |
 
 ## Case-Insensitive Matching
 
