@@ -92,7 +92,7 @@ void snobol_context_destroy(snobol_context_t *ctx) {
  */
 
 /** Copy a static message into the caller's malloc'd error out-param. */
-static void set_error(char **error, const char *msg) {
+static void set_error_out(char **error, const char *msg) {
   if (!error)
     return;
   size_t mlen = strlen(msg) + 1;
@@ -114,7 +114,7 @@ static snobol_pattern_t *pattern_finalize(uint8_t *bc, size_t bc_len,
       (snobol_pattern_t *)snobol_malloc(sizeof(snobol_pattern_t));
   if (!pat) {
     compiler_free(bc);
-    set_error(error, "out of memory");
+    set_error_out(error, "out of memory");
     return NULL;
   }
   memset(pat, 0, sizeof(snobol_pattern_t));
@@ -161,7 +161,7 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
     const char *msg = snobol_parser_get_error(parser);
     if (!msg)
       msg = "unknown parse error";
-    set_error(error, msg);
+    set_error_out(error, msg);
     snobol_ast_free(ast);
     goto cleanup;
   }
@@ -172,7 +172,7 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
   snobol_ast_free(ast);
 
   if (rc != 0) {
-    set_error(error, "compilation failed");
+    set_error_out(error, "compilation failed");
     goto cleanup;
   }
 
@@ -1751,7 +1751,7 @@ snobol_pattern_t *snobol_pattern_build_compile(snobol_context_t *ctx,
   snobol_ast_free(root); /* AST ownership consumed on both outcomes */
 
   if (rc != 0) {
-    set_error(error, "compilation failed");
+    set_error_out(error, "compilation failed");
     return NULL;
   }
 
