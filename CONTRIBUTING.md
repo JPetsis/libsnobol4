@@ -171,8 +171,10 @@ cd bindings/php && vendor/bin/phpunit tests/php
 
 ### 4. Update the Changelog
 
-**Every change must add an entry to [`CHANGELOG.md`](CHANGELOG.md)** under the
-`[Unreleased]` section, using
+**Every change must add an entry under `[Unreleased]`** in the changelog of
+the affected component — [`CHANGELOG.md`](CHANGELOG.md) for the C core and
+repository-level work, [`bindings/php/CHANGELOG.md`](bindings/php/CHANGELOG.md)
+for the PHP binding — using
 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) categorization
 (Added / Changed / Fixed / Removed). Describe the change, the affected
 tiers/surfaces, and any migration notes. PRs without a changelog entry will
@@ -280,8 +282,9 @@ hand-edit version literals in any header.
 
 1. Bump `project(libsnobol4 VERSION X.Y.Z)` in the top-level `CMakeLists.txt`
    (and reconfigure); the version header regenerates automatically.
-2. Move the `[Unreleased]` changelog entries under a new version heading in
-   `CHANGELOG.md`.
+2. Move the `[Unreleased]` entries under a new version heading in the
+   changelog of each released component (`CHANGELOG.md` for the C core,
+   `bindings/php/CHANGELOG.md` for the PHP binding).
 3. Create git tags:
    ```bash
    git tag core/v1.0.2
