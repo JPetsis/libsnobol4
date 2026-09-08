@@ -9,6 +9,7 @@
 #include "snobol/parser.h"
 #include "snobol/snobol_internal.h"
 #include "snobol/vm.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,15 @@ struct snobol_parser {
    * next register (0-based), in order of appearance, matching the PHP
    * Builder::cap(reg, ...) convention. */
   int capture_reg_counter;
+  /* Capture-name registry: name -> register, so EMIT(@name) and
+   * `name = <value>` can resolve a capture by its source name.  A name
+   * re-registers to its newest register. */
+  struct capture_name_entry {
+    char *name; /* Owned */
+    int reg;
+  } *capture_names;
+  size_t capture_name_count;
+  size_t capture_name_capacity;
 };
 
 /* Forward declarations for recursive descent */
@@ -45,6 +55,17 @@ static ast_node_t *parse_function_call(snobol_parser_t *parser,
                                        snobol_lexer_t *lexer);
 static ast_node_t *parse_dynamic_eval(snobol_parser_t *parser,
                                       snobol_lexer_t *lexer);
+static ast_node_t *parse_table_or_assign(snobol_parser_t *parser,
+                                         snobol_lexer_t *lexer,
+                                         const char *name, size_t name_len);
+static ast_node_t *parse_emit(snobol_parser_t *parser, snobol_lexer_t *lexer);
+static bool ident_is_v_register(const char *text, size_t len, int *out_reg);
+static void register_capture_name(snobol_parser_t *parser, const char *text,
+                                  size_t len, int reg);
+static int find_capture_reg(snobol_parser_t *parser, const char *text,
+                            size_t len);
+static int parse_naming_target(snobol_parser_t *parser, snobol_lexer_t *lexer,
+                               bool dollar_already_consumed);
 
 /* Error handling helpers */
 static void set_error(snobol_parser_t *parser, const char *msg, size_t line,
@@ -110,6 +131,13 @@ static bool expect(snobol_parser_t *parser, snobol_lexer_t *lexer,
     return true;
   }
 
+  /* Surface a lexical error verbatim instead of a misleading expectation */
+  if (tok.type == TOKEN_ERROR && snobol_lexer_has_error(lexer)) {
+    set_error(parser, snobol_lexer_get_error(lexer),
+              snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+    return false;
+  }
+
   /* Error: unexpected token */
   char msg[128];
   snprintf(msg, sizeof(msg), "Expected %s, got %s", snobol_token_name(type),
@@ -117,6 +145,216 @@ static bool expect(snobol_parser_t *parser, snobol_lexer_t *lexer,
   set_error(parser, msg, snobol_lexer_get_line(lexer),
             snobol_lexer_get_pos(lexer));
   return false;
+}
+
+/**
+ * Parse a mandatory integer argument for a builtin function.
+ * Emits a descriptive error naming the function when the argument is
+ * missing, not an integer, or outside the int32 range the AST accepts.
+ */
+static bool parse_integer_arg(snobol_parser_t *parser, snobol_lexer_t *lexer,
+                              const char *func, int32_t *out) {
+  token_t tok = peek(lexer);
+
+  if (tok.type == TOKEN_ERROR && snobol_lexer_has_error(lexer)) {
+    set_error(parser, snobol_lexer_get_error(lexer),
+              snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+    return false;
+  }
+
+  if (tok.type != TOKEN_INTEGER) {
+    char msg[192];
+    const char *token_desc;
+    char lit_buf[48];
+    if (tok.type == TOKEN_LIT) {
+      size_t n = tok.data.string.len;
+      if (n > sizeof(lit_buf) - 3) {
+        n = sizeof(lit_buf) - 3;
+      }
+      lit_buf[0] = '\'';
+      memcpy(lit_buf + 1, tok.data.string.text, n);
+      lit_buf[n + 1] = '\'';
+      lit_buf[n + 2] = '\0';
+      token_desc = lit_buf;
+    } else if (tok.type == TOKEN_IDENT) {
+      size_t n = tok.data.string.len;
+      if (n > sizeof(lit_buf) - 1) {
+        n = sizeof(lit_buf) - 1;
+      }
+      memcpy(lit_buf, tok.data.string.text, n);
+      lit_buf[n] = '\0';
+      token_desc = lit_buf;
+    } else {
+      token_desc = snobol_token_name(tok.type);
+    }
+    snprintf(msg, sizeof(msg), "%s expects an integer argument, got %s", func,
+             token_desc);
+    set_error(parser, msg, snobol_lexer_get_line(lexer),
+              snobol_lexer_get_pos(lexer));
+    return false;
+  }
+
+  int64_t value = tok.data.integer.value;
+  if (value < INT32_MIN || value > INT32_MAX) {
+    char msg[192];
+    snprintf(msg, sizeof(msg),
+             "%s integer argument %lld is out of range (int32)", func,
+             (long long)value);
+    set_error(parser, msg, snobol_lexer_get_line(lexer),
+              snobol_lexer_get_pos(lexer));
+    return false;
+  }
+
+  advance(lexer);
+  *out = (int32_t)value;
+  return true;
+}
+
+/**
+ * Recognize the explicit-register identifier form `vN` (e.g. "v0", "v12").
+ * Returns true and sets *out_reg when the text is exactly 'v' + digits.
+ */
+static bool ident_is_v_register(const char *text, size_t len, int *out_reg) {
+  if (!text || len < 2 || text[0] != 'v' || text[1] < '0' || text[1] > '9') {
+    return false;
+  }
+  int32_t reg = 0;
+  for (size_t i = 1; i < len; i++) {
+    char c = text[i];
+    if (c < '0' || c > '9') {
+      return false;
+    }
+    reg = reg * 10 + (int32_t)(c - '0');
+    if (reg > MAX_VARS) {
+      return false; /* Out of range: not a valid register name */
+    }
+  }
+  if (out_reg) {
+    *out_reg = (int)reg;
+  }
+  return true;
+}
+
+/** Record (or refresh) the register allocated for a capture name. */
+static void register_capture_name(snobol_parser_t *parser, const char *text,
+                                  size_t len, int reg) {
+  if (!parser) {
+    return;
+  }
+  for (size_t i = 0; i < parser->capture_name_count; i++) {
+    if (strlen(parser->capture_names[i].name) == len &&
+        memcmp(parser->capture_names[i].name, text, len) == 0) {
+      parser->capture_names[i].reg = reg;
+      return;
+    }
+  }
+  if (parser->capture_name_count >= parser->capture_name_capacity) {
+    size_t new_cap = parser->capture_name_capacity
+                         ? parser->capture_name_capacity * 2
+                         : 8;
+    struct capture_name_entry *new_entries = (struct capture_name_entry *)
+        realloc((void *)parser->capture_names, new_cap * sizeof(*new_entries));
+    if (!new_entries) {
+      return;
+    }
+    parser->capture_names = new_entries;
+    parser->capture_name_capacity = new_cap;
+  }
+  char *name_copy = (char *)malloc(len + 1);
+  if (!name_copy) {
+    return;
+  }
+  memcpy(name_copy, text, len);
+  name_copy[len] = '\0';
+  parser->capture_names[parser->capture_name_count].name = name_copy;
+  parser->capture_names[parser->capture_name_count].reg = reg;
+  parser->capture_name_count++;
+}
+
+/** Look up a capture name; returns its register or -1 when unknown. */
+static int find_capture_reg(snobol_parser_t *parser, const char *text,
+                            size_t len) {
+  if (!parser) {
+    return -1;
+  }
+  for (size_t i = 0; i < parser->capture_name_count; i++) {
+    if (strlen(parser->capture_names[i].name) == len &&
+        memcmp(parser->capture_names[i].name, text, len) == 0) {
+      return parser->capture_names[i].reg;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Parse a match-naming target: `@name` (allocates the next sequential
+ * register and registers the name) or an explicit register identifier
+ * `vN` (optionally spelled `$vN`).  Returns the target register, or -1
+ * after setting a descriptive error.
+ *
+ * @param dollar_already_consumed  true when the caller already consumed a
+ *   `$` naming operator and the current token is the target itself.
+ */
+static int parse_naming_target(snobol_parser_t *parser, snobol_lexer_t *lexer,
+                               bool dollar_already_consumed) {
+  token_t tok = peek(lexer);
+
+  /* `@name`: allocate the next sequential capture register. */
+  if (tok.type == TOKEN_AT) {
+    advance(lexer);
+    tok = peek(lexer);
+    if (tok.type != TOKEN_IDENT) {
+      set_error(parser, "expected a capture name after '@' in a naming target",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return -1;
+    }
+    if (parser->capture_reg_counter >= MAX_VARS) {
+      set_error(parser, "Too many captures (max 64)",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return -1;
+    }
+    int reg = parser->capture_reg_counter++;
+    register_capture_name(parser, tok.data.string.text, tok.data.string.len,
+                          reg);
+    advance(lexer);
+    return reg;
+  }
+
+  /* Optional `$` prefix spelling of the explicit-register target. */
+  if (tok.type == TOKEN_ANCHOR_END) {
+    advance(lexer);
+    tok = peek(lexer);
+  }
+
+  if (tok.type == TOKEN_IDENT) {
+    int reg = -1;
+    if (ident_is_v_register(tok.data.string.text, tok.data.string.len, &reg)) {
+      if (reg >= MAX_VARS) {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "naming register v%d out of range (v0..v%d)", reg,
+                 MAX_VARS - 1);
+        set_error(parser, msg, snobol_lexer_get_line(lexer),
+                  snobol_lexer_get_pos(lexer));
+        return -1;
+      }
+      advance(lexer);
+      return reg;
+    }
+    if (tok.data.string.len >= 2 && tok.data.string.text[0] == 'v' &&
+        tok.data.string.text[1] >= '0' && tok.data.string.text[1] <= '9') {
+      set_error(parser, "naming register out of range (v0..v63)",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return -1;
+    }
+  }
+
+  set_error(parser,
+            "naming target must be @name or $vN (e.g. 'a' . @word or "
+            "'a' $ v1)",
+            snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+  (void)dollar_already_consumed;
+  return -1;
 }
 
 ast_node_t *snobol_parser_parse(snobol_parser_t *parser,
@@ -134,12 +372,25 @@ ast_node_t *snobol_parser_parse(snobol_parser_t *parser,
   }
   parser->seen_label_count = 0;
 
+  /* Clear the capture-name registry and sequential register allocator */
+  for (size_t i = 0; i < parser->capture_name_count; i++) {
+    free(parser->capture_names[i].name);
+  }
+  parser->capture_name_count = 0;
+  parser->capture_reg_counter = 0;
+
   /* Parse the pattern */
   ast_node_t *ast = parse_pattern(parser, lexer);
 
   /* Check for trailing tokens */
   if (!parser->error.has_error) {
     token_t tok = peek(lexer);
+    if (tok.type == TOKEN_ERROR && snobol_lexer_has_error(lexer)) {
+      set_error(parser, snobol_lexer_get_error(lexer),
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      snobol_ast_free(ast);
+      return nullptr;
+    }
     if (tok.type != TOKEN_EOF) {
       set_error(parser, "Unexpected token after pattern",
                 snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
@@ -316,6 +567,63 @@ static ast_node_t *parse_concatenation(snobol_parser_t *parser,
   while (true) {
     token_t tok = peek(lexer);
 
+    /* Match-naming: <part> ('.' | '$') <target> binds tighter than
+     * concatenation, so it wraps the most recent part.  '$' is the end
+     * anchor unless a naming target follows. */
+    if (count > 0) {
+      bool naming = false;
+      if (tok.type == TOKEN_DOT) {
+        naming = true;
+      } else if (tok.type == TOKEN_ANCHOR_END) {
+        snobol_lexer_state_t saved_state = snobol_lexer_save(lexer);
+        advance(lexer);             /* Consume '$' */
+        token_t nxt = peek(lexer);
+        if (nxt.type == TOKEN_AT) {
+          naming = true;
+        } else if (nxt.type == TOKEN_IDENT) {
+          if (ident_is_v_register(nxt.data.string.text, nxt.data.string.len,
+                                  nullptr)) {
+            naming = true;
+          } else {
+            /* `P $ x`: unary-$ indirect reference, not a naming target. */
+            set_error(parser,
+                      "unary '$' indirect reference is not supported "
+                      "(naming targets are @name or $vN)",
+                      snobol_lexer_get_line(lexer),
+                      snobol_lexer_get_pos(lexer));
+            for (size_t i = 0; i < count; i++) {
+              snobol_ast_free(parts[i]);
+            }
+            free((void *)parts);
+            return nullptr;
+          }
+        }
+        if (!naming) {
+          /* Plain end anchor; leave '$' for parse_primary. */
+          snobol_lexer_restore(lexer, saved_state);
+        }
+      }
+
+      if (naming) {
+        /* The '$' operator is already consumed (naming lookahead); the
+         * '.' operator is still pending. */
+        if (tok.type == TOKEN_DOT) {
+          advance(lexer);
+        }
+        int reg = parse_naming_target(parser, lexer,
+                                      tok.type == TOKEN_ANCHOR_END);
+        if (reg < 0) {
+          for (size_t i = 0; i < count; i++) {
+            snobol_ast_free(parts[i]);
+          }
+          free((void *)parts);
+          return nullptr;
+        }
+        parts[count - 1] = snobol_ast_create_cap(reg, parts[count - 1]);
+        continue;
+      }
+    }
+
     /* Check if this token starts a primary pattern */
     bool is_primary =
         (tok.type == TOKEN_LIT || tok.type == TOKEN_CHARCLASS ||
@@ -323,13 +631,22 @@ static ast_node_t *parse_concatenation(snobol_parser_t *parser,
          tok.type == TOKEN_ANCHOR_END || tok.type == TOKEN_AT ||
          tok.type == TOKEN_IDENT) != 0;
 
-    /* Check for function calls */
+    /* Check for function calls, table accesses, assignments, or bare
+     * primitives (ARB, FENCE, REM) */
     if (tok.type == TOKEN_IDENT) {
-      /* Look ahead for '(' */
+      /* Look ahead for '(' / '[' / '=' or a bare primitive name */
       snobol_lexer_state_t saved_state = snobol_lexer_save(lexer);
       advance(lexer);             /* Consume IDENT */
       token_t next = peek(lexer); /* Peek at next token */
-      if (next.type == TOKEN_LPAREN) {
+      if (next.type == TOKEN_LPAREN || next.type == TOKEN_LBRACKET ||
+          next.type == TOKEN_EQUALS) {
+        is_primary = true;
+      } else if ((tok.data.string.len == 3 &&
+                  strncmp(tok.data.string.text, "ARB", 3) == 0) ||
+                 (tok.data.string.len == 5 &&
+                  strncmp(tok.data.string.text, "FENCE", 5) == 0) ||
+                 (tok.data.string.len == 3 &&
+                  strncmp(tok.data.string.text, "REM", 3) == 0)) {
         is_primary = true;
       }
       /* Restore lexer position */
@@ -471,6 +788,17 @@ static ast_node_t *parse_primary(snobol_parser_t *parser,
     case TOKEN_ANCHOR_END:
       advance(lexer);
       {
+        /* Unary '$' indirect reference (`$X`) is a classic-SNOBOL4 gap; the
+         * '$' here only denotes the end anchor, so reject the reference. */
+        token_t nxt = peek(lexer);
+        if (nxt.type == TOKEN_IDENT) {
+          set_error(parser,
+                    "unary '$' indirect reference is not supported "
+                    "(naming targets are @name or $vN)",
+                    snobol_lexer_get_line(lexer),
+                    snobol_lexer_get_pos(lexer));
+          return nullptr;
+        }
         ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
         if (node) {
           node->type = AST_ANCHOR;
@@ -501,6 +829,11 @@ static ast_node_t *parse_primary(snobol_parser_t *parser,
         }
         int reg = parser->capture_reg_counter++;
 
+        /* Remember the name so EMIT(@name) / `name = <value>` can resolve
+         * this capture's register later in the pattern. */
+        register_capture_name(parser, tok.data.string.text,
+                              tok.data.string.len, reg);
+
         ast_node_t *sub = parse_primary(parser, lexer);
         if (!sub) {
           return nullptr;
@@ -514,6 +847,18 @@ static ast_node_t *parse_primary(snobol_parser_t *parser,
       return parse_function_call(parser, lexer);
 
     default:
+      if (tok.type == TOKEN_ERROR && snobol_lexer_has_error(lexer)) {
+        set_error(parser, snobol_lexer_get_error(lexer),
+                  snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+        return nullptr;
+      }
+      if (tok.type == TOKEN_INTEGER) {
+        set_error(parser,
+                  "Integer literal is not valid here (digits only appear "
+                  "inside builtin argument lists)",
+                  snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+        return nullptr;
+      }
       set_error(parser, "Unexpected token in pattern",
                 snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
       return nullptr;
@@ -538,8 +883,33 @@ static ast_node_t *parse_function_call(snobol_parser_t *parser,
   advance(lexer);
   token_t next = peek(lexer);
 
+  if (next.type == TOKEN_EQUALS || next.type == TOKEN_LBRACKET) {
+    /* Register assignment (`v1 = 0`) or table access (`T['k']`). */
+    return parse_table_or_assign(parser, lexer, name, name_len);
+  }
+
+  if (next.type == TOKEN_CHARCLASS) {
+    /* `T[ab]` — the lexer only emits LBRACKET for quoted / $vN keys, so a
+     * charclass directly after an identifier is an invalid table key. */
+    set_error(parser,
+              "invalid table key after identifier: expected 'literal' or "
+              "$vN register reference",
+              snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+    return nullptr;
+  }
+
   if (next.type != TOKEN_LPAREN) {
-    /* Not a function call, treat as identifier */
+    /* Not a function call: bare pattern primitives ARB / FENCE / REM. */
+    if (name_len == 3 && strncmp(name, "ARB", 3) == 0) {
+      /* ARB = arbitrary substring; PHP Builder::arb() is arbno(len(1)). */
+      return snobol_ast_create_arbno(snobol_ast_create_len(1));
+    }
+    if (name_len == 5 && strncmp(name, "FENCE", 5) == 0) {
+      return snobol_ast_create_fence();
+    }
+    if (name_len == 3 && strncmp(name, "REM", 3) == 0) {
+      return snobol_ast_create_rem();
+    }
     /* For now, return error - identifiers alone aren't valid patterns */
     set_error(parser, "Bare identifier is not a valid pattern",
               snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
@@ -636,60 +1006,242 @@ static ast_node_t *parse_function_call(snobol_parser_t *parser,
   }
 
   if (strncmp(name, "LEN", name_len) == 0) {
-    /* Parse LEN(n) - argument is peeked but not used yet */
-    (void)peek(
-        lexer); /* Argument parsed but not used - placeholder for future */
-    advance(lexer);
+    int32_t n = 1;
+    if (!parse_integer_arg(parser, lexer, "LEN", &n)) {
+      return nullptr;
+    }
 
     if (!expect(parser, lexer, TOKEN_RPAREN)) {
       return nullptr;
     }
 
-    /* Simplified - would need proper integer parsing */
-    ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
-    if (node) {
-      node->type = AST_LEN;
-      node->data.len.n = 1; /* Placeholder */
-    }
-    return node;
+    return snobol_ast_create_len(n);
   }
 
   if (strncmp(name, "EVAL", name_len) == 0) {
     return parse_dynamic_eval(parser, lexer);
   }
 
+  if (strncmp(name, "EMIT", name_len) == 0) {
+    return parse_emit(parser, lexer);
+  }
+
   if (strncmp(name, "POS", name_len) == 0) {
-    token_t arg = peek(lexer);
-    if (arg.type != TOKEN_LIT) {
-      set_error(parser, "POS expects integer argument",
-                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+    int32_t n = 0;
+    if (!parse_integer_arg(parser, lexer, "POS", &n)) {
       return nullptr;
     }
-    advance(lexer);
 
     if (!expect(parser, lexer, TOKEN_RPAREN)) {
       return nullptr;
     }
 
-    int32_t n = (int32_t)strtol(arg.data.string.text, nullptr, 10);
     return snobol_ast_create_pos(n);
   }
 
   if (strncmp(name, "TAB", name_len) == 0) {
-    token_t arg = peek(lexer);
-    if (arg.type != TOKEN_LIT) {
-      set_error(parser, "TAB expects integer argument",
-                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+    int32_t n = 0;
+    if (!parse_integer_arg(parser, lexer, "TAB", &n)) {
       return nullptr;
     }
-    advance(lexer);
 
     if (!expect(parser, lexer, TOKEN_RPAREN)) {
       return nullptr;
     }
 
-    int32_t n = (int32_t)strtol(arg.data.string.text, nullptr, 10);
     return snobol_ast_create_tab(n);
+  }
+
+  /* --- Source-syntax primitive parity (see source-primitive-parity spec) --- */
+
+  if (strncmp(name, "ARB", name_len) == 0) {
+    /* ARB() — zero-argument function form of the primitive */
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      return nullptr;
+    }
+    return snobol_ast_create_arbno(snobol_ast_create_len(1));
+  }
+
+  if (strncmp(name, "ARBNO", name_len) == 0) {
+    if (match(lexer, TOKEN_RPAREN)) {
+      set_error(parser, "ARBNO expects one pattern argument: ARBNO(pattern)",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    ast_node_t *sub = parse_repetition(parser, lexer);
+    if (!sub) {
+      return nullptr;
+    }
+    if (match(lexer, TOKEN_COMMA)) {
+      set_error(parser, "ARBNO expects one pattern argument: ARBNO(pattern)",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    return snobol_ast_create_arbno(sub);
+  }
+
+  if (strncmp(name, "BAL", name_len) == 0) {
+    uint32_t open_cp = '(';
+    uint32_t close_cp = ')';
+    token_t arg = peek(lexer);
+    if (arg.type == TOKEN_RPAREN) {
+      /* BAL() — default parentheses delimiters */
+      advance(lexer);
+      return snobol_ast_create_bal(open_cp, close_cp);
+    }
+
+    /* First delimiter: BAL('(') / BAL('(', ')') */
+    if (arg.type != TOKEN_LIT) {
+      set_error(parser,
+                "BAL expects string delimiters: BAL() or BAL('(', ')')",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    advance(lexer);
+    int bytes = 0;
+    if (!utf8_peek_next(arg.data.string.text, arg.data.string.len, 0,
+                        &open_cp, &bytes)) {
+      set_error(parser, "BAL delimiter is not valid UTF-8",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+
+    if (match(lexer, TOKEN_COMMA)) {
+      advance(lexer);
+      arg = peek(lexer);
+      if (arg.type == TOKEN_RPAREN) {
+        set_error(parser,
+                  "BAL expects a closing delimiter after the comma: "
+                  "BAL('(', ')')",
+                  snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+        return nullptr;
+      }
+      if (arg.type != TOKEN_LIT) {
+        set_error(parser,
+                  "BAL expects string delimiters: BAL() or BAL('(', ')')",
+                  snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+        return nullptr;
+      }
+      advance(lexer);
+      if (!utf8_peek_next(arg.data.string.text, arg.data.string.len, 0,
+                          &close_cp, &bytes)) {
+        set_error(parser, "BAL delimiter is not valid UTF-8",
+                  snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+        return nullptr;
+      }
+    }
+
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      return nullptr;
+    }
+    return snobol_ast_create_bal(open_cp, close_cp);
+  }
+
+  if (strncmp(name, "FENCE", name_len) == 0) {
+    if (!match(lexer, TOKEN_RPAREN)) {
+      set_error(parser, "FENCE expects no arguments",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    advance(lexer);
+    return snobol_ast_create_fence();
+  }
+
+  if (strncmp(name, "REM", name_len) == 0) {
+    if (!match(lexer, TOKEN_RPAREN)) {
+      set_error(parser, "REM expects no arguments",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    advance(lexer);
+    return snobol_ast_create_rem();
+  }
+
+  if (strncmp(name, "RPOS", name_len) == 0) {
+    int32_t n = 0;
+    if (!parse_integer_arg(parser, lexer, "RPOS", &n)) {
+      return nullptr;
+    }
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      return nullptr;
+    }
+    return snobol_ast_create_rpos(n);
+  }
+
+  if (strncmp(name, "RTAB", name_len) == 0) {
+    int32_t n = 0;
+    if (!parse_integer_arg(parser, lexer, "RTAB", &n)) {
+      return nullptr;
+    }
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      return nullptr;
+    }
+    return snobol_ast_create_rtab(n);
+  }
+
+  if (strncmp(name, "repeat", name_len) == 0) {
+    const char *sig = "repeat expects three arguments: repeat(pattern, min, max)";
+    if (match(lexer, TOKEN_RPAREN)) {
+      set_error(parser, sig, snobol_lexer_get_line(lexer),
+                snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    ast_node_t *sub = parse_repetition(parser, lexer);
+    if (!sub) {
+      return nullptr;
+    }
+    if (!expect(parser, lexer, TOKEN_COMMA)) {
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    int32_t min = 0;
+    if (!parse_integer_arg(parser, lexer, "repeat", &min)) {
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    if (match(lexer, TOKEN_RPAREN)) {
+      set_error(parser, sig, snobol_lexer_get_line(lexer),
+                snobol_lexer_get_pos(lexer));
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    if (!expect(parser, lexer, TOKEN_COMMA)) {
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    int32_t max = 0;
+    if (!parse_integer_arg(parser, lexer, "repeat", &max)) {
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    if (min < 0) {
+      char msg[160];
+      snprintf(msg, sizeof(msg),
+               "repeat: min must be non-negative (got %d)", min);
+      set_error(parser, msg, snobol_lexer_get_line(lexer),
+                snobol_lexer_get_pos(lexer));
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    if (max < min) {
+      char msg[160];
+      snprintf(msg, sizeof(msg), "repeat: max (%d) must be >= min (%d)", max,
+               min);
+      set_error(parser, msg, snobol_lexer_get_line(lexer),
+                snobol_lexer_get_pos(lexer));
+      snobol_ast_free(sub);
+      return nullptr;
+    }
+    return snobol_ast_create_repeat(sub, min, max);
   }
 
   if (strncmp(name, "ABORT", name_len) == 0) {
@@ -744,6 +1296,213 @@ static ast_node_t *parse_dynamic_eval(snobol_parser_t *parser,
   return node;
 }
 
+/**
+ * Parse the two identifier-prefixed forms that are not function calls:
+ * register assignment (`v1 = 0`, `name = 0`) and table access/update
+ * (`T['k']`, `T['k'] = <value>`, `T[$vN]`).  The identifier was already
+ * consumed by the caller; the current token is '=' or '['.
+ */
+static ast_node_t *parse_table_or_assign(snobol_parser_t *parser,
+                                         snobol_lexer_t *lexer,
+                                         const char *name, size_t name_len) {
+  token_t tok = peek(lexer);
+
+  if (tok.type == TOKEN_EQUALS) {
+    /* Register assignment: <target> = <register-number> */
+    advance(lexer);
+
+    int var = -1;
+    if (ident_is_v_register(name, name_len, &var)) {
+      /* Explicit register target: v1 = 0 assigns to register v1. */
+    } else {
+      var = find_capture_reg(parser, name, name_len);
+      if (var < 0) {
+        char msg[192];
+        snprintf(msg, sizeof(msg),
+                 "assignment target '%.*s' is not a capture name (register "
+                 "variables are v0..v%d)",
+                 (int)name_len, name, MAX_VARS - 1);
+        set_error(parser, msg, snobol_lexer_get_line(lexer),
+                  snobol_lexer_get_pos(lexer));
+        return nullptr;
+      }
+    }
+
+    tok = peek(lexer);
+    if (tok.type != TOKEN_INTEGER) {
+      set_error(parser,
+                "assignment expects a register number after '=' "
+                "(e.g. v1 = 0 copies capture register 0 into v1)",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    int64_t reg = tok.data.integer.value;
+    if (reg < 0 || reg >= MAX_VARS) {
+      char msg[160];
+      snprintf(msg, sizeof(msg),
+               "assignment register %lld out of range (v0..v%d)", (long long)reg,
+               MAX_VARS - 1);
+      set_error(parser, msg, snobol_lexer_get_line(lexer),
+                snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    advance(lexer);
+
+    return snobol_ast_create_assign(var, (int)reg);
+  }
+
+  /* Table access / update: IDENT '[' key ']' [ '=' value ]
+   * The AST creators NUL-terminate the table name via strlen, so a
+   * NUL-terminated copy of the identifier slice is required. */
+  char *table_name = (char *)malloc(name_len + 1);
+  if (!table_name) {
+    set_error(parser, "out of memory", snobol_lexer_get_line(lexer),
+              snobol_lexer_get_pos(lexer));
+    return nullptr;
+  }
+  memcpy(table_name, name, name_len);
+  table_name[name_len] = '\0';
+
+  advance(lexer); /* Consume '[' */
+
+  ast_node_t *key = nullptr;
+  tok = peek(lexer);
+  if (tok.type == TOKEN_ERROR && snobol_lexer_has_error(lexer)) {
+    set_error(parser, snobol_lexer_get_error(lexer),
+              snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+    return nullptr;
+  } else if (tok.type == TOKEN_LIT) {
+    /* Literal key: TABLE['k'] */
+    advance(lexer);
+    key = snobol_ast_create_lit(tok.data.string.text, tok.data.string.len);
+  } else if (tok.type == TOKEN_ANCHOR_END) {
+    /* Capture-derived key: TABLE[$vN] */
+    advance(lexer);
+    tok = peek(lexer);
+    int reg = -1;
+    if (tok.type != TOKEN_IDENT ||
+        !ident_is_v_register(tok.data.string.text, tok.data.string.len,
+                             &reg)) {
+      set_error(parser,
+                "table key register must be $vN (e.g. $v0 for the value "
+                "captured into register 0)",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    if (reg >= MAX_VARS) {
+      char msg[160];
+      snprintf(msg, sizeof(msg),
+               "table key register v%d out of range (v0..v%d)", reg,
+               MAX_VARS - 1);
+      set_error(parser, msg, snobol_lexer_get_line(lexer),
+                snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    advance(lexer);
+    key = snobol_ast_create_regref(reg);
+  } else {
+    char msg[192];
+    snprintf(msg, sizeof(msg),
+             "invalid key in '%.*s[...]': expected a quoted literal ('k') or "
+             "$vN register reference",
+             (int)name_len, name);
+    set_error(parser, msg, snobol_lexer_get_line(lexer),
+              snobol_lexer_get_pos(lexer));
+    return nullptr;
+  }
+
+  if (!expect(parser, lexer, TOKEN_RBRACKET)) {
+    free(table_name);
+    snobol_ast_free(key);
+    return nullptr;
+  }
+
+  /* Optional update: TABLE[key] = <value-pattern> */
+  if (match(lexer, TOKEN_EQUALS)) {
+    advance(lexer);
+    if (peek(lexer).type == TOKEN_EOF) {
+      set_error(parser, "expected a value pattern after '=' in 'TABLE[key] = '",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      free(table_name);
+      snobol_ast_free(key);
+      return nullptr;
+    }
+    ast_node_t *value = parse_repetition(parser, lexer);
+    if (!value) {
+      free(table_name);
+      snobol_ast_free(key);
+      return nullptr;
+    }
+    ast_node_t *node = snobol_ast_create_table_update(table_name, key, value);
+    free(table_name);
+    return node;
+  }
+
+  {
+    ast_node_t *node = snobol_ast_create_table_access(table_name, key);
+    free(table_name);
+    return node;
+  }
+}
+
+/**
+ * Parse the EMIT core: EMIT('text') or EMIT(@name / @vN).  The '(' was
+ * already consumed by the caller.
+ */
+static ast_node_t *parse_emit(snobol_parser_t *parser, snobol_lexer_t *lexer) {
+  token_t tok = peek(lexer);
+
+  if (tok.type == TOKEN_LIT) {
+    /* EMIT('text'): append literal text to the match output. */
+    advance(lexer);
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      return nullptr;
+    }
+    return snobol_ast_create_emit(tok.data.string.text, tok.data.string.len,
+                                  -1);
+  }
+
+  if (tok.type == TOKEN_AT) {
+    /* EMIT(@vN): append the captured value of register N.
+     * EMIT(@name): append the value of the capture allocated for name. */
+    advance(lexer);
+    tok = peek(lexer);
+    if (tok.type != TOKEN_IDENT) {
+      set_error(parser,
+                "EMIT(@...) expects a capture name or register: "
+                "EMIT(@name) or EMIT(@vN)",
+                snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+      return nullptr;
+    }
+    int reg = -1;
+    if (!ident_is_v_register(tok.data.string.text, tok.data.string.len,
+                             &reg)) {
+      reg = find_capture_reg(parser, tok.data.string.text,
+                             tok.data.string.len);
+      if (reg < 0) {
+        char msg[192];
+        snprintf(msg, sizeof(msg),
+                 "EMIT(@%.*s): unknown capture name (capture it earlier in "
+                 "the pattern with @%.*s ...)",
+                 (int)tok.data.string.len, tok.data.string.text,
+                 (int)tok.data.string.len, tok.data.string.text);
+        set_error(parser, msg, snobol_lexer_get_line(lexer),
+                  snobol_lexer_get_pos(lexer));
+        return nullptr;
+      }
+    }
+    advance(lexer);
+    if (!expect(parser, lexer, TOKEN_RPAREN)) {
+      return nullptr;
+    }
+    return snobol_ast_create_emit(nullptr, 0, reg);
+  }
+
+  set_error(parser, "EMIT expects an argument: EMIT('text') or EMIT(@reg)",
+            snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+  return nullptr;
+}
+
 bool snobol_parser_has_error(snobol_parser_t *parser) {
   if (!parser) {
     return false;
@@ -787,6 +1546,10 @@ void snobol_parser_destroy(snobol_parser_t *parser) {
       free(parser->seen_labels[i]);
     }
     free((void *)parser->seen_labels);
+    for (size_t i = 0; i < parser->capture_name_count; i++) {
+      free(parser->capture_names[i].name);
+    }
+    free((void *)parser->capture_names);
     free(parser);
   }
 }

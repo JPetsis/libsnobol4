@@ -61,6 +61,16 @@ typedef struct {
   const uint8_t *ranges_ptr; /**< Pointer to packed range data in bytecode */
   uint16_t count;            /**< Number of CpRange entries */
   uint16_t case_insensitive; /**< Non-zero if case-insensitive */
+  /**
+   * Precomputed ASCII membership bitmap (bytes 0-127), derived once from
+   * ranges_ptr.  Valid only when has_ascii_map is set; ranges that exceed
+   * the ASCII range (start/end > 127) leave the flag clear and callers
+   * fall back to the range walk.  Lets the search-VM class ops (BREAKX,
+   * SPAN, ANY, NOTANY) test membership with a single bitmap load instead
+   * of rebuilding the bitmap per subject byte.
+   */
+  uint64_t ascii_map[2];
+  bool has_ascii_map;
 } snobol_range_meta_t;
 
 /**
@@ -477,6 +487,12 @@ typedef struct {
    * Allocated by pike_scan on first use; freed in state-destroy. */
   void *pike_thread_buf;
   void *pike_defer_buf;
+
+  /* Cold-slab pool for the pike_scan hot/cold thread split (D1/D2).  Owns
+   * up to PIKE_THREAD_BUF capture/variable/counter slabs, materialized
+   * lazily on first register op.  Allocated by pike_scan on first use;
+   * freed in state-destroy. */
+  void *pike_cold_pool;
 
   /* Cached SIMD NFA for Tier 9.  Set by the search state before dispatch;
    * tier_simd_nfa checks/updates it.  Owned by the search state's destroy

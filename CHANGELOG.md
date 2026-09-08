@@ -15,6 +15,40 @@ tagged `php/vX.Y.Z`.
 
 ### Added
 
+- **Source parser is now a full peer of the Builder API** — the pattern
+  source syntax (`Pattern::fromString()`, `snobol_pattern_compile*`)
+  compiles to byte-for-byte bytecode identical to its Builder twin:
+  - Lexer: digit sequences lex as real integer tokens, `.` and `$`
+    disambiguated, no more silent character skipping (sticky, positioned
+    `TOKEN_ERROR`s surfaced verbatim by the parser); NUL is end of input
+  - `LEN(n)`, `POS(n)`, `TAB(n)`, `RPOS(n)`, `RTAB(n)` and `repeat`
+    bounds take real signed integer arguments (int32) with descriptive
+    errors for missing/quoted/overflowing values; the `LEN` placeholder
+    (hardcoded length 1) is removed
+  - Source primitives `ARB` (= `ARBNO(LEN(1))`), `ARBNO(p)`,
+    `BAL(...)`, `FENCE`, `REM`, `repeat(p, min, max)` with bound
+    validation (`max >= min >= 0`)
+  - `EMIT('text')` / `EMIT(@vN)` / `EMIT(@name)`, `T['k']` reads,
+    `T['k'] = p` updates, `T[$vN]` capture-derived keys (new
+    `AST_REG_REF` node; `OP_TABLE_GET/SET` with `kreg=N`), and register
+    assignment `vN = <reg>` / `name = <reg>`
+  - Match-naming operators `P . @name`, `P $ vN`, `P . vN`, `P . $vN`
+    (naming binds tighter than concatenation, `$` stays the end anchor
+    without a target); unary `$X` indirect references fail with
+    "indirect reference is not supported"
+  - New Builder naming construct `snobol_pattern_build_name(build, reg,
+    sub)` (PHP `Builder::name($node, $reg)`)
+- **Source-vs-Builder parity harness** (`tests/c/test_source_parity.c`,
+  ~296 assertions): 32 source forms × Builder twins asserting byte-for-byte
+  `snobol_pattern_get_bc` equality, identical tier election, and matched
+  behavior pairs with capture contents; the search oracle stays green
+- **Compatibility docs**: `docs/SNOBOL4_COMPATIBILITY.md` ledger
+  classifying feature areas as faithful / deliberate divergence /
+  extension / known gap; both manuals carry "SNOBOL4 compatibility"
+  notes and source-syntax appendixes where every listed form parses;
+  `core/grammar/snobol.ebnf` rewritten to the implemented grammar
+  (integer tokens, naming operators, all primaries, extensions labeled)
+
 - **Release branching pipeline** — post-1.0 maintenance flow. CI now runs on
   `release/**` branches (push and PR) in `ci-core`, `ci-php`, `sanitizers`,
   `valgrind` and `codeql`; the dead `develop` trigger was dropped. The
@@ -89,6 +123,36 @@ tagged `php/vX.Y.Z`.
   the PR hygiene gate in `pr-hygiene.yml` — no longer report
   "taking the address of a label is non-standard". The MSVC switch
   fallback is unchanged.
+- **Per-set_id ASCII bitmap cache for the search-VM class ops**
+  (`core/src/vm_exec.c`, `core/src/search_tiers.c`, `core/include/snobol/vm.h`):
+  `snobol_range_meta_t` now carries a precomputed `ascii_map[2]` +
+  `has_ascii_map`, filled once in `snobol_build_range_meta`; the search-VM
+  class ops (`svm_breakx`/`svm_span`/`svm_any`/`svm_notany`/`svm_break`) test
+  ASCII membership per byte with a bitmap load instead of rebuilding the
+  bitmap from ranges on every subject byte. Anchored `pike_overflow` probe
+  row (BREAKX over a 900-byte subject): ~2.33 µs → ~700 ns (3.3×). Callers
+  without `range_meta` keep the previous range/UTF-8 fallback path.
+- **Hot/cold split of the pike_scan thread state** (`core/src/search_tiers.c`,
+  `core/include/snobol/vm.h`, `core/src/search_meta.c`): `pike_thread_t`
+  shrinks from 2,288 to 32 bytes (ip/pos/match_start + cold-slab pointer);
+  capture/variable/counter registers live in a cold slab materialized
+  lazily from a pooled arena (`vm->pike_cold_pool`, 64 zero-once slots,
+  returned on thread death; SPLIT and BREAKX-retry forks deep-copy, so
+  capture divergence semantics are unchanged). Per-spawn `memset` of the
+  fat struct becomes 3 scalar writes; the per-position loop copies the hot
+  struct only. New `pike_spawn` probe row (unanchored tier-6 capture
+  pattern — worst case, every spawn materializes a slab): ~45.3 µs →
+  ~21.7 µs (2.1×); stack footprint of the stateless path drops ~585 KB →
+  ~150 KB (VM path 8 KB).
+- **Register-liveness gated restart-loop init** (`core/src/search_meta.c`,
+  `core/src/search_tiers.c`, `core/include/snobol/search.h`): a conservative
+  bytecode walk (`bc_uses_register_state`) classifies which register classes
+  a pattern can touch (captures, variables via `OP_ASSIGN`, loop counters),
+  exposed as `has_assign`/`has_counter` on `snobol_search_meta_t`;
+  `search_vm_init_from_vm` zeroes only those classes per restart position,
+  dropping the unconditional 4×512 B cap/var memsets for register-free
+  patterns. Anchored fixed intercept ~280 → ~275 ns; repeat rows unchanged
+  (they legitimately still zero counter state).
 
 ### Added
 
@@ -142,7 +206,7 @@ tagged `php/vX.Y.Z`.
   was previously dropped and re-derived with `strlen`, truncating emitted
   output at the first NUL byte); `ast_clone` had the same bug and is fixed.
 
-C test suite: **366 cases / 72,970 assertions** (custom runner).
+C test suite: **378 cases / 73,859 assertions** (custom runner).
 
 ## [1.0.4] - 2026-08-11
 

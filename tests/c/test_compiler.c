@@ -23,6 +23,7 @@ extern void test_assert(bool condition, const char *message);
 #include "../../core/include/snobol/ast.h"
 #include "../../core/include/snobol/compiler.h"
 #include "../../core/include/snobol/vm.h"
+#include "../../core/include/snobol/snobol.h"
 
 
 /* Compile an AST; frees the AST and returns the bytecode buffer. */
@@ -286,6 +287,485 @@ void test_cov_engine2_fuse_shapes(void) {
   }
 }
 
+static void test_cov_len_real_semantics(void) {
+  test_suite("Compiler: LEN(n) real semantics");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = nullptr;
+
+  /* Source LEN(2) must honor n (previously the parser placeholder fixed
+   * the length at 1) and compile to bytecode identical to Builder len(2). */
+  snobol_pattern_t *src =
+      snobol_pattern_compile_ex(ctx, "LEN(2)", 6, 0, &err);
+  snobol_pattern_build_t *b = snobol_pattern_build_create();
+  ast_node_t *root = snobol_pattern_build_emit(b, snobol_pattern_build_len(b, 2));
+  snobol_pattern_t *built = snobol_pattern_build_compile(ctx, root, 0, &err);
+
+  test_assert((src && built) != 0, "source + builder LEN(2) both compile");
+  if (src && built) {
+    size_t al = snobol_pattern_get_bc_len(src);
+    size_t bl = snobol_pattern_get_bc_len(built);
+    test_assert(al == bl, "LEN(2) bytecode lengths match");
+    test_assert(
+        (al == bl && memcmp(snobol_pattern_get_bc(src),
+                            snobol_pattern_get_bc(built), al) == 0) != 0,
+        "LEN(2) source bytecode == builder bytecode");
+
+    snobol_match_t *m1 = snobol_pattern_match(src, "abc", 3);
+    snobol_match_t *m2 = snobol_pattern_match(built, "abc", 3);
+    test_assert((m1 && m1->success && m1->length == 2) != 0,
+                "source LEN(2) on 'abc' consumes exactly 2 characters");
+    test_assert((m2 && m2->success && m2->length == 2) != 0,
+                "builder len(2) on 'abc' consumes exactly 2 characters");
+    if (m1) {
+      snobol_match_free(m1);
+    }
+    if (m2) {
+      snobol_match_free(m2);
+    }
+    snobol_pattern_free(src);
+    snobol_pattern_free(built);
+  } else {
+    snobol_pattern_free(src);
+    snobol_pattern_free(built);
+  }
+  free(err);
+  err = nullptr;
+  snobol_pattern_build_destroy(b);
+
+  /* LEN() with no argument and LEN('5') with a quoted argument are both
+   * rejected with descriptive errors naming the integer requirement. */
+  {
+    const char *bad[] = {"LEN()", "LEN('5')"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+      err = nullptr;
+      snobol_pattern_t *p =
+          snobol_pattern_compile_ex(ctx, bad[i], strlen(bad[i]), 0, &err);
+      test_assert(p == NULL, "malformed LEN argument rejected");
+      test_assert((err && strstr(err, "integer") != NULL) != 0,
+                  "LEN rejection names the integer requirement");
+      free(err);
+    }
+  }
+
+  snobol_context_destroy(ctx);
+}
+
+static void test_cov_source_primitives_behavior(void) {
+  test_suite("Compiler: source primitives match + Builder parity");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = nullptr;
+
+  /* ARB: README quick-start 'abc' ARB 'def' — both compiles and behaves. */
+  {
+    snobol_pattern_t *src =
+        snobol_pattern_compile_ex(ctx, "'abc' ARB 'def'", 15, 0, &err);
+
+    snobol_pattern_build_t *b = snobol_pattern_build_create();
+    ast_node_t *l1 = snobol_pattern_build_lit(b, "abc", 3);
+    ast_node_t *arb = snobol_pattern_build_arbno(b, snobol_pattern_build_len(b, 1));
+    ast_node_t *l2 = snobol_pattern_build_lit(b, "def", 3);
+    ast_node_t **parts = (ast_node_t **)malloc(3 * sizeof(ast_node_t *));
+    parts[0] = l1;
+    parts[1] = arb;
+    parts[2] = l2;
+    ast_node_t *root = snobol_pattern_build_emit(b,
+                            snobol_pattern_build_concat(b, parts, 3));
+    snobol_pattern_t *built = snobol_pattern_build_compile(ctx, root, 0, &err);
+    snobol_pattern_build_destroy(b);
+
+    test_assert(src != NULL, "'abc' ARB 'def' compiles from source");
+    test_assert((src && built) != 0, "builder twin compiles");
+    if (src && built) {
+      size_t al = snobol_pattern_get_bc_len(src);
+      size_t bl = snobol_pattern_get_bc_len(built);
+      test_assert((al == bl && memcmp(snobol_pattern_get_bc(src),
+                                      snobol_pattern_get_bc(built), al) == 0) != 0,
+                  "source ARB bytecode == builder arbno(len(1))");
+
+      snobol_match_t *m = snobol_pattern_match(src, "abc def xyz", 11);
+      test_assert((m && m->success && m->length == 7) != 0,
+                  "ARB matches ' ' between abc and def");
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(src);
+    snobol_pattern_free(built);
+    free(err);
+    err = nullptr;
+  }
+
+  /* ARBNO('a') ≡ 'a'* bytecode and behavior. */
+  {
+    snobol_pattern_t *fn = snobol_pattern_compile_ex(ctx, "ARBNO('a')", 10, 0, &err);
+    free(err);
+    err = nullptr;
+    snobol_pattern_t *star = snobol_pattern_compile_ex(ctx, "'a'*", 4, 0, &err);
+    test_assert((fn && star) != 0, "ARBNO('a') and 'a'* both compile");
+    if (fn && star) {
+      size_t al = snobol_pattern_get_bc_len(fn);
+      size_t bl = snobol_pattern_get_bc_len(star);
+      test_assert((al == bl && memcmp(snobol_pattern_get_bc(fn),
+                                      snobol_pattern_get_bc(star), al) == 0) != 0,
+                  "ARBNO('a') bytecode == 'a'* bytecode");
+      snobol_match_t *m = snobol_pattern_match(fn, "aaa", 3);
+      test_assert((m && m->success && m->length == 3) != 0,
+                  "ARBNO('a') consumes all of 'aaa'");
+      if (m) {
+        snobol_match_free(m);
+      }
+      m = snobol_pattern_match(fn, "bb", 2);
+      test_assert((m && m->success && m->length == 0) != 0,
+                  "ARBNO('a') matches empty at 'bb'");
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(fn);
+    snobol_pattern_free(star);
+    free(err);
+    err = nullptr;
+  }
+
+  /* BAL('(', ')') nested-delimiter matching; BAL() equals explicit form. */
+  {
+    snobol_pattern_t *bal = snobol_pattern_compile_ex(ctx, "BAL('(', ')')", 13, 0, &err);
+    test_assert(bal != NULL, "BAL('(', ')') compiles");
+    if (bal) {
+      snobol_match_t *m = snobol_pattern_match(bal, "(outer (inner) outer)", 21);
+      test_assert((m && m->success && m->length == 21) != 0,
+                  "BAL matches the whole nested pair");
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(bal);
+    free(err);
+    err = nullptr;
+  }
+  {
+    snobol_pattern_t *bal0 = snobol_pattern_compile_ex(ctx, "BAL()", 5, 0, &err);
+    snobol_pattern_t *balx = snobol_pattern_compile_ex(ctx, "BAL('(', ')')", 13, 0, &err);
+    test_assert((bal0 && balx) != 0, "BAL() and BAL('(', ')') compile");
+    if (bal0 && balx) {
+      size_t al = snobol_pattern_get_bc_len(bal0);
+      size_t bl = snobol_pattern_get_bc_len(balx);
+      test_assert((al == bl && memcmp(snobol_pattern_get_bc(bal0),
+                                      snobol_pattern_get_bc(balx), al) == 0) != 0,
+                  "BAL() bytecode == BAL('(', ')') bytecode");
+      snobol_match_t *m = snobol_pattern_match(bal0, "(a (b) c)", 9);
+      test_assert((m && m->success && m->length == 9) != 0,
+                  "BAL() with default delimiters matches '(a (b) c)'");
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(bal0);
+    snobol_pattern_free(balx);
+    free(err);
+    err = nullptr;
+  }
+
+  /* REM consumes the remainder; RTAB(2) + REM leaves the last 2. */
+  {
+    snobol_pattern_t *p = snobol_pattern_compile_ex(ctx, "'ab' REM", 8, 0, &err);
+    test_assert(p != NULL, "'ab' REM compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_match(p, "abcdef", 6);
+      test_assert((m && m->success && m->length == 6) != 0,
+                  "REM consumes 'cdef' after 'ab'");
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(p);
+    free(err);
+    err = nullptr;
+
+    p = snobol_pattern_compile_ex(ctx, "RTAB(2) REM", 11, 0, &err);
+    test_assert(p != NULL, "RTAB(2) REM compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_match(p, "abcdef", 6);
+      test_assert((m && m->success && m->length == 6) != 0,
+                  "RTAB(2) REM consumes everything, REM = 'ef'");
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(p);
+    free(err);
+    err = nullptr;
+  }
+
+  /* RPOS(0) succeeds with the cursor at the end. */
+  {
+    snobol_pattern_t *p =
+        snobol_pattern_compile_ex(ctx, "SPAN('a-z') RPOS(0)", 19, 0, &err);
+    test_assert(p != NULL, "SPAN('a-z') RPOS(0) compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_match(p, "abc", 3);
+      test_assert((m && m->success && m->length == 3) != 0,
+                  "RPOS(0) succeeds at the subject end");
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(p);
+    free(err);
+    err = nullptr;
+  }
+
+  /* repeat('a', 2, 3) honors bounds; bytecode matches Builder repeat. */
+  {
+    snobol_pattern_t *src = snobol_pattern_compile_ex(ctx, "repeat('a', 2, 3)", 17, 0, &err);
+    /* Builder twin: the C builder API has no repeat()-shaped helper, so
+     * construct the identical AST node directly (snobol_ast_create_repeat). */
+    snobol_pattern_build_t *b = snobol_pattern_build_create();
+    ast_node_t *rep = snobol_ast_create_repeat(snobol_ast_create_lit("a", 1), 2, 3);
+    ast_node_t *root = snobol_pattern_build_emit(b, rep);
+    snobol_pattern_t *built = snobol_pattern_build_compile(ctx, root, 0, &err);
+    snobol_pattern_build_destroy(b);
+
+    test_assert((src && built) != 0, "repeat source + builder compile");
+    if (src && built) {
+      size_t al = snobol_pattern_get_bc_len(src);
+      size_t bl = snobol_pattern_get_bc_len(built);
+      test_assert((al == bl && memcmp(snobol_pattern_get_bc(src),
+                                      snobol_pattern_get_bc(built), al) == 0) != 0,
+                  "repeat source bytecode == builder repeat bytecode");
+
+      struct {
+        const char *subj;
+        size_t len;
+        bool ok;
+        size_t mlen;
+      } cases[] = {{"a", 1, false, 0},   {"aa", 2, true, 2},
+                   {"aaa", 3, true, 3},  {"aaaa", 4, true, 3}};
+      for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        snobol_match_t *m = snobol_pattern_match(src, cases[i].subj, cases[i].len);
+        test_assert((m && m->success) == cases[i].ok, "repeat bound outcome");
+        if (m && m->success) {
+          test_assert(m->length == cases[i].mlen, "repeat bound length");
+        }
+        if (m) {
+          snobol_match_free(m);
+        }
+      }
+    }
+    snobol_pattern_free(src);
+    snobol_pattern_free(built);
+    free(err);
+    err = nullptr;
+  }
+
+  snobol_context_destroy(ctx);
+}
+
+static void test_cov_source_emit_table_assign(void) {
+  test_suite("Compiler: source EMIT / TABLE / assignment");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = nullptr;
+
+  /* EMIT('X') appends to the match output buffer. */
+  {
+    snobol_pattern_t *p =
+        snobol_pattern_compile_ex(ctx, "'h' EMIT('X') 'i'", 17, 0, &err);
+    test_assert(p != NULL, "'h' EMIT('X') 'i' compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_match(p, "hi", 2);
+      test_assert((m && m->success && m->length == 2) != 0,
+                  "EMIT pattern matches 'hi'");
+      if (m && m->success) {
+        test_assert(m->output_len == 1 && m->output && m->output[0] == 'X',
+                    "EMIT('X') output buffer contains 'X'");
+      }
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(p);
+    free(err);
+    err = nullptr;
+  }
+
+  /* EMIT(@name) and EMIT(@vN) append the captured value. */
+  {
+    snobol_pattern_t *p =
+        snobol_pattern_compile_ex(ctx, "@name 'ab' EMIT(@name)", 22, 0, &err);
+    test_assert(p != NULL, "@name 'ab' EMIT(@name) compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_match(p, "ab", 2);
+      test_assert((m && m->success) != 0, "EMIT(@name) pattern matches");
+      if (m && m->success) {
+        test_assert(m->output_len == 2 && m->output &&
+                        memcmp(m->output, "ab", 2) == 0,
+                    "EMIT(@name) emits the captured 'ab'");
+      }
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(p);
+    free(err);
+    err = nullptr;
+  }
+  {
+    /* Bytecode parity: source EMIT('X') == builder emit text node;
+     * source EMIT(@v1) == builder emit-register node. */
+    snobol_pattern_t *src =
+        snobol_pattern_compile_ex(ctx, "'h' EMIT('X')", 13, 0, &err);
+    snobol_pattern_build_t *b = snobol_pattern_build_create();
+    ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+    parts[0] = snobol_pattern_build_lit(b, "h", 1);
+    parts[1] = snobol_ast_create_emit("X", 1, -1);
+    ast_node_t *root = snobol_pattern_build_emit(
+        b, snobol_pattern_build_concat(b, parts, 2));
+    snobol_pattern_t *built = snobol_pattern_build_compile(ctx, root, 0, &err);
+    snobol_pattern_build_destroy(b);
+    test_assert((src && built) != 0, "EMIT source + builder compile");
+    if (src && built) {
+      size_t al = snobol_pattern_get_bc_len(src);
+      size_t bl = snobol_pattern_get_bc_len(built);
+      test_assert((al == bl && memcmp(snobol_pattern_get_bc(src),
+                                      snobol_pattern_get_bc(built), al) == 0) != 0,
+                  "EMIT('X') bytecode == builder emit text bytecode");
+    }
+    snobol_pattern_free(src);
+    snobol_pattern_free(built);
+    free(err);
+    err = nullptr;
+  }
+
+  /* Assignment: '@x 'ab' v1 = 0' copies capture register 0 into v1. */
+  {
+    snobol_pattern_t *p = snobol_pattern_compile_ex(
+        ctx, "@x 'ab' v1 = 0", 14, 0, &err);
+    test_assert(p != NULL, "@x 'ab' v1 = 0 compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_match(p, "ab", 2);
+      test_assert((m && m->success) != 0, "assignment pattern matches");
+      if (m && m->success) {
+        size_t vlen = 0;
+        const char *v = snobol_match_get_variable(m, "v1", &vlen);
+        test_assert((v && vlen == 2 && memcmp(v, "ab", 2) == 0) != 0,
+                    "OP_ASSIGN binds 'ab' into v1");
+      }
+      if (m) {
+        snobol_match_free(m);
+      }
+    }
+    snobol_pattern_free(p);
+    free(err);
+    err = nullptr;
+  }
+  {
+    /* Bytecode parity: source assignment == builder assign(var, reg). */
+    snobol_pattern_t *src =
+        snobol_pattern_compile_ex(ctx, "@x 'ab' v1 = 0", 14, 0, &err);
+    snobol_pattern_build_t *b = snobol_pattern_build_create();
+    ast_node_t *cap = snobol_pattern_build_cap(b, 0, snobol_pattern_build_lit(b, "ab", 2));
+    ast_node_t *assign = snobol_pattern_build_assign(b, 1, 0);
+    ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+    parts[0] = cap;
+    parts[1] = assign;
+    ast_node_t *root = snobol_pattern_build_emit(
+        b, snobol_pattern_build_concat(b, parts, 2));
+    snobol_pattern_t *built = snobol_pattern_build_compile(ctx, root, 0, &err);
+    snobol_pattern_build_destroy(b);
+    test_assert((src && built) != 0, "assignment source + builder compile");
+    if (src && built) {
+      size_t al = snobol_pattern_get_bc_len(src);
+      size_t bl = snobol_pattern_get_bc_len(built);
+      test_assert((al == bl && memcmp(snobol_pattern_get_bc(src),
+                                      snobol_pattern_get_bc(built), al) == 0) != 0,
+                  "source assignment bytecode == builder assign bytecode");
+    }
+    snobol_pattern_free(src);
+    snobol_pattern_free(built);
+    free(err);
+    err = nullptr;
+  }
+
+  /* TABLE['k'] / TABLE['k'] = 'v' / TABLE[$v0]: bytecode parity with the
+   * Builder table nodes (literal-key forms compile through the same path;
+   * the $vN key takes the register-reference key encoding). */
+  {
+    snobol_pattern_t *src = snobol_pattern_compile_ex(ctx, "T['k']", 6, 0, &err);
+    snobol_pattern_build_t *b = snobol_pattern_build_create();
+    ast_node_t *root = snobol_pattern_build_emit(
+        b, snobol_ast_create_table_access("T", snobol_ast_create_lit("k", 1)));
+    snobol_pattern_t *built = snobol_pattern_build_compile(ctx, root, 0, &err);
+    snobol_pattern_build_destroy(b);
+    test_assert((src && built) != 0, "table access source + builder compile");
+    if (src && built) {
+      size_t al = snobol_pattern_get_bc_len(src);
+      size_t bl = snobol_pattern_get_bc_len(built);
+      test_assert((al == bl && memcmp(snobol_pattern_get_bc(src),
+                                      snobol_pattern_get_bc(built), al) == 0) != 0,
+                  "T['k'] bytecode == builder tableAccess bytecode");
+    }
+    snobol_pattern_free(src);
+    snobol_pattern_free(built);
+    free(err);
+    err = nullptr;
+  }
+  {
+    snobol_pattern_t *src = snobol_pattern_compile_ex(ctx, "T['k'] = 'v'", 11, 0, &err);
+    snobol_pattern_build_t *b = snobol_pattern_build_create();
+    ast_node_t *root = snobol_pattern_build_emit(
+        b, snobol_ast_create_table_update("T", snobol_ast_create_lit("k", 1),
+                                          snobol_ast_create_lit("v", 1)));
+    snobol_pattern_t *built = snobol_pattern_build_compile(ctx, root, 0, &err);
+    snobol_pattern_build_destroy(b);
+    test_assert((src && built) != 0, "table update source + builder compile");
+    if (src && built) {
+      size_t al = snobol_pattern_get_bc_len(src);
+      size_t bl = snobol_pattern_get_bc_len(built);
+      test_assert((al == bl && memcmp(snobol_pattern_get_bc(src),
+                                      snobol_pattern_get_bc(built), al) == 0) != 0,
+                  "T['k'] = 'v' bytecode == builder tableUpdate bytecode");
+    }
+    snobol_pattern_free(src);
+    snobol_pattern_free(built);
+    free(err);
+    err = nullptr;
+  }
+  {
+    /* $vN key: emits OP_TABLE_GET with kreg=N directly (no capture wrap),
+     * identical to the Builder AST twin with a register-reference key. */
+    snobol_pattern_t *src =
+        snobol_pattern_compile_ex(ctx, "@w 'z' T[$v0]", 13, 0, &err);
+    snobol_pattern_build_t *b = snobol_pattern_build_create();
+    ast_node_t *cap = snobol_pattern_build_cap(b, 0, snobol_pattern_build_lit(b, "z", 1));
+    ast_node_t *acc = snobol_ast_create_table_access(
+        "T", snobol_ast_create_regref(0));
+    ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+    parts[0] = cap;
+    parts[1] = acc;
+    ast_node_t *root = snobol_pattern_build_emit(
+        b, snobol_pattern_build_concat(b, parts, 2));
+    snobol_pattern_t *built = snobol_pattern_build_compile(ctx, root, 0, &err);
+    snobol_pattern_build_destroy(b);
+    test_assert((src && built) != 0, "T[$v0] source + builder compile");
+    if (src && built) {
+      size_t al = snobol_pattern_get_bc_len(src);
+      size_t bl = snobol_pattern_get_bc_len(built);
+      test_assert((al == bl && memcmp(snobol_pattern_get_bc(src),
+                                      snobol_pattern_get_bc(built), al) == 0) != 0,
+                  "T[$v0] bytecode == builder regref-key bytecode");
+    }
+    snobol_pattern_free(src);
+    snobol_pattern_free(built);
+    free(err);
+    err = nullptr;
+  }
+
+  snobol_context_destroy(ctx);
+}
+
 void test_compiler_suite(void) {
   test_suite("Compiler Tests");
 
@@ -375,4 +855,7 @@ void test_compiler_suite(void) {
   test_cov_codegen_emit_all();
   test_cov_codegen_labels();
   test_cov_engine2_fuse_shapes();
+  test_cov_len_real_semantics();
+  test_cov_source_primitives_behavior();
+  test_cov_source_emit_table_assign();
 }
