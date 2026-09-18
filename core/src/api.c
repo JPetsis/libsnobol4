@@ -310,8 +310,8 @@ static void pattern_release_bound_tables(snobol_pattern_t *pattern) {
 
 /** Read a big-endian u32 operand (bounds are validated by the caller). */
 static uint32_t pattern_bc_u32(const uint8_t *p) {
-  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) |
-         (uint32_t)p[3];
+  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+         ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
 /**
@@ -333,14 +333,12 @@ static size_t pattern_next_instruction(const uint8_t *bc, size_t bc_len,
     case OP_REM:
     case OP_FENCE:
     case OP_DYNAMIC:
-    case OP_NOP:
-      return next;
+    case OP_NOP: return next;
     /* One operand byte. */
     case OP_CAP_START:
     case OP_CAP_END:
     case OP_ANCHOR:
-    case OP_EMIT_CAPTURE:
-      return next + 1;
+    case OP_EMIT_CAPTURE: return next + 1;
     /* Two operand bytes. */
     case OP_ANY:
     case OP_NOTANY:
@@ -350,30 +348,24 @@ static size_t pattern_next_instruction(const uint8_t *bc, size_t bc_len,
     case OP_LABEL:
     case OP_GOTO:
     case OP_GOTO_F:
-    case OP_EMIT_EXPR:
-      return next + 2;
+    case OP_EMIT_EXPR: return next + 2;
     /* Three operand bytes. */
     case OP_ASSIGN:
-    case OP_EVAL:
-      return next + 3;
+    case OP_EVAL: return next + 3;
     /* Four operand bytes. */
     case OP_LEN:
     case OP_JMP:
     case OP_POS:
     case OP_TAB:
     case OP_RPOS:
-    case OP_RTAB:
-      return next + 4;
+    case OP_RTAB: return next + 4;
     /* loop_id:u8 + target:u32 */
-    case OP_REPEAT_STEP:
-      return next + 5;
+    case OP_REPEAT_STEP: return next + 5;
     /* target:u32 + target:u32 */
     case OP_SPLIT:
-    case OP_BAL:
-      return next + 8;
+    case OP_BAL: return next + 8;
     /* loop_id:u8 + min:u32 + max:u32 + skip:u32 */
-    case OP_REPEAT_INIT:
-      return next + 13;
+    case OP_REPEAT_INIT: return next + 13;
     /* op + reg:u8 + format:u8 [+ width:u16 + fill:u8 for LPAD/RPAD] */
     case OP_EMIT_FORMAT: {
       if (next + 2 > bc_len) {
@@ -444,8 +436,7 @@ static size_t pattern_next_instruction(const uint8_t *bc, size_t bc_len,
       end += 4 + (size_t)pattern_bc_u32(bc + end);
       return (end <= bc_len) ? end : SIZE_MAX;
     }
-    default:
-      return SIZE_MAX; /* unknown opcode (or truncated): stop safely */
+    default: return SIZE_MAX; /* unknown opcode (or truncated): stop safely */
   }
 }
 

@@ -124,9 +124,8 @@ static void test_multiple_tables_and_rebind(void) {
 
   snobol_context_t *ctx = snobol_context_create();
   char *err = nullptr;
-  snobol_pattern_t *p =
-      snobol_pattern_compile_ex(ctx, "T['a'] A['b']", strlen("T['a'] A['b']"), 0,
-                                &err);
+  snobol_pattern_t *p = snobol_pattern_compile_ex(
+      ctx, "T['a'] A['b']", strlen("T['a'] A['b']"), 0, &err);
   test_assert(p != nullptr, "T['a'] A['b'] compiles");
 
   snobol_table_t *t = table_create("T");
@@ -251,8 +250,8 @@ static void test_source_and_builder_twins(void) {
       snobol_pattern_compile_ex(ctx, "T['k'] = 'v'", 11, 0, &err);
   snobol_pattern_build_t *bw = snobol_pattern_build_create();
   ast_node_t *root_w = snobol_pattern_build_emit(
-      bw, snobol_ast_create_table_update(
-              "T", snobol_ast_create_lit("k", 1), snobol_ast_create_lit("v", 1)));
+      bw, snobol_ast_create_table_update("T", snobol_ast_create_lit("k", 1),
+                                         snobol_ast_create_lit("v", 1)));
   snobol_pattern_t *built_w =
       snobol_pattern_build_compile(ctx, root_w, 0, &err);
   snobol_pattern_build_destroy(bw);
@@ -364,8 +363,7 @@ static void test_table_op_after_terminal_op(void) {
 
   bind_T(p, table);
   m = snobol_pattern_match(p, "k", 1);
-  test_assert(snobol_match_success(m),
-              "the binding reaches the late table op");
+  test_assert(snobol_match_success(m), "the binding reaches the late table op");
   snobol_match_free(m);
 
   snobol_pattern_free(p);
@@ -376,7 +374,8 @@ static void test_table_op_after_terminal_op(void) {
   test_assert(p != nullptr, "('a' ABORT()) | T['k'] compiles");
   bind_T(p, table);
   m = snobol_pattern_match(p, "k", 1);
-  test_assert(snobol_match_success(m), "ABORT shape resolves the late table op");
+  test_assert(snobol_match_success(m),
+              "ABORT shape resolves the late table op");
   snobol_match_free(m);
   snobol_pattern_free(p);
 

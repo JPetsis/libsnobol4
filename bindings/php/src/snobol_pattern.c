@@ -808,7 +808,7 @@ PHP_METHOD(Snobol_Pattern, subst) {
       vm_free_arrays(&tvm);
     if (tvm.dyn_cache)
       dynamic_pattern_cache_destroy(tvm.dyn_cache);
-    /* dyn_pending_source / dyn_pending_bc are owned and freed by the core
+      /* dyn_pending_source / dyn_pending_bc are owned and freed by the core
      * (snobol_free, and nulled once consumed) — never freed from here. */
 #endif
 
@@ -917,8 +917,7 @@ PHP_METHOD(Snobol_Pattern, bindTables) {
         efree(ctabs);
         zend_throw_exception(
             zend_ce_type_error,
-            "Pattern::bindTables(): values must be Snobol\\Table instances",
-            0);
+            "Pattern::bindTables(): values must be Snobol\\Table instances", 0);
         RETURN_THROWS();
       }
       names[n] = ZSTR_VAL(key);
@@ -990,9 +989,9 @@ PHP_METHOD(Snobol_Pattern, bindTables) {
       RETURN_THROWS();
     }
   }
-  if (snobol_pattern_search_state_set_tables(
-          intern->search_state, intern->bound_tables,
-          intern->bound_tables_count) != 0) {
+  if (snobol_pattern_search_state_set_tables(intern->search_state,
+                                             intern->bound_tables,
+                                             intern->bound_tables_count) != 0) {
     zend_throw_exception(zend_ce_exception,
                          "Pattern::bindTables(): failed to register the "
                          "tables",
@@ -2090,8 +2089,9 @@ static const zend_function_entry snobol_pattern_methods[] = {
             ZEND_ACC_PUBLIC) PHP_ME(Snobol_Pattern, setEvalCallbacks,
                                     ai_setEval, ZEND_ACC_PUBLIC)
             PHP_ME(Snobol_Pattern, setJit, ai_setJit, ZEND_ACC_PUBLIC) PHP_ME(
-                Snobol_Pattern, bindTables, ai_bindTables, ZEND_ACC_PUBLIC)
-                PHP_ME(Snobol_Pattern, searchAll, ai_searchAll, ZEND_ACC_PUBLIC)
+                Snobol_Pattern, bindTables, ai_bindTables,
+                ZEND_ACC_PUBLIC) PHP_ME(Snobol_Pattern, searchAll, ai_searchAll,
+                                        ZEND_ACC_PUBLIC)
                 PHP_ME(Snobol_Pattern, matchLiteral, ai_matchLiteral,
                        ZEND_ACC_PUBLIC) PHP_ME(Snobol_Pattern, searchSplit,
                                                ai_searchSplit, ZEND_ACC_PUBLIC)

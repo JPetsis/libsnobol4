@@ -1050,7 +1050,10 @@ uint8_t snobol_bc_register_classes(const uint8_t *bc, size_t bc_len) {
   while (ip < bc_len) {
     uint8_t op = bc[ip];
     switch (op) {
-      case OP_CAP_START: classes |= SNBL_REG_CAPTURE; ip += 2; break;
+      case OP_CAP_START:
+        classes |= SNBL_REG_CAPTURE;
+        ip += 2;
+        break;
       case OP_CAP_END:
         /* CAP_END also exposes the capture as var<r> (svm_cap_end writes
          * var_start/var_end and bumps var_count), so it needs the VARS
@@ -1059,10 +1062,22 @@ uint8_t snobol_bc_register_classes(const uint8_t *bc, size_t bc_len) {
         classes |= SNBL_REG_CAPTURE | SNBL_REG_VARS;
         ip += 2;
         break;
-      case OP_EMIT_CAPTURE: classes |= SNBL_REG_CAPTURE; ip += 2; break;
-      case OP_ASSIGN: classes |= SNBL_REG_CAPTURE | SNBL_REG_VARS; ip += 4; break;
-      case OP_REPEAT_INIT: classes |= SNBL_REG_COUNTERS; ip += 14; break;
-      case OP_REPEAT_STEP: classes |= SNBL_REG_COUNTERS; ip += 6; break;
+      case OP_EMIT_CAPTURE:
+        classes |= SNBL_REG_CAPTURE;
+        ip += 2;
+        break;
+      case OP_ASSIGN:
+        classes |= SNBL_REG_CAPTURE | SNBL_REG_VARS;
+        ip += 4;
+        break;
+      case OP_REPEAT_INIT:
+        classes |= SNBL_REG_COUNTERS;
+        ip += 14;
+        break;
+      case OP_REPEAT_STEP:
+        classes |= SNBL_REG_COUNTERS;
+        ip += 6;
+        break;
       case OP_ACCEPT:
       case OP_SUCCEED:
       case OP_ABORT:
@@ -2219,8 +2234,8 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   /* D3: fine-grained register liveness for the restart loop's lazy init. */
   {
     uint8_t reg_classes = snobol_bc_register_classes(bc, bc_len);
-    out->has_capture = out->has_capture ||
-                       (reg_classes & SNBL_REG_CAPTURE) != 0;
+    out->has_capture =
+        out->has_capture || (reg_classes & SNBL_REG_CAPTURE) != 0;
     out->has_assign = (reg_classes & SNBL_REG_VARS) != 0;
     out->has_counter = (reg_classes & SNBL_REG_COUNTERS) != 0;
   }

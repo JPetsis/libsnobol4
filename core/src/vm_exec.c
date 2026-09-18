@@ -312,7 +312,8 @@ void snobol_build_range_meta(const uint8_t *bc, size_t bc_len,
      * ops test membership per byte without rebuilding it (see
      * snobol_range_meta_t.ascii_map). */
     table[id - 1].has_ascii_map =
-        ptr && ranges_to_ascii_bitmap(ptr, (size_t)count, table[id - 1].ascii_map);
+        ptr &&
+        ranges_to_ascii_bitmap(ptr, (size_t)count, table[id - 1].ascii_map);
   }
 
   *out_table = table;
