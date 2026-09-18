@@ -373,6 +373,57 @@ const snobol_range_meta_t *snobol_pattern_get_range_meta(
  */
 void snobol_pattern_free(snobol_pattern_t *pattern);
 
+/* Pattern table binding */
+/**
+ * @brief Bind host tables to a compiled pattern by name.
+ *
+ * Resolves the embedded table names of every unbound @c OP_TABLE_GET /
+ * @c OP_TABLE_SET instruction in the pattern's bytecode: an instruction whose
+ * name matches @p names[k] is patched to the sequential id @c k, and the
+ * tables are retained on the pattern so every match/search call registers
+ * them into its execution VM (reads resolve, writes land in the table).
+ *
+ * A name with no matching entry — and any pattern that was never bound —
+ * keeps today's behaviour: the table op fails and backtracks.  Re-binding
+ * with a different (e.g. reordered) list re-patches every instruction
+ * against the new list, so a name absent from it fails again; binding with
+ * @p n equal to 0 releases the retained tables and clears the binding.
+ *
+ * Mutating the pattern's bytecode is one-shot: bind before sharing the
+ * pattern across threads.
+ *
+ * @param[in] pattern Compiled pattern to bind (NULL returns -1).
+ * @param[in] names   Table names, parallel to @p tables.
+ * @param[in] tables  Tables to retain and register, parallel to @p names.
+ * @param[in] n       Number of entries in @p names / @p tables.
+ * @return 0 on success, -1 on invalid arguments or allocation failure.
+ */
+int snobol_pattern_bind_tables(snobol_pattern_t *pattern, const char **names,
+                               snobol_table_t *const *tables, size_t n);
+
+/**
+ * @brief Bind table ids in a compiled pattern bytecode buffer by name.
+ *
+ * Low-level companion to snobol_pattern_bind_tables() for callers that own
+ * pattern bytecode directly (bindings that compile bytecode without a core
+ * pattern object).  Patches every @c OP_TABLE_GET / @c OP_TABLE_SET
+ * instruction in place: an instruction whose embedded name matches
+ * @p names[k] is patched to id @c k; every other instruction is reset to
+ * @c SNBL_TABLE_ID_UNBOUND so the op fails at match time.  Registering the
+ * tables into the execution VM is the caller's responsibility (see
+ * snobol_pattern_search_state_set_tables()); the registration order must be
+ * the same as the name order passed here.
+ *
+ * @param[in,out] bc     Mutable bytecode buffer, patched in place.
+ * @param[in]     bc_len Byte length of @p bc.
+ * @param[in]     names  Table names to bind (NULL or @p n == 0 clears all
+ *                       table ops back to unbound).
+ * @param[in]     n      Number of entries in @p names.
+ * @return 0 on success, -1 on invalid arguments.
+ */
+int snobol_pattern_bind_bytecode_tables(uint8_t *bc, size_t bc_len,
+                                        const char **names, size_t n);
+
 /* Pattern matching */
 /**
  * @brief Execute a compiled pattern against a subject string.

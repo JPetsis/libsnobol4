@@ -59,6 +59,11 @@ struct snobol_pattern {
    * for bushy alternations (flat ones route to Tier 8 and never build one). */
   snobol_auto_trie_t *trie_cache;
   int trie_cache_refs; /* reserved for diagnostics; 0 when no cache present */
+  /* Tables bound via snobol_pattern_bind_tables(): retained (refcount) for
+   * the pattern's lifetime and registered into the execution VM of every
+   * match/search call so OP_TABLE_GET/OP_TABLE_SET resolve. */
+  snobol_table_t **bound_tables;
+  size_t bound_tables_count;
 };
 
 /* Maximum named variables returned from a match */
@@ -277,10 +282,278 @@ bool snobol_pattern_automaton_available(const snobol_pattern_t *pattern) {
           pattern->automaton->num_states < SNOBOL_DFA_MAX_STATES) != 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * Pattern table binding
+ *
+ * The pattern compiler emits OP_TABLE_GET / OP_TABLE_SET with an unbound
+ * table id plus the embedded table name, exactly like template bytecode.
+ * Binding patches the ids to sequential positions in a caller-provided
+ * name list and retains the tables on the pattern; the execution paths
+ * register them into their VM before running (see vm_set_tables()).
+ * ---------------------------------------------------------------------------
+ */
+
+/** Release the tables retained by snobol_pattern_bind_tables() (idempotent). */
+static void pattern_release_bound_tables(snobol_pattern_t *pattern) {
+  if (pattern->bound_tables) {
+    for (size_t i = 0; i < pattern->bound_tables_count; i++) {
+      table_release(pattern->bound_tables[i]);
+    }
+    snobol_free(pattern->bound_tables);
+    pattern->bound_tables = nullptr;
+  }
+  pattern->bound_tables_count = 0;
+}
+
+/** Read a big-endian u32 operand (bounds are validated by the caller). */
+static uint32_t pattern_bc_u32(const uint8_t *p) {
+  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) |
+         (uint32_t)p[3];
+}
+
+/**
+ * Return the byte offset just past the instruction at @p ip, or SIZE_MAX for
+ * an unknown opcode or truncated operands.  Mirrors the operand layouts the
+ * VM dispatch consumes (vm_exec.c).  Opcode-specific handling of the table
+ * instructions lives in the caller.
+ */
+static size_t pattern_next_instruction(const uint8_t *bc, size_t bc_len,
+                                       size_t ip) {
+  /* Offset just past the opcode byte; operand sizes are counted from it. */
+  size_t next = ip + 1;
+  switch (bc[ip]) {
+    /* No operands. */
+    case OP_ACCEPT:
+    case OP_FAIL:
+    case OP_SUCCEED:
+    case OP_ABORT:
+    case OP_REM:
+    case OP_FENCE:
+    case OP_DYNAMIC:
+    case OP_NOP:
+      return next;
+    /* One operand byte. */
+    case OP_CAP_START:
+    case OP_CAP_END:
+    case OP_ANCHOR:
+    case OP_EMIT_CAPTURE:
+      return next + 1;
+    /* Two operand bytes. */
+    case OP_ANY:
+    case OP_NOTANY:
+    case OP_SPAN:
+    case OP_BREAK:
+    case OP_BREAKX:
+    case OP_LABEL:
+    case OP_GOTO:
+    case OP_GOTO_F:
+    case OP_EMIT_EXPR:
+      return next + 2;
+    /* Three operand bytes. */
+    case OP_ASSIGN:
+    case OP_EVAL:
+      return next + 3;
+    /* Four operand bytes. */
+    case OP_LEN:
+    case OP_JMP:
+    case OP_POS:
+    case OP_TAB:
+    case OP_RPOS:
+    case OP_RTAB:
+      return next + 4;
+    /* loop_id:u8 + target:u32 */
+    case OP_REPEAT_STEP:
+      return next + 5;
+    /* target:u32 + target:u32 */
+    case OP_SPLIT:
+    case OP_BAL:
+      return next + 8;
+    /* loop_id:u8 + min:u32 + max:u32 + skip:u32 */
+    case OP_REPEAT_INIT:
+      return next + 13;
+    /* op + reg:u8 + format:u8 [+ width:u16 + fill:u8 for LPAD/RPAD] */
+    case OP_EMIT_FORMAT: {
+      if (next + 2 > bc_len) {
+        return SIZE_MAX;
+      }
+      uint8_t fmt = bc[next + 1];
+      if (fmt == SNBL_FMT_LPAD || fmt == SNBL_FMT_RPAD) {
+        return next + 5;
+      }
+      return next + 2;
+    }
+    /* offset:u32 + len:u32, payload stored inline right after the operands. */
+    case OP_LIT:
+    case OP_EMIT_LITERAL: {
+      if (next + 8 > bc_len) {
+        return SIZE_MAX;
+      }
+      uint32_t lit_off = pattern_bc_u32(bc + next);
+      uint32_t lit_len = pattern_bc_u32(bc + next + 4);
+      size_t end = next + 8;
+      if (lit_off == end) { /* inline payload */
+        if ((size_t)lit_len > bc_len - end) {
+          return SIZE_MAX;
+        }
+        end += lit_len;
+      }
+      return end;
+    }
+    /* array_id:u16 + reg:u8 + reg:u8 + name_len:u8 + name bytes */
+    case OP_ARRAY_GET:
+    case OP_ARRAY_SET: {
+      if (next + 5 > bc_len) {
+        return SIZE_MAX;
+      }
+      size_t end = next + 5 + (size_t)bc[next + 4];
+      return (end <= bc_len) ? end : SIZE_MAX;
+    }
+    /* table_id:u16 + key_type:u8 + name_len:u8 + name bytes + key payload */
+    case OP_EMIT_TABLE: {
+      if (next + 4 > bc_len) {
+        return SIZE_MAX;
+      }
+      uint8_t key_type = bc[next + 2];
+      size_t end = next + 4 + (size_t)bc[next + 3];
+      if (end > bc_len) {
+        return SIZE_MAX;
+      }
+      if (key_type == 0) { /* literal key: key_len:u16 + key bytes */
+        if (end + 2 > bc_len) {
+          return SIZE_MAX;
+        }
+        size_t key_len = (size_t)bc[end] << 8 | (size_t)bc[end + 1];
+        end += 2 + key_len;
+      } else if (key_type == 1) { /* capture key: key_reg:u8 */
+        end += 1;
+      }
+      return (end <= bc_len) ? end : SIZE_MAX;
+    }
+    /* source_len:u32 + source + bc_len:u32 + bytecode */
+    case OP_DYNAMIC_DEF: {
+      if (next + 4 > bc_len) {
+        return SIZE_MAX;
+      }
+      size_t end = next + 4 + (size_t)pattern_bc_u32(bc + next);
+      if (end + 4 > bc_len) {
+        return SIZE_MAX;
+      }
+      end += 4 + (size_t)pattern_bc_u32(bc + end);
+      return (end <= bc_len) ? end : SIZE_MAX;
+    }
+    default:
+      return SIZE_MAX; /* unknown opcode (or truncated): stop safely */
+  }
+}
+
+int snobol_pattern_bind_bytecode_tables(uint8_t *bc, size_t bc_len,
+                                        const char **names, size_t n) {
+  if (!bc || bc_len == 0) {
+    return -1;
+  }
+  if (n >= (size_t)SNBL_TABLE_ID_UNBOUND) {
+    return -1; /* id space exhausted: ids must stay below the sentinel */
+  }
+
+  /* The compiler appends the charclass section and the label table after the
+   * instruction stream, and those bytes can mimic opcodes, so the walk is
+   * bounded by the exact body length.  Hand-built bytecode without a
+   * validating trailer falls back to stopping at the first terminal op;
+   * note that a terminal op in an early branch does NOT end the reachable
+   * code (later branches are laid out after it and are reachable through
+   * their SPLIT), which is why the bounded walk passes through them. */
+  size_t body_len = snobol_bc_body_len(bc, bc_len);
+  bool bounded = body_len > 0;
+  size_t limit = bounded ? body_len : bc_len;
+
+  size_t ip = 0;
+  while (ip < limit) {
+    uint8_t op = bc[ip];
+
+    if (!bounded && (op == OP_ACCEPT || op == OP_SUCCEED || op == OP_ABORT)) {
+      break; /* unbounded walk: a terminal op ends the scan */
+    }
+
+    if (op == OP_TABLE_GET || op == OP_TABLE_SET) {
+      /* opcode:u8 + table_id:u16 + key_reg:u8 + dest/value_reg:u8 +
+         name_len:u8 + name bytes */
+      if (ip + 6 > bc_len) {
+        return -1;
+      }
+      uint8_t nm_len = bc[ip + 5];
+      if (ip + 6 + (size_t)nm_len > bc_len) {
+        return -1;
+      }
+      const char *nm = (const char *)bc + ip + 6;
+      /* Bind to the position in the name list; a name absent from the list
+       * is reset to unbound so the op fails at match time. */
+      uint16_t new_id = (uint16_t)SNBL_TABLE_ID_UNBOUND;
+      for (size_t k = 0; k < n; k++) {
+        if (names[k] && strlen(names[k]) == nm_len &&
+            memcmp(names[k], nm, nm_len) == 0) {
+          new_id = (uint16_t)k;
+          break;
+        }
+      }
+      bc[ip + 1] = (uint8_t)((new_id >> 8) & 0xFF);
+      bc[ip + 2] = (uint8_t)(new_id & 0xFF);
+      ip += 6 + nm_len;
+      continue;
+    }
+
+    size_t next = pattern_next_instruction(bc, bc_len, ip);
+    if (next == SIZE_MAX || next > limit) {
+      return -1; /* truncated operands or a bound off an opcode boundary */
+    }
+    ip = next;
+  }
+  return 0;
+}
+
+int snobol_pattern_bind_tables(snobol_pattern_t *pattern, const char **names,
+                               snobol_table_t *const *tables, size_t n) {
+  if (!pattern) {
+    return -1;
+  }
+
+  /* Drop any previous binding (re-binding re-patches against the new list). */
+  pattern_release_bound_tables(pattern);
+
+  if (n == 0) {
+    /* Cleared: the execution VM registers zero tables, so the last ids
+     * patched into the bytecode resolve to nothing and every table op
+     * fails exactly as unbound. */
+    return 0;
+  }
+  if (!names || !tables) {
+    return -1;
+  }
+
+  /* Patch the bytecode first: a failure must not leave a half-bound
+   * pattern holding retained tables that no op can reach. */
+  if (snobol_pattern_bind_bytecode_tables(pattern->bc, pattern->bc_len, names,
+                                          n) != 0) {
+    return -1;
+  }
+
+  snobol_table_t **kept =
+      (snobol_table_t **)snobol_malloc(n * sizeof(snobol_table_t *));
+  if (!kept) {
+    return -1;
+  }
+  for (size_t i = 0; i < n; i++) {
+    kept[i] = tables[i] ? table_retain(tables[i]) : nullptr;
+  }
+  pattern->bound_tables = kept;
+  pattern->bound_tables_count = n;
+  return 0;
+}
+
 void snobol_pattern_free(snobol_pattern_t *pattern) {
   if (!pattern) {
     return;
   }
+  pattern_release_bound_tables(pattern);
   compiler_free(pattern->bc);
   if (pattern->range_meta) {
     snobol_free(pattern->range_meta);
