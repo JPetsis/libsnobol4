@@ -36,6 +36,18 @@ core versions correspond 1:1.
   rewritten source-syntax appendix (every listed form parses; 32 AST
   node types / 42 opcodes); `docs/SNOBOL4_COMPATIBILITY.md` is the
   classification ledger (faithful / divergence / extension / gap).
+- **`Pattern::bindTables(array $tables)`** — binds a name => `Snobol\Table`
+  map to a pattern's table operations (source `T['k']`, `T['k'] = p`,
+  `T[$v0]` and the Builder twins). Bound reads resolve and writes land in
+  `match()` and every search method (`searchAll`, `searchSplit`,
+  `searchSplitOffsets`, `searchSplitCuts`, `searchReplace`, and the lazy
+  split/search iterators); re-binding replaces the tables, an empty array
+  clears the binding, a non-Table value throws `TypeError`, and a name not
+  in the list fails like an unbound read. The Table objects are retained
+  by the pattern, so callers can drop their references.
+  Note: a read resolves when the captured key exists in the bound table
+  (classic SNOBOL4 instead matches the stored value against the subject;
+  value matching is not implemented — see `docs/SNOBOL4_COMPATIBILITY.md`).
 
 ### Changed
 

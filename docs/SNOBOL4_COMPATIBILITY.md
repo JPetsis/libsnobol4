@@ -62,7 +62,7 @@ Deliberate divergences are also surfaced in the manuals (`docs/c-manual.md`,
 |---|---|---|
 | Template substitution (`$NAME[...]`, format operations) | Faithful | `snobol_template_*` + `PatternHelper::tableSubst()` / `formattedSubst()`; tables bound by name via `snobol_template_bind_tables` |
 | Pattern `EMIT` (`EMIT('text')`, `EMIT(@vN)`, `EMIT(@name)`) | Extension | Emits into the match output buffer (classic SNOBOL4 has no EMIT; nearest classic mechanism is `OUTPUT` assignment) |
-| Pattern-level table ops (`T['k']`, `T['k'] = p`, `T[$v0]`) | Known gap | Compile and run (parity with the Builder), but the table NAME is not bound to a runtime `Snobol\Table` — only template-level `$T[...]` values resolve through the runtime binding machinery. Planned: `snobol_pattern_bind_tables` (change `feat-pattern-table-binding`). Nearest working mechanism: template tables |
+| Pattern-level table ops (`T['k']`, `T['k'] = p`, `T[$v0]`) | Known gap | Names bind to runtime tables via `snobol_pattern_bind_tables()` (C) / `Pattern::bindTables()` (PHP): reads resolve when the captured key exists in the bound table and succeed zero-width, writes store the captured value. Remaining gap: classic SNOBOL4 matches the stored VALUE as the pattern (`'hello world' T<'k'>` matches when `T<'k'> = 'hello'`; verified against CSNOBOL4 2.3.1), while this engine matches the key text and checks existence — value matching is not implemented |
 
 ## 6. Data types
 

@@ -205,8 +205,36 @@ tagged `php/vX.Y.Z`.
   the `AST_EMIT` node now carries the literal's byte length (the length
   was previously dropped and re-derived with `strlen`, truncating emitted
   output at the first NUL byte); `ast_clone` had the same bug and is fixed.
+- **Pattern-level table binding** (`snobol_pattern_bind_tables()` in
+  `core/src/api.c`): binding a name => table list patches every unbound
+  `OP_TABLE_GET`/`OP_TABLE_SET` instruction in the pattern bytecode to the
+  matching name's sequential id and retains the tables on the pattern, so
+  `T['k']` reads resolve and `T['k'] = p` writes land in the bound tables
+  in match and every search path (the pattern's binding is registered into
+  the stateless search VMs, and into the persistent search state — which
+  re-registers only when the binding generation changed). Bytecode-only
+  callers (the PHP binding) use `snobol_pattern_bind_bytecode_tables()`
+  plus `snobol_pattern_search_state_set_tables()`. Re-binding re-patches
+  against the new name list; binding with an empty list clears it again;
+  unbound patterns keep the previous fail-and-backtrack behaviour. New C
+  suite `test_pattern_table_binding.c`.
 
-C test suite: **378 cases / 73,859 assertions** (custom runner).
+### Fixed
+
+- **Search-VM / DFA eligibility walks now cover the whole bytecode body**:
+  `check_search_vm_eligible()` and `check_automaton_eligible()` returned
+  "eligible" at the first terminal op, so a pattern whose early branch ends
+  in `FAIL()`/`ABORT()`/`SUCCEED()` and whose later branch (reachable
+  through that branch's SPLIT) contains an opcode the search-VM cannot
+  execute — e.g. a table op — was routed to tier 6, whose computed-goto
+  table has no entry for it: `goto *NULL`, SIGSEGV
+  (`('a' FAIL()) | T['k']` reproduced it on pristine builds). Both walks
+  are now bounded by the compiler-trailer-derived body length
+  (`snobol_bc_body_len()` in `core/src/vm_exec.c`) and keep the
+  stop-at-terminal scan for hand-built bytecode without a validating
+  trailer.
+
+C test suite: **389 cases / 74,128 assertions** (custom runner).
 
 ## [1.0.4] - 2026-08-11
 
