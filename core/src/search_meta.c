@@ -655,8 +655,15 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
   if (bc_len > 512) {
     return false;
   }
+  /* Same exactness requirement as check_search_vm_eligible(): the DFA must
+   * not be elected for a body whose later branches contain ops it cannot
+   * represent, so the walk covers the whole body (bounded by the trailer)
+   * and only falls back to stop-at-terminal for hand-built bytecode. */
+  size_t body_len = snobol_bc_body_len(bc, bc_len);
+  bool bounded = body_len > 0;
+  size_t limit = bounded ? body_len : bc_len;
   size_t ip = 0;
-  while (ip < bc_len) {
+  while (ip < limit) {
     uint8_t op = bc[ip++];
     switch (op) {
       /* Side-effect ops — disqualify */
@@ -679,21 +686,24 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
       /* Simple opcode families — safe */
       case OP_ACCEPT:
       case OP_FAIL:
-        return true; /* Short pattern: eligible if we hit terminal */
+        if (!bounded) {
+          return true; /* legacy: terminal ends the hand-built scan */
+        }
+        break;
       case OP_JMP:
-        if (ip + 4 > bc_len) {
+        if (ip + 4 > limit) {
           return false;
         }
         ip += 4;
         break;
       case OP_SPLIT:
-        if (ip + 8 > bc_len) {
+        if (ip + 8 > limit) {
           return false;
         }
         ip += 8;
         break;
       case OP_LIT: {
-        if (ip + 8 > bc_len) {
+        if (ip + 8 > limit) {
           return false;
         }
         /* off(u32) len(u32) */
@@ -703,7 +713,7 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
       }
       case OP_ANY:
       case OP_NOTANY:
-        if (ip + 2 > bc_len) {
+        if (ip + 2 > limit) {
           return false;
         }
         ip += 2;
@@ -717,7 +727,7 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
       case OP_SPAN:
       case OP_BREAK: return false;
       case OP_LEN:
-        if (ip + 4 > bc_len) {
+        if (ip + 4 > limit) {
           return false;
         }
         ip += 4;
@@ -739,18 +749,18 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
       case OP_NOP:
       case OP_ABORT:
       case OP_SUCCEED:
-        if (ip > bc_len) {
+        if (ip > limit) {
           return false;
         }
         break;
       case OP_REPEAT_INIT:
-        if (ip + 13 > bc_len) {
+        if (ip + 13 > limit) {
           return false;
         }
         ip += 13;
         break;
       case OP_REPEAT_STEP:
-        if (ip + 5 > bc_len) {
+        if (ip + 5 > limit) {
           return false;
         }
         ip += 5;
@@ -1125,8 +1135,19 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
   if (!bc || bc_len < 2) {
     return false;
   }
+  /* The search-VM only executes the opcodes its dispatch table lists, so a
+   * body containing any other opcode must stay on the general VM.  The walk
+   * needs the exact body bound: code laid out after an early branch's
+   * terminal op (FAIL/ABORT/SUCCEED) is still reachable through the branch
+   * SPLIT, so stopping at the first terminal op wrongly marked such patterns
+   * eligible and the search-VM then dispatched an unsupported opcode through
+   * a NULL table entry.  Without a validating trailer (hand-built bytecode)
+   * the legacy stop-at-terminal behavior is kept. */
+  size_t body_len = snobol_bc_body_len(bc, bc_len);
+  bool bounded = body_len > 0;
+  size_t limit = bounded ? body_len : bc_len;
   size_t ip = 0;
-  while (ip < bc_len) {
+  while (ip < limit) {
     uint8_t op = bc[ip++];
     switch (op) {
       /* Side-effect / complex ops — disqualify.  Note: OP_CAP_START / OP_CAP_END
@@ -1149,25 +1170,31 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
       case OP_LABEL:
       case OP_BAL:
       case OP_REM: return false;
-      /* Terminal — immediately eligible for this sub-pattern */
+      /* Terminal ops end a sub-pattern.  With an exact body bound the walk
+       * continues past them (later branches are still reachable); without
+       * one they end the scan (legacy behavior). */
       case OP_ACCEPT:
       case OP_FAIL:
       case OP_ABORT:
-      case OP_SUCCEED: return true;
+      case OP_SUCCEED:
+        if (!bounded) {
+          return true;
+        }
+        break;
       case OP_JMP:
-        if (ip + 4 > bc_len) {
+        if (ip + 4 > limit) {
           return false;
         }
         ip += 4;
         break;
       case OP_SPLIT:
-        if (ip + 8 > bc_len) {
+        if (ip + 8 > limit) {
           return false;
         }
         ip += 8;
         break;
       case OP_LIT: {
-        if (ip + 8 > bc_len) {
+        if (ip + 8 > limit) {
           return false;
         }
         uint32_t lit_len = search_read_u32(bc, ip + 4);
@@ -1178,7 +1205,7 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
       case OP_NOTANY:
       case OP_SPAN:
       case OP_BREAK:
-        if (ip + 2 > bc_len) {
+        if (ip + 2 > limit) {
           return false;
         }
         ip += 2;
@@ -1188,7 +1215,7 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
       case OP_RTAB:
       case OP_POS:
       case OP_TAB:
-        if (ip + 4 > bc_len) {
+        if (ip + 4 > limit) {
           return false;
         }
         ip += 4;
@@ -1199,13 +1226,13 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
         /* zero-width, no operands beyond opcode */
         break;
       case OP_REPEAT_INIT:
-        if (ip + 13 > bc_len) {
+        if (ip + 13 > limit) {
           return false;
         }
         ip += 13;
         break;
       case OP_REPEAT_STEP:
-        if (ip + 5 > bc_len) {
+        if (ip + 5 > limit) {
           return false;
         }
         ip += 5;
@@ -1213,19 +1240,19 @@ static bool check_search_vm_eligible(const uint8_t *bc, size_t bc_len) {
       /* Capture-aware ops now supported by search-VM */
       case OP_CAP_START:
       case OP_CAP_END:
-        if (ip + 1 > bc_len) {
+        if (ip + 1 > limit) {
           return false;
         }
         ip += 1; /* uint8 register index */
         break;
       case OP_ASSIGN:
-        if (ip + 3 > bc_len) {
+        if (ip + 3 > limit) {
           return false;
         }
         ip += 3; /* uint16 var index + uint8 cap register */
         break;
       case OP_BREAKX:
-        if (ip + 2 > bc_len) {
+        if (ip + 2 > limit) {
           return false;
         }
         ip += 2; /* uint16 set_id */

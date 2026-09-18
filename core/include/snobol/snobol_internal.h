@@ -114,6 +114,22 @@ enum {
  * so callers may zero exactly the returned classes and no more. */
 uint8_t snobol_bc_register_classes(const uint8_t *bc, size_t bc_len);
 
+/* ---------------------------------------------------------------------------
+ * Bytecode body boundary
+ *
+ * Compiler-produced bytecode appends the charclass section and the label
+ * table after the instruction stream:
+ *   [body][class blobs][class offsets u32 x N][class_count u32]
+ *         [label offsets u32 x lc][label_count u32][MAGIC u32]
+ * The earliest class blob starts exactly where the body ends.  Walkers need
+ * this bound: range data can contain bytes that mimic opcodes, so a linear
+ * scan that runs past the body may mistake metadata for instructions.
+ *
+ * Returns the body length, or 0 when the trailer does not validate (hand-
+ * built bytecode without one) — callers then fall back to their own bound.
+ * ------------------------------------------------------------------------- */
+size_t snobol_bc_body_len(const uint8_t *bc, size_t bc_len);
+
 #ifdef __cplusplus
 }
 #endif

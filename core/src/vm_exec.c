@@ -190,6 +190,58 @@ const uint8_t *get_ranges_ptr(const VM *vm, uint16_t set_id,
   return vm->bc + ip;
 }
 
+size_t snobol_bc_body_len(const uint8_t *bc, size_t bc_len) {
+  if (!bc || bc_len < 12) {
+    return 0;
+  }
+
+  /* Only the compiler-produced format carries the label-table magic.  A
+   * hand-built buffer without it returns 0 (caller falls back): its trailing
+   * bytes can coincidentally parse as a zero class count, and deriving a
+   * bound from that would cut a real instruction in half. */
+  size_t last_at = bc_len - 4;
+  uint32_t last4 = read_u32(bc, bc_len, &last_at);
+  if (last4 != SNOBOL_LABEL_TABLE_MAGIC) {
+    return 0;
+  }
+
+  /* [label offsets][label_count][MAGIC] sit after the charclass section. */
+  size_t lc_at = bc_len - 8;
+  uint32_t label_count = read_u32(bc, bc_len, &lc_at);
+  size_t skip = 8 + ((size_t)label_count * 4);
+  if (bc_len < skip + 4) {
+    return 0;
+  }
+  size_t cc_tail = bc_len - skip;
+
+  size_t count_at = cc_tail - 4;
+  uint32_t class_count = read_u32(bc, bc_len, &count_at);
+  size_t table_size = (size_t)class_count * 4;
+  if (cc_tail < 4 + table_size) {
+    return 0;
+  }
+  if (class_count == 0) {
+    /* No class blobs: the body ends where the count field starts. */
+    return cc_tail - 4;
+  }
+
+  /* Each entry holds the absolute offset of its class blob; the earliest
+   * blob starts exactly where the instruction stream ended. */
+  size_t offsets_at = cc_tail - 4 - table_size;
+  size_t earliest = SIZE_MAX;
+  for (uint32_t i = 0; i < class_count; i++) {
+    size_t entry_at = offsets_at + ((size_t)i * 4);
+    uint32_t off = read_u32(bc, bc_len, &entry_at);
+    if ((size_t)off < earliest) {
+      earliest = (size_t)off;
+    }
+  }
+  if (earliest == 0 || earliest > offsets_at) {
+    return 0; /* not a plausible body end: caller falls back */
+  }
+  return earliest;
+}
+
 void snobol_build_range_meta(const uint8_t *bc, size_t bc_len,
                              snobol_range_meta_t **out_table,
                              size_t *out_count) {
