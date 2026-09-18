@@ -36,7 +36,9 @@ static void pike_assert(bool cond, const char *name) {
 }
 
 /* Mirror of the core pattern struct (core/src/api.c) so pike_scan can be
- * driven with AST-compiled bytecode + derived metadata + range metadata. */
+ * driven with AST-compiled bytecode + derived metadata + range metadata.
+ * Keep the field order in sync: snobol_pattern_free() reads the trailing
+ * binding fields. */
 typedef struct {
   uint8_t *bc;
   size_t bc_len;
@@ -48,6 +50,9 @@ typedef struct {
   snobol_dfa_t *automaton;
   snobol_auto_trie_t *trie_cache;
   int trie_cache_refs;
+  snobol_table_t **bound_tables;
+  size_t bound_tables_count;
+  uint32_t bound_tables_gen;
 } pike_pattern_layout;
 
 static snobol_pattern_t *pike_make_pattern(ast_node_t *root) {

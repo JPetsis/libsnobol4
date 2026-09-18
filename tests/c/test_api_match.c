@@ -25,7 +25,9 @@ extern void test_assert(bool condition, const char *message);
 #include "../../core/include/snobol/snobol.h"
 
 
-/* ── Core pattern struct mirror (api.c:40-62) ─────────────────────────────── */
+/* ── Core pattern struct mirror (api.c) ─────────────────────────────────────
+ * Keep the field order in sync: snobol_pattern_free() reads the trailing
+ * binding fields. */
 
 typedef struct {
   uint8_t *bc;
@@ -38,6 +40,9 @@ typedef struct {
   snobol_dfa_t *automaton;
   snobol_auto_trie_t *trie_cache;
   int trie_cache_refs;
+  snobol_table_t **bound_tables;
+  size_t bound_tables_count;
+  uint32_t bound_tables_gen;
 } cova_pattern_layout;
 
 /* Build a pattern object from raw bytecode (mirrors do_compile's metadata
