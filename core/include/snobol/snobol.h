@@ -560,6 +560,31 @@ void snobol_pattern_search_state_set_eval_fn(
     void *eval_udata);
 
 /**
+ * @brief Set the tables registered into a search state's persistent VM.
+ *
+ * For bytecode-only callers (bindings that compile bytecode without a core
+ * pattern object): the tables are retained on the state, and the state's VM
+ * registry is rebuilt from them before each search, so
+ * @c OP_TABLE_GET / @c OP_TABLE_SET ids patched by
+ * snobol_pattern_bind_bytecode_tables() resolve.  The list order must match
+ * the name order passed to the bytecode binding (ids are positions in it).
+ *
+ * When no state-level tables are set, a pattern associated via
+ * snobol_pattern_search_state_set_pattern() supplies the binding instead;
+ * state-level tables take precedence over the pattern's.  Replacing or
+ * clearing the list (with @p n equal to 0) takes effect on the next search.
+ *
+ * @param[in] state  Search state created by snobol_pattern_search_state_create().
+ * @param[in] tables Tables to retain and register (NULL with @p n == 0 to
+ *                   clear).
+ * @param[in] n      Number of entries in @p tables.
+ * @return 0 on success, -1 on invalid arguments or allocation failure.
+ */
+int snobol_pattern_search_state_set_tables(snobol_pattern_search_state_t *state,
+                                           snobol_table_t *const *tables,
+                                           size_t n);
+
+/**
  * @brief Destroy a search state object. NULL-safe.
  *
  * Releases the cached VM, output buffer, match result, and the

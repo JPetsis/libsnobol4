@@ -61,9 +61,12 @@ struct snobol_pattern {
   int trie_cache_refs; /* reserved for diagnostics; 0 when no cache present */
   /* Tables bound via snobol_pattern_bind_tables(): retained (refcount) for
    * the pattern's lifetime and registered into the execution VM of every
-   * match/search call so OP_TABLE_GET/OP_TABLE_SET resolve. */
+   * match/search call so OP_TABLE_GET/OP_TABLE_SET resolve.  The generation
+   * is bumped by every binding call so search states can tell whether the
+   * registry they built still mirrors the current binding. */
   snobol_table_t **bound_tables;
   size_t bound_tables_count;
+  uint32_t bound_tables_gen;
 };
 
 /* Maximum named variables returned from a match */
@@ -516,6 +519,10 @@ int snobol_pattern_bind_tables(snobol_pattern_t *pattern, const char **names,
     return -1;
   }
 
+  /* Every call changes the binding state (including failed and clearing
+   * ones), so search states re-sync their VM registry on the next call. */
+  pattern->bound_tables_gen++;
+
   /* Drop any previous binding (re-binding re-patches against the new list). */
   pattern_release_bound_tables(pattern);
 
@@ -823,6 +830,8 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
   vm.s = subject;
   vm.len = len;
   vm.out = &out_buf;
+  /* Bound tables (if any) must resolve inside the VM's OP_TABLE_GET/SET. */
+  vm_set_tables(&vm, pattern->bound_tables, pattern->bound_tables_count);
 
   /* Use cached search metadata from compile time. Falls back to local
    * derivation only if the pattern was built without our compile path
@@ -885,6 +894,7 @@ snobol_match_t *snobol_pattern_search(snobol_pattern_t *pattern,
 
   snobol_buf_free(&out_buf);
   vm_free_labels(&vm);
+  vm_free_tables(&vm);
   snobol_search_vm_cleanup(&vm);
   return m;
 }
@@ -942,6 +952,8 @@ bool snobol_pattern_search_reuse(snobol_pattern_t *pattern, const char *subject,
   vm.s = subject;
   vm.len = len;
   vm.out = &out_buf;
+  /* Bound tables (if any) must resolve inside the VM's OP_TABLE_GET/SET. */
+  vm_set_tables(&vm, pattern->bound_tables, pattern->bound_tables_count);
 
   /* Use cached search metadata from compile time */
   const snobol_search_meta_t *meta = &pattern->meta;
@@ -996,6 +1008,7 @@ bool snobol_pattern_search_reuse(snobol_pattern_t *pattern, const char *subject,
 
   snobol_buf_free(&out_buf);
   vm_free_labels(&vm);
+  vm_free_tables(&vm);
   snobol_search_vm_cleanup(&vm);
   return ok;
 }
@@ -1031,6 +1044,17 @@ struct snobol_pattern_search_state {
   struct simd_nfa *nfa; /* cached SIMD NFA (Tier 9), built once per state */
   bool vm_inited;       /* true after first search call sets it up */
   bool buf_inited;      /* true after first out_buf_init */
+  /* Tables registered into the state's persistent VM.  Set directly by
+   * bytecode-only callers via snobol_pattern_search_state_set_tables();
+   * when unset, a pattern associated with the state supplies the binding.
+   * synced_src/synced_gen record what the VM registry mirrors so an
+   * unchanged binding skips the rebuild. */
+  snobol_table_t **bound_tables;
+  size_t bound_tables_count;
+  uint32_t bound_tables_gen;
+  const void *synced_src; /* NULL = nothing, else pattern or the state */
+  uint32_t synced_gen;
+  bool vm_tables_synced; /* false until the first registry sync */
 };
 
 snobol_pattern_search_state_t *snobol_pattern_search_state_create(
@@ -1060,6 +1084,80 @@ void snobol_pattern_search_state_set_pattern(
   }
 }
 
+int snobol_pattern_search_state_set_tables(snobol_pattern_search_state_t *state,
+                                           snobol_table_t *const *tables,
+                                           size_t n) {
+  if (!state) {
+    return -1;
+  }
+
+  /* Release any previous state-level binding. */
+  if (state->bound_tables) {
+    for (size_t i = 0; i < state->bound_tables_count; i++) {
+      table_release(state->bound_tables[i]);
+    }
+    snobol_free(state->bound_tables);
+    state->bound_tables = nullptr;
+  }
+  state->bound_tables_count = 0;
+
+  if (n > 0) {
+    if (!tables || n >= (size_t)SNBL_TABLE_ID_UNBOUND) {
+      return -1;
+    }
+    snobol_table_t **kept =
+        (snobol_table_t **)snobol_malloc(n * sizeof(snobol_table_t *));
+    if (!kept) {
+      return -1;
+    }
+    for (size_t i = 0; i < n; i++) {
+      kept[i] = tables[i] ? table_retain(tables[i]) : nullptr;
+    }
+    state->bound_tables = kept;
+    state->bound_tables_count = n;
+  }
+
+  /* Every call changes the binding (set, replace, or clear), so the next
+   * search re-syncs the VM registry. */
+  state->bound_tables_gen++;
+  return 0;
+}
+
+/**
+ * Rebuild the state's VM table registry from its current binding.  State
+ * tables set via snobol_pattern_search_state_set_tables() take precedence;
+ * otherwise the pattern associated with the state (if any) supplies them.
+ * The synced_* fields make an unchanged binding a no-op, so hot search
+ * loops do not re-register tables on every call.
+ */
+static void search_state_sync_tables(snobol_pattern_search_state_t *state) {
+  snobol_table_t *const *src = nullptr;
+  size_t n = 0;
+  const void *src_id = nullptr;
+  uint32_t gen = 0;
+
+  if (state->bound_tables_count > 0) {
+    src = state->bound_tables;
+    n = state->bound_tables_count;
+    src_id = state;
+    gen = state->bound_tables_gen;
+  } else if (state->pattern && state->pattern->bound_tables_count > 0) {
+    src = state->pattern->bound_tables;
+    n = state->pattern->bound_tables_count;
+    src_id = state->pattern;
+    gen = state->pattern->bound_tables_gen;
+  }
+
+  if (state->vm_tables_synced && state->synced_src == src_id &&
+      state->synced_gen == gen) {
+    return; /* registry already mirrors this binding */
+  }
+  vm_set_tables(&state->vm, src, n);
+  state->synced_src = src_id;
+  state->synced_gen = gen;
+  state->vm_tables_synced = true;
+}
+
 void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
   if (!state) {
     return;
@@ -1076,6 +1174,7 @@ void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
     snobol_buf_free(&state->out_buf);
   }
   vm_free_labels(&state->vm);
+  vm_free_tables(&state->vm); /* release the registry's table retains */
   snobol_search_vm_cleanup(&state->vm);
   if (state->range_meta) {
     snobol_free(state->range_meta);
@@ -1089,6 +1188,13 @@ void snobol_pattern_search_state_destroy(snobol_pattern_search_state_t *state) {
       snobol_free(state->match.var_values[i]);
       state->match.var_values[i] = nullptr;
     }
+  }
+  if (state->bound_tables) {
+    for (size_t i = 0; i < state->bound_tables_count; i++) {
+      table_release(state->bound_tables[i]);
+    }
+    snobol_free(state->bound_tables);
+    state->bound_tables = nullptr;
   }
   snobol_free(state);
 }
@@ -1196,6 +1302,10 @@ snobol_match_t *snobol_pattern_search_ex(snobol_pattern_search_state_t *state,
     state->nfa = build_nfa_masks_alloc(state->bc, state->bc_len, &state->vm);
   }
   state->vm.simd_nfa = state->nfa;
+
+  /* Mirror the current table binding into the persistent VM (no-op when the
+   * registry already matches, so hot loops skip the rebuild). */
+  search_state_sync_tables(state);
 
   snobol_search_result_t sr;
   bool ok = snobol_search_exec(&state->vm, subject, subject_len, start_offset,
@@ -1318,6 +1428,9 @@ snobol_match_t *snobol_pattern_search_ex_anchored(
     state->nfa = build_nfa_masks_alloc(state->bc, state->bc_len, &state->vm);
   }
   state->vm.simd_nfa = state->nfa;
+
+  /* Mirror the current table binding into the persistent VM. */
+  search_state_sync_tables(state);
 
   /* Anchored search — must start at offset 0 */
   snobol_search_result_t sr;
