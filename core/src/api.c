@@ -569,6 +569,33 @@ void snobol_pattern_free(snobol_pattern_t *pattern) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Execution-VM table registry
+ * ---------------------------------------------------------------------------
+ */
+
+/**
+ * Rebuild @p vm's table registry from @p tables (same order as the name list
+ * passed to snobol_pattern_bind_tables(), so the patched ids line up).
+ * Frees any previous registration, so calling it before every execution is
+ * correct even across re-binding, and unbound patterns pay one NULL check.
+ */
+static void vm_set_tables(VM *vm, snobol_table_t *const *tables, size_t n) {
+  if (vm->tables) {
+    vm_free_tables(vm);
+  }
+  if (!tables || n == 0) {
+    return;
+  }
+  vm_init_tables(vm);
+  for (size_t i = 0; i < n; i++) {
+    uint16_t id = 0;
+    if (!vm_register_table(vm, tables[i], &id)) {
+      break; /* OOM: the remaining ids resolve to NULL and their ops fail */
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * Pattern matching
  * ---------------------------------------------------------------------------
  */
@@ -684,6 +711,8 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
   vm.s = subject;
   vm.len = len;
   vm.out = &out_buf;
+  /* Bound tables (if any) must resolve inside the VM's OP_TABLE_GET/SET. */
+  vm_set_tables(&vm, pattern->bound_tables, pattern->bound_tables_count);
 
   /* Build and cache DFA for eligible patterns (lazy: reuse cached) */
   snobol_dfa_t *dfa = nullptr;
@@ -740,6 +769,7 @@ snobol_match_t *snobol_pattern_match(snobol_pattern_t *pattern,
 
   snobol_buf_free(&out_buf);
   vm_free_labels(&vm);
+  vm_free_tables(&vm);
   snobol_search_vm_cleanup(&vm);
   return m;
 }
