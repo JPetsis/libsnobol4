@@ -197,6 +197,12 @@ PHP_METHOD(Snobol_SplitIterator, rewind) {
     iter->valid = false;
     return;
   }
+  /* Re-apply the pattern's table binding after the state was recreated. */
+  if (iter->pattern->bound_tables_count > 0) {
+    (void)snobol_pattern_search_state_set_tables(
+        iter->state, iter->pattern->bound_tables,
+        iter->pattern->bound_tables_count);
+  }
 
   bool has_more = si_fetch_next(iter);
   iter->valid = true;
@@ -290,6 +296,12 @@ void php_snobol_create_split_iterator(zval *return_value, zval *pattern_zv,
   ZVAL_UNDEF(&iter->current_segment);
   if (!iter->state) {
     zend_throw_exception(zend_ce_exception, "Failed to create search state", 0);
+  }
+  /* Carry the pattern's table binding into the iterator's own state. */
+  if (iter->state && iter->pattern->bound_tables_count > 0) {
+    (void)snobol_pattern_search_state_set_tables(
+        iter->state, iter->pattern->bound_tables,
+        iter->pattern->bound_tables_count);
   }
 }
 

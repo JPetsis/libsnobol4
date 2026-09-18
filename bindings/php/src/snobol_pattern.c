@@ -42,6 +42,21 @@ static inline void snobol_log_impl(const char *file, int line, const char *fmt, 
 extern zend_class_entry *snobol_pattern_ce;
 static zend_object_handlers snobol_pattern_object_handlers;
 
+/** @brief Release the PHP-side table binding held on a pattern: the retained
+ *  zval array (keeps the Snobol\Table objects alive) and the borrowed C
+ *  pointer list.  Idempotent. */
+static void php_snobol_release_table_binding(snobol_pattern_t *intern) {
+  if (Z_TYPE(intern->bound_tables_zv) != IS_UNDEF) {
+    zval_ptr_dtor(&intern->bound_tables_zv);
+    ZVAL_UNDEF(&intern->bound_tables_zv);
+  }
+  if (intern->bound_tables) {
+    snobol_free(intern->bound_tables);
+    intern->bound_tables = NULL;
+  }
+  intern->bound_tables_count = 0;
+}
+
 /** @brief Free a Pattern object: releases bytecode, caches, search state and eval callbacks. */
 static void php_snobol_pattern_dtor(zend_object *object) {
   snobol_pattern_t *intern = php_snobol_fetch(object);
@@ -72,6 +87,7 @@ static void php_snobol_pattern_dtor(zend_object *object) {
     zval_ptr_dtor(&intern->eval_callbacks);
     ZVAL_UNDEF(&intern->eval_callbacks);
   }
+  php_snobol_release_table_binding(intern);
 
   zend_object_std_dtor(object);
   SNOBOL_LOG("php_snobol_pattern_dtor: done");
@@ -121,6 +137,10 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_setJit, 0, 0, 1)
 ZEND_ARG_TYPE_INFO(0, enabled, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(ai_bindTables, 0, 0, 1)
+ZEND_ARG_ARRAY_INFO(0, tables, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(ai_searchAll, 0, 0, 1)
@@ -857,6 +877,130 @@ PHP_METHOD(Snobol_Pattern, setJit) {
   ZEND_PARSE_PARAMETERS_END();
 
   RETURN_TRUE;
+}
+
+/** @brief Pattern::bindTables(array $tables): static
+ *  Binds a name => Snobol\Table map to the pattern's table operations.  The
+ *  tables are retained on the pattern (and carried by its persistent search
+ *  state), so bound reads resolve and bound writes land in match() and all
+ *  search methods.  An empty array clears the binding. */
+PHP_METHOD(Snobol_Pattern, bindTables) {
+  zval *tables;
+  ZEND_PARSE_PARAMETERS_START(1, 1)
+  Z_PARAM_ARRAY(tables)
+  ZEND_PARSE_PARAMETERS_END();
+
+  snobol_pattern_t *intern = php_snobol_fetch(Z_OBJ_P(ZEND_THIS));
+  if (!intern->bc || intern->bc_len == 0) {
+    zend_throw_exception(zend_ce_exception, "Pattern not compiled", 0);
+    RETURN_THROWS();
+  }
+
+  /* Collect the binding names (PHP array keys) and the C table pointers in
+     one pass; the bytecode patcher assigns ids in this order. */
+  HashTable *ht = Z_ARRVAL_P(tables);
+  size_t raw_count = zend_hash_num_elements(ht);
+  const char **names = NULL;
+  snobol_table_t **ctabs = NULL;
+  if (raw_count > 0) {
+    names = (const char **)emalloc(raw_count * sizeof(const char *));
+    ctabs = (snobol_table_t **)emalloc(raw_count * sizeof(snobol_table_t *));
+    size_t n = 0;
+    zend_string *key;
+    zval *entry;
+    ZEND_HASH_FOREACH_STR_KEY_VAL(ht, key, entry) {
+      if (!key)
+        continue; /* integer-keyed entries carry no binding name */
+      snobol_table_t *ct = php_snobol_get_table_from_zval(entry);
+      if (!ct) {
+        efree(names);
+        efree(ctabs);
+        zend_throw_exception(
+            zend_ce_type_error,
+            "Pattern::bindTables(): values must be Snobol\\Table instances",
+            0);
+        RETURN_THROWS();
+      }
+      names[n] = ZSTR_VAL(key);
+      ctabs[n] = ct;
+      n++;
+    }
+    ZEND_HASH_FOREACH_END();
+    raw_count = n;
+  }
+
+  if (snobol_pattern_bind_bytecode_tables(intern->bc, intern->bc_len, names,
+                                          raw_count) != 0) {
+    if (names)
+      efree(names);
+    if (ctabs)
+      efree(ctabs);
+    /* Do not leave a half-bound pattern behind. */
+    php_snobol_release_table_binding(intern);
+    if (intern->search_state) {
+      (void)snobol_pattern_search_state_set_tables(intern->search_state, NULL,
+                                                   0);
+    }
+    zend_throw_exception(zend_ce_exception,
+                         "Pattern::bindTables(): failed to bind the pattern "
+                         "bytecode",
+                         0);
+    RETURN_THROWS();
+  }
+
+  /* Retain the PHP tables (keeps the Snobol\Table objects alive) and rebuild
+     the borrowed pointer list. */
+  if (Z_TYPE(intern->bound_tables_zv) != IS_UNDEF)
+    zval_ptr_dtor(&intern->bound_tables_zv);
+  ZVAL_COPY(&intern->bound_tables_zv, tables);
+  if (intern->bound_tables) {
+    snobol_free(intern->bound_tables);
+    intern->bound_tables = NULL;
+  }
+  intern->bound_tables_count = 0;
+  if (raw_count > 0) {
+    snobol_table_t **kept =
+        (snobol_table_t **)snobol_malloc(raw_count * sizeof(snobol_table_t *));
+    if (!kept) {
+      if (names)
+        efree(names);
+      if (ctabs)
+        efree(ctabs);
+      php_snobol_release_table_binding(intern);
+      zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+      RETURN_THROWS();
+    }
+    for (size_t i = 0; i < raw_count; i++)
+      kept[i] = ctabs[i];
+    intern->bound_tables = kept;
+    intern->bound_tables_count = raw_count;
+  }
+  if (names)
+    efree(names);
+  if (ctabs)
+    efree(ctabs);
+
+  /* Ensure the persistent search state exists (every search method reuses it
+     instead of creating its own) and carry the binding into it. */
+  if (!intern->search_state) {
+    intern->search_state =
+        snobol_pattern_search_state_create(intern->bc, intern->bc_len);
+    if (!intern->search_state) {
+      zend_throw_exception(zend_ce_exception, "Out of memory", 0);
+      RETURN_THROWS();
+    }
+  }
+  if (snobol_pattern_search_state_set_tables(
+          intern->search_state, intern->bound_tables,
+          intern->bound_tables_count) != 0) {
+    zend_throw_exception(zend_ce_exception,
+                         "Pattern::bindTables(): failed to register the "
+                         "tables",
+                         0);
+    RETURN_THROWS();
+  }
+
+  RETURN_OBJ_COPY(Z_OBJ_P(ZEND_THIS));
 }
 
 /* ---------------------------------------------------------------------------
@@ -1946,7 +2090,8 @@ static const zend_function_entry snobol_pattern_methods[] = {
             ZEND_ACC_PUBLIC) PHP_ME(Snobol_Pattern, setEvalCallbacks,
                                     ai_setEval, ZEND_ACC_PUBLIC)
             PHP_ME(Snobol_Pattern, setJit, ai_setJit, ZEND_ACC_PUBLIC) PHP_ME(
-                Snobol_Pattern, searchAll, ai_searchAll, ZEND_ACC_PUBLIC)
+                Snobol_Pattern, bindTables, ai_bindTables, ZEND_ACC_PUBLIC)
+                PHP_ME(Snobol_Pattern, searchAll, ai_searchAll, ZEND_ACC_PUBLIC)
                 PHP_ME(Snobol_Pattern, matchLiteral, ai_matchLiteral,
                        ZEND_ACC_PUBLIC) PHP_ME(Snobol_Pattern, searchSplit,
                                                ai_searchSplit, ZEND_ACC_PUBLIC)

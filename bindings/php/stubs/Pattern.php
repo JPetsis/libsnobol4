@@ -33,6 +33,9 @@ class Pattern
     /** @param bool $enabled @return static */
     public function setJit(bool $enabled): static { return $this; }
 
+    /** @param array<string, Table> $tables @return static */
+    public function bindTables(array $tables): static { return $this; }
+
     /** @param string $subject @param array $options @return array */
     public function searchAll(string $subject, array $options = []): array { return []; }
 

@@ -116,6 +116,13 @@ typedef struct snobol_pattern {
      * Stored as a PHP array mapping fn_id => callable.
      * Initialized to ZVAL_UNDEF; freed in dtor. */
   zval eval_callbacks;
+  /* Tables bound via bindTables(): the retained PHP array (name => Table)
+     keeps the Snobol\Table objects alive; bound_tables holds the borrowed C
+     table pointers in the same order (the id order of the bytecode binding).
+     Initialized to ZVAL_UNDEF / NULL; freed in dtor. */
+  zval bound_tables_zv;
+  snobol_table_t **bound_tables;
+  size_t bound_tables_count;
   zend_object std;
 } snobol_pattern_t;
 
