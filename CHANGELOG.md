@@ -88,6 +88,22 @@ tagged `php/vX.Y.Z`.
 
 ### Changed
 
+- **Pattern-level table reads now match the stored value** (classic SNOBOL4
+  semantics): `T['k']` resolves the literal (or captured) key as data and
+  matches the table value against the subject at the current position,
+  consuming it. An absent key fails and backtracks, an empty value matches
+  zero-width, and the comparison folds case under the case-insensitive flag;
+  the key text is no longer matched against or captured from the subject.
+  Write forms store the matched text under the evaluated key. Breaking against
+  the unreleased `feat-pattern-table-binding` behavior (which succeeded
+  zero-width on key existence). The table instruction now carries its key as
+  `key_kind` + payload (`OP_TABLE_GET`/`OP_TABLE_SET` layout), and every
+  bytecode walker (binder, template binder, required-literal scan) steps it.
+- **Failed ops resume at the choice stack**: a failed table op (and the
+  pre-existing array and `BAL` cases) now backtracks in the computed-goto
+  build; a bare `break` previously left the dispatch loop, so an op failure
+  inside an alternation aborted the whole match instead of trying the
+  alternative.
 - **Anchored-path required-byte prefilter** (`core/src/search_tiers.c`): the
   required-byte prefilter (`memchr`/`memmem` for the literal present on every
   accepting path) now runs in `snobol_search_exec_anchored` before tier
@@ -221,6 +237,19 @@ tagged `php/vX.Y.Z`.
 
 ### Fixed
 
+- **Unsupported table keys report a specific compile error**: a key that is
+  not a literal string or a `$vN` register reference (`Builder::tableAccess`
+  with an arbitrary node) and a literal above 65535 bytes now produce a named
+  error instead of the generic "compilation failed". `compile_ast_error()`
+  exposes the message to embedders.
+- **Pattern-level table write fixes from the review**: the value capture now
+  uses a parser-allocated register (`table_update.value_reg`) instead of the
+  hardcoded register 1, because `T[$v1] = 'x'` had its value capture overwrite
+  the key before `OP_TABLE_SET` read it and stored under `'x'`; a zero-width
+  value pattern now stores an empty value (`T['k'] = ''`); and the inline key
+  length is `u16`, so literal keys are no longer capped at 255 bytes. The
+  bind walker also rejects a table instruction that runs past the
+  compiler-derived body instead of patching into the trailer.
 - **Integer literal scanning no longer overflows**: `scan_integer()`
   (`core/src/lexer.c`) set the overflow flag but kept evaluating
   `value = value * 10 + digit`, a signed-overflow undefined behavior on every
@@ -243,7 +272,7 @@ tagged `php/vX.Y.Z`.
   stop-at-terminal scan for hand-built bytecode without a validating
   trailer.
 
-C test suite: **391 cases / 74,145 assertions** (custom runner).
+C test suite: **403 cases / 74,239 assertions** (custom runner).
 
 ## [1.0.4] - 2026-08-11
 

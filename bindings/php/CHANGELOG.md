@@ -51,6 +51,15 @@ core versions correspond 1:1.
 
 ### Changed
 
+- **Table reads now match the stored value** (classic SNOBOL4): `T['k']` and
+  `T[$v0]` resolve the key as data and match the table value at the current
+  position, consuming it; an absent key fails, an empty value matches
+  zero-width, and `caseInsensitive` folds the comparison. The key text is no
+  longer required in the subject. `T['k'] = p` stores the matched text under
+  the evaluated key. Capture the matched value with `T['k'] $v1` or
+  `T['k'] . @name` (the register the operator allocates). Breaking against the
+  unreleased `Pattern::bindTables()` behavior. Rebuild the extension to pick
+  up the new core bytecode shape.
 - **Anchored `match()` benefits from the core prefilter** — the required-byte
   prefilter now also runs on the anchored entry
   (`snobol_search_exec_anchored`), which `Pattern::match()` uses. Failing
@@ -77,6 +86,13 @@ core versions correspond 1:1.
 
 ### Fixed
 
+- **Table-write fixes from the review**: a register-key write no longer has
+  its value capture overwrite the key (`T[$v1] = 'x'` stored under the value),
+  `T['k'] = ''` stores an empty value, and literal keys above 255 bytes
+  compile again. `Pattern::compileFromAst()` now throws the core compile
+  message (e.g. a non-literal table key names the requirement) instead of the
+  generic "Failed to compile AST". No binding code path changed otherwise;
+  rebuild the extension for the new core bytecode shape.
 - **`Pattern::searchSplitGenerator()` now yields exactly `searchSplit()`'s
   segments** — the lazy iterator dropped the empty trailing segment when the
   subject ended at a delimiter (and yielded nothing for an empty subject), so

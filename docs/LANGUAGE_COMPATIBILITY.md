@@ -216,8 +216,8 @@ The following opcodes support these features:
 | `OP_LABEL`       | label_id (u16)                                                          | Define a label target                                                                                                                           |
 | `OP_GOTO`        | label_id (u16)                                                          | Unconditional transfer to label                                                                                                                 |
 | `OP_GOTO_F`      | label_id (u16)                                                          | Transfer to label if last match failed                                                                                                          |
-| `OP_TABLE_GET`   | table_id (u16), key_reg (u8), dest_reg (u8)                             | Lookup table[key]                                                                                                                               |
-| `OP_TABLE_SET`   | table_id (u16), key_reg (u8), value_reg (u8)                            | Set table[key] = value                                                                                                                          |
+| `OP_TABLE_GET`   | table_id (u16), key_kind (u8), key payload, flags (u8), name_len (u8), name | Match the stored table value at the cursor (key is data; kind 1 carries a u16-length literal) |
+| `OP_TABLE_SET`   | table_id (u16), key_kind (u8), key payload, value_reg (u8), name_len (u8), name | Store the captured value under the key (key is data, not consumed) |
 | `OP_DYNAMIC_DEF` | len (u32), bytecode[len]                                                | Define dynamic pattern bytecode block                                                                                                           |
 | `OP_DYNAMIC`     | (uses pending bytecode from OP_DYNAMIC_DEF)                             | Execute stored dynamic pattern                                                                                                                  |
 | `OP_EMIT_TABLE`  | table_id (u16), key_type (u8), name_len (u8), name_bytes[name_len], ... | Emit table lookup (key_type: 0=literal, 1=capture); name resolved by `snobol_template_bind_tables()`                                            |
@@ -384,8 +384,8 @@ All runtime objects (tables, dynamic patterns) use reference counting:
 
 | Suite         | Tests                                          | Status  |
 |---------------|------------------------------------------------|---------|
-| C Tests       | 389 cases / 74,128 assertions                  | ✅ Pass |
-| PHP Tests     | 599                                            | ✅ Pass |
+| C Tests       | 403 cases / 74,239 assertions                  | ✅ Pass |
+| PHP Tests     | 617                                            | ✅ Pass |
 | Compatibility | 40                                             | ✅ Pass |
 
 The C numbers are produced by the custom runner (`make test`). The PHP and

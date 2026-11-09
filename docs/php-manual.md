@@ -2567,6 +2567,16 @@ The `Pattern::fromString()` method accepts SNOBOL4 pattern syntax:
 - Source syntax compiles to the same bytecode as the Builder surface (verified
   byte-for-byte by the C parity suite), so `fromString()` and `Builder` are
   interchangeable. The Builder API covers all 32 AST node types and 42 opcodes.
+- Table forms are data-keyed. `T['k']` looks the literal key up in the bound
+  table and matches the stored VALUE at the current position, consuming it
+  (folding case when the pattern is case-insensitive); an absent key fails and
+  backtracks, and an empty value matches zero-width. `T[$v0]` reads the key
+  from a capture register. `T['k'] = p` matches `p`, captures its text and
+  stores it under the evaluated key; the key text is never required in or
+  consumed from the subject. Use `T['k'] $v1` (or `. @name`) to capture the
+  matched value for later operations. A zero-width value pattern stores an
+  empty value, and a register key may be any capture register: the write's
+  value capture uses its own register.
 - Classic-SNOBOL4 divergences (`match()` anchored by default, deterministic
   `BREAK`, clamping `RTAB`) are documented in the manual sections that describe
   them; the full classification is the ledger:
