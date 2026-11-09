@@ -96,10 +96,11 @@ final class PatternTableBindingTest extends TestCase
         $table->set('k', 'value');
         $pattern = Pattern::fromString("T['k']")->bindTables(['T' => $table]);
 
-        /* The lazy iterator skips an empty trailing segment (unlike
-         * searchSplit, which appends it). */
-        $segments = iterator_to_array($pattern->searchSplitGenerator('kak'));
-        $this->assertSame(['', 'a'], array_values($segments));
+        /* The iterator yields the same segments as searchSplit(), including
+         * the empty trailing segment. */
+        $segments = iterator_to_array($pattern->searchSplitGenerator('kak'), false);
+        $this->assertSame(['', 'a', ''], $segments);
+        $this->assertSame($pattern->searchSplit('kak'), $segments);
     }
 
     public function testClearingTheBinding(): void

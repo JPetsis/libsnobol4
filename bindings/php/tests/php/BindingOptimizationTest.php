@@ -467,7 +467,9 @@ class BindingOptimizationTest extends TestCase
         $p = Pattern::fromString("'a'");
         $it = $p->searchSplitGenerator('');
         $it->rewind();
-        $this->assertFalse($it->valid());
+        // An empty subject is one empty segment, matching searchSplit().
+        $this->assertTrue($it->valid());
+        $this->assertSame('', $it->current());
         $it->next();
         $this->assertFalse($it->valid());
     }
@@ -589,7 +591,9 @@ class BindingOptimizationTest extends TestCase
         foreach ($p->searchSplitGenerator("") as $seg) {
             $result[] = $seg;
         }
-        $this->assertCount(0, $result);
+        // One empty segment, matching searchSplit() and explode().
+        $this->assertCount(1, $result);
+        $this->assertSame('', $result[0]);
     }
 
     public function testSearchSplitGeneratorEquivalence(): void

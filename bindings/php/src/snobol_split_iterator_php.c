@@ -114,11 +114,11 @@ static bool si_fetch_next(snobol_split_iterator_t *iter) {
       ZVAL_EMPTY_STRING(&iter->current_segment);
     }
     iter->last_end = iter->subject_len;
-    iter->has_trailing = false;
-    /* If we just set the trailing segment, mark it available */
-    if (seg_len > 0) {
-      iter->has_trailing = true;
-    }
+    /* The remainder is a segment even when it is empty: a subject that ends
+       at a delimiter match, and an empty subject, both yield it.  searchSplit()
+       yields the same segment, and implode() only reconstructs the subject
+       when it is present. */
+    iter->has_trailing = true;
   }
   return found;
 }
