@@ -249,11 +249,11 @@ static void register_capture_name(snobol_parser_t *parser, const char *text,
     }
   }
   if (parser->capture_name_count >= parser->capture_name_capacity) {
-    size_t new_cap = parser->capture_name_capacity
-                         ? parser->capture_name_capacity * 2
-                         : 8;
-    struct capture_name_entry *new_entries = (struct capture_name_entry *)
-        realloc((void *)parser->capture_names, new_cap * sizeof(*new_entries));
+    size_t new_cap =
+        parser->capture_name_capacity ? parser->capture_name_capacity * 2 : 8;
+    struct capture_name_entry *new_entries =
+        (struct capture_name_entry *)realloc((void *)parser->capture_names,
+                                             new_cap * sizeof(*new_entries));
     if (!new_entries) {
       return;
     }
@@ -331,9 +331,8 @@ static int parse_naming_target(snobol_parser_t *parser, snobol_lexer_t *lexer,
     if (ident_is_v_register(tok.data.string.text, tok.data.string.len, &reg)) {
       if (reg >= MAX_VARS) {
         char msg[160];
-        snprintf(msg, sizeof(msg),
-                 "naming register v%d out of range (v0..v%d)", reg,
-                 MAX_VARS - 1);
+        snprintf(msg, sizeof(msg), "naming register v%d out of range (v0..v%d)",
+                 reg, MAX_VARS - 1);
         set_error(parser, msg, snobol_lexer_get_line(lexer),
                   snobol_lexer_get_pos(lexer));
         return -1;
@@ -576,7 +575,7 @@ static ast_node_t *parse_concatenation(snobol_parser_t *parser,
         naming = true;
       } else if (tok.type == TOKEN_ANCHOR_END) {
         snobol_lexer_state_t saved_state = snobol_lexer_save(lexer);
-        advance(lexer);             /* Consume '$' */
+        advance(lexer); /* Consume '$' */
         token_t nxt = peek(lexer);
         if (nxt.type == TOKEN_AT) {
           naming = true;
@@ -610,8 +609,8 @@ static ast_node_t *parse_concatenation(snobol_parser_t *parser,
         if (tok.type == TOKEN_DOT) {
           advance(lexer);
         }
-        int reg = parse_naming_target(parser, lexer,
-                                      tok.type == TOKEN_ANCHOR_END);
+        int reg =
+            parse_naming_target(parser, lexer, tok.type == TOKEN_ANCHOR_END);
         if (reg < 0) {
           for (size_t i = 0; i < count; i++) {
             snobol_ast_free(parts[i]);
@@ -795,8 +794,7 @@ static ast_node_t *parse_primary(snobol_parser_t *parser,
           set_error(parser,
                     "unary '$' indirect reference is not supported "
                     "(naming targets are @name or $vN)",
-                    snobol_lexer_get_line(lexer),
-                    snobol_lexer_get_pos(lexer));
+                    snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
           return nullptr;
         }
         ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
@@ -831,8 +829,8 @@ static ast_node_t *parse_primary(snobol_parser_t *parser,
 
         /* Remember the name so EMIT(@name) / `name = <value>` can resolve
          * this capture's register later in the pattern. */
-        register_capture_name(parser, tok.data.string.text,
-                              tok.data.string.len, reg);
+        register_capture_name(parser, tok.data.string.text, tok.data.string.len,
+                              reg);
 
         ast_node_t *sub = parse_primary(parser, lexer);
         if (!sub) {
@@ -1097,15 +1095,14 @@ static ast_node_t *parse_function_call(snobol_parser_t *parser,
 
     /* First delimiter: BAL('(') / BAL('(', ')') */
     if (arg.type != TOKEN_LIT) {
-      set_error(parser,
-                "BAL expects string delimiters: BAL() or BAL('(', ')')",
+      set_error(parser, "BAL expects string delimiters: BAL() or BAL('(', ')')",
                 snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
       return nullptr;
     }
     advance(lexer);
     int bytes = 0;
-    if (!utf8_peek_next(arg.data.string.text, arg.data.string.len, 0,
-                        &open_cp, &bytes)) {
+    if (!utf8_peek_next(arg.data.string.text, arg.data.string.len, 0, &open_cp,
+                        &bytes)) {
       set_error(parser, "BAL delimiter is not valid UTF-8",
                 snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
       return nullptr;
@@ -1185,7 +1182,8 @@ static ast_node_t *parse_function_call(snobol_parser_t *parser,
   }
 
   if (strncmp(name, "repeat", name_len) == 0) {
-    const char *sig = "repeat expects three arguments: repeat(pattern, min, max)";
+    const char *sig =
+        "repeat expects three arguments: repeat(pattern, min, max)";
     if (match(lexer, TOKEN_RPAREN)) {
       set_error(parser, sig, snobol_lexer_get_line(lexer),
                 snobol_lexer_get_pos(lexer));
@@ -1225,8 +1223,8 @@ static ast_node_t *parse_function_call(snobol_parser_t *parser,
     }
     if (min < 0) {
       char msg[160];
-      snprintf(msg, sizeof(msg),
-               "repeat: min must be non-negative (got %d)", min);
+      snprintf(msg, sizeof(msg), "repeat: min must be non-negative (got %d)",
+               min);
       set_error(parser, msg, snobol_lexer_get_line(lexer),
                 snobol_lexer_get_pos(lexer));
       snobol_ast_free(sub);
@@ -1340,8 +1338,8 @@ static ast_node_t *parse_table_or_assign(snobol_parser_t *parser,
     if (reg < 0 || reg >= MAX_VARS) {
       char msg[160];
       snprintf(msg, sizeof(msg),
-               "assignment register %lld out of range (v0..v%d)", (long long)reg,
-               MAX_VARS - 1);
+               "assignment register %lld out of range (v0..v%d)",
+               (long long)reg, MAX_VARS - 1);
       set_error(parser, msg, snobol_lexer_get_line(lexer),
                 snobol_lexer_get_pos(lexer));
       return nullptr;
@@ -1381,8 +1379,7 @@ static ast_node_t *parse_table_or_assign(snobol_parser_t *parser,
     tok = peek(lexer);
     int reg = -1;
     if (tok.type != TOKEN_IDENT ||
-        !ident_is_v_register(tok.data.string.text, tok.data.string.len,
-                             &reg)) {
+        !ident_is_v_register(tok.data.string.text, tok.data.string.len, &reg)) {
       set_error(parser,
                 "table key register must be $vN (e.g. $v0 for the value "
                 "captured into register 0)",
@@ -1434,6 +1431,30 @@ static ast_node_t *parse_table_or_assign(snobol_parser_t *parser,
       return nullptr;
     }
     ast_node_t *node = snobol_ast_create_table_update(table_name, key, value);
+    if (node) {
+      /* The value capture executes after the key is in its register, and it
+       * writes its own register.  A register key must therefore not share the
+       * scratch: `T[$v1] = 'x'` would otherwise read the key after the value
+       * capture overwrote it.  Take the next capture register, skipping the
+       * key's when the key is a register reference. */
+      int avoid = -1;
+      if (key && key->type == AST_REG_REF) {
+        avoid = key->data.reg_ref.reg;
+      }
+      int scratch = parser->capture_reg_counter;
+      if (scratch == avoid) {
+        scratch++;
+      }
+      if (scratch >= MAX_VARS) {
+        set_error(parser, "Too many captures (max 64)",
+                  snobol_lexer_get_line(lexer), snobol_lexer_get_pos(lexer));
+        free(table_name);
+        snobol_ast_free(node);
+        return nullptr;
+      }
+      node->data.table_update.value_reg = (uint8_t)scratch;
+      parser->capture_reg_counter = scratch + 1;
+    }
     free(table_name);
     return node;
   }
@@ -1475,10 +1496,8 @@ static ast_node_t *parse_emit(snobol_parser_t *parser, snobol_lexer_t *lexer) {
       return nullptr;
     }
     int reg = -1;
-    if (!ident_is_v_register(tok.data.string.text, tok.data.string.len,
-                             &reg)) {
-      reg = find_capture_reg(parser, tok.data.string.text,
-                             tok.data.string.len);
+    if (!ident_is_v_register(tok.data.string.text, tok.data.string.len, &reg)) {
+      reg = find_capture_reg(parser, tok.data.string.text, tok.data.string.len);
       if (reg < 0) {
         char msg[192];
         snprintf(msg, sizeof(msg),

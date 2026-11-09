@@ -1080,8 +1080,9 @@ void test_cov_tpl_tables(void) {
     bc2[ip++] = OP_TABLE_GET;
     bc2[ip++] = 0xFF;
     bc2[ip++] = 0xFF;
-    bc2[ip++] = 0;
-    bc2[ip++] = 0;
+    bc2[ip++] = 0; /* key_kind: register */
+    bc2[ip++] = 0; /* key_reg */
+    bc2[ip++] = 0; /* flags */
     bc2[ip++] = 3;
     bc2[ip++] = 't';
     bc2[ip++] = 'b';
@@ -1089,8 +1090,9 @@ void test_cov_tpl_tables(void) {
     bc2[ip++] = OP_TABLE_SET;
     bc2[ip++] = 0xFF;
     bc2[ip++] = 0xFF;
-    bc2[ip++] = 0;
-    bc2[ip++] = 0;
+    bc2[ip++] = 0; /* key_kind: register */
+    bc2[ip++] = 0; /* key_reg */
+    bc2[ip++] = 0; /* value_reg */
     bc2[ip++] = 3;
     bc2[ip++] = 't';
     bc2[ip++] = 'b';

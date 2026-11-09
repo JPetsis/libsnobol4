@@ -320,6 +320,7 @@ ast_node_t *snobol_ast_clone(const ast_node_t *node) {
           snobol_ast_clone(node->data.table_update.key);
       clone->data.table_update.value =
           snobol_ast_clone(node->data.table_update.value);
+      clone->data.table_update.value_reg = node->data.table_update.value_reg;
       break;
 
     case AST_DYNAMIC_EVAL:
@@ -694,6 +695,7 @@ ast_node_t *snobol_ast_create_table_update(const char *table, ast_node_t *key,
   node->data.table_update.table = str_dup(table, strlen(table));
   node->data.table_update.key = key;
   node->data.table_update.value = value;
+  node->data.table_update.value_reg = 0xFF; /* compiler-allocated */
   return node;
 }
 

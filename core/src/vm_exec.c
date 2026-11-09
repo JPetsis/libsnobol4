@@ -17,6 +17,7 @@
 #include "snobol/string_fn.h"
 #include "snobol/table.h"
 #include "snobol/type_fn.h"
+#include "snobol/unicode_fold.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -455,6 +456,77 @@ static bool vm_legacy_choice_mode(void) {
     resolved = 1;
   }
   return legacy;
+}
+
+/* --------------------------------------------------------------------------
+ * Table value matching
+ *
+ * A pattern-level table read matches the STORED VALUE against the subject at
+ * the current position (classic SNOBOL4), it does not consume from the key.
+ * Case-insensitive matching uses the same peer model the compiler applies to
+ * case-insensitive literals: a subject codepoint matches a value codepoint
+ * when it is the codepoint itself, one of its uppercase mappings, or its
+ * lowercase mapping.
+ * -------------------------------------------------------------------------- */
+
+static bool vm_cp_case_peer(uint32_t subject_cp, uint32_t value_cp) {
+  if (subject_cp == value_cp) {
+    return true;
+  }
+  uint32_t upper[2];
+  int upper_len = 0;
+  snobol_to_upper_cp(value_cp, upper, &upper_len);
+  for (int i = 0; i < upper_len; i++) {
+    if (upper[i] == subject_cp) {
+      return true;
+    }
+  }
+  return snobol_to_lower_cp(value_cp) == subject_cp;
+}
+
+/**
+ * @brief Match a table value against the subject at the current position.
+ *
+ * @param vm              Running VM.
+ * @param value           Stored value bytes.
+ * @param value_len       Stored value length.
+ * @param case_insensitive Fold case while comparing.
+ * @param out_consumed    Subject bytes consumed on success.
+ * @return true when the value matches at @p vm->pos.
+ */
+static bool vm_table_value_matches(const VM *vm, const char *value,
+                                   size_t value_len, bool case_insensitive,
+                                   size_t *out_consumed) {
+  size_t available = vm->len - vm->pos;
+  const char *subject = vm->s + vm->pos;
+
+  if (!case_insensitive) {
+    if (value_len > available || memcmp(subject, value, value_len) != 0) {
+      return false;
+    }
+    *out_consumed = value_len;
+    return true;
+  }
+
+  size_t sp = 0;
+  size_t vp = 0;
+  while (vp < value_len) {
+    uint32_t subject_cp;
+    uint32_t value_cp;
+    int subject_bytes;
+    int value_bytes;
+    if (!utf8_peek_next(subject, available, sp, &subject_cp, &subject_bytes) ||
+        !utf8_peek_next(value, value_len, vp, &value_cp, &value_bytes)) {
+      return false;
+    }
+    if (!vm_cp_case_peer(subject_cp, value_cp)) {
+      return false;
+    }
+    sp += (size_t)subject_bytes;
+    vp += (size_t)value_bytes;
+  }
+  *out_consumed = sp;
+  return true;
 }
 
 bool vm_run(VM *vm) {
@@ -1663,12 +1735,50 @@ bool vm_run(VM *vm) {
   case OP_TABLE_GET:
 #endif
   {
-    /* Lookup table[key] and store result in dest register
-       * Format: table_id u16, key_reg u8, dest_reg u8
-       * If key not found, fail (trigger backtracking) */
+    /* Match the stored table value (classic SNOBOL4).
+       * Format: table_id u16, key_kind u8, key payload, flags u8,
+       *         name_len u8, name bytes
+       * key_kind 0: register u8 (capture-derived subject range)
+       * key_kind 1: len u8 + bytes (literal key, data)
+       * flags bit 0: fold case when matching the value.
+       * The key is data and is never consumed; the value is matched against
+       * the subject at the current position and consumed.  A missing key
+       * fails (trigger backtracking). */
     uint16_t table_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
-    uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
-    uint8_t dest_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+    uint8_t key_kind = read_u8(vm->bc, vm->bc_len, &vm->ip);
+
+    const char *key = NULL;
+    size_t key_len = 0;
+    uint8_t key_reg = 0;
+    if (key_kind == 0) {
+      key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+    } else if (key_kind == 1) {
+      key_len = read_u16(vm->bc, vm->bc_len, &vm->ip);
+      if (vm->ip + key_len > vm->bc_len) {
+        if (!vm_pop_choice(vm)) {
+          goto fail_ret;
+        }
+#ifdef _MSC_VER
+        break;
+#else
+          continue;
+#endif
+      }
+      key = (const char *)vm->bc + vm->ip;
+      vm->ip += key_len;
+    } else {
+      /* Unknown key encoding - fail */
+      if (!vm_pop_choice(vm)) {
+        goto fail_ret;
+      }
+#ifdef _MSC_VER
+      break;
+#else
+        continue;
+#endif
+    }
+
+    uint8_t flags = read_u8(vm->bc, vm->bc_len, &vm->ip);
     uint8_t name_len = read_u8(vm->bc, vm->bc_len, &vm->ip);
     vm->ip += name_len;
 
@@ -1678,50 +1788,61 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
-    /* Get key from capture register */
-    if (key_reg >= MAX_CAPS || vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
-      /* Invalid key register - fail */
-      if (!vm_pop_choice(vm)) {
-        goto fail_ret;
+    if (key_kind == 0) {
+      /* Get key from capture register */
+      if (key_reg >= MAX_CAPS ||
+          vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
+        /* Invalid key register - fail */
+        if (!vm_pop_choice(vm)) {
+          goto fail_ret;
+        }
+#ifdef _MSC_VER
+        break;
+#else
+          continue;
+#endif
       }
-      break;
+      key = vm->s + vm->cap_start[key_reg];
+      key_len = vm->cap_end[key_reg] - vm->cap_start[key_reg];
     }
 
-    /* Extract key string */
-    size_t key_start = vm->cap_start[key_reg];
-    size_t key_end = vm->cap_end[key_reg];
-    size_t key_len = key_end - key_start;
-
-    /* Allocate and copy key */
-    char *key = (char *)snobol_malloc(key_len + 1);
-    if (!key) {
-      if (!vm_pop_choice(vm)) {
-        goto fail_ret;
-      }
-      break;
-    }
-    memcpy(key, vm->s + key_start, key_len);
-    key[key_len] = '\0';
-
-    /* Lookup in table */
-    const char *value = table_get(table, key);
-    snobol_free(key);
-
+    /* Lookup in table (length-aware, binary-safe keys) */
+    size_t value_len = 0;
+    const char *value = table_get_ex(table, key, key_len, &value_len);
     if (!value) {
       /* Key not found - fail (trigger backtracking) */
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
-    /* Store result: update dest_reg to match the value
-       * For now, we just note the lookup succeeded
-       * Full implementation would store value in a temp buffer */
-    (void)dest_reg; /* Result available via table */
+    /* Match the stored value against the subject and consume it.  An empty
+       * value matches zero-width at the current position. */
+    size_t consumed = 0;
+    if (!vm_table_value_matches(vm, value, value_len, (flags & 0x01) != 0,
+                                &consumed)) {
+      if (!vm_pop_choice(vm)) {
+        goto fail_ret;
+      }
+#ifdef _MSC_VER
+      break;
+#else
+        continue;
+#endif
+    }
+    vm->pos += consumed;
 #ifdef _MSC_VER
     break;
 #else
@@ -1735,11 +1856,47 @@ bool vm_run(VM *vm) {
   case OP_TABLE_SET:
 #endif
   {
-    /* Set table[key] = value
-       * Format: table_id u16, key_reg u8, value_reg u8
-       * Always succeeds (table operations don't fail) */
+    /* Set table[key] = captured value.
+       * Format: table_id u16, key_kind u8, key payload, value_reg u8,
+       *         name_len u8, name bytes
+       * key_kind 0: register u8 (capture-derived subject range)
+       * key_kind 1: len u8 + bytes (literal key, data)
+       * The key is data and is not consumed; the value register must hold a
+       * non-empty capture range whose text is stored. */
     uint16_t table_id = read_u16(vm->bc, vm->bc_len, &vm->ip);
-    uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+    uint8_t key_kind = read_u8(vm->bc, vm->bc_len, &vm->ip);
+
+    const char *key = NULL;
+    size_t key_len = 0;
+    uint8_t key_reg = 0;
+    if (key_kind == 0) {
+      key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
+    } else if (key_kind == 1) {
+      key_len = read_u16(vm->bc, vm->bc_len, &vm->ip);
+      if (vm->ip + key_len > vm->bc_len) {
+        if (!vm_pop_choice(vm)) {
+          goto fail_ret;
+        }
+#ifdef _MSC_VER
+        break;
+#else
+          continue;
+#endif
+      }
+      key = (const char *)vm->bc + vm->ip;
+      vm->ip += key_len;
+    } else {
+      /* Unknown key encoding - fail */
+      if (!vm_pop_choice(vm)) {
+        goto fail_ret;
+      }
+#ifdef _MSC_VER
+      break;
+#else
+        continue;
+#endif
+    }
+
     uint8_t value_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
     uint8_t name_len = read_u8(vm->bc, vm->bc_len, &vm->ip);
     vm->ip += name_len;
@@ -1750,69 +1907,57 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
-    /* Get key from capture register */
-    if (key_reg >= MAX_CAPS || vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
+    if (key_kind == 0) {
+      /* Get key from capture register */
+      if (key_reg >= MAX_CAPS ||
+          vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
+        if (!vm_pop_choice(vm)) {
+          goto fail_ret;
+        }
+#ifdef _MSC_VER
+        break;
+#else
+          continue;
+#endif
+      }
+      key = vm->s + vm->cap_start[key_reg];
+      key_len = vm->cap_end[key_reg] - vm->cap_start[key_reg];
+    }
+
+    /* Get value from capture register.  An empty capture range is valid: a
+       zero-width value pattern stores an empty value. */
+    if (value_reg >= MAX_CAPS) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
-
-    /* Get value from capture register */
-    if (value_reg >= MAX_CAPS ||
-        vm->cap_end[value_reg] <= vm->cap_start[value_reg]) {
-      if (!vm_pop_choice(vm)) {
-        goto fail_ret;
-      }
-      break;
-    }
-
-    size_t key_start = vm->cap_start[key_reg];
-    size_t key_end = vm->cap_end[key_reg];
-    size_t key_len = key_end - key_start;
 
     size_t val_start = vm->cap_start[value_reg];
-    size_t val_end = vm->cap_end[value_reg];
-    size_t val_len = val_end - val_start;
+    size_t val_len = vm->cap_end[value_reg] - val_start;
 
-    /* Allocate and copy key */
-    char *key = (char *)snobol_malloc(key_len + 1);
-    if (!key) {
+    /* Set in table (copies key and value, binary-safe) */
+    if (!table_set_ex(table, key, key_len, vm->s + val_start, val_len)) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
-    memcpy(key, vm->s + key_start, key_len);
-    key[key_len] = '\0';
-
-    /* Allocate and copy value */
-    char *value = (char *)snobol_malloc(val_len + 1);
-    if (!value) {
-      snobol_free(key);
-      if (!vm_pop_choice(vm)) {
-        goto fail_ret;
-      }
-      break;
-    }
-    memcpy(value, vm->s + val_start, val_len);
-    value[val_len] = '\0';
-
-    /* Set in table */
-    if (!table_set(table, key, value)) {
-      snobol_free(key);
-      snobol_free(value);
-      if (!vm_pop_choice(vm)) {
-        goto fail_ret;
-      }
-      break;
-    }
-
-    snobol_free(key);
-    snobol_free(value);
 #ifdef _MSC_VER
     break;
 #else
@@ -1838,14 +1983,22 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
     if (key_reg >= MAX_CAPS || vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
     size_t key_start = vm->cap_start[key_reg];
@@ -1857,7 +2010,11 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
     memcpy(key_str, vm->s + key_start, key_len);
     key_str[key_len] = '\0';
@@ -1870,7 +2027,11 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
     (void)dest_reg;
@@ -1898,14 +2059,22 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
     if (key_reg >= MAX_CAPS || vm->cap_end[key_reg] <= vm->cap_start[key_reg]) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
     if (value_reg >= MAX_CAPS ||
@@ -1913,7 +2082,11 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
     size_t key_start = vm->cap_start[key_reg];
@@ -1929,7 +2102,11 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
     memcpy(key_str, vm->s + key_start, key_len);
     key_str[key_len] = '\0';
@@ -1940,7 +2117,11 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
     memcpy(value_str, vm->s + val_start, val_len);
     value_str[val_len] = '\0';
@@ -1953,7 +2134,11 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+        continue;
+#endif
     }
 
     snobol_free(value_str);
@@ -2309,7 +2494,11 @@ bool vm_run(VM *vm) {
       if (!vm_pop_choice(vm)) {
         goto fail_ret;
       }
+#ifdef _MSC_VER
       break;
+#else
+          continue;
+#endif
     }
 
     while (bal_pos < vm->len) {

@@ -889,8 +889,9 @@ void test_cov_vm_table_array(void) {
   /* TABLE_GET success + ARRAY ops via AST-built bytecode with registries. */
   uint8_t bc[256];
   size_t ip = 0;
-  /* CAP_START(0) LIT('k') CAP_END(0) TABLE_GET(0, 0, 1, name_len=1,'t')
-   * TABLE_SET(0, 0, 0, 1, 't') ACCEPT — table must contain "k". */
+  /* CAP_START(0) LIT('k') CAP_END(0) TABLE_GET(id 0, key reg 0, 't')
+   * TABLE_SET(id 0, key literal 'k', value reg 0) ARRAY_GET ARRAY_SET ACCEPT.
+   * The table holds t["k"] = "v", so the read consumes "v" from "kv". */
   bc[ip++] = OP_CAP_START;
   bc[ip++] = 0;
   bc[ip++] = OP_LIT;
@@ -901,13 +902,17 @@ void test_cov_vm_table_array(void) {
   bc[ip++] = 0;
   bc[ip++] = OP_TABLE_GET;
   covv_emit_u16_be(bc, &ip, 0);
+  bc[ip++] = 0; /* key_kind: register */
   bc[ip++] = 0; /* key_reg */
-  bc[ip++] = 1; /* dest_reg */
+  bc[ip++] = 0; /* flags */
   bc[ip++] = 1; /* name_len */
   bc[ip++] = 't';
   bc[ip++] = OP_TABLE_SET;
   covv_emit_u16_be(bc, &ip, 0);
-  bc[ip++] = 0; /* key_reg */
+  bc[ip++] = 1; /* key_kind: literal */
+  bc[ip++] = 0; /* key_len high byte */
+  bc[ip++] = 1; /* key_len low byte */
+  bc[ip++] = 'k';
   bc[ip++] = 0; /* value_reg */
   bc[ip++] = 1; /* name_len */
   bc[ip++] = 't';
@@ -936,8 +941,8 @@ void test_cov_vm_table_array(void) {
   memset(&vm, 0, sizeof(vm));
   vm.bc = bc;
   vm.bc_len = bc_len;
-  vm.s = "k";
-  vm.len = 1;
+  vm.s = "kv";
+  vm.len = 2;
   vm_init_tables(&vm);
   vm_init_arrays(&vm);
   uint16_t tid = 0;
@@ -972,8 +977,10 @@ void test_cov_vm_table_array(void) {
     bc2[ip2++] = 0;
     bc2[ip2++] = OP_TABLE_GET;
     covv_emit_u16_be(bc2, &ip2, 0);
-    bc2[ip2++] = 0;
-    bc2[ip2++] = 1;
+    bc2[ip2++] = 1; /* key_kind: literal */
+    bc2[ip2++] = 1; /* key_len */
+    bc2[ip2++] = 'z';
+    bc2[ip2++] = 0; /* flags */
     bc2[ip2++] = 1;
     bc2[ip2++] = 't';
     bc2[ip2++] = OP_ACCEPT;
@@ -1010,8 +1017,10 @@ void test_cov_vm_table_array(void) {
     bc3[ip3++] = 0;
     bc3[ip3++] = OP_TABLE_GET;
     covv_emit_u16_be(bc3, &ip3, 7); /* unregistered id */
-    bc3[ip3++] = 0;
-    bc3[ip3++] = 1;
+    bc3[ip3++] = 1;                 /* key_kind: literal */
+    bc3[ip3++] = 1;                 /* key_len */
+    bc3[ip3++] = 'k';
+    bc3[ip3++] = 0; /* flags */
     bc3[ip3++] = 1;
     bc3[ip3++] = 't';
     bc3[ip3++] = OP_ACCEPT;
@@ -1842,8 +1851,9 @@ void test_cov_engine2_vm_exec(void) {
     bc[ip++] = 0;
     bc[ip++] = OP_TABLE_GET;
     cove_emit_u16_be(bc, &ip, 0);
+    bc[ip++] = 0;  /* key_kind: register */
     bc[ip++] = 99; /* key_reg >= MAX_CAPS */
-    bc[ip++] = 1;
+    bc[ip++] = 0;  /* flags */
     bc[ip++] = 1;
     bc[ip++] = 't';
     bc[ip++] = OP_ACCEPT;
@@ -1878,6 +1888,7 @@ void test_cov_engine2_vm_exec(void) {
     bc[ip++] = 0;
     bc[ip++] = OP_TABLE_SET;
     cove_emit_u16_be(bc, &ip, 0);
+    bc[ip++] = 0;  /* key_kind: register */
     bc[ip++] = 0;  /* key_reg */
     bc[ip++] = 99; /* value_reg >= MAX_CAPS */
     bc[ip++] = 1;

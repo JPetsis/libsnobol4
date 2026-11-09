@@ -197,10 +197,20 @@ typedef enum {
   OP_LABEL,     /**< Define label target; label_id: u16 */
   OP_GOTO,      /**< Unconditional label jump; label_id: u16 */
   OP_GOTO_F,    /**< Jump to label if last match failed; label_id: u16 */
-  OP_TABLE_GET, /**< Lookup: dest_reg = table[key_reg]; table_id: u16, key_reg:
-                   u8, dest_reg: u8, name_len: u8, name: bytes[name_len] */
-  OP_TABLE_SET, /**< Update: table[key_reg] = value_reg; table_id: u16, key_reg:
-                   u8, value_reg: u8, name_len: u8, name: bytes[name_len] */
+  OP_TABLE_GET, /**< Match a bound table value; table_id: u16, key_kind: u8,
+                   key payload, flags: u8, name_len: u8, name:
+                   bytes[name_len].  key_kind 0 = register (u8), 1 = inline
+                   literal (len u16 + bytes); a register key is a
+                   capture-derived subject range, a literal key is data.
+                   flags bit 0 = case-insensitive value matching.  The
+                   stored value is matched against the subject and consumed;
+                   a missing key fails. Variable-length instruction. */
+  OP_TABLE_SET, /**< Update: table[key] = value_reg; table_id: u16, key_kind:
+                   u8, key payload (same encoding as OP_TABLE_GET),
+                   value_reg: u8, name_len: u8, name: bytes[name_len].  The
+                   value register must hold a capture range (an empty range
+                   stores an empty value); the key is data and is not
+                   consumed. Variable-length. */
   OP_ARRAY_GET, /**< Lookup: dest_reg = array[key_reg]; array_id: u16, key_reg:
                    u8, dest_reg: u8, name_len: u8, name: bytes[name_len] */
   OP_ARRAY_SET, /**< Update: array[key_reg] = value_reg; array_id: u16, key_reg:

@@ -1155,19 +1155,38 @@ int snobol_template_bind_tables(uint8_t *bc, size_t bc_len, const char **names,
 
       case OP_TABLE_GET:
       case OP_TABLE_SET: {
-        /* table_id:u16, reg:u8, reg:u8, name_len:u8, name_bytes[name_len] */
-        if (ip + 4 > bc_len) {
+        /* table_id:u16, key_kind:u8, key payload, one byte (GET flags /
+         * SET value_reg), name_len:u8, name_bytes[name_len].
+         * key_kind 0 payload: reg u8.  key_kind 1: len u8 + bytes. */
+        if (ip + 3 > bc_len) {
           return result;
         }
         uint16_t tid = ((uint16_t)bc[ip] << 8) | bc[ip + 1];
-        uint8_t nm_len = bc[ip + 4];
+        uint8_t key_kind = bc[ip + 2];
+        size_t payload_len;
+        if (key_kind == 0) {
+          payload_len = 1;
+        } else if (key_kind == 1) {
+          if (ip + 5 > bc_len) {
+            return result;
+          }
+          payload_len = 2 + (((size_t)bc[ip + 3] << 8) | bc[ip + 4]);
+        } else {
+          return result;
+        }
+        size_t nm_len_at = ip + 4 + payload_len;
+        size_t name_at = nm_len_at + 1;
+        if (name_at > bc_len) {
+          return result;
+        }
+        uint8_t nm_len = bc[nm_len_at];
 
-        if (ip + 5 + nm_len > bc_len) {
+        if (name_at + nm_len > bc_len) {
           return result;
         }
 
         if (tid == (uint16_t)SNBL_TABLE_ID_UNBOUND) {
-          const char *name_ptr = (const char *)bc + ip + 5;
+          const char *name_ptr = (const char *)bc + name_at;
           bool resolved = false;
           for (size_t k = 0; k < n; k++) {
             if (names[k] && strlen(names[k]) == nm_len &&
@@ -1185,7 +1204,7 @@ int snobol_template_bind_tables(uint8_t *bc, size_t bc_len, const char **names,
             result = -1;
           }
         }
-        ip += 5 + nm_len;
+        ip = name_at + nm_len;
         break;
       }
 

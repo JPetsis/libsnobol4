@@ -221,7 +221,9 @@ PHP_METHOD(Snobol_Pattern, compileFromAst) {
 
   if (compile_ast_to_bytecode(ast, options, &bc, &bc_len) != 0) {
     SNOBOL_LOG("Snobol_Pattern::compileFromAst: compilation FAILED");
-    zend_throw_exception(zend_ce_exception, "Failed to compile AST", 0);
+    const char *detail = compile_ast_error();
+    zend_throw_exception(zend_ce_exception,
+                         detail ? detail : "Failed to compile AST", 0);
     RETURN_NULL();
   }
 
@@ -321,10 +323,12 @@ PHP_METHOD(Snobol_Pattern, fromString) {
 
   if (compile_ast_to_bytecode_c(ast, case_insensitive, &bc, &bc_len) != 0) {
     SNOBOL_LOG("Snobol_Pattern::fromString: compilation FAILED");
+    const char *detail = compile_ast_error();
     snobol_ast_free(ast);
     snobol_parser_destroy(parser);
     snobol_lexer_destroy(lexer);
-    zend_throw_exception(zend_ce_exception, "Failed to compile AST", 0);
+    zend_throw_exception(zend_ce_exception,
+                         detail ? detail : "Failed to compile AST", 0);
     RETURN_NULL();
   }
 

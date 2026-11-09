@@ -97,16 +97,16 @@ typedef enum {
   AST_TABLE_UPDATE, /* Table assignment */
 
   /* Pattern primitives */
-  AST_BREAKX, /* BREAKX – break with retry choice point */
-  AST_BAL,    /* BAL – balanced delimiter match */
-  AST_FENCE,  /* FENCE – cut choice stack */
-  AST_REM,    /* REM – consume remainder */
-  AST_RPOS,   /* RPOS(n) – cursor n codepoints from end */
-  AST_RTAB,   /* RTAB(n) – advance to n codepoints from end */
-  AST_POS,    /* POS(n) – succeed when cursor at n codepoints from start */
-  AST_TAB,    /* TAB(n) – advance cursor to n codepoints from start */
-  AST_ABORT,  /* ABORT – terminate entire match */
-  AST_FAIL,   /* FAIL – force failure / backtrack */
+  AST_BREAKX,  /* BREAKX – break with retry choice point */
+  AST_BAL,     /* BAL – balanced delimiter match */
+  AST_FENCE,   /* FENCE – cut choice stack */
+  AST_REM,     /* REM – consume remainder */
+  AST_RPOS,    /* RPOS(n) – cursor n codepoints from end */
+  AST_RTAB,    /* RTAB(n) – advance to n codepoints from end */
+  AST_POS,     /* POS(n) – succeed when cursor at n codepoints from start */
+  AST_TAB,     /* TAB(n) – advance cursor to n codepoints from start */
+  AST_ABORT,   /* ABORT – terminate entire match */
+  AST_FAIL,    /* FAIL – force failure / backtrack */
   AST_SUCCEED, /* SUCCEED – force immediate success */
 
   /* Register reference (one of the v0..v63 variable registers).  Used as a
@@ -247,6 +247,8 @@ struct ast_node {
       char *table;       /* Owned: table name */
       ast_node_t *key;   /* Owned: key expression */
       ast_node_t *value; /* Owned: value expression */
+      uint8_t value_reg; /* Value capture register; 0xFF = compiler-allocated
+                            (Builder-built ASTs have no parser allocator) */
     } table_update;
 
     /* AST_BREAKX */

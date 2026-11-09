@@ -31,6 +31,15 @@ int compile_ast_to_bytecode_c(ast_node_t *ast, bool case_insensitive,
                               uint8_t **out_bc, size_t *out_len);
 
 /**
+ * Last specific error from compile_ast_to_bytecode_c().
+ *
+ * @return Human-readable message for the most recent failed compile, or NULL
+ *         when the last compile succeeded or failed without a specific
+ *         message.  The pointer is valid until the next compile call.
+ */
+const char *compile_ast_error(void);
+
+/**
  * Compile template string to bytecode
  * @param tpl Template string
  * @param len Template length

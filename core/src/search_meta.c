@@ -2413,6 +2413,28 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
         { adv = 3; }
       } else if (op == OP_ASSIGN) {
         { adv = 4; }
+      } else if (op == OP_TABLE_GET || op == OP_TABLE_SET) {
+        /* table_id:u16, key_kind:u8, key payload, one byte (GET flags /
+         * SET value_reg), name_len:u8, name bytes.
+         * Skip the whole instruction: the key is data, never a pattern
+         * literal, and its bytes must not be scanned as opcodes. */
+        if (scan + 4 > bc_len) {
+          break;
+        }
+        uint8_t key_kind = bc[scan + 3];
+        size_t payload_len;
+        if (key_kind == 0) {
+          payload_len = 1;
+        } else if (key_kind == 1 && scan + 6 <= bc_len) {
+          payload_len = 2 + (((size_t)bc[scan + 4] << 8) | bc[scan + 5]);
+        } else {
+          break;
+        }
+        size_t nm_len_at = scan + 5 + payload_len;
+        if (nm_len_at + 1 > bc_len) {
+          break;
+        }
+        adv = nm_len_at + 1 + (size_t)bc[nm_len_at] - scan;
       }
       scan += adv;
       if (adv == 0 || scan > bc_len) {

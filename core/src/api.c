@@ -187,7 +187,8 @@ static snobol_pattern_t *do_compile(const char *source, size_t len,
   snobol_ast_free(ast);
 
   if (rc != 0) {
-    set_error_out(error, "compilation failed");
+    const char *detail = compile_ast_error();
+    set_error_out(error, detail ? detail : "compilation failed");
     goto cleanup;
   }
 
@@ -469,16 +470,32 @@ int snobol_pattern_bind_bytecode_tables(uint8_t *bc, size_t bc_len,
     }
 
     if (op == OP_TABLE_GET || op == OP_TABLE_SET) {
-      /* opcode:u8 + table_id:u16 + key_reg:u8 + dest/value_reg:u8 +
-         name_len:u8 + name bytes */
-      if (ip + 6 > bc_len) {
+      /* opcode:u8 + table_id:u16 + key_kind:u8 + key payload +
+         one byte (GET flags / SET value_reg) + name_len:u8 + name bytes.
+         key_kind 0 payload: reg u8.  key_kind 1 payload: len u8 + bytes. */
+      if (ip + 4 > bc_len) {
         return -1;
       }
-      uint8_t nm_len = bc[ip + 5];
-      if (ip + 6 + (size_t)nm_len > bc_len) {
+      uint8_t key_kind = bc[ip + 3];
+      size_t payload_len;
+      if (key_kind == 0) {
+        payload_len = 1;
+      } else if (key_kind == 1 && ip + 6 <= bc_len) {
+        payload_len = 2 + (((size_t)bc[ip + 4] << 8) | bc[ip + 5]);
+      } else {
         return -1;
       }
-      const char *nm = (const char *)bc + ip + 6;
+      size_t name_len_at = ip + 5 + payload_len;
+      size_t name_at = name_len_at + 1;
+      if (name_at > bc_len) {
+        return -1;
+      }
+      uint8_t nm_len = bc[name_len_at];
+      if (name_at + (size_t)nm_len > bc_len ||
+          name_at + (size_t)nm_len > limit) {
+        return -1;
+      }
+      const char *nm = (const char *)bc + name_at;
       /* Bind to the position in the name list; a name absent from the list
        * is reset to unbound so the op fails at match time. */
       uint16_t new_id = (uint16_t)SNBL_TABLE_ID_UNBOUND;
@@ -491,7 +508,7 @@ int snobol_pattern_bind_bytecode_tables(uint8_t *bc, size_t bc_len,
       }
       bc[ip + 1] = (uint8_t)((new_id >> 8) & 0xFF);
       bc[ip + 2] = (uint8_t)(new_id & 0xFF);
-      ip += 6 + nm_len;
+      ip = name_at + nm_len;
       continue;
     }
 
@@ -2259,7 +2276,8 @@ snobol_pattern_t *snobol_pattern_build_compile(snobol_context_t *ctx,
   snobol_ast_free(root); /* AST ownership consumed on both outcomes */
 
   if (rc != 0) {
-    set_error_out(error, "compilation failed");
+    const char *detail = compile_ast_error();
+    set_error_out(error, detail ? detail : "compilation failed");
     return nullptr;
   }
 

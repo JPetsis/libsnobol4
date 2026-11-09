@@ -23,6 +23,21 @@ static uint16_t label_table_capacity_c = 0;
 static char label_error_c[256];
 static bool label_has_error_c = false;
 
+/* Last specific code-generation error.  The callers fall back to their own
+ * generic message when this is empty; the first error wins so a failed
+ * sub-node is not overwritten by the parent's failure. */
+static char compile_error_c[256];
+
+static void set_compile_error(const char *msg) {
+  if (compile_error_c[0] == '\0') {
+    snprintf(compile_error_c, sizeof(compile_error_c), "%s", msg);
+  }
+}
+
+const char *compile_ast_error(void) {
+  return compile_error_c[0] != '\0' ? compile_error_c : nullptr;
+}
+
 static void free_label_table_c(void) {
   for (uint16_t i = 0; i < label_table_count_c; i++) {
     if (label_table_c[i].name) {
@@ -180,31 +195,91 @@ static int emit_eval_c(int fn, int reg, CodeBuf *c) {
   return 0;
 }
 
-static int emit_table_access_c(const char *table, ast_node_t *key, CodeBuf *c) {
-  /* To support table access in patterns:
-   * 1. Capture key into reg 0
-   * 2. Emit OP_TABLE_GET with unbound ID and the name
-   *
-   * A register-reference key (AST_REG_REF, source form `TABLE[$vN]`) skips
-   * the capture wrap: the key register already holds the captured subject
-   * range, so OP_TABLE_GET reads it directly. */
-  uint8_t key_reg = 0;
+/* Highest capture register referenced anywhere in the AST, computed once per
+ * compile.  Builder-built ASTs carry no parser-allocated value register, so
+ * the table write places its value capture one above this. */
+static int compiler_max_reg = -1;
+
+static int max_int_c(int a, int b) {
+  return a > b ? a : b;
+}
+
+/** Highest capture register used by @p node, or -1 when it uses none. */
+static int ast_max_reg_c(const ast_node_t *node) {
+  if (!node) {
+    return -1;
+  }
+  switch (node->type) {
+    case AST_CAP:
+      return max_int_c(node->data.cap.reg, ast_max_reg_c(node->data.cap.sub));
+    case AST_ASSIGN:
+      return max_int_c(node->data.assign.var, node->data.assign.reg);
+    case AST_EVAL: return node->data.eval.reg;
+    case AST_EMIT: return node->data.emit.reg;
+    case AST_REG_REF: return node->data.reg_ref.reg;
+    case AST_CONCAT: {
+      int max = -1;
+      for (size_t i = 0; i < node->data.concat.count; i++) {
+        max = max_int_c(max, ast_max_reg_c(node->data.concat.parts[i]));
+      }
+      return max;
+    }
+    case AST_ALT:
+      return max_int_c(ast_max_reg_c(node->data.alt.left),
+                       ast_max_reg_c(node->data.alt.right));
+    case AST_REPETITION: return ast_max_reg_c(node->data.repetition.sub);
+    case AST_ARBNO: return ast_max_reg_c(node->data.arbno.sub);
+    case AST_DYNAMIC_EVAL: return ast_max_reg_c(node->data.dynamic_eval.expr);
+    case AST_LABEL: return ast_max_reg_c(node->data.label.target);
+    case AST_TABLE_ACCESS: return ast_max_reg_c(node->data.table_access.key);
+    case AST_TABLE_UPDATE: {
+      int max = max_int_c(ast_max_reg_c(node->data.table_update.key),
+                          ast_max_reg_c(node->data.table_update.value));
+      if (node->data.table_update.value_reg < MAX_VARS) {
+        max = max_int_c(max, (int)node->data.table_update.value_reg);
+      }
+      return max;
+    }
+    default: return -1;
+  }
+}
+
+/**
+ * Emit a table key operand: kind 0 = register reference (u8), kind 1 =
+ * inline literal (len u8 + bytes).  Keys are data: a literal key is never
+ * matched against or captured from the subject, and any other key form has
+ * no value at compile time and is rejected.
+ */
+static int emit_table_key_c(ast_node_t *key, CodeBuf *c) {
   if (key && key->type == AST_REG_REF) {
-    key_reg = (uint8_t)key->data.reg_ref.reg;
-  } else {
-    cb_emit_u8(c, OP_CAP_START);
-    cb_emit_u8(c, 0);
-    if (emit_node_c(key, c) != 0) {
+    cb_emit_u8(c, 0); /* kind 0: register */
+    cb_emit_u8(c, (uint8_t)key->data.reg_ref.reg);
+    return 0;
+  }
+  if (key && key->type == AST_LITERAL) {
+    size_t len = key->data.literal.len;
+    if (len > 0xFFFF) {
+      set_compile_error("table key literal exceeds 65535 bytes");
       return -1;
     }
-    cb_emit_u8(c, OP_CAP_END);
-    cb_emit_u8(c, 0);
+    cb_emit_u8(c, 1); /* kind 1: inline literal */
+    cb_emit_u16(c, (uint16_t)len);
+    cb_emit_bytes(c, (const uint8_t *)key->data.literal.text, len);
+    return 0;
   }
+  set_compile_error(
+      "table key must be a literal string or a $vN register reference");
+  return -1; /* unsupported key form */
+}
 
+static int emit_table_access_c(const char *table, ast_node_t *key, CodeBuf *c) {
+  /* Match the stored value: table_id, key (data), flags (bit 0 = CI), name. */
   cb_emit_u8(c, OP_TABLE_GET);
   cb_emit_u16(c, 0xFFFF); /* unbound */
-  cb_emit_u8(c, key_reg); /* kreg */
-  cb_emit_u8(c, 0);       /* dreg */
+  if (emit_table_key_c(key, c) != 0) {
+    return -1;
+  }
+  cb_emit_u8(c, compiler_case_insensitive ? 0x01 : 0x00); /* flags */
   size_t nlen = strlen(table);
   cb_emit_u8(c, (uint8_t)nlen);
   cb_emit_bytes(c, (const uint8_t *)table, nlen);
@@ -212,35 +287,39 @@ static int emit_table_access_c(const char *table, ast_node_t *key, CodeBuf *c) {
 }
 
 static int emit_table_update_c(const char *table, ast_node_t *key,
-                               ast_node_t *value, CodeBuf *c) {
-  /* Capture key into reg 0 (or reference an existing register for
-   * AST_REG_REF keys), then capture the value into reg 1. */
-  uint8_t key_reg = 0;
-  if (key && key->type == AST_REG_REF) {
-    key_reg = (uint8_t)key->data.reg_ref.reg;
-  } else {
-    cb_emit_u8(c, OP_CAP_START);
-    cb_emit_u8(c, 0);
-    if (emit_node_c(key, c) != 0) {
-      return -1;
-    }
-    cb_emit_u8(c, OP_CAP_END);
-    cb_emit_u8(c, 0);
+                               ast_node_t *value, uint8_t value_reg,
+                               CodeBuf *c) {
+  /* The value capture needs a register of its own: it runs after the key's
+   * pattern and would otherwise overwrite a register-held key.  Source
+   * patterns carry the parser-allocated register; Builder-built ASTs carry
+   * 0xFF and get the next register above everything the AST uses. */
+  int scratch = (value_reg < MAX_VARS) ? value_reg : compiler_max_reg + 1;
+  if (scratch >= MAX_VARS) {
+    set_compile_error("no free capture register for the table write value");
+    return -1;
+  }
+  if (key && key->type == AST_REG_REF && key->data.reg_ref.reg == scratch) {
+    set_compile_error(
+        "table key register collides with the value capture register");
+    return -1; /* the value capture would clobber the key */
   }
 
-  /* Capture value into reg 1 */
+  /* Capture the value pattern from the subject, then store it under the
+   * evaluated key (data, never consumed). */
   cb_emit_u8(c, OP_CAP_START);
-  cb_emit_u8(c, 1);
+  cb_emit_u8(c, (uint8_t)scratch);
   if (emit_node_c(value, c) != 0) {
     return -1;
   }
   cb_emit_u8(c, OP_CAP_END);
-  cb_emit_u8(c, 1);
+  cb_emit_u8(c, (uint8_t)scratch);
 
   cb_emit_u8(c, OP_TABLE_SET);
   cb_emit_u16(c, 0xFFFF); /* unbound */
-  cb_emit_u8(c, key_reg); /* kreg */
-  cb_emit_u8(c, 1);       /* vreg */
+  if (emit_table_key_c(key, c) != 0) {
+    return -1;
+  }
+  cb_emit_u8(c, (uint8_t)scratch); /* value register */
   size_t nlen = strlen(table);
   cb_emit_u8(c, (uint8_t)nlen);
   cb_emit_bytes(c, (const uint8_t *)table, nlen);
@@ -347,6 +426,8 @@ int compile_ast_to_bytecode_c(ast_node_t *ast, bool case_insensitive,
   free_label_table_c();
   next_loop_id = 0;
   compiler_case_insensitive = case_insensitive;
+  compiler_max_reg = ast_max_reg_c(ast);
+  compile_error_c[0] = '\0';
 
   CodeBuf cb;
   cb_init(&cb);
@@ -792,9 +873,9 @@ static int emit_node_c(ast_node_t *node, CodeBuf *c) {
                                  node->data.table_access.key, c);
 
     case AST_TABLE_UPDATE:
-      return emit_table_update_c(node->data.table_update.table,
-                                 node->data.table_update.key,
-                                 node->data.table_update.value, c);
+      return emit_table_update_c(
+          node->data.table_update.table, node->data.table_update.key,
+          node->data.table_update.value, node->data.table_update.value_reg, c);
 
     default:
       SNOBOL_LOG("emit_node_c: unknown node type %d", node->type);
