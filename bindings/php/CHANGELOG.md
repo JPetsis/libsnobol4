@@ -77,6 +77,14 @@ core versions correspond 1:1.
 
 ### Fixed
 
+- **`Pattern::searchSplitGenerator()` now yields exactly `searchSplit()`'s
+  segments** — the lazy iterator dropped the empty trailing segment when the
+  subject ended at a delimiter (and yielded nothing for an empty subject), so
+  its output could not reconstruct the subject with `implode()` and disagreed
+  with the eager split, which follows PHP's `explode`/`preg_split` convention.
+  It now yields the trailing empty segment and the single empty segment for
+  `""`. Early-break laziness is unchanged: the extra segment costs one empty
+  string only when iteration reaches it.
 - **Stale Packagist branch alias** (`composer.json`): `dev-main` resolved
   as `0.2.x-dev`; now `1.x-dev` so `dev-main` consumers get correct
   stability and semver range matching.

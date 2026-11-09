@@ -989,6 +989,8 @@ The SearchIterator is ideal for "find first N" patterns. For full iteration, the
 
 Returns a `Snobol\SplitIterator` that lazily yields segment strings one at a time. Each segment is materialized as a `zend_string` only when the caller's iteration reaches it — callers that break after N segments pay zero cost for the remaining delimiters. Uses `snobol_pattern_search_next()` internally for literal delimiters (~8 ns/call).
 
+The yielded sequence is exactly the one `searchSplit()` returns, including the empty trailing segment when the subject ends at a delimiter match and the single empty segment for an empty subject; concatenating the segments with the delimiter text reconstructs the subject.
+
 ```php
 $p = Pattern::fromString("','");
 $it = $p->searchSplitGenerator("a,b,c");

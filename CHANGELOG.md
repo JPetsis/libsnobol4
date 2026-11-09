@@ -221,6 +221,15 @@ tagged `php/vX.Y.Z`.
 
 ### Fixed
 
+- **Integer literal scanning no longer overflows**: `scan_integer()`
+  (`core/src/lexer.c`) set the overflow flag but kept evaluating
+  `value = value * 10 + digit`, a signed-overflow undefined behavior on every
+  digit past the nineteenth (UBSan reported
+  `999999999999999999 * 10 cannot be represented`). The accumulator is now
+  `uint64_t` with an explicit limit (`INT64_MAX`, or `INT64_MAX + 1` when a
+  leading `-` was consumed), so oversized literals are still rejected with the
+  same message while `-9223372036854775808` scans to its value and reports an
+  int32 range error instead of a spurious "too large" overflow.
 - **Search-VM / DFA eligibility walks now cover the whole bytecode body**:
   `check_search_vm_eligible()` and `check_automaton_eligible()` returned
   "eligible" at the first terminal op, so a pattern whose early branch ends
@@ -234,7 +243,7 @@ tagged `php/vX.Y.Z`.
   stop-at-terminal scan for hand-built bytecode without a validating
   trailer.
 
-C test suite: **389 cases / 74,128 assertions** (custom runner).
+C test suite: **391 cases / 74,145 assertions** (custom runner).
 
 ## [1.0.4] - 2026-08-11
 
