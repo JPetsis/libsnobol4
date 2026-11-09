@@ -18,18 +18,18 @@
  * Lexer state structure (opaque to callers)
  */
 struct snobol_lexer {
-  const char *source; /* Source text (not owned) */
-  size_t len;         /* Length of source */
-  size_t pos;         /* Current position */
-  size_t line;        /* Current line (1-based) */
-  size_t column;      /* Current column (1-based) */
-  token_t peek_token; /* Peeked token (if any) */
-  bool has_peek;      /* Whether peek_token is valid */
+  const char *source;     /* Source text (not owned) */
+  size_t len;             /* Length of source */
+  size_t pos;             /* Current position */
+  size_t line;            /* Current line (1-based) */
+  size_t column;          /* Current column (1-based) */
+  token_t peek_token;     /* Peeked token (if any) */
+  bool has_peek;          /* Whether peek_token is valid */
   token_type_t prev_type; /* Type of the last returned token (context) */
   bool has_error;         /* Sticky lexical error (see set_lexer_error) */
   char error_msg[SNOBOL_LEXER_ERROR_MAX];
-  size_t error_line;  /* Line of the offending character */
-  size_t error_col;   /* Column of the offending character */
+  size_t error_line; /* Line of the offending character */
+  size_t error_col;  /* Column of the offending character */
 };
 
 /* Forward declarations */
@@ -144,8 +144,15 @@ static token_t scan_ident(snobol_lexer_t *lexer) {
 }
 
 static token_t scan_integer(snobol_lexer_t *lexer, bool negative) {
-  /* First digit already at lexer->pos (or a leading '-' was consumed) */
-  int64_t value = 0;
+  /* First digit already at lexer->pos (or a leading '-' was consumed).
+   * Accumulate in uint64_t so no signed multiply can overflow; the limit is
+   * INT64_MAX for positive values and INT64_MAX + 1 for negative ones (the
+   * magnitude of INT64_MIN).  Once the limit is exceeded, stop accumulating
+   * and report the literal: the remaining digits are consumed below and the
+   * value is discarded. */
+  uint64_t value = 0;
+  const uint64_t limit =
+      negative ? (uint64_t)INT64_MAX + 1u : (uint64_t)INT64_MAX;
   bool overflow = false;
 
   while (lexer->pos < lexer->len) {
@@ -153,22 +160,21 @@ static token_t scan_integer(snobol_lexer_t *lexer, bool negative) {
     if (c < '0' || c > '9') {
       break;
     }
-    if (value > (INT64_MAX - (int64_t)(c - '0')) / 10) {
-      overflow = true;
+    if (!overflow) {
+      uint64_t digit = (uint64_t)(c - '0');
+      if (value > (limit - digit) / 10u) {
+        overflow = true;
+      } else {
+        value = value * 10u + digit;
+      }
     }
-    value = value * 10 + (int64_t)(c - '0');
     lexer->pos++;
     lexer->column++;
   }
 
-  if (negative && !overflow) {
-    value = -value;
-  }
-
   if (overflow) {
     /* Consume the rest of the digit run so the position is past it. */
-    while (lexer->pos < lexer->len &&
-           lexer->source[lexer->pos] >= '0' &&
+    while (lexer->pos < lexer->len && lexer->source[lexer->pos] >= '0' &&
            lexer->source[lexer->pos] <= '9') {
       lexer->pos++;
       lexer->column++;
@@ -185,8 +191,16 @@ static token_t scan_integer(snobol_lexer_t *lexer, bool negative) {
     return make_token(TOKEN_ERROR);
   }
 
+  int64_t signed_value;
+  if (negative) {
+    signed_value =
+        (value == (uint64_t)INT64_MAX + 1u) ? INT64_MIN : -(int64_t)value;
+  } else {
+    signed_value = (int64_t)value;
+  }
+
   token_t token = make_token(TOKEN_INTEGER);
-  token.data.integer.value = value;
+  token.data.integer.value = signed_value;
   return token;
 }
 

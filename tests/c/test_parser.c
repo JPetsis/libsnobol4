@@ -609,14 +609,15 @@ void test_cov_parser_functions(void) {
 
   /* Numeric argument validation: missing, quoted, mis-typed, out of range. */
   {
-    const char *bad[] = {"LEN()",      "POS()",    "TAB()",
-                         "LEN('5')",   "POS('2')", "TAB('3')",
-                         "POS(x3)",    "LEN(99999999999999999999)"};
+    const char *bad[] = {
+        "LEN()",    "POS()",    "TAB()",   "LEN('5')",
+        "POS('2')", "TAB('3')", "POS(x3)", "LEN(99999999999999999999)"};
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
       snobol_parser_t *parser = snobol_parser_create();
       bool err = false;
       ast_node_t *ast = covp_parse(parser, bad[i], &err);
-      test_assert((ast == NULL && err) != 0, "invalid numeric argument rejected");
+      test_assert((ast == NULL && err) != 0,
+                  "invalid numeric argument rejected");
       if (!ast && err) {
         const char *msg = snobol_parser_get_error(parser);
         test_assert(
@@ -809,7 +810,8 @@ void test_cov_parser_source_primitives(void) {
       const char *src;
       uint32_t open;
       uint32_t close;
-    } cases[] = {{"BAL()", '(', ')'},   {"BAL('(')", '(', ')'},
+    } cases[] = {{"BAL()", '(', ')'},
+                 {"BAL('(')", '(', ')'},
                  {"BAL('(', ')')", '(', ')'},
                  {"BAL('<', '>')", '<', '>'}};
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -898,12 +900,11 @@ void test_cov_parser_source_primitives(void) {
       test_assert((ast == NULL && err) != 0, "invalid primitive rejected");
       if (!ast && err) {
         const char *msg = snobol_parser_get_error(parser);
-        test_assert(
-            (msg && (strstr(msg, "ARBNO") || strstr(msg, "repeat") ||
-                     strstr(msg, "BAL") || strstr(msg, "FENCE") ||
-                     strstr(msg, "REM") || strstr(msg, "RPOS") ||
-                     strstr(msg, "RTAB")) != NULL) != 0,
-            "primitive error names the primitive");
+        test_assert((msg && (strstr(msg, "ARBNO") || strstr(msg, "repeat") ||
+                             strstr(msg, "BAL") || strstr(msg, "FENCE") ||
+                             strstr(msg, "REM") || strstr(msg, "RPOS") ||
+                             strstr(msg, "RTAB")) != NULL) != 0,
+                    "primitive error names the primitive");
       }
       snobol_parser_destroy(parser);
     }
@@ -918,7 +919,8 @@ void test_cov_parser_emit_table_assign(void) {
     snobol_parser_t *parser = snobol_parser_create();
     bool err = false;
     ast_node_t *ast = covp_parse(parser, "EMIT('X')", &err);
-    test_assert((ast && !err && ast->type == AST_EMIT) != 0, "EMIT('X') parses");
+    test_assert((ast && !err && ast->type == AST_EMIT) != 0,
+                "EMIT('X') parses");
     if (ast && ast->type == AST_EMIT) {
       test_assert(ast->data.emit.reg == -1, "literal EMIT has no register");
       test_assert(ast->data.emit.len == 1 && ast->data.emit.text &&
@@ -1075,10 +1077,9 @@ void test_cov_parser_emit_table_assign(void) {
 
   /* Descriptive errors for malformed EMIT / TABLE / assignment forms. */
   {
-    const char *bad[] = {"EMIT()",     "EMIT(5)",   "EMIT(@nope)",
-                         "T[ab]",      "T[]",       "T[$va]",
-                         "unknown = 0", "v1 = 'x'", "v1 = 99",
-                         "v1 = -1"};
+    const char *bad[] = {"EMIT()",  "EMIT(5)", "EMIT(@nope)", "T[ab]",
+                         "T[]",     "T[$va]",  "unknown = 0", "v1 = 'x'",
+                         "v1 = 99", "v1 = -1"};
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
       snobol_parser_t *parser = snobol_parser_create();
       bool err = false;
@@ -1086,11 +1087,10 @@ void test_cov_parser_emit_table_assign(void) {
       test_assert((ast == NULL && err) != 0, "malformed form rejected");
       if (!ast && err) {
         const char *msg = snobol_parser_get_error(parser);
-        test_assert(
-            (msg && (strstr(msg, "EMIT") || strstr(msg, "table") ||
-                     strstr(msg, "TABLE") || strstr(msg, "assign") ||
-                     strstr(msg, "value"))) != NULL,
-            "form error is descriptive");
+        test_assert((msg && (strstr(msg, "EMIT") || strstr(msg, "table") ||
+                             strstr(msg, "TABLE") || strstr(msg, "assign") ||
+                             strstr(msg, "value"))) != NULL,
+                    "form error is descriptive");
       }
       snobol_parser_destroy(parser);
     }
@@ -1210,9 +1210,8 @@ void test_cov_parser_naming_ops(void) {
 
   /* Unary '$' indirect references and bad targets fail descriptively. */
   {
-    const char *bad[] = {"'a' . 'b'", "'a' . x",
-                         "SPAN('a-z') . $name",
-                         "'a' . @",    "'a' . v99", "'a' $x"};
+    const char *bad[] = {"'a' . 'b'", "'a' . x",   "SPAN('a-z') . $name",
+                         "'a' . @",   "'a' . v99", "'a' $x"};
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
       snobol_parser_t *parser = snobol_parser_create();
       bool err = false;
@@ -1220,11 +1219,10 @@ void test_cov_parser_naming_ops(void) {
       test_assert((ast == NULL && err) != 0, "invalid naming form rejected");
       if (!ast && err) {
         const char *msg = snobol_parser_get_error(parser);
-        test_assert(
-            (msg && (strstr(msg, "naming") || strstr(msg, "indirect") ||
-                     strstr(msg, "register") || strstr(msg, "capture"))) !=
-                NULL,
-            "naming failure is descriptive");
+        test_assert((msg && (strstr(msg, "naming") || strstr(msg, "indirect") ||
+                             strstr(msg, "register") ||
+                             strstr(msg, "capture"))) != NULL,
+                    "naming failure is descriptive");
       }
       snobol_parser_destroy(parser);
     }
@@ -1244,6 +1242,38 @@ void test_cov_parser_naming_ops(void) {
   }
 }
 
+static void test_parser_integer_argument_boundaries(void) {
+  test_suite("Parser: integer argument boundaries");
+
+  /* INT64_MAX and INT64_MIN scan as values, then fail the int32 range check. */
+  const char *boundary[] = {"LEN(9223372036854775807)",
+                            "LEN(-9223372036854775808)"};
+  for (size_t i = 0; i < sizeof(boundary) / sizeof(boundary[0]); i++) {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, boundary[i], &err);
+    test_assert((ast == NULL && err) != 0, "boundary literal is rejected");
+    const char *msg = snobol_parser_get_error(parser);
+    test_assert(msg != NULL && strstr(msg, "LEN") != NULL,
+                "boundary literal reports a range error naming LEN");
+    test_assert(msg != NULL && strstr(msg, "too large") == NULL,
+                "boundary literal is not reported as a 64-bit overflow");
+    snobol_parser_destroy(parser);
+  }
+
+  /* Beyond the 64-bit range is the overflow error. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    bool err = false;
+    ast_node_t *ast = covp_parse(parser, "LEN(999999999999999999999)", &err);
+    test_assert((ast == NULL && err) != 0, "oversized literal is rejected");
+    const char *msg = snobol_parser_get_error(parser);
+    test_assert(msg != NULL && strstr(msg, "too large") != NULL,
+                "oversized literal reports the 64-bit overflow");
+    snobol_parser_destroy(parser);
+  }
+}
+
 void test_parser_suite(void) {
   test_parser_create_destroy();
   test_parser_literal();
@@ -1259,6 +1289,7 @@ void test_parser_suite(void) {
   test_parser_error_unclosed_literal();
   test_parser_error_empty();
   test_parser_memory_cleanup();
+  test_parser_integer_argument_boundaries();
   test_cov_parser_labels_and_gotos();
   test_cov_parser_repetition_and_primary();
   test_cov_parser_functions();

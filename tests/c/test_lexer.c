@@ -5,6 +5,7 @@
 
 #include "snobol/lexer.h"
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -224,7 +225,8 @@ static void test_lexer_integer(void) {
 
   tok = snobol_lexer_next(lexer);
   test_assert(tok.type == TOKEN_INTEGER, "token 3 is INTEGER");
-  test_assert(tok.data.integer.value == 5, "integer value is 5 (no digits dropped)");
+  test_assert(tok.data.integer.value == 5,
+              "integer value is 5 (no digits dropped)");
 
   tok = snobol_lexer_next(lexer);
   test_assert(tok.type == TOKEN_RPAREN, "token 4 is RPAREN");
@@ -246,6 +248,41 @@ static void test_lexer_signed_integer(void) {
   tok = snobol_lexer_next(lexer);
   test_assert(tok.type == TOKEN_EOF, "EOF after -1");
 
+  snobol_lexer_destroy(lexer);
+}
+
+static void test_lexer_integer_boundaries(void) {
+  test_suite("Lexer: integer boundary values");
+
+  /* INT64_MAX scans to its value. */
+  snobol_lexer_t *lexer = snobol_lexer_create("9223372036854775807", 19);
+  token_t tok = snobol_lexer_next(lexer);
+  test_assert(tok.type == TOKEN_INTEGER, "INT64_MAX is an INTEGER token");
+  test_assert(tok.data.integer.value == INT64_MAX, "INT64_MAX value scans");
+  snobol_lexer_destroy(lexer);
+
+  /* INT64_MIN scans to its value (magnitude accumulates before the sign). */
+  lexer = snobol_lexer_create("-9223372036854775808", 20);
+  tok = snobol_lexer_next(lexer);
+  test_assert(tok.type == TOKEN_INTEGER, "INT64_MIN is an INTEGER token");
+  test_assert(tok.data.integer.value == INT64_MIN, "INT64_MIN value scans");
+  snobol_lexer_destroy(lexer);
+
+  /* INT64_MAX + 1 is rejected as an overflow, not scanned. */
+  lexer = snobol_lexer_create("9223372036854775808", 19);
+  tok = snobol_lexer_next(lexer);
+  test_assert(tok.type == TOKEN_ERROR, "INT64_MAX+1 is rejected");
+  test_assert(snobol_lexer_has_error(lexer), "overflow recorded");
+  test_assert(snobol_lexer_get_error(lexer) != NULL &&
+                  strstr(snobol_lexer_get_error(lexer), "too large") != NULL,
+              "overflow error says the literal is too large");
+  snobol_lexer_destroy(lexer);
+
+  /* A long digit run is rejected the same way. */
+  lexer = snobol_lexer_create("999999999999999999999", 21);
+  tok = snobol_lexer_next(lexer);
+  test_assert(tok.type == TOKEN_ERROR, "21-digit literal is rejected");
+  test_assert(snobol_lexer_has_error(lexer), "long-run overflow recorded");
   snobol_lexer_destroy(lexer);
 }
 
@@ -336,7 +373,8 @@ static void test_lexer_table_brackets(void) {
     tok = snobol_lexer_next(lexer);
     test_assert(tok.type == TOKEN_IDENT, "x is IDENT");
     tok = snobol_lexer_next(lexer);
-    test_assert(tok.type == TOKEN_CHARCLASS, "[ab] after capture stays CHARCLASS");
+    test_assert(tok.type == TOKEN_CHARCLASS,
+                "[ab] after capture stays CHARCLASS");
     snobol_lexer_destroy(lexer);
   }
 }
@@ -447,6 +485,7 @@ void test_lexer_suite(void) {
   test_lexer_single_quotes();
   test_lexer_integer();
   test_lexer_signed_integer();
+  test_lexer_integer_boundaries();
   test_lexer_unrecognized_char();
   test_lexer_dot_token();
   test_lexer_table_brackets();
