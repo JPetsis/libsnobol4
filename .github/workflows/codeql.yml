@@ -28,7 +28,9 @@ permissions:
 jobs:
   analyze-cpp:
     name: Analyze C/C++
-    runs-on: ubuntu-latest
+    # php8.5-dev comes from ppa:ondrej/php, which has no release for
+    # Ubuntu 26.04 (resolute), the current ubuntu-latest.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       security-events: write

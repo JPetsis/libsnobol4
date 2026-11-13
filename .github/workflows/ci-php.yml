@@ -28,7 +28,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+        # ubuntu-latest now resolves to Ubuntu 26.04 (resolute), which
+        # ppa:ondrej/php does not publish for: apt-get update fails on the
+        # missing Release file.  Pin to 24.04 (noble), the newest release
+        # the PPA supports.
+        os: [ ubuntu-24.04, macos-latest ]
         php-version: [ '8.3', '8.4', '8.5' ]
 
     steps:
@@ -44,7 +48,7 @@ jobs:
           coverage: none
 
       - name: Install system dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           # Ubuntu noble's default repos do not ship php8.4-dev.
           # shivammathur/setup-php may have already added ppa:ondrej/php
