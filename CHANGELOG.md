@@ -13,6 +13,8 @@ tagged `php/vX.Y.Z`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-13
+
 ### Added
 
 - **`snobol_pattern_from_bytecode()`**: a public constructor that turns an
@@ -92,6 +94,75 @@ tagged `php/vX.Y.Z`.
   the root `CHANGELOG.md` covers the C core and repository-level work. The
   historical entries were split by component; `CONTRIBUTING.md` updated to
   require `[Unreleased]` entries in the affected component's file.
+
+- **Anchored prefilter tests** (`tests/c/test_search_prefilter.c`):
+  `snobol_search_exec_anchored` on `('a'*) 'b'`, `('a'+)+ 'b'`,
+  `@r('a'*) 'b'` and `('a'+) 'pqr'` (multi-byte required literal) over
+  subjects without the literal asserts `!ok` + `prefilter_skip == true`;
+  a subject containing the literal but failing at the anchor asserts the
+  prefilter does NOT short-circuit and the failure agrees with the full VM.
+- **`tokenize_next_pass` probe measured ~0 ns under LTO**
+  (`bench/c/bench_probe.c`): the scenario's loop results were dead (nothing
+  reads `pos` or the search state afterwards), and SNOBOL_LTO — the Release
+  default — provably eliminated the entire `snobol_pattern_search_next`
+  loop, collapsing the row to ~0 ns/iter under LTO while no-LTO builds
+  measured ~4.2 µs. The loop now accumulates a work-consumed checksum that
+  the probe prints in a new `sum` column (loop-escape guard), keeping the
+  loop observable under LTO. The row measures honestly again (3,239 ns/pass
+  at PROBE_ITERS=20000); identical checksums across LTO and no-LTO builds
+  confirm both execute the same work.
+- **`make build` uses the canonical LTO configuration and the baseline
+  guard validates only that config** (`Makefile`, `bench/c/bench_probe.c`,
+  `bench/c/CMakeLists.txt`): the Makefile build target dropped its
+  `-DSNOBOL_LTO=OFF` override, so the default dev build now matches the
+  shipped Release configuration (LTO is the CMake default and the CMakeLists
+  documents it as canonical). The `PROBE_BASELINE=1` guard compares against
+  the single baseline captured from that build
+  (`bench/results/search_perf_baseline.json`, which records a
+  `build_config` block); no-LTO codegen is systematically slower, so a
+  no-LTO probe build skips the guard with guidance instead of producing
+  mass fake "regressions" — `PROBE_BASELINE_PATH` overrides and forces the
+  comparison. Documented in `bench/README.md`.
+
+- **Sequential capture registers for `@name` patterns** (`core/src/parser.c`):
+  every `@name` capture now allocates the next register in order of
+  appearance, starting at register 0 (previously all captures hardcoded
+  register 1, so the second `@name` in a pattern overwrote the first).
+  The advertised-but-nonexistent `@*` / `@integer` forms are rejected with
+  a parse error. Registers are 0-based end-to-end (`v0`..`v63`); the PHP
+  binding emits capture keys as `"v0"`, `"v1"`, … and the Builder validates
+  `0 <= reg < 64`.
+- **Length-aware array/table APIs** (`core/src/array.c`, `core/src/table.c`):
+  `table_set_ex/get_ex/has_ex/delete_ex` and
+  `snobol_array_set_ex/get_ex` operate on byte-exact keys and values, so
+  keys that differ only after an embedded NUL are distinct entries and
+  values with embedded NULs round-trip unmodified. The NUL-terminated
+  variants remain as `strlen` wrappers; `snobol_array_values` copies
+  byte-exact. C tests: NUL-key/NUL-value suites in `test_tables.c` and
+  `test_array.c`.
+- **NUL-safe EMIT literals** (`core/src/ast.c`, `core/src/compiler_codegen.c`):
+  the `AST_EMIT` node now carries the literal's byte length (the length
+  was previously dropped and re-derived with `strlen`, truncating emitted
+  output at the first NUL byte); `ast_clone` had the same bug and is fixed.
+- **Pattern-level table binding** (`snobol_pattern_bind_tables()` in
+  `core/src/api.c`): binding a name => table list patches every unbound
+  `OP_TABLE_GET`/`OP_TABLE_SET` instruction in the pattern bytecode to the
+  matching name's sequential id and retains the tables on the pattern, so
+  `T['k']` reads resolve and `T['k'] = p` writes land in the bound tables
+  in match and every search path (the pattern's binding is registered into
+  the stateless search VMs, and into the persistent search state — which
+  re-registers only when the binding generation changed). Bytecode-only
+  callers (the PHP binding) use `snobol_pattern_bind_bytecode_tables()`
+  plus `snobol_pattern_search_state_set_tables()`. Re-binding re-patches
+  against the new name list; binding with an empty list clears it again;
+  unbound patterns keep the previous fail-and-backtrack behaviour. New C
+  suite `test_pattern_table_binding.c`.
+- **C core coverage above 90%**: parser diagnostic paths (invalid naming
+  and table keys, BAL delimiter validation, capture-register exhaustion),
+  non-ASCII case-insensitive class folding, bytecode-walker instruction
+  sizing, and API argument guards are now covered. Line coverage measured
+  with the CI chain (`gcov`/`lcov`, `c-core` filter) is 90.25%, up from
+  89.3%.
 
 ### Changed
 
@@ -176,77 +247,6 @@ tagged `php/vX.Y.Z`.
   dropping the unconditional 4×512 B cap/var memsets for register-free
   patterns. Anchored fixed intercept ~280 → ~275 ns; repeat rows unchanged
   (they legitimately still zero counter state).
-
-### Added
-
-- **Anchored prefilter tests** (`tests/c/test_search_prefilter.c`):
-  `snobol_search_exec_anchored` on `('a'*) 'b'`, `('a'+)+ 'b'`,
-  `@r('a'*) 'b'` and `('a'+) 'pqr'` (multi-byte required literal) over
-  subjects without the literal asserts `!ok` + `prefilter_skip == true`;
-  a subject containing the literal but failing at the anchor asserts the
-  prefilter does NOT short-circuit and the failure agrees with the full VM.
-- **`tokenize_next_pass` probe measured ~0 ns under LTO**
-  (`bench/c/bench_probe.c`): the scenario's loop results were dead (nothing
-  reads `pos` or the search state afterwards), and SNOBOL_LTO — the Release
-  default — provably eliminated the entire `snobol_pattern_search_next`
-  loop, collapsing the row to ~0 ns/iter under LTO while no-LTO builds
-  measured ~4.2 µs. The loop now accumulates a work-consumed checksum that
-  the probe prints in a new `sum` column (loop-escape guard), keeping the
-  loop observable under LTO. The row measures honestly again (3,239 ns/pass
-  at PROBE_ITERS=20000); identical checksums across LTO and no-LTO builds
-  confirm both execute the same work.
-- **`make build` uses the canonical LTO configuration and the baseline
-  guard validates only that config** (`Makefile`, `bench/c/bench_probe.c`,
-  `bench/c/CMakeLists.txt`): the Makefile build target dropped its
-  `-DSNOBOL_LTO=OFF` override, so the default dev build now matches the
-  shipped Release configuration (LTO is the CMake default and the CMakeLists
-  documents it as canonical). The `PROBE_BASELINE=1` guard compares against
-  the single baseline captured from that build
-  (`bench/results/search_perf_baseline.json`, which records a
-  `build_config` block); no-LTO codegen is systematically slower, so a
-  no-LTO probe build skips the guard with guidance instead of producing
-  mass fake "regressions" — `PROBE_BASELINE_PATH` overrides and forces the
-  comparison. Documented in `bench/README.md`.
-
-- **Sequential capture registers for `@name` patterns** (`core/src/parser.c`):
-  every `@name` capture now allocates the next register in order of
-  appearance, starting at register 0 (previously all captures hardcoded
-  register 1, so the second `@name` in a pattern overwrote the first).
-  The advertised-but-nonexistent `@*` / `@integer` forms are rejected with
-  a parse error. Registers are 0-based end-to-end (`v0`..`v63`); the PHP
-  binding emits capture keys as `"v0"`, `"v1"`, … and the Builder validates
-  `0 <= reg < 64`.
-- **Length-aware array/table APIs** (`core/src/array.c`, `core/src/table.c`):
-  `table_set_ex/get_ex/has_ex/delete_ex` and
-  `snobol_array_set_ex/get_ex` operate on byte-exact keys and values, so
-  keys that differ only after an embedded NUL are distinct entries and
-  values with embedded NULs round-trip unmodified. The NUL-terminated
-  variants remain as `strlen` wrappers; `snobol_array_values` copies
-  byte-exact. C tests: NUL-key/NUL-value suites in `test_tables.c` and
-  `test_array.c`.
-- **NUL-safe EMIT literals** (`core/src/ast.c`, `core/src/compiler_codegen.c`):
-  the `AST_EMIT` node now carries the literal's byte length (the length
-  was previously dropped and re-derived with `strlen`, truncating emitted
-  output at the first NUL byte); `ast_clone` had the same bug and is fixed.
-- **Pattern-level table binding** (`snobol_pattern_bind_tables()` in
-  `core/src/api.c`): binding a name => table list patches every unbound
-  `OP_TABLE_GET`/`OP_TABLE_SET` instruction in the pattern bytecode to the
-  matching name's sequential id and retains the tables on the pattern, so
-  `T['k']` reads resolve and `T['k'] = p` writes land in the bound tables
-  in match and every search path (the pattern's binding is registered into
-  the stateless search VMs, and into the persistent search state — which
-  re-registers only when the binding generation changed). Bytecode-only
-  callers (the PHP binding) use `snobol_pattern_bind_bytecode_tables()`
-  plus `snobol_pattern_search_state_set_tables()`. Re-binding re-patches
-  against the new name list; binding with an empty list clears it again;
-  unbound patterns keep the previous fail-and-backtrack behaviour. New C
-  suite `test_pattern_table_binding.c`.
-- **C core coverage above 90%**: parser diagnostic paths (invalid naming
-  and table keys, BAL delimiter validation, capture-register exhaustion),
-  non-ASCII case-insensitive class folding, bytecode-walker instruction
-  sizing, and API argument guards are now covered. Line coverage measured
-  with the CI chain (`gcov`/`lcov`, `c-core` filter) is 90.25%, up from
-  89.3%.
 
 ### Fixed
 

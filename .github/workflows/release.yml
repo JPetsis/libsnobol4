@@ -53,15 +53,15 @@ jobs:
         include:
           - os: linux
             arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             php-version: '8.3'
           - os: linux
             arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             php-version: '8.4'
           - os: linux
             arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             php-version: '8.5'
           - os: linux
             arch: aarch64

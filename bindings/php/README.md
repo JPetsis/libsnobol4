@@ -91,7 +91,7 @@ can exercise the real end-to-end install flow without leaving the container:
 # Verify PIE targets the container's PHP
 ddev exec pie show -v
 
-# After a v1.0.2 release exists on Packagist/GitHub:
+# After a v1.1.0 release exists on Packagist/GitHub:
 ddev exec pie install libsnobol4/snobol
 ```
 
@@ -502,7 +502,7 @@ $minor = ($v >> 8) & 0xFF;   // 0
 $patch = $v & 0xFF;          // 0
 ```
 
-For v1.0.2 this returns `0x00010002` (65538 in decimal).
+For v1.1.0 this returns `0x00010100` (65792 in decimal).
 
 ## Running Tests
 

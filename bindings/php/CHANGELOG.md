@@ -15,6 +15,8 @@ core versions correspond 1:1.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-13
+
 ### Added
 
 - **`Pattern::fromString()` source syntax is now a full Builder peer** —
@@ -162,6 +164,24 @@ core versions correspond 1:1.
 - **`snobol_text_lpad`/`rpad` pad with the full UTF-8 codepoint** — a
   multi-byte pad such as `'€'` is decoded via `snobol_ord` instead of
   being truncated to its first byte.
+
+## [1.0.4] - 2026-08-11
+
+### Fixed
+
+- **Stale Packagist branch alias** (`composer.json`): `dev-main` resolved
+  as `0.2.x-dev`; now `1.x-dev` so `dev-main` consumers get correct
+  stability and semver range matching.
+- **`PHP_SNOBOL_VERSION` bumped to 1.0.4** (`php_snobol.h`) to match the
+  release.
+
+### Changed
+
+- **Bundles core v1.0.4** — the extension embeds the C core via the
+  amalgam, so this release ships the search-engine fixes (empty-match
+  handling, prefilter soundness, alt-literals trie, fast-path
+  eligibility). No binding code changed beyond the metadata fixes;
+  `php/v1.0.4` corresponds to `core/v1.0.4`.
 
 ## [1.0.3] - 2026-08-10
 
