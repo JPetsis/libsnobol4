@@ -196,6 +196,43 @@ snobol_pattern_t *snobol_pattern_compile_ex(snobol_context_t *ctx,
 
 Unknown flag bits are ignored (forward-compatible).
 
+### From Existing Bytecode
+
+```c
+snobol_pattern_t *snobol_pattern_from_bytecode(uint8_t *bc, size_t bc_len,
+                                               uint32_t flags, char **error);
+```
+
+Use this when you already hold compiled bytecode (from
+`compile_ast_to_bytecode_c()` or a stored buffer) and need a real pattern
+object. The constructor runs the same finalization path as the compiler:
+search metadata and range metadata are derived, so matching, search, tier
+reporting and the accessors behave exactly as for a compiled pattern.
+
+Ownership of `bc` transfers on entry. On success the pattern frees the buffer
+in `snobol_pattern_free()`; on failure (null buffer, zero length, out of
+memory) this function frees it. Do not free or reuse `bc` after the call. The
+buffer must come from the compiler API or `snobol_malloc()`.
+
+```c
+uint8_t *bc = NULL;
+size_t bc_len = 0;
+if (compile_ast_to_bytecode_c(ast, false, &bc, &bc_len) != 0) {
+    /* compile error */
+}
+
+char *err = NULL;
+snobol_pattern_t *pat =
+    snobol_pattern_from_bytecode(bc, bc_len, 0, &err);
+if (!pat) {
+    fprintf(stderr, "construct failed: %s\n", err);
+    free(err);
+    return;
+}
+/* ... match/search ... */
+snobol_pattern_free(pat); /* also frees bc */
+```
+
 ### From Builder AST
 
 See [The Builder API](#8-the-builder-api) for the programmatic path; the

@@ -384,7 +384,7 @@ All runtime objects (tables, dynamic patterns) use reference counting:
 
 | Suite         | Tests                                          | Status  |
 |---------------|------------------------------------------------|---------|
-| C Tests       | 403 cases / 74,239 assertions                  | ✅ Pass |
+| C Tests       | 406 cases / 74,275 assertions                  | ✅ Pass |
 | PHP Tests     | 617                                            | ✅ Pass |
 | Compatibility | 40                                             | ✅ Pass |
 

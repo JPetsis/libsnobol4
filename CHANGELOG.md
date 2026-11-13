@@ -15,6 +15,13 @@ tagged `php/vX.Y.Z`.
 
 ### Added
 
+- **`snobol_pattern_from_bytecode()`**: a public constructor that turns an
+  existing bytecode buffer into a fully initialized pattern through the same
+  finalization path as the compiler (search metadata and range metadata),
+  with documented ownership transfer to the pattern. The two test suites that
+  hand-built mirrors of the private pattern struct (`test_pike_scan.c`,
+  `test_api_match.c`) now use it, removing the memory-safety trap that the
+  binding-field addition exposed.
 - **Source parser is now a full peer of the Builder API** — the pattern
   source syntax (`Pattern::fromString()`, `snobol_pattern_compile*`)
   compiles to byte-for-byte bytecode identical to its Builder twin:
@@ -272,7 +279,7 @@ tagged `php/vX.Y.Z`.
   stop-at-terminal scan for hand-built bytecode without a validating
   trailer.
 
-C test suite: **403 cases / 74,239 assertions** (custom runner).
+C test suite: **406 cases / 74,275 assertions** (custom runner).
 
 ## [1.0.4] - 2026-08-11
 
