@@ -198,6 +198,16 @@ static void php_phelper_cache_clear(void) {
   }
 }
 
+/** @brief Request-shutdown hook: drop the cached slots.
+ *
+ *  ph_cache has static storage duration but its keys and values come from
+ *  the request heap. Without this reset the next request on the same worker
+ *  would read and release zend_string/zval values that request shutdown
+ *  already freed. Called from the module's RSHUTDOWN handler. */
+void snobol_pattern_helper_php_rshutdown(void) {
+  php_phelper_cache_clear();
+}
+
 /* Extract boolean option from options array */
 /** @brief Read a boolean option: true for IS_TRUE or any non-zero long. */
 static bool php_phelper_get_opt_bool(zval *options, const char *name) {

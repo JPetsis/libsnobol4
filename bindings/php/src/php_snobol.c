@@ -78,6 +78,7 @@ void snobol_pattern_cache_php_minit(void);
 
 /* Extern declaration from snobol_pattern_helper_php.c */
 void snobol_pattern_helper_php_minit(void);
+void snobol_pattern_helper_php_rshutdown(void);
 
 /* Extern declaration from snobol_search_iterator_php.c */
 void snobol_search_iterator_minit(void);
@@ -135,6 +136,20 @@ PHP_MINIT_FUNCTION(snobol) {
   snobol_search_iterator_minit();
   snobol_split_iterator_minit();
   SNOBOL_LOG("PHP_MINIT_FUNCTION(snobol): DONE");
+  return SUCCESS;
+}
+
+/**
+ * @brief Request shutdown: release state that lives in file-scope statics
+ *        but refers to request-heap allocations.
+ *
+ * The PatternHelper slot cache stores a zend_string key and a Pattern object
+ * zval per slot. Those values belong to the request that filled them, so they
+ * must be released here; otherwise a reused worker (php-fpm, mod_php) would
+ * read and release memory the previous request already freed.
+ */
+PHP_RSHUTDOWN_FUNCTION(snobol) {
+  snobol_pattern_helper_php_rshutdown();
   return SUCCESS;
 }
 
@@ -803,10 +818,10 @@ static const zend_function_entry snobol_functions[] = {
 zend_module_entry snobol_module_entry = {STANDARD_MODULE_HEADER,
                                          "snobol",
                                          snobol_functions,
-                                         PHP_MINIT(snobol),
-                                         NULL,
-                                         NULL,
-                                         NULL,
+                                         PHP_MINIT(snobol), /* module start */
+                                         NULL,              /* module end */
+                                         NULL,              /* request start */
+                                         PHP_RSHUTDOWN(snobol),
                                          PHP_MINFO(snobol),
                                          PHP_SNOBOL_VERSION,
                                          STANDARD_MODULE_PROPERTIES};

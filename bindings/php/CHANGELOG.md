@@ -15,6 +15,19 @@ core versions correspond 1:1.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Security: the `PatternHelper` slot cache is now request-scoped.** The
+  cache behind the string-pattern convenience methods (`matchOnce`,
+  `matchAll`, `split`, `replace`, `formattedSubst`) is a file-scope static
+  holding a `zend_string` key and a `Pattern` object zval, but the module
+  registered no request-shutdown handler: on a reused worker (php-fpm,
+  mod_php) the next request compared against, and then released, memory the
+  previous request had already freed (cross-request use-after-free). The
+  module now clears the cache in `RSHUTDOWN`; `PatternHelper::clearCache()`
+  still works within a request. `PatternHelperRequestScopeTest` exercises
+  three requests in one process.
+
 ## [1.1.0] - 2026-11-13
 
 ### Added
