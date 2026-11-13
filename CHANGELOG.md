@@ -13,6 +13,13 @@ tagged `php/vX.Y.Z`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Windows release builds**: the PHP devel-pack lookup now handles
+  revision-suffixed names on both the releases and archives listings, and a
+  manual backfill workflow can attach a missing Windows PIE asset to an
+  existing release tag without moving it.
+
 ## [1.1.0] - 2026-11-13
 
 ### Added
