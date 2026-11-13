@@ -181,17 +181,36 @@ jobs:
           try {
             Invoke-WebRequest -Uri $develUrl -OutFile devel.zip -MaximumRedirection 5
           } catch {
-            $releases = (Invoke-WebRequest -Uri "https://windows.php.net/downloads/releases/" -UseBasicParsing).Content
-            $pattern = "php-devel-pack-$($mm)\.(\d+)-$($ts)Win32-$vsPack-x64\.zip"
-            $matches = [regex]::Matches($releases, $pattern) | ForEach-Object { $_.Groups[0].Value }
-            if ($matches.Count -gt 0) {
-              $latest = $matches | Sort-Object -Descending | Select-Object -First 1
-              $fallbackUrl = "https://windows.php.net/downloads/releases/$latest"
-              echo "Exact devel pack not found ($phpVer), using: $latest"
-              Invoke-WebRequest -Uri $fallbackUrl -OutFile devel.zip -MaximumRedirection 5
-            } else {
-              throw "No devel pack found for PHP $mm"
+            # Fallback: find the newest devel pack for this major.minor version
+            # on the releases and archives listings.  Devel pack names may
+            # carry a release revision suffix (e.g. "8.4.27-1"), so the exact
+            # <version> name above can 404 even though the pack exists.
+            $pattern = "php-devel-pack-$([regex]::Escape($mm))\.(\d+)(?:-(\d+))?-$([regex]::Escape($ts))Win32-$([regex]::Escape($vsPack))-x64\.zip"
+            $candidates = @()
+            foreach ($page in @(
+              "https://windows.php.net/downloads/releases/",
+              "https://windows.php.net/downloads/releases/archives/"
+            )) {
+              try {
+                $content = (Invoke-WebRequest -Uri $page -UseBasicParsing).Content
+                $candidates += [regex]::Matches($content, $pattern) | ForEach-Object {
+                  [pscustomobject]@{
+                    Name  = $_.Value
+                    Patch = [int]$_.Groups[1].Value
+                    Rev   = if ($_.Groups[2].Success) { [int]$_.Groups[2].Value } else { 0 }
+                  }
+                }
+              } catch {
+                echo "Could not read $page : $($_.Exception.Message)"
+              }
             }
+            $latest = $candidates | Sort-Object Patch, Rev -Descending | Select-Object -First 1
+            if (-not $latest) {
+              throw "No devel pack found for PHP $mm ($ts$vsPack)"
+            }
+            $fallbackUrl = "https://windows.php.net/downloads/releases/$($latest.Name)"
+            echo "⚠️  Exact devel pack not found ($phpVer), using: $($latest.Name)"
+            Invoke-WebRequest -Uri $fallbackUrl -OutFile devel.zip -MaximumRedirection 5
           }
           Expand-Archive devel.zip -DestinationPath php-dev
 

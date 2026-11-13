@@ -1,0 +1,208 @@
+name: Release Windows Backfill
+
+# One-off recovery path: build the Windows PIE assets for an existing release
+# tag when the tag-triggered Release run could not produce them.  The tag is
+# never moved; assets are uploaded to the existing (draft) GitHub release.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to backfill Windows PIE assets for
+        required: true
+        default: v1.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows x86_64 (PHP ${{ matrix.php-version }})
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ['8.4', '8.5']
+    steps:
+      - name: Validate release tag
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          # The value is also used as a checkout ref below; constrain it to the
+          # release-tag shape before any step consumes it.
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "invalid release tag: $TAG"
+            exit 1
+          fi
+
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          tools: composer
+          coverage: none
+
+      - name: Download PHP dev pack and locate MSVC
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Dev pack: headers, import lib (dev/php.lib), phpize.bat/configure.bat.
+          # It MUST match the exact PHP version + ts/nts + VS toolset + arch of
+          # the PHP that setup-php installed, otherwise the built .dll will not
+          # load (ABI mismatch).  The "-vsXX" segment in the dev pack name
+          # records which VS built that PHP release.  We must BUILD with the
+          # same VS toolset (the MSVC CRT must match for DLL loading).
+          $phpVer = (php -r "echo PHP_VERSION;")
+          $ts = (php -r "echo ZEND_THREAD_SAFE ? '' : 'nts-';")
+          $mm = ($phpVer -split '\.')[0..1] -join '.'
+          $vsPack = @{'8.0'='vs16';'8.1'='vs16';'8.2'='vs16';'8.3'='vs16';'8.4'='vs17';'8.5'='vs17'}[$mm]
+          if (-not $vsPack) { $vsPack = 'vs16' }
+
+          $develName = "php-devel-pack-$phpVer-$($ts)Win32-$vsPack-x64.zip"
+          $develUrl = "https://windows.php.net/downloads/releases/$develName"
+          echo "Building against PHP $phpVer (ts flag: '$ts', devel pack toolset: $vsPack)"
+          echo "Downloading dev pack: $develUrl"
+          try {
+            Invoke-WebRequest -Uri $develUrl -OutFile devel.zip -MaximumRedirection 5
+          } catch {
+            # Fallback: find the newest devel pack for this major.minor version
+            # on the releases and archives listings.  Devel pack names may
+            # carry a release revision suffix (e.g. "8.4.27-1"), so the exact
+            # <version> name above can 404 even though the pack exists.
+            $pattern = "php-devel-pack-$([regex]::Escape($mm))\.(\d+)(?:-(\d+))?-$([regex]::Escape($ts))Win32-$([regex]::Escape($vsPack))-x64\.zip"
+            $candidates = @()
+            foreach ($page in @(
+              "https://windows.php.net/downloads/releases/",
+              "https://windows.php.net/downloads/releases/archives/"
+            )) {
+              try {
+                $content = (Invoke-WebRequest -Uri $page -UseBasicParsing).Content
+                $candidates += [regex]::Matches($content, $pattern) | ForEach-Object {
+                  [pscustomobject]@{
+                    Name  = $_.Value
+                    Patch = [int]$_.Groups[1].Value
+                    Rev   = if ($_.Groups[2].Success) { [int]$_.Groups[2].Value } else { 0 }
+                  }
+                }
+              } catch {
+                echo "Could not read $page : $($_.Exception.Message)"
+              }
+            }
+            $latest = $candidates | Sort-Object Patch, Rev -Descending | Select-Object -First 1
+            if (-not $latest) {
+              throw "No devel pack found for PHP $mm ($ts$vsPack)"
+            }
+            $fallbackUrl = "https://windows.php.net/downloads/releases/$($latest.Name)"
+            echo "⚠️  Exact devel pack not found ($phpVer), using: $($latest.Name)"
+            Invoke-WebRequest -Uri $fallbackUrl -OutFile devel.zip -MaximumRedirection 5
+          }
+          Expand-Archive devel.zip -DestinationPath php-dev
+
+          $phpize = (Get-ChildItem php-dev -Recurse -Filter phpize.bat | Select-Object -First 1).FullName
+          if (-not $phpize) { throw "phpize.bat not found in dev pack" }
+          $phpDev = Split-Path $phpize
+          echo "PHP_DEV=$phpDev" >> $env:GITHUB_ENV
+
+          $phpBin = Split-Path (Get-Command php.exe).Source
+          echo "PHP_BIN_DIR=$phpBin" >> $env:GITHUB_ENV
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $vsVer = '17'
+          $vsRange = "[$($vsVer).0,$([int]$vsVer + 1).0)"
+          $vsPath = & $vswhere -version $vsRange -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath -format value
+          if (-not $vsPath) { throw "Visual Studio $vsVer.x with VC tools (x86.x64) not found" }
+          $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found at $vcvars" }
+          echo "VCVARS=$vcvars" >> $env:GITHUB_ENV
+
+      - name: Install bison (required by configure.bat)
+        shell: pwsh
+        run: |
+          $bisonUrl = "https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip"
+          Invoke-WebRequest -Uri $bisonUrl -OutFile winflexbison.zip -MaximumRedirection 5
+          & 7z x winflexbison.zip -owinflexbison -y | Out-Null
+          $found = Get-ChildItem winflexbison -Recurse -Filter bison.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            $found = Get-ChildItem winflexbison -Recurse -Filter win_bison.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $found) { throw "bison.exe / win_bison.exe not found after extracting winflexbison" }
+          $toolsDir = $found.DirectoryName
+          $bisonPath = Join-Path $toolsDir "bison.exe"
+          if (-not (Test-Path $bisonPath)) {
+            Copy-Item $found.FullName $bisonPath
+          }
+          echo $toolsDir >> $env:GITHUB_PATH
+          & $bisonPath --version
+
+      - name: Create re2c stub source
+        shell: pwsh
+        run: |
+          @'
+          #include <stdio.h>
+          int main(int argc, char *argv[]) {
+              printf("re2c 3.1\n");
+              return 0;
+          }
+          '@ | Set-Content -Path re2c_stub.c -NoNewline
+
+      - name: Generate core version header
+        shell: bash
+        run: |
+          # The Windows phpize build does not run CMake over the core, so the
+          # generated snobol/version.h must be produced explicitly from the
+          # single version source in CMakeLists.txt.
+          ./dev/generate_version_header.sh
+
+      - name: Build extension (phpize + nmake)
+        shell: cmd
+        run: |
+          @echo on
+          call "%VCVARS%"
+          if errorlevel 1 exit /b 1
+          set "PATH=%PHP_DEV%;%PHP_BIN_DIR%;%PATH%"
+          where bison
+          bison --version
+          cl.exe /nologo /Fe:re2c.exe re2c_stub.c /link /SUBSYSTEM:CONSOLE
+          if errorlevel 1 exit /b 1
+          set "PATH=%GITHUB_WORKSPACE%;%PATH%"
+          cd /d %GITHUB_WORKSPACE%\bindings\php
+          call phpize.bat
+          if errorlevel 1 exit /b 1
+          call configure.bat --enable-snobol=shared
+          if errorlevel 1 exit /b 1
+          powershell -Command "$f='x64\Release\resp\SNOBOL_GLOBAL_OBJS.txt'; $c=Get-Content $f -Raw; $c=$c.Replace('\Release\\src/','\Release\'); $c=$c.Replace('\Release\\src\','\Release\'); Set-Content $f $c -NoNewline"
+          nmake
+          if errorlevel 1 exit /b 1
+          for /r %%d in (php_snobol.dll) do @if exist "%%d" copy /Y "%%d" .
+          dir *.dll
+          if not exist php_snobol.dll exit /b 1
+
+      - name: Package DLL per PIE naming convention
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = Get-ChildItem bindings\php -Recurse -Filter php_snobol.dll | Select-Object -First 1
+          if (-not $dll) { throw "php_snobol.dll not found" }
+          # PIE's WindowsExtensionAssetName uses the Composer pretty version
+          # (v1.1.0, with the 'v') for both the zip and the DLL inside it.
+          $ver = "${{ inputs.tag }}"
+          $base = "php_snobol-$ver-${{ matrix.php-version }}-nts-vs17-x86_64"
+          $zipName = "$base.zip"
+          Copy-Item $dll.FullName "$base.dll"
+          Compress-Archive -Path "$base.dll" -DestinationPath $zipName -Force
+          echo "ZIP=$zipName" >> $env:GITHUB_ENV
+          echo "Packaged: $zipName ($base.dll inside)"
+
+      - name: Attach Windows binary to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag }}" "$env:ZIP" --clobber
