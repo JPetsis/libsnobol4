@@ -960,6 +960,84 @@ void test_cov_api_capture_absolute_equivalence(void) {
   snobol_context_destroy(ctx);
 }
 
+static void test_cov_api_guards_and_emit_output(void) {
+  test_suite("Coverage: API argument guards and EMIT output");
+
+  test_assert(snobol_pattern_match(nullptr, "x", 1) == nullptr,
+              "pattern_match rejects a null pattern");
+  test_assert(snobol_pattern_bind_tables(nullptr, nullptr, nullptr, 0) == -1,
+              "bind_tables rejects a null pattern");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = nullptr;
+  snobol_pattern_t *p = snobol_pattern_compile_ex(ctx, "'a'", 3, 0, &err);
+  test_assert(p != nullptr, "guard pattern compiles");
+  if (p) {
+    test_assert(snobol_pattern_match(p, nullptr, 0) == nullptr,
+                "pattern_match rejects a null subject");
+    test_assert(snobol_pattern_bind_tables(p, nullptr, nullptr, 1) == -1,
+                "bind_tables rejects null name/table arrays");
+    snobol_pattern_search_state_t *st = snobol_pattern_search_state_create(
+        snobol_pattern_get_bc(p), snobol_pattern_get_bc_len(p));
+    test_assert(st != nullptr, "search state is created from pattern bytecode");
+    if (st) {
+      test_assert(snobol_pattern_search_state_set_tables(st, nullptr, 1) == -1,
+                  "set_tables rejects a null table list");
+      snobol_pattern_search_state_destroy(st);
+    }
+
+    /* Empty captures expose a null pointer and a zero length. */
+    snobol_pattern_t *ep =
+        snobol_pattern_compile_ex(ctx, "@x LEN(0)", 9, 0, &err);
+    test_assert(ep != nullptr, "empty-capture pattern compiles");
+    if (ep) {
+      snobol_match_t *em = snobol_pattern_match(ep, "", 0);
+      size_t elen = 99;
+      const char *ev = snobol_match_get_variable(em, "v0", &elen);
+      test_assert(ev == nullptr && elen == 0,
+                  "empty capture reports a null value and zero length");
+      snobol_match_free(em);
+      snobol_pattern_free(ep);
+    }
+
+    size_t nlen = 99;
+    test_assert(snobol_match_get_variable(nullptr, "v0", &nlen) == nullptr &&
+                    nlen == 0,
+                "get_variable rejects a null match");
+    snobol_pattern_free(p);
+  }
+  free(err);
+  snobol_context_destroy(ctx);
+
+  test_assert(snobol_pattern_search_state_create(nullptr, 0) == nullptr,
+              "search_state_create rejects a null buffer");
+  const uint8_t empty_bc[1] = {0};
+  test_assert(snobol_pattern_search_state_create(empty_bc, 0) == nullptr,
+              "search_state_create rejects a zero length");
+  test_assert(snobol_pattern_search_state_set_tables(nullptr, nullptr, 0) == -1,
+              "set_tables rejects a null state");
+
+  /* The one-shot API returns the VM's emit buffer as result->output. */
+  snobol_match_result_t *r = snobol_match("EMIT('hi') 'a'", 14, "a", 1, 0);
+  test_assert(r != nullptr && r->success, "EMIT pattern matches");
+  test_assert(r != nullptr && r->output != nullptr &&
+                  strcmp(r->output, "hi") == 0,
+              "EMIT output is returned");
+  snobol_match_result_free(r);
+
+  /* One-shot capture copying plus EMIT(@name) reading that capture. */
+  r = snobol_match("@x 'a' EMIT(@x)", strlen("@x 'a' EMIT(@x)"), "a", 1, 0);
+  test_assert(r != nullptr && r->success && r->capture_count == 1,
+              "one-shot capture is reported");
+  test_assert(r != nullptr && r->captures != nullptr &&
+                  r->captures[0] != nullptr && strcmp(r->captures[0], "a") == 0,
+              "one-shot capture value is exposed");
+  test_assert(r != nullptr && r->output != nullptr &&
+                  strcmp(r->output, "a") == 0,
+              "emit of a capture contributes to the output");
+  snobol_match_result_free(r);
+}
+
 void test_api_match_suite(void) {
   test_suite("API: snobol_match()");
 
@@ -1122,4 +1200,5 @@ void test_api_match_suite(void) {
   test_cov_api_accessors();
   test_cov_api_one_shot();
   test_cov_api_builder();
+  test_cov_api_guards_and_emit_output();
 }

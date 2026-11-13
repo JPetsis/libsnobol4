@@ -189,8 +189,146 @@ static void test_ownership_and_invalid_args(void) {
   free(err);
 }
 
+/* The table binder walks the instruction stream to patch table ids, so it must
+ * size every opcode layout exactly like the VM.  A crafted stream containing
+ * one instruction of each layout pins that contract without executing it. */
+static void test_bytecode_walker_opcode_sizes(void) {
+  test_suite("Pattern from bytecode: walker sizes every opcode");
+
+  uint8_t bc[256];
+  memset(bc, 0, sizeof(bc));
+  size_t at = 0;
+
+  bc[at++] = OP_EMIT_EXPR;
+  bc[at++] = 0;
+  bc[at++] = 0;
+
+  bc[at++] = OP_EVAL;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 0;
+
+  bc[at++] = OP_REPEAT_STEP;
+  for (int i = 0; i < 5; i++) {
+    bc[at++] = 0;
+  }
+
+  bc[at++] = OP_REPEAT_INIT;
+  for (int i = 0; i < 13; i++) {
+    bc[at++] = 0;
+  }
+
+  bc[at++] = OP_EMIT_FORMAT;
+  bc[at++] = 0;
+  bc[at++] = 0;
+
+  bc[at++] = OP_EMIT_FORMAT;
+  bc[at++] = 0;
+  bc[at++] = SNBL_FMT_LPAD;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 0;
+
+  bc[at++] = OP_LIT;
+  put_u32_be(bc, &at, (uint32_t)(at + 8)); /* inline payload offset */
+  put_u32_be(bc, &at, 2);
+  bc[at++] = 'a';
+  bc[at++] = 'b';
+
+  bc[at++] = OP_ARRAY_GET;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 1;
+  bc[at++] = 'a';
+
+  bc[at++] = OP_ARRAY_SET;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 1;
+  bc[at++] = 's';
+
+  bc[at++] = OP_EMIT_TABLE;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 1; /* capture key */
+  bc[at++] = 1; /* name length */
+  bc[at++] = 't';
+  bc[at++] = 0; /* key register */
+
+  bc[at++] = OP_EMIT_TABLE;
+  bc[at++] = 0;
+  bc[at++] = 0;
+  bc[at++] = 0; /* literal key */
+  bc[at++] = 1; /* name length */
+  bc[at++] = 'u';
+  bc[at++] = 0; /* key length high byte */
+  bc[at++] = 1; /* key length low byte */
+  bc[at++] = 'k';
+
+  bc[at++] = OP_DYNAMIC_DEF;
+  put_u32_be(bc, &at, 0);
+  put_u32_be(bc, &at, 0);
+
+  bc[at++] = OP_ACCEPT;
+
+  test_assert(snobol_pattern_bind_bytecode_tables(bc, at, nullptr, 0) == 0,
+              "the binder walks every opcode layout");
+  test_assert(snobol_pattern_bind_bytecode_tables(nullptr, 0, nullptr, 0) == -1,
+              "null bytecode is rejected");
+
+  const char *names_one[] = {"x"};
+  test_assert(snobol_pattern_bind_bytecode_tables(bc, at, names_one,
+                                                  SNBL_TABLE_ID_UNBOUND) == -1,
+              "an exhausted table id space is rejected");
+
+  uint8_t trunc[16];
+  memset(trunc, 0, sizeof(trunc));
+  trunc[0] = OP_LIT;
+  test_assert(snobol_pattern_bind_bytecode_tables(trunc, 8, nullptr, 0) == -1,
+              "truncated operands are rejected");
+  trunc[0] = 0xFF;
+  test_assert(snobol_pattern_bind_bytecode_tables(trunc, 2, nullptr, 0) == -1,
+              "unknown opcodes are rejected");
+
+  /* Malformed table instructions: each guard must reject, not read past the
+   * buffer or silently patch a straddling instruction. */
+  uint8_t bad_table[8];
+  memset(bad_table, 0, sizeof(bad_table));
+  bad_table[0] = OP_TABLE_GET;
+  test_assert(snobol_pattern_bind_bytecode_tables(bad_table, 3, nullptr, 0) ==
+                  -1,
+              "truncated table operands are rejected");
+  bad_table[3] = 2; /* invalid key kind */
+  test_assert(snobol_pattern_bind_bytecode_tables(bad_table, 6, nullptr, 0) ==
+                  -1,
+              "an invalid table key kind is rejected");
+  memset(bad_table, 0, sizeof(bad_table));
+  bad_table[0] = OP_TABLE_GET;
+  bad_table[3] = 1; /* capture key with no key byte */
+  test_assert(snobol_pattern_bind_bytecode_tables(bad_table, 5, nullptr, 0) ==
+                  -1,
+              "a truncated capture key is rejected");
+  memset(bad_table, 0, sizeof(bad_table));
+  bad_table[0] = OP_TABLE_GET; /* key kind 0, no room for the name length */
+  test_assert(snobol_pattern_bind_bytecode_tables(bad_table, 6, nullptr, 0) ==
+                  -1,
+              "a missing table name length is rejected");
+  memset(bad_table, 0, sizeof(bad_table));
+  bad_table[0] = OP_TABLE_GET;
+  bad_table[5] = 1; /* name length at 6 */
+  bad_table[6] = 5; /* name length 5, but no name bytes */
+  test_assert(snobol_pattern_bind_bytecode_tables(bad_table, 7, nullptr, 0) ==
+                  -1,
+              "a truncated table name is rejected");
+}
+
 void test_pattern_from_bytecode_suite(void) {
   test_compiler_bytecode_roundtrip();
   test_handbuilt_bytecode();
   test_ownership_and_invalid_args();
+  test_bytecode_walker_opcode_sizes();
 }

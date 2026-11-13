@@ -6,6 +6,7 @@
 #include "snobol/ast.h"
 #include "snobol/lexer.h"
 #include "snobol/parser.h"
+#include "snobol/snobol.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1274,6 +1275,74 @@ static void test_parser_integer_argument_boundaries(void) {
   }
 }
 
+/* Compile a source that must fail and assert the reported message names the
+ * failure.  Covers the parser's diagnostic branches for malformed input. */
+static void expect_compile_error_cov(const char *src, size_t len,
+                                     const char *needle) {
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = nullptr;
+  snobol_pattern_t *p = snobol_pattern_compile_ex(ctx, src, len, 0, &err);
+  test_assert(p == nullptr, "invalid source is rejected");
+  test_assert(err != nullptr && strstr(err, needle) != nullptr,
+              "error message names the failure");
+  if (p) {
+    snobol_pattern_free(p);
+  }
+  free(err);
+  snobol_context_destroy(ctx);
+}
+
+static void test_cov_parser_error_paths(void) {
+  test_suite("Coverage: parser error paths");
+
+  expect_compile_error_cov("'x' . v99", strlen("'x' . v99"),
+                           "naming register out of range");
+  expect_compile_error_cov("T['k'] =", strlen("T['k'] ="),
+                           "expected a value pattern");
+  expect_compile_error_cov("T['k'", strlen("T['k'"), "Expected RBRACKET");
+  expect_compile_error_cov("T[12]", strlen("T[12]"), "invalid table key");
+  expect_compile_error_cov("('a' | 12)", strlen("('a' | 12)"),
+                           "Expected pattern element");
+  expect_compile_error_cov("EMIT('x'", strlen("EMIT('x'"), "Expected RPAREN");
+  expect_compile_error_cov("EMIT(@12)", strlen("EMIT(@12)"), "EMIT(@...)");
+  expect_compile_error_cov("EMIT(12)", strlen("EMIT(12)"),
+                           "EMIT expects an argument");
+  expect_compile_error_cov("@", 1, "Expected capture target");
+  expect_compile_error_cov("SPAN(", strlen("SPAN("),
+                           "SPAN expects string argument");
+
+  /* A truncated UTF-8 sequence inside a BAL delimiter is rejected by the
+   * parser's delimiter validation, not by the VM. */
+  static const unsigned char bal_bad_utf8[] = {
+      'B', 'A', 'L', '(', '\'', 0xC3, '\'', ',', ' ', '\'', ')', '\'', ')'};
+  expect_compile_error_cov((const char *)bal_bad_utf8, sizeof(bal_bad_utf8),
+                           "BAL delimiter is not valid UTF-8");
+  expect_compile_error_cov("BAL('(', )", strlen("BAL('(', )"),
+                           "BAL expects a closing delimiter");
+  expect_compile_error_cov("BAL('(', ')'", strlen("BAL('(', ')'"),
+                           "Expected RPAREN");
+  static const unsigned char bal_bad_close[] = {
+      'B', 'A', 'L', '(', '\'', '(', '\'', ',', ' ', '\'', 0xC3, '\'', ')'};
+  expect_compile_error_cov((const char *)bal_bad_close, sizeof(bal_bad_close),
+                           "BAL delimiter is not valid UTF-8");
+
+  /* Exhausting the capture register file through a naming-operator chain. */
+  char big[16384];
+  size_t off = 0;
+  for (int i = 0; i < 65; i++) {
+    off += (size_t)snprintf(big + off, sizeof(big) - off, "'x' . @c%d ", i);
+  }
+  expect_compile_error_cov(big, off, "Too many captures");
+
+  /* Exhausting it through the table-write value scratch allocation. */
+  off = 0;
+  for (int i = 0; i < 64; i++) {
+    off += (size_t)snprintf(big + off, sizeof(big) - off, "@c%d 'x' ", i);
+  }
+  off += (size_t)snprintf(big + off, sizeof(big) - off, "T['k'] = 'y'");
+  expect_compile_error_cov(big, off, "Too many captures");
+}
+
 void test_parser_suite(void) {
   test_parser_create_destroy();
   test_parser_literal();
@@ -1297,4 +1366,5 @@ void test_parser_suite(void) {
   test_cov_parser_source_primitives();
   test_cov_parser_emit_table_assign();
   test_cov_parser_naming_ops();
+  test_cov_parser_error_paths();
 }

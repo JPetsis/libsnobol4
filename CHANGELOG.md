@@ -241,6 +241,12 @@ tagged `php/vX.Y.Z`.
   against the new name list; binding with an empty list clears it again;
   unbound patterns keep the previous fail-and-backtrack behaviour. New C
   suite `test_pattern_table_binding.c`.
+- **C core coverage above 90%**: parser diagnostic paths (invalid naming
+  and table keys, BAL delimiter validation, capture-register exhaustion),
+  non-ASCII case-insensitive class folding, bytecode-walker instruction
+  sizing, and API argument guards are now covered. Line coverage measured
+  with the CI chain (`gcov`/`lcov`, `c-core` filter) is 90.25%, up from
+  89.3%.
 
 ### Fixed
 
@@ -279,7 +285,7 @@ tagged `php/vX.Y.Z`.
   stop-at-terminal scan for hand-built bytecode without a validating
   trailer.
 
-C test suite: **406 cases / 74,275 assertions** (custom runner).
+C test suite: **410 cases / 74,367 assertions** (custom runner).
 
 ## [1.0.4] - 2026-08-11
 
