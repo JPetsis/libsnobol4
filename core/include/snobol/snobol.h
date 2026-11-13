@@ -326,6 +326,32 @@ snobol_pattern_t *snobol_pattern_compile_ex(snobol_context_t *ctx,
                                             uint32_t flags, char **error);
 
 /**
+ * @brief Build a pattern from an existing bytecode buffer.
+ *
+ * The buffer is finalized exactly like compiler output: search metadata and
+ * range metadata are derived through the same path, so the pattern matches,
+ * searches and reports its tier exactly like the equivalent compiled pattern.
+ *
+ * @note Ownership of @p bc transfers when the function is called.  On success
+ *       the pattern owns the buffer and releases it in
+ *       snobol_pattern_free().  On failure (invalid arguments or out of
+ *       memory) this function releases the buffer itself.  The caller must
+ *       not free or reuse @p bc afterwards.  @p bc must come from the
+ *       compiler API or snobol_malloc().
+ *
+ * @param[in]  bc      Bytecode buffer (ownership transfers as described).
+ * @param[in]  bc_len  Byte length of @p bc; must be non-zero.
+ * @param[in]  flags   Bitmask of SNOBOL_FLAG_* constants (unknown bits are
+ *                     ignored, matching snobol_pattern_compile_ex()).
+ * @param[out] error   On failure, *error is set to a malloc'd message the
+ *                     caller must free; set to NULL on success.  May be NULL.
+ * @return New pattern, or NULL for a null buffer, zero length or out of
+ *         memory.  Free with snobol_pattern_free().
+ */
+snobol_pattern_t *snobol_pattern_from_bytecode(uint8_t *bc, size_t bc_len,
+                                               uint32_t flags, char **error);
+
+/**
  * @brief Get the bytecode pointer from a compiled pattern.
  * @param[in] pattern Compiled pattern.
  * @return Read-only pointer to the bytecode, or NULL if pattern is NULL.

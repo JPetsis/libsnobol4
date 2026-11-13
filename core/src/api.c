@@ -142,6 +142,26 @@ static snobol_pattern_t *pattern_finalize(uint8_t *bc, size_t bc_len,
   return pat;
 }
 
+snobol_pattern_t *snobol_pattern_from_bytecode(uint8_t *bc, size_t bc_len,
+                                               uint32_t flags, char **error) {
+  if (error) {
+    *error = nullptr;
+  }
+  if (!bc) {
+    set_error_out(error, "bytecode buffer is required");
+    return nullptr;
+  }
+  if (bc_len == 0) {
+    compiler_free(bc);
+    set_error_out(error, "bytecode length must be non-zero");
+    return nullptr;
+  }
+  /* Same flag handling as snobol_pattern_compile_ex(): unknown bits are
+   * ignored for forward compatibility. */
+  bool case_insensitive = (flags & SNOBOL_FLAG_CASE_INSENSITIVE) != 0;
+  return pattern_finalize(bc, bc_len, case_insensitive, error);
+}
+
 /**
  * Core compilation helper: lex → parse → compile → allocate pattern.
  */
