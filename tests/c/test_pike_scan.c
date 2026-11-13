@@ -35,44 +35,20 @@ static void pike_assert(bool cond, const char *name) {
   fprintf(stderr, "  PIKE FAIL: %s\n", name);
 }
 
-/* Mirror of the core pattern struct (core/src/api.c) so pike_scan can be
- * driven with AST-compiled bytecode + derived metadata + range metadata.
- * Keep the field order in sync: snobol_pattern_free() reads the trailing
- * binding fields. */
-typedef struct {
-  uint8_t *bc;
-  size_t bc_len;
-  bool case_insensitive;
-  snobol_search_meta_t meta;
-  bool meta_initialized;
-  snobol_range_meta_t *range_meta;
-  size_t range_meta_count;
-  snobol_dfa_t *automaton;
-  snobol_auto_trie_t *trie_cache;
-  int trie_cache_refs;
-  snobol_table_t **bound_tables;
-  size_t bound_tables_count;
-  uint32_t bound_tables_gen;
-} pike_pattern_layout;
-
+/* Build a real pattern from AST-compiled bytecode through the public
+ * constructor.  The constructor derives metadata through the compiler's
+ * finalization path and owns the buffer; the pattern is released with
+ * snobol_pattern_free(). */
 static snobol_pattern_t *pike_make_pattern(ast_node_t *root) {
   uint8_t *bc = nullptr;
   size_t bc_len = 0;
   if (compile_ast_to_bytecode_c(root, false, &bc, &bc_len) != 0) {
     return nullptr;
   }
-  pike_pattern_layout *p =
-      (pike_pattern_layout *)calloc(1, sizeof(pike_pattern_layout));
-  if (!p) {
-    free(bc);
-    return nullptr;
-  }
-  p->bc = bc;
-  p->bc_len = bc_len;
-  snobol_search_derive_meta(bc, bc_len, &p->meta);
-  p->meta_initialized = true;
-  snobol_build_range_meta(bc, bc_len, &p->range_meta, &p->range_meta_count);
-  return (snobol_pattern_t *)p;
+  char *err = nullptr;
+  snobol_pattern_t *p = snobol_pattern_from_bytecode(bc, bc_len, 0, &err);
+  free(err);
+  return p;
 }
 
 static void pike_test_literal(void) {

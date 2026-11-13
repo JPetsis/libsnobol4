@@ -283,6 +283,7 @@ void test_dynamic_pattern_suite(void);
 void test_table_ops_suite(void);
 void test_template_ops_suite(void);
 void test_pattern_table_binding_suite(void);
+void test_pattern_from_bytecode_suite(void);
 void test_control_flow_suite(void);
 void test_backtracking_suite(void);
 void test_catastrophic_suite(void);
@@ -387,6 +388,7 @@ int main(void) {
   RUN_SUITE("Table Ops", test_table_ops_suite);
   RUN_SUITE("Template Ops", test_template_ops_suite);
   RUN_SUITE("Pattern Table Binding", test_pattern_table_binding_suite);
+  RUN_SUITE("Pattern from bytecode", test_pattern_from_bytecode_suite);
 
   /* Pattern matching engine */
   RUN_SUITE("Control Flow", test_control_flow_suite);

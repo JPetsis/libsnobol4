@@ -25,55 +25,16 @@ extern void test_assert(bool condition, const char *message);
 #include "../../core/include/snobol/snobol.h"
 
 
-/* ── Core pattern struct mirror (api.c) ─────────────────────────────────────
- * Keep the field order in sync: snobol_pattern_free() reads the trailing
- * binding fields. */
-
-typedef struct {
-  uint8_t *bc;
-  size_t bc_len;
-  bool case_insensitive;
-  snobol_search_meta_t meta;
-  bool meta_initialized;
-  snobol_range_meta_t *range_meta;
-  size_t range_meta_count;
-  snobol_dfa_t *automaton;
-  snobol_auto_trie_t *trie_cache;
-  int trie_cache_refs;
-  snobol_table_t **bound_tables;
-  size_t bound_tables_count;
-  uint32_t bound_tables_gen;
-} cova_pattern_layout;
-
-/* Build a pattern object from raw bytecode (mirrors do_compile's metadata
- * derivation).  The caller owns the result and must free via
- * snobol_pattern_free(). */
-static snobol_pattern_t *cova_make_pattern(uint8_t *bc, size_t bc_len) {
-  cova_pattern_layout *p =
-      (cova_pattern_layout *)calloc(1, sizeof(cova_pattern_layout));
-  if (!p) {
-    return nullptr;
-  }
-  p->bc = bc;
-  p->bc_len = bc_len;
-  snobol_search_derive_meta(bc, bc_len, &p->meta);
-  p->meta_initialized = true;
-  snobol_build_range_meta(bc, bc_len, &p->range_meta, &p->range_meta_count);
-  return (snobol_pattern_t *)p;
-}
-
-/* Compile an AST to bytecode and wrap it in a pattern object. */
+/* Compile an AST to bytecode and wrap it in a pattern through the public
+ * constructor.  The constructor derives the metadata and owns the buffer; the
+ * pattern is released with snobol_pattern_free(). */
 static snobol_pattern_t *cova_compile_pattern(ast_node_t *root) {
   uint8_t *bc = nullptr;
   size_t bc_len = 0;
   if (compile_ast_to_bytecode_c(root, false, &bc, &bc_len) != 0) {
     return nullptr;
   }
-  snobol_pattern_t *p = cova_make_pattern(bc, bc_len);
-  if (!p) {
-    free(bc);
-  }
-  return p;
+  return snobol_pattern_from_bytecode(bc, bc_len, 0, nullptr);
 }
 
 static ast_node_t *cova_cap_eval(int fn, const char *text, size_t len) {

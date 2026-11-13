@@ -15,6 +15,7 @@ add_executable(snobol4_tests
     test_table_ops.c
     test_template_ops.c
     test_pattern_table_binding.c
+    test_pattern_from_bytecode.c
     test_control_flow.c
     test_backtracking.c
     test_stress_backtracking.c
