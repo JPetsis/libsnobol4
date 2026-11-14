@@ -36,6 +36,10 @@ struct snobol_parser {
   } *capture_names;
   size_t capture_name_count;
   size_t capture_name_capacity;
+  /* Structural nesting depth currently held (see depth_enter()).  Bounds
+   * both the recursive-descent stack and the depth of the AST handed to the
+   * compiler's recursive walkers. */
+  size_t depth;
 };
 
 /* Forward declarations for recursive descent */
@@ -51,6 +55,10 @@ static ast_node_t *parse_repetition(snobol_parser_t *parser,
                                     snobol_lexer_t *lexer);
 static ast_node_t *parse_primary(snobol_parser_t *parser,
                                  snobol_lexer_t *lexer);
+static ast_node_t *parse_statement_impl(snobol_parser_t *parser,
+                                        snobol_lexer_t *lexer);
+static ast_node_t *parse_primary_impl(snobol_parser_t *parser,
+                                      snobol_lexer_t *lexer);
 static ast_node_t *parse_function_call(snobol_parser_t *parser,
                                        snobol_lexer_t *lexer);
 static ast_node_t *parse_dynamic_eval(snobol_parser_t *parser,
@@ -108,6 +116,60 @@ static void set_error(snobol_parser_t *parser, const char *msg, size_t line,
   }
   memcpy(parser->error.message, msg, len);
   parser->error.message[len] = '\0';
+}
+
+/** Record the structural-depth error at the lexer's current position. */
+static void set_depth_error(snobol_parser_t *parser, snobol_lexer_t *lexer) {
+  char msg[96];
+  snprintf(msg, sizeof(msg), "Pattern nesting too deep (max %d levels)",
+           SNOBOL_PARSER_MAX_DEPTH);
+  set_error(parser, msg, snobol_lexer_get_line(lexer),
+            snobol_lexer_get_pos(lexer));
+}
+
+/**
+ * Consume one unit of the parser's recursion budget.
+ *
+ * Every construct that nests the recursive descent — a parenthesised group,
+ * a label prefix, a capture, a function-call argument — consumes one unit
+ * while it is being parsed.  Without this budget a few kilobytes of repeated
+ * '(' would exhaust the C stack and kill the host process.
+ *
+ * Returns false, with a parse error recorded, once the budget is exhausted.
+ */
+static bool depth_enter(snobol_parser_t *parser, snobol_lexer_t *lexer) {
+  if (parser->depth >= SNOBOL_PARSER_MAX_DEPTH) {
+    set_depth_error(parser, lexer);
+    return false;
+  }
+
+  parser->depth++;
+  return true;
+}
+
+/** Release @p n budget units previously taken with depth_enter(). */
+static void depth_leave(snobol_parser_t *parser, size_t n) {
+  parser->depth -= n;
+}
+
+/**
+ * Reject a subtree taller than the structural-depth budget.
+ *
+ * The AST factories record each subtree's height, so this costs O(1).  The
+ * check runs at every node wrap that can repeat in a loop (alternation
+ * branches, naming operators) and on the guarded descent returns, so a
+ * too-deep tree is never built far enough to overflow the recursive walkers
+ * (emit_node_c/emit_alt_c, ast_max_reg_c, ast_node_nullable,
+ * snobol_ast_free) or the teardown of a rejected tree.
+ */
+static bool ast_depth_ok(snobol_parser_t *parser, snobol_lexer_t *lexer,
+                         const ast_node_t *node) {
+  if (snobol_ast_depth(node) <= SNOBOL_PARSER_MAX_DEPTH) {
+    return true;
+  }
+
+  set_depth_error(parser, lexer);
+  return false;
 }
 
 static token_t advance(snobol_lexer_t *lexer) {
@@ -378,6 +440,9 @@ ast_node_t *snobol_parser_parse(snobol_parser_t *parser,
   parser->capture_name_count = 0;
   parser->capture_reg_counter = 0;
 
+  /* Release any budget still held by a previous, aborted parse. */
+  parser->depth = 0;
+
   /* Parse the pattern */
   ast_node_t *ast = parse_pattern(parser, lexer);
 
@@ -406,8 +471,27 @@ static ast_node_t *parse_pattern(snobol_parser_t *parser,
   return parse_statement(parser, lexer);
 }
 
+/**
+ * Guarded entry point of the statement (label) recursion.  Every label
+ * prefix nests one AST_LABEL level, so the descent takes budget here.
+ */
 static ast_node_t *parse_statement(snobol_parser_t *parser,
                                    snobol_lexer_t *lexer) {
+  if (!depth_enter(parser, lexer)) {
+    return nullptr;
+  }
+
+  ast_node_t *node = parse_statement_impl(parser, lexer);
+  depth_leave(parser, 1);
+  if (!ast_depth_ok(parser, lexer, node)) {
+    snobol_ast_free(node);
+    return nullptr;
+  }
+  return node;
+}
+
+static ast_node_t *parse_statement_impl(snobol_parser_t *parser,
+                                        snobol_lexer_t *lexer) {
   /* Check for label: IDENT ':' */
   token_t tok = peek(lexer);
   if (tok.type == TOKEN_IDENT) {
@@ -541,6 +625,9 @@ static ast_node_t *parse_alternation(snobol_parser_t *parser,
     return nullptr;
   }
 
+  /* Every '|' adds one AST_ALT level to the left spine, so the wrap is
+   * checked as it is built: rejecting a too-deep tree afterwards would have
+   * to free it recursively. */
   while (match(lexer, TOKEN_PIPE)) {
     advance(lexer); /* Consume '|' */
 
@@ -551,6 +638,10 @@ static ast_node_t *parse_alternation(snobol_parser_t *parser,
     }
 
     left = snobol_ast_create_alt(left, right);
+    if (!ast_depth_ok(parser, lexer, left)) {
+      snobol_ast_free(left);
+      return nullptr;
+    }
   }
 
   return left;
@@ -618,7 +709,18 @@ static ast_node_t *parse_concatenation(snobol_parser_t *parser,
           free((void *)parts);
           return nullptr;
         }
+        /* Each naming operator wraps the preceding part in a new AST_CAP.
+         * For explicit vN targets it allocates no register and never
+         * recurses, so the wrap is checked directly: a 200k-operator chain
+         * must fail here, before the recursive teardown ever sees it. */
         parts[count - 1] = snobol_ast_create_cap(reg, parts[count - 1]);
+        if (!ast_depth_ok(parser, lexer, parts[count - 1])) {
+          for (size_t i = 0; i < count; i++) {
+            snobol_ast_free(parts[i]);
+          }
+          free((void *)parts);
+          return nullptr;
+        }
         continue;
       }
     }
@@ -744,8 +846,28 @@ static ast_node_t *parse_repetition(snobol_parser_t *parser,
   }
 }
 
+/**
+ * Guarded entry point of the primary recursion.  Parenthesised groups,
+ * captures, function-call arguments and table forms all re-enter the descent
+ * through here, so this is where one nesting level is charged.
+ */
 static ast_node_t *parse_primary(snobol_parser_t *parser,
                                  snobol_lexer_t *lexer) {
+  if (!depth_enter(parser, lexer)) {
+    return nullptr;
+  }
+
+  ast_node_t *node = parse_primary_impl(parser, lexer);
+  depth_leave(parser, 1);
+  if (!ast_depth_ok(parser, lexer, node)) {
+    snobol_ast_free(node);
+    return nullptr;
+  }
+  return node;
+}
+
+static ast_node_t *parse_primary_impl(snobol_parser_t *parser,
+                                      snobol_lexer_t *lexer) {
   token_t tok = peek(lexer);
 
   switch (tok.type) {
@@ -779,6 +901,7 @@ static ast_node_t *parse_primary(snobol_parser_t *parser,
         ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
         if (node) {
           node->type = AST_ANCHOR;
+          node->depth = 1;
           node->data.anchor.atype = ANCHOR_START;
         }
         return node;
@@ -800,6 +923,7 @@ static ast_node_t *parse_primary(snobol_parser_t *parser,
         ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
         if (node) {
           node->type = AST_ANCHOR;
+          node->depth = 1;
           node->data.anchor.atype = ANCHOR_END;
         }
         return node;
@@ -1288,6 +1412,7 @@ static ast_node_t *parse_dynamic_eval(snobol_parser_t *parser,
   ast_node_t *node = (ast_node_t *)calloc(1, sizeof(ast_node_t));
   if (node) {
     node->type = AST_DYNAMIC_EVAL;
+    node->depth = 1 + snobol_ast_depth(expr);
     node->data.dynamic_eval.expr = expr;
   }
 

@@ -15,10 +15,26 @@ tagged `php/vX.Y.Z`.
 
 ### Fixed
 
+- **Bounded parser recursion and AST depth**: pattern source text is now
+  limited to `SNOBOL_PARSER_MAX_DEPTH` (1000) structural levels, where a
+  parenthesised group, label prefix, capture, function-call argument,
+  alternation branch and match-naming operator each consume one level.
+  Deeper input fails with a `Pattern nesting too deep` parse error instead
+  of recursing until the C stack overflows in the parser or in the
+  recursive AST walkers (`emit_node_c`/`emit_alt_c`, `ast_max_reg_c`,
+  `snobol_ast_free`). This covers nesting via `(`, label prefixes,
+  alternation chains, match-naming chains such as `'x'.v0.v0…`, and
+  alternation depth accumulated across nesting levels. AST nodes carry
+  their subtree height, so the check is O(1). Builder-composed ASTs
+  (`snobol_pattern_build_compile`) bypass the parser and keep their
+  existing behavior; `Pattern::compileFromAst` and the PHP array-to-AST
+  converter are unaffected.
 - **Windows release builds**: the PHP devel-pack lookup now handles
   revision-suffixed names on both the releases and archives listings, and a
   manual backfill workflow can attach a missing Windows PIE asset to an
   existing release tag without moving it.
+
+C test suite: **411 cases / 74,391 assertions** (custom runner).
 
 ## [1.1.0] - 2026-11-13
 

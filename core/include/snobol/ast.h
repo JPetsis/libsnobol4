@@ -140,6 +140,14 @@ struct ast_node {
   ast_type_t type;
 
   /**
+   * Height of this node's subtree, in nodes (a leaf is 1).  Maintained in
+   * O(1) by the snobol_ast_create_*() factories and snobol_ast_clone(); the
+   * parser uses it to reject patterns whose nesting would exhaust the
+   * recursive AST walkers (see SNOBOL_PARSER_MAX_DEPTH).
+   */
+  uint32_t depth;
+
+  /**
    * True when this node's storage was bump-allocated from the thread-local
    * AST arena (see snobol_ast_set_arena).  Such nodes must not be passed to
    * free(); the owning arena is reset by the caller instead.  Sub-allocations
@@ -367,6 +375,17 @@ ast_node_t *snobol_ast_clone(const ast_node_t *node);
  * @param node Node to free (NULL is safe)
  */
 void snobol_ast_free(ast_node_t *node);
+
+/**
+ * Subtree height of an AST node.
+ *
+ * The value is maintained by the node factories, so this is O(1): a leaf is
+ * 1 and NULL is 0.
+ *
+ * @param node AST node, or NULL
+ * @return Subtree height in nodes
+ */
+uint32_t snobol_ast_depth(const ast_node_t *node);
 
 /**
  * Bind a bump arena that subsequent AST node allocations draw from.  Pass NULL

@@ -1343,6 +1343,255 @@ static void test_cov_parser_error_paths(void) {
   expect_compile_error_cov(big, off, "Too many captures");
 }
 
+/* ---------------------------------------------------------------------------
+ * Structural depth limit (CWE-674: unbounded recursion fed by pattern text).
+ *
+ * The payloads below are the original attack shapes: nested parentheses,
+ * label prefixes, a flat alternation, and naming wrappers, plus a nested
+ * alternation that would multiply a per-level branch cap.  Every one of them
+ * must produce a parse error instead of exhausting the C stack.
+ */
+
+static char *build_depth_parens(size_t n, size_t *out_len) {
+  char *src = (char *)malloc(n * 2 + 4);
+  if (!src) {
+    *out_len = 0;
+    return nullptr;
+  }
+  size_t k = 0;
+  for (size_t i = 0; i < n; i++)
+    src[k++] = '(';
+  src[k++] = '\'';
+  src[k++] = 'x';
+  src[k++] = '\'';
+  for (size_t i = 0; i < n; i++)
+    src[k++] = ')';
+  src[k] = '\0';
+  *out_len = k;
+  return src;
+}
+
+static char *build_depth_labels(size_t n, size_t *out_len) {
+  char *src = (char *)malloc(n * 32 + 8);
+  if (!src) {
+    *out_len = 0;
+    return nullptr;
+  }
+  size_t k = 0;
+  for (size_t i = 0; i < n; i++) {
+    k += (size_t)snprintf(src + k, 32, "l%zu: ", i);
+  }
+  src[k++] = '\'';
+  src[k++] = 'x';
+  src[k++] = '\'';
+  src[k] = '\0';
+  *out_len = k;
+  return src;
+}
+
+static char *build_depth_alts(size_t n, size_t *out_len) {
+  char *src = (char *)malloc(n * 4 + 4);
+  if (!src) {
+    *out_len = 0;
+    return nullptr;
+  }
+  size_t k = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (i)
+      src[k++] = '|';
+    src[k++] = '\'';
+    src[k++] = 'x';
+    src[k++] = '\'';
+  }
+  src[k] = '\0';
+  *out_len = k;
+  return src;
+}
+
+static char *build_depth_names(size_t n, size_t *out_len) {
+  char *src = (char *)malloc(n * 3 + 8);
+  if (!src) {
+    *out_len = 0;
+    return nullptr;
+  }
+  size_t k = 0;
+  src[k++] = '\'';
+  src[k++] = 'x';
+  src[k++] = '\'';
+  for (size_t i = 0; i < n; i++) {
+    src[k++] = '.';
+    src[k++] = 'v';
+    src[k++] = '0';
+  }
+  src[k] = '\0';
+  *out_len = k;
+  return src;
+}
+
+/* levels nested alternations, each with `branches` additional branches and
+ * the nested tree on the left spine. */
+static char *build_depth_alt_nest(size_t levels, size_t branches,
+                                  size_t *out_len) {
+  size_t cap = levels * (branches * 4 + 2) + 16;
+  char *cur = (char *)malloc(cap);
+  if (!cur) {
+    *out_len = 0;
+    return nullptr;
+  }
+  memcpy(cur, "'x'", 3);
+  size_t clen = 3;
+  for (size_t i = 0; i < levels; i++) {
+    char *next = (char *)malloc(cap);
+    if (!next) {
+      free(cur);
+      *out_len = 0;
+      return nullptr;
+    }
+    size_t k = 0;
+    next[k++] = '(';
+    memcpy(next + k, cur, clen);
+    k += clen;
+    for (size_t j = 0; j < branches; j++) {
+      memcpy(next + k, "|'x'", 4);
+      k += 4;
+    }
+    next[k++] = ')';
+    free(cur);
+    cur = next;
+    clen = k;
+  }
+  cur[clen] = '\0';
+  *out_len = clen;
+  return cur;
+}
+
+static void expect_depth_error(const char *src, size_t len, const char *msg) {
+  snobol_parser_t *parser = snobol_parser_create();
+  snobol_lexer_t *lexer = snobol_lexer_create(src, len);
+  ast_node_t *ast = snobol_parser_parse(parser, lexer);
+
+  test_assert(ast == nullptr, msg);
+  test_assert(snobol_parser_has_error(parser) != 0,
+              "depth limit records a parse error");
+  const char *err = snobol_parser_get_error(parser);
+  test_assert((err != nullptr && strstr(err, "nesting too deep") != nullptr) !=
+                  0,
+              "error message names the nesting limit");
+
+  if (ast) {
+    snobol_ast_free(ast);
+  }
+  snobol_lexer_destroy(lexer);
+  snobol_parser_destroy(parser);
+}
+
+static void expect_depth_ok(const char *src, size_t len, const char *msg) {
+  snobol_parser_t *parser = snobol_parser_create();
+  snobol_lexer_t *lexer = snobol_lexer_create(src, len);
+  ast_node_t *ast = snobol_parser_parse(parser, lexer);
+
+  test_assert((ast != nullptr && !snobol_parser_has_error(parser)) != 0, msg);
+
+  if (ast) {
+    snobol_ast_free(ast);
+  }
+  snobol_lexer_destroy(lexer);
+  snobol_parser_destroy(parser);
+}
+
+static void test_parser_depth_limit(void) {
+  test_suite("Parser: structural depth limit");
+
+  const size_t attack_n = 20000;
+  const size_t ok_n = SNOBOL_PARSER_MAX_DEPTH / 2;
+  size_t len = 0;
+  char *src = nullptr;
+
+  /* Attack shapes: each must be rejected, not crash. */
+  src = build_depth_parens(attack_n, &len);
+  expect_depth_error(src, len, "20000 nested '(' rejected");
+  free(src);
+
+  src = build_depth_labels(attack_n, &len);
+  expect_depth_error(src, len, "20000 label prefixes rejected");
+  free(src);
+
+  src = build_depth_alts(attack_n, &len);
+  expect_depth_error(src, len, "20000 alternation branches rejected");
+  free(src);
+
+  src = build_depth_names(attack_n, &len);
+  expect_depth_error(src, len, "20000 naming wrappers rejected");
+  free(src);
+
+  src = build_depth_alt_nest(100, 32, &len);
+  expect_depth_error(src, len, "nested alternation depth does not multiply");
+  free(src);
+
+  /* Legitimate patterns under the limit still parse. */
+  src = build_depth_parens(ok_n, &len);
+  expect_depth_ok(src, len, "nesting under the limit still parses");
+  free(src);
+
+  src = build_depth_labels(ok_n, &len);
+  expect_depth_ok(src, len, "label nesting under the limit still parses");
+  free(src);
+
+  src = build_depth_alts(ok_n, &len);
+  expect_depth_ok(src, len, "alternation under the limit still parses");
+  free(src);
+
+  src = build_depth_names(ok_n, &len);
+  expect_depth_ok(src, len, "naming chain under the limit still parses");
+  free(src);
+
+  src = build_depth_alt_nest(20, 32, &len);
+  expect_depth_ok(src, len, "modest alternation nesting still parses");
+  free(src);
+
+  /* The original attack path through the public compile API. */
+  {
+    src = build_depth_parens(attack_n, &len);
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = nullptr;
+    snobol_pattern_t *pat = snobol_pattern_compile(ctx, src, len, &err);
+    test_assert(pat == nullptr, "snobol_pattern_compile rejects deep nesting");
+    test_assert(
+        (err != nullptr && strstr(err, "nesting too deep") != nullptr) != 0,
+        "compile API surfaces the nesting error");
+    if (pat) {
+      snobol_pattern_free(pat);
+    }
+    free(err);
+    snobol_context_destroy(ctx);
+    free(src);
+  }
+
+  /* A depth-limit error leaves the parser reusable. */
+  {
+    snobol_parser_t *parser = snobol_parser_create();
+    src = build_depth_parens(attack_n, &len);
+    snobol_lexer_t *lexer = snobol_lexer_create(src, len);
+    ast_node_t *ast = snobol_parser_parse(parser, lexer);
+    test_assert(ast == nullptr, "first parse hits the depth limit");
+    if (ast) {
+      snobol_ast_free(ast);
+    }
+    snobol_lexer_destroy(lexer);
+    free(src);
+
+    lexer = snobol_lexer_create("'ok'", 4);
+    ast = snobol_parser_parse(parser, lexer);
+    test_assert((ast != nullptr && !snobol_parser_has_error(parser)) != 0,
+                "parser reusable after a depth-limit error");
+    if (ast) {
+      snobol_ast_free(ast);
+    }
+    snobol_lexer_destroy(lexer);
+    snobol_parser_destroy(parser);
+  }
+}
+
 void test_parser_suite(void) {
   test_parser_create_destroy();
   test_parser_literal();
@@ -1358,6 +1607,7 @@ void test_parser_suite(void) {
   test_parser_error_unclosed_literal();
   test_parser_error_empty();
   test_parser_memory_cleanup();
+  test_parser_depth_limit();
   test_parser_integer_argument_boundaries();
   test_cov_parser_labels_and_gotos();
   test_cov_parser_repetition_and_primary();

@@ -24,6 +24,21 @@ extern "C" {
 #define SNOBOL_PARSER_ERROR_MAX 256
 
 /**
+ * Maximum structural nesting depth of a parsed pattern.
+ *
+ * Each parenthesised group, label prefix, capture, function-call argument,
+ * alternation branch and match-naming wrapper consumes one level.  The
+ * parser, the bytecode emitters (emit_node_c/emit_alt_c, ast_max_reg_c) and
+ * snobol_ast_free all walk the parsed tree recursively, so the parser
+ * rejects patterns that exceed this budget with a parse error instead of
+ * letting a few kilobytes of repeated '(' or '|' exhaust the C stack.
+ *
+ * Builder-composed ASTs (snobol_pattern_build_compile) bypass the parser and
+ * are not subject to this limit.
+ */
+enum { SNOBOL_PARSER_MAX_DEPTH = 1000 };
+
+/**
  * Parser error information
  */
 typedef struct {

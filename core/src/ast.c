@@ -45,6 +45,82 @@ static ast_node_t *ast_node_alloc(void) {
   return (ast_node_t *)calloc(1, sizeof(ast_node_t));
 }
 
+/** Subtree height of @p node (leaf = 1, NULL = 0). */
+static uint32_t ast_subtree_depth(const ast_node_t *node) {
+  return node ? node->depth : 0;
+}
+
+/** Set @p node's height to one level above the deeper of two children. */
+static void ast_depth_over(ast_node_t *node, const ast_node_t *a,
+                           const ast_node_t *b) {
+  uint32_t da = ast_subtree_depth(a);
+  uint32_t db = ast_subtree_depth(b);
+  node->depth = 1 + (da > db ? da : db);
+}
+
+/**
+ * Record a node's subtree height from the children already assigned to it.
+ *
+ * Every snobol_ast_create_*() factory calls this once, so the height stays
+ * available in O(1) for the parser's structural-depth check without walking
+ * the tree.
+ */
+static void ast_node_set_depth(ast_node_t *node) {
+  switch (node->type) {
+    case AST_CONCAT: {
+      uint32_t deepest = 0;
+      for (size_t i = 0; node->data.concat.parts && i < node->data.concat.count;
+           i++) {
+        uint32_t child = ast_subtree_depth(node->data.concat.parts[i]);
+        if (child > deepest) {
+          deepest = child;
+        }
+      }
+      node->depth = 1 + deepest;
+      break;
+    }
+
+    case AST_ALT:
+      ast_depth_over(node, node->data.alt.left, node->data.alt.right);
+      break;
+
+    case AST_TABLE_UPDATE:
+      ast_depth_over(node, node->data.table_update.key,
+                     node->data.table_update.value);
+      break;
+
+    case AST_REPETITION:
+      node->depth = 1 + ast_subtree_depth(node->data.repetition.sub);
+      break;
+
+    case AST_ARBNO:
+      node->depth = 1 + ast_subtree_depth(node->data.arbno.sub);
+      break;
+
+    case AST_CAP:
+      node->depth = 1 + ast_subtree_depth(node->data.cap.sub);
+      break;
+
+    case AST_LABEL:
+      node->depth = 1 + ast_subtree_depth(node->data.label.target);
+      break;
+
+    case AST_TABLE_ACCESS:
+      node->depth = 1 + ast_subtree_depth(node->data.table_access.key);
+      break;
+
+    case AST_DYNAMIC_EVAL:
+      node->depth = 1 + ast_subtree_depth(node->data.dynamic_eval.expr);
+      break;
+
+    default: node->depth = 1; break;
+  }
+}
+
+uint32_t snobol_ast_depth(const ast_node_t *node) {
+  return ast_subtree_depth(node);
+}
+
 /**
  * Internal helper: duplicate a string
  */
@@ -69,6 +145,7 @@ ast_node_t *snobol_ast_create_lit(const char *text, size_t len) {
   node->type = AST_LITERAL;
   node->data.literal.text = str_dup(text, len);
   node->data.literal.len = len;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -81,6 +158,7 @@ ast_node_t *snobol_ast_create_concat(ast_node_t **parts, size_t count) {
   node->type = AST_CONCAT;
   node->data.concat.parts = parts;
   node->data.concat.count = count;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -93,6 +171,7 @@ ast_node_t *snobol_ast_create_alt(ast_node_t *left, ast_node_t *right) {
   node->type = AST_ALT;
   node->data.alt.left = left;
   node->data.alt.right = right;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -104,6 +183,7 @@ ast_node_t *snobol_ast_create_arbno(ast_node_t *sub) {
 
   node->type = AST_ARBNO;
   node->data.arbno.sub = sub;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -116,6 +196,7 @@ ast_node_t *snobol_ast_create_cap(int reg, ast_node_t *sub) {
   node->type = AST_CAP;
   node->data.cap.reg = reg;
   node->data.cap.sub = sub;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -128,6 +209,7 @@ ast_node_t *snobol_ast_create_span(const char *set, size_t len) {
   node->type = AST_SPAN;
   node->data.charclass.set = str_dup(set, len);
   node->data.charclass.len = len;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -145,6 +227,7 @@ ast_node_t *snobol_ast_create_any(const char *set, size_t len) {
     node->data.charclass.set = nullptr;
     node->data.charclass.len = 0;
   }
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -159,6 +242,7 @@ ast_node_t *snobol_ast_create_repeat(ast_node_t *sub, int32_t min,
   node->data.repetition.sub = sub;
   node->data.repetition.min = min;
   node->data.repetition.max = max;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -178,6 +262,7 @@ ast_node_t *snobol_ast_create_goto(const char *label) {
   } else {
     node->data.goto_stmt.label = nullptr;
   }
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -202,6 +287,7 @@ ast_node_t *snobol_ast_create_label(char *name, ast_node_t *target) {
     node->data.label.name = nullptr;
   }
   node->data.label.target = target;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -361,6 +447,7 @@ ast_node_t *snobol_ast_clone(const ast_node_t *node) {
     case AST_SUCCEED: break;
   }
 
+  ast_node_set_depth(clone);
   return clone;
 }
 
@@ -596,6 +683,7 @@ ast_node_t *snobol_ast_create_break(const char *set, size_t len) {
   node->type = AST_BREAK;
   node->data.charclass.set = str_dup(set, len);
   node->data.charclass.len = len;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -607,6 +695,7 @@ ast_node_t *snobol_ast_create_notany(const char *set, size_t len) {
   node->type = AST_NOTANY;
   node->data.charclass.set = str_dup(set, len);
   node->data.charclass.len = len;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -618,6 +707,7 @@ ast_node_t *snobol_ast_create_assign(int var, int reg) {
   node->type = AST_ASSIGN;
   node->data.assign.var = var;
   node->data.assign.reg = reg;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -628,6 +718,7 @@ ast_node_t *snobol_ast_create_len(int32_t n) {
   }
   node->type = AST_LEN;
   node->data.len.n = n;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -638,6 +729,7 @@ ast_node_t *snobol_ast_create_anchor(anchor_type_t atype) {
   }
   node->type = AST_ANCHOR;
   node->data.anchor.atype = atype;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -650,6 +742,7 @@ ast_node_t *snobol_ast_create_emit(const char *text, size_t len, int reg) {
   node->data.emit.text = str_dup(text, len);
   node->data.emit.len = len;
   node->data.emit.reg = reg;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -660,6 +753,7 @@ ast_node_t *snobol_ast_create_dynamic_eval(ast_node_t *expr) {
   }
   node->type = AST_DYNAMIC_EVAL;
   node->data.dynamic_eval.expr = expr;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -671,6 +765,7 @@ ast_node_t *snobol_ast_create_eval(int fn, int reg) {
   node->type = AST_EVAL;
   node->data.eval.fn = fn;
   node->data.eval.reg = reg;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -682,6 +777,7 @@ ast_node_t *snobol_ast_create_table_access(const char *table, ast_node_t *key) {
   node->type = AST_TABLE_ACCESS;
   node->data.table_access.table = str_dup(table, strlen(table));
   node->data.table_access.key = key;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -696,6 +792,7 @@ ast_node_t *snobol_ast_create_table_update(const char *table, ast_node_t *key,
   node->data.table_update.key = key;
   node->data.table_update.value = value;
   node->data.table_update.value_reg = 0xFF; /* compiler-allocated */
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -707,6 +804,7 @@ ast_node_t *snobol_ast_create_breakx(const char *set, size_t len) {
   node->type = AST_BREAKX;
   node->data.breakx.set = str_dup(set, len);
   node->data.breakx.len = len;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -718,6 +816,7 @@ ast_node_t *snobol_ast_create_bal(uint32_t open_cp, uint32_t close_cp) {
   node->type = AST_BAL;
   node->data.bal.open_cp = open_cp;
   node->data.bal.close_cp = close_cp;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -727,6 +826,7 @@ ast_node_t *snobol_ast_create_fence(void) {
     return nullptr;
   }
   node->type = AST_FENCE;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -736,6 +836,7 @@ ast_node_t *snobol_ast_create_rem(void) {
     return nullptr;
   }
   node->type = AST_REM;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -746,6 +847,7 @@ ast_node_t *snobol_ast_create_rpos(int32_t n) {
   }
   node->type = AST_RPOS;
   node->data.rpos_rtab.n = n;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -756,6 +858,7 @@ ast_node_t *snobol_ast_create_rtab(int32_t n) {
   }
   node->type = AST_RTAB;
   node->data.rpos_rtab.n = n;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -766,6 +869,7 @@ ast_node_t *snobol_ast_create_pos(int32_t n) {
   }
   node->type = AST_POS;
   node->data.rpos_rtab.n = n;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -776,6 +880,7 @@ ast_node_t *snobol_ast_create_tab(int32_t n) {
   }
   node->type = AST_TAB;
   node->data.rpos_rtab.n = n;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -785,6 +890,7 @@ ast_node_t *snobol_ast_create_abort(void) {
     return nullptr;
   }
   node->type = AST_ABORT;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -794,6 +900,7 @@ ast_node_t *snobol_ast_create_fail(void) {
     return nullptr;
   }
   node->type = AST_FAIL;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -803,6 +910,7 @@ ast_node_t *snobol_ast_create_succeed(void) {
     return nullptr;
   }
   node->type = AST_SUCCEED;
+  ast_node_set_depth(node);
   return node;
 }
 
@@ -813,5 +921,6 @@ ast_node_t *snobol_ast_create_regref(int reg) {
   }
   node->type = AST_REG_REF;
   node->data.reg_ref.reg = reg;
+  ast_node_set_depth(node);
   return node;
 }
