@@ -13,6 +13,20 @@ tagged `php/vX.Y.Z`.
 
 ## [Unreleased]
 
+### Added
+
+- **Branch-walk coverage for the required-literal study**: the SPLIT branch
+  walk is now exercised for `FAIL()` branches, nested alternations, loops
+  inside a branch and `FENCE`, plus the conservative layouts reachable through
+  caller-supplied bytecode (unknown opcode, non-inline literal, truncated
+  `LIT`/`SPLIT`/`REPEAT_INIT`/`REPEAT_STEP`/linear operand, backward `JMP`,
+  backward `REPEAT_INIT` skip, out-of-range branch target, `BAL` and
+  `ASSIGN`). The SPLIT-recording bound and the split-after-literal guard have
+  their own controls. Every line in the walk is covered except the unreachable
+  stack-full push guard. Line coverage for the core sources measured with the
+  CI `gcov`/`lcov` chain rises from 90.2% to 90.6%, putting the `c-core` flag
+  back above its 90% gate.
+
 ### Fixed
 
 - **Test-suite leak in the template key regression**: `test_long_table_key_not_dispatched`
@@ -83,7 +97,7 @@ tagged `php/vX.Y.Z`.
   than 65535 bytes, which the 16-bit `key_len` field cannot encode; it
   previously wrote a truncated length followed by the full key payload.
 
-C test suite: **413 cases / 74,445 assertions** (custom runner).
+C test suite: **413 cases / 74,470 assertions** (custom runner).
 
 ## [1.1.0] - 2026-11-13
 
