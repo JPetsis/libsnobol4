@@ -15,6 +15,13 @@ tagged `php/vX.Y.Z`.
 
 ### Fixed
 
+- **Test-suite leak in the template key regression**: `test_long_table_key_not_dispatched`
+  initialised its `snobol_buf` and then passed it to `run_dict_template()`, which
+  initialises the buffer again through `init_test_vm()`. Each of the five call
+  sites leaked the first 1 KiB block, so the Valgrind and ASan+LSan CI jobs
+  reported `5120 bytes in 5 allocations` as definitely lost. The buffer is now
+  zero-initialised at declaration (so a compile failure still leaves it safe to
+  inspect) and initialised once by the helper. No library code changes.
 - **Required-literal prefilter dropped valid matches**: `derive_meta` marks
   the last literal in the bytecode as "required" unless it can prove that a
   `SPLIT` branch bypasses it, and the bypass test assumed every branch's

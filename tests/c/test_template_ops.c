@@ -782,11 +782,12 @@ static void test_long_table_key_not_dispatched(void) {
   snobol_table_t *table = table_create("dict");
   (void)table_set(table, "sky", "blue");
 
-  /* $v0[TABLE['...']] form. */
+  /* $v0[TABLE['...']] form.  The output buffer is zero-initialised: the
+   * helper initialises it before running, and a compile failure must still
+   * leave it safe to inspect. */
   size_t tpl_len = 0;
   char *tpl = assemble_template("$v0[dict['", key, KEY_LEN, "']]", &tpl_len);
-  snobol_buf out;
-  snobol_buf_init(&out);
+  snobol_buf out = {0};
   bool ran = tpl && run_dict_template(tpl, tpl_len, table, &out);
   test_assert(ran, "over-long literal key compiles, binds and runs");
   test_assert(out.len == 0, "key bytes are not dispatched as opcodes");
@@ -795,7 +796,6 @@ static void test_long_table_key_not_dispatched(void) {
 
   /* $TABLE['...'] form reaches the same compiler path. */
   tpl = assemble_template("$dict['", key, KEY_LEN, "']", &tpl_len);
-  snobol_buf_init(&out);
   ran = tpl && run_dict_template(tpl, tpl_len, table, &out);
   test_assert(ran, "bare $TABLE form with over-long key runs");
   test_assert(out.len == 0, "bare $TABLE key bytes are not dispatched");
@@ -804,7 +804,6 @@ static void test_long_table_key_not_dispatched(void) {
 
   /* Paired control: a short key through the same boundary still resolves. */
   tpl = assemble_template("$v0[dict['", "sky", 3, "']]", &tpl_len);
-  snobol_buf_init(&out);
   ran = tpl && run_dict_template(tpl, tpl_len, table, &out);
   test_assert(ran, "short-key template runs");
   test_assert((out.len == 4 && memcmp(out.data, "blue", 4) == 0) != 0,
@@ -823,7 +822,6 @@ static void test_long_table_key_not_dispatched(void) {
     big[65535] = 'k';
 
     tpl = assemble_template("$v0[dict['", big, 65535, "']]", &tpl_len);
-    snobol_buf_init(&out);
     ran = tpl && run_dict_template(tpl, tpl_len, table, &out);
     test_assert(ran, "65535-byte key compiles, binds and runs");
     test_assert(out.len == 0, "65535-byte key is skipped, not decoded");
@@ -863,7 +861,6 @@ static void test_long_table_key_not_dispatched(void) {
     bc[ip++] = OP_ACCEPT;
 
     VM vm;
-    snobol_buf_init(&out);
     init_test_vm(&vm, "cat", &out);
     vm.bc = bc;
     vm.bc_len = ip;
