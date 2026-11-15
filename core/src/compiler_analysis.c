@@ -194,18 +194,41 @@ void free_charclass_list(void) {
   compiler_case_insensitive = false;
 }
 
-void add_range(CCEntry *e, uint32_t start, uint32_t end) {
+/**
+ * Append one codepoint range to a character-class entry.
+ *
+ * Grows the range array when it is full.  The capacity is kept consistent on
+ * every path: it only advances after a successful reallocation, and it never
+ * exceeds UINT16_MAX because range_count is serialized as a 16-bit field in
+ * the bytecode.  A zero-size reallocation (which frees the array on
+ * glibc/macOS) can therefore never be attempted.
+ *
+ * @param e     Character-class entry to extend
+ * @param start First codepoint of the range
+ * @param end   Last codepoint of the range
+ * @return 0 on success, -1 when the capacity is exhausted, -2 when the
+ *         allocation failed
+ */
+int add_range(CCEntry *e, uint32_t start, uint32_t end) {
   if (e->range_count == e->range_cap) {
-    e->range_cap = e->range_cap ? e->range_cap * 2 : 4;
-    CpRange *nr = snobol_realloc(e->ranges, e->range_cap * sizeof(CpRange));
+    uint32_t new_cap = e->range_cap ? (uint32_t)e->range_cap * 2 : 4;
+    if (new_cap > UINT16_MAX) {
+      new_cap = UINT16_MAX;
+    }
+    if (new_cap <= e->range_count) {
+      return -1; /* full: the caller reports a compile error */
+    }
+    CpRange *nr = snobol_realloc(e->ranges, (size_t)new_cap * sizeof(CpRange));
     if (!nr) {
-      return; /* OOM: keep the old ranges */
+      return -2; /* OOM: keep the old ranges and the old capacity */
     }
     e->ranges = nr;
+    e->range_cap = (uint16_t)new_cap;
   }
   e->ranges[e->range_count].start = start;
   e->ranges[e->range_count].end = end;
   e->range_count++;
+  return 0;
 }
 
 int compare_ranges(const void *a, const void *b) {
@@ -250,10 +273,33 @@ void normalize_ranges(CCEntry *e) {
   e->range_count = (uint16_t)(write + 1);
 }
 
+/**
+ * Parse a character-class set string and register it.
+ *
+ * Ranges and single codepoints are added, case peers are expanded when
+ * case-insensitive compilation is active, and the resulting range list is
+ * normalized and deduplicated against the classes registered so far.
+ *
+ * @param s   Set string (UTF-8)
+ * @param len Length of @p s in bytes
+ * @return 1-based class id, or -1 when the class needs more than UINT16_MAX
+ *         ranges or the build could not allocate memory.  A failure also
+ *         records the reason through set_compile_error().
+ */
 int add_or_get_charclass(const char *s, size_t len) {
   CCEntry *ne = snobol_malloc(sizeof(*ne));
   memset(ne, 0, sizeof(*ne));
   ne->case_insensitive = (int)compiler_case_insensitive ? 1 : 0;
+  int status = 0;
+
+/* A failed range append abandons the partial class. */
+#define ADD_RANGE_OR_FAIL(begin, finish)       \
+  do {                                         \
+    status = add_range(ne, (begin), (finish)); \
+    if (status != 0) {                         \
+      goto fail;                               \
+    }                                          \
+  } while (0)
 
   size_t pos = 0;
   while (pos < len) {
@@ -274,26 +320,26 @@ int add_or_get_charclass(const char *s, size_t len) {
                        &end_bytes) &&
         end_cp > cp) {
       /* Expand X-Y range */
-      add_range(ne, cp, end_cp);
+      ADD_RANGE_OR_FAIL(cp, end_cp);
       if (compiler_case_insensitive) {
         if (cp >= 'A' && end_cp <= 'Z') {
-          add_range(ne, cp + 32, end_cp + 32);
+          ADD_RANGE_OR_FAIL(cp + 32, end_cp + 32);
         } else if (cp >= 'a' && end_cp <= 'z') {
-          add_range(ne, cp - 32, end_cp - 32);
+          ADD_RANGE_OR_FAIL(cp - 32, end_cp - 32);
         } else if (end_cp > 0x7F) {
           for (uint32_t c = cp; c <= end_cp; c++) {
             uint32_t up[2];
             int ulen;
             snobol_to_upper_cp(c, up, &ulen);
             if (up[0] != c) {
-              add_range(ne, up[0], up[0]);
+              ADD_RANGE_OR_FAIL(up[0], up[0]);
               if (ulen > 1) {
-                add_range(ne, up[1], up[1]);
+                ADD_RANGE_OR_FAIL(up[1], up[1]);
               }
             }
             uint32_t lo = snobol_to_lower_cp(c);
             if (lo != c) {
-              add_range(ne, lo, lo);
+              ADD_RANGE_OR_FAIL(lo, lo);
             }
           }
         }
@@ -303,31 +349,32 @@ int add_or_get_charclass(const char *s, size_t len) {
     }
 
     /* Single codepoint */
-    add_range(ne, cp, cp);
+    ADD_RANGE_OR_FAIL(cp, cp);
     if (compiler_case_insensitive) {
       if (cp >= 'A' && cp <= 'Z') {
-        add_range(ne, cp + 32, cp + 32);
+        ADD_RANGE_OR_FAIL(cp + 32, cp + 32);
       } else if (cp >= 'a' && cp <= 'z') {
-        add_range(ne, cp - 32, cp - 32);
+        ADD_RANGE_OR_FAIL(cp - 32, cp - 32);
       } else if (cp > 0x7F) {
         uint32_t up[2];
         int ulen;
         snobol_to_upper_cp(cp, up, &ulen);
         if (up[0] != cp) {
-          add_range(ne, up[0], up[0]);
+          ADD_RANGE_OR_FAIL(up[0], up[0]);
           if (ulen > 1) {
-            add_range(ne, up[1], up[1]);
+            ADD_RANGE_OR_FAIL(up[1], up[1]);
           }
         }
         uint32_t lo = snobol_to_lower_cp(cp);
         if (lo != cp) {
-          add_range(ne, lo, lo);
+          ADD_RANGE_OR_FAIL(lo, lo);
         }
       }
     }
 
     pos += cp_bytes;
   }
+#undef ADD_RANGE_OR_FAIL
   normalize_ranges(ne);
 
   CCEntry *e = charclass_head;
@@ -358,6 +405,14 @@ int add_or_get_charclass(const char *s, size_t len) {
   }
   charclass_count++;
   return (int)charclass_count;
+
+fail:
+  set_compile_error(status == -1 ? SNOBOL_CC_TOO_LARGE : SNOBOL_CC_NOMEM);
+  if (ne->ranges) {
+    snobol_free(ne->ranges);
+  }
+  snobol_free(ne);
+  return -1;
 }
 
 /* ---------------------------------------------------------------------------

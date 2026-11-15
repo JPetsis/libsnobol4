@@ -837,6 +837,156 @@ static void test_cov_compiler_ci_unicode_classes(void) {
   }
 }
 
+/**
+ * Regression for the 16-bit character-class range capacity.
+ *
+ * add_range() used to double a uint16_t capacity, so 32768 ranges wrapped the
+ * capacity to 0, freed the array with realloc(p, 0) and kept writing at
+ * ranges[32768].  Any case-insensitive class wide enough to expand past the
+ * capacity must now abort the compile with a diagnostic instead.
+ */
+static char *cc_range_set(int copies, size_t *out_len) {
+  /* U+0100 - U+0FFF, one range token per copy: 6 bytes, roughly 800-1600
+   * folded ranges each (measured: 40 copies fit, 80 do not). */
+  static const char token[] = "\xC4\x80-\xE0\xBF\xBF";
+  size_t token_len = sizeof(token) - 1;
+  char *set = (char *)malloc((size_t)copies * token_len + 1);
+  for (int i = 0; i < copies; i++) {
+    memcpy(set + (size_t)i * token_len, token, token_len);
+  }
+  set[(size_t)copies * token_len] = '\0';
+  *out_len = (size_t)copies * token_len;
+  return set;
+}
+
+static char *cc_class_source(const char *op, const char *set, size_t set_len,
+                             size_t *out_len) {
+  size_t cap = set_len + strlen(op) + sizeof("('')");
+  char *src = (char *)malloc(cap);
+  int n = snprintf(src, cap, "%s('%s')", op, set);
+  *out_len = (size_t)n;
+  return src;
+}
+
+static void test_cov_compiler_ci_range_capacity(void) {
+  test_suite("Compiler: character-class range capacity");
+
+  snobol_context_t *ctx = snobol_context_create();
+
+  /* Every primitive that registers a class must reject one whose folded
+   * expansion would overflow the 16-bit range count. */
+  {
+    static const char *ops[] = {"SPAN", "ANY", "BREAK", "NOTANY", "BREAKX"};
+    size_t set_len = 0;
+    char *set = cc_range_set(80, &set_len);
+
+    for (size_t i = 0; i < sizeof(ops) / sizeof(ops[0]); i++) {
+      size_t src_len = 0;
+      char *src = cc_class_source(ops[i], set, set_len, &src_len);
+      char msg[96];
+
+      char *err = nullptr;
+      snobol_pattern_t *p = snobol_pattern_compile_ex(
+          ctx, src, src_len, SNOBOL_FLAG_CASE_INSENSITIVE, &err);
+      snprintf(msg, sizeof(msg), "%s: over-capacity class is rejected", ops[i]);
+      test_assert(p == nullptr, msg);
+      snprintf(msg, sizeof(msg), "%s: rejection names the range capacity",
+               ops[i]);
+      test_assert(err != nullptr && strstr(err, "65535 ranges") != nullptr,
+                  msg);
+
+      free(err);
+      free(src);
+    }
+    free(set);
+  }
+
+  /* Alternate representation: repeated single codepoints, not ranges. */
+  {
+    const char *cp = "\xC3\x84"; /* U+00C4, two ranges per copy */
+    size_t copies = 40000;
+    size_t set_len = copies * 2;
+    char *set = (char *)malloc(set_len + 1);
+    for (size_t i = 0; i < copies; i++) {
+      memcpy(set + i * 2, cp, 2);
+    }
+    set[set_len] = '\0';
+    size_t src_len = 0;
+    char *src = cc_class_source("SPAN", set, set_len, &src_len);
+
+    char *err = nullptr;
+    snobol_pattern_t *p = snobol_pattern_compile_ex(
+        ctx, src, src_len, SNOBOL_FLAG_CASE_INSENSITIVE, &err);
+    test_assert(p == nullptr, "over-capacity CI codepoint list is rejected");
+    test_assert(err != nullptr && strstr(err, "65535 ranges") != nullptr,
+                "codepoint-list rejection names the range capacity");
+
+    free(err);
+    free(src);
+    free(set);
+  }
+
+  /* Same input without case folding stays far below the capacity. */
+  {
+    size_t set_len = 0;
+    char *set = cc_range_set(80, &set_len);
+    size_t src_len = 0;
+    char *src = cc_class_source("SPAN", set, set_len, &src_len);
+
+    char *err = nullptr;
+    snobol_pattern_t *p = snobol_pattern_compile_ex(ctx, src, src_len, 0, &err);
+    test_assert(p != nullptr, "case-sensitive 80-range class compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_match(p, "\xE0\xBF\xBF", 3);
+      test_assert((m && m->success) != 0, "case-sensitive class still matches");
+      snobol_match_free(m);
+      snobol_pattern_free(p);
+    }
+    free(err);
+    free(src);
+    free(set);
+  }
+
+  /* Legitimate behavior on the same boundary: a class that fills the old
+   * 32768-entry capacity still compiles and matches across both cases. */
+  {
+    size_t set_len = 0;
+    char *set = cc_range_set(40, &set_len);
+    size_t src_len = 0;
+    char *src = cc_class_source("SPAN", set, set_len, &src_len);
+
+    char *err = nullptr;
+    snobol_pattern_t *p = snobol_pattern_compile_ex(
+        ctx, src, src_len, SNOBOL_FLAG_CASE_INSENSITIVE, &err);
+    test_assert(p != nullptr, "under-capacity CI class compiles");
+    if (p) {
+      snobol_match_t *m = snobol_pattern_match(p, "\xC4\x80", 2);
+      test_assert((m && m->success) != 0, "CI class matches a range member");
+      snobol_match_free(m);
+      snobol_pattern_free(p);
+    }
+    free(err);
+    err = nullptr;
+
+    /* The failed compiles above must not poison the shared class list. */
+    const char *plain = "SPAN('\xC3\x84-\xC3\x96')";
+    snobol_pattern_t *q = snobol_pattern_compile_ex(
+        ctx, plain, strlen(plain), SNOBOL_FLAG_CASE_INSENSITIVE, &err);
+    test_assert(q != nullptr, "compiler still works after a rejected class");
+    if (q) {
+      snobol_match_t *m = snobol_pattern_match(q, "\xC3\xA4", 2);
+      test_assert((m && m->success) != 0, "follow-up CI class matches");
+      snobol_match_free(m);
+      snobol_pattern_free(q);
+    }
+    free(err);
+    free(src);
+    free(set);
+  }
+
+  snobol_context_destroy(ctx);
+}
+
 void test_compiler_suite(void) {
   test_suite("Compiler Tests");
 
@@ -930,4 +1080,5 @@ void test_compiler_suite(void) {
   test_cov_source_primitives_behavior();
   test_cov_source_emit_table_assign();
   test_cov_compiler_ci_unicode_classes();
+  test_cov_compiler_ci_range_capacity();
 }

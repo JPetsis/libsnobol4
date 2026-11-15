@@ -28,7 +28,7 @@ static bool label_has_error_c = false;
  * sub-node is not overwritten by the parent's failure. */
 static char compile_error_c[256];
 
-static void set_compile_error(const char *msg) {
+void set_compile_error(const char *msg) {
   if (compile_error_c[0] == '\0') {
     snprintf(compile_error_c, sizeof(compile_error_c), "%s", msg);
   }
@@ -137,6 +137,9 @@ static int emit_lit_case_insensitive_c(CodeBuf *c, const char *s, size_t len) {
     /* add_or_get_charclass will expand the codepoint's case peer when
      * compiler_case_insensitive is set. */
     int setid = add_or_get_charclass(s + pos, (size_t)cp_bytes);
+    if (setid < 0) {
+      return -1; /* add_or_get_charclass set the diagnostic */
+    }
     cb_emit_u8(c, OP_ANY);
     cb_emit_u16(c, (uint16_t)setid);
     pos += (size_t)cp_bytes;
@@ -146,6 +149,9 @@ static int emit_lit_case_insensitive_c(CodeBuf *c, const char *s, size_t len) {
 
 static int emit_span_c(const char *set, size_t len, CodeBuf *c) {
   int setid = add_or_get_charclass(set, len);
+  if (setid < 0) {
+    return -1; /* add_or_get_charclass set the diagnostic */
+  }
   cb_emit_u8(c, OP_SPAN);
   cb_emit_u16(c, (uint16_t)setid);
   return 0;
@@ -153,6 +159,9 @@ static int emit_span_c(const char *set, size_t len, CodeBuf *c) {
 
 static int emit_break_c(const char *set, size_t len, CodeBuf *c) {
   int setid = add_or_get_charclass(set, len);
+  if (setid < 0) {
+    return -1; /* add_or_get_charclass set the diagnostic */
+  }
   cb_emit_u8(c, OP_BREAK);
   cb_emit_u16(c, (uint16_t)setid);
   return 0;
@@ -161,7 +170,11 @@ static int emit_break_c(const char *set, size_t len, CodeBuf *c) {
 static int emit_any_c(const char *set, size_t len, CodeBuf *c) {
   uint16_t setid = 0;
   if (set && len > 0) {
-    setid = (uint16_t)add_or_get_charclass(set, len);
+    int id = add_or_get_charclass(set, len);
+    if (id < 0) {
+      return -1; /* add_or_get_charclass set the diagnostic */
+    }
+    setid = (uint16_t)id;
   }
   cb_emit_u8(c, OP_ANY);
   cb_emit_u16(c, setid);
@@ -170,6 +183,9 @@ static int emit_any_c(const char *set, size_t len, CodeBuf *c) {
 
 static int emit_notany_c(const char *set, size_t len, CodeBuf *c) {
   int setid = add_or_get_charclass(set, len);
+  if (setid < 0) {
+    return -1; /* add_or_get_charclass set the diagnostic */
+  }
   cb_emit_u8(c, OP_NOTANY);
   cb_emit_u16(c, (uint16_t)setid);
   return 0;
@@ -355,6 +371,9 @@ static int emit_emit_c(const char *text, size_t len, int reg, CodeBuf *c) {
 /* Pattern primitive emit helpers (C-AST path) */
 static int emit_breakx_c(const char *set, size_t len, CodeBuf *c) {
   int setid = add_or_get_charclass(set, len);
+  if (setid < 0) {
+    return -1; /* add_or_get_charclass set the diagnostic */
+  }
   cb_emit_u8(c, OP_BREAKX);
   cb_emit_u16(c, (uint16_t)setid);
   return 0;

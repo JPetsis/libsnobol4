@@ -71,9 +71,16 @@ void snobol_diag(const char *msg);
 
 void free_charclass_list(void);
 int add_or_get_charclass(const char *s, size_t len);
-void add_range(CCEntry *e, uint32_t start, uint32_t end);
+int add_range(CCEntry *e, uint32_t start, uint32_t end);
 void normalize_ranges(CCEntry *e);
 int compare_ranges(const void *a, const void *b);
+
+/* Specific code-generation error, surfaced by compile_ast_error(). */
+void set_compile_error(const char *msg);
+
+/* Character-class build failures reported through set_compile_error(). */
+#define SNOBOL_CC_TOO_LARGE "character class expansion exceeds 65535 ranges"
+#define SNOBOL_CC_NOMEM "out of memory while building a character class"
 
 /* ---------------------------------------------------------------------------
  * SPLIT/ANY fusion pass (shared)

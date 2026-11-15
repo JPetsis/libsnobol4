@@ -33,6 +33,19 @@ tagged `php/vX.Y.Z`.
   revision-suffixed names on both the releases and archives listings, and a
   manual backfill workflow can attach a missing Windows PIE asset to an
   existing release tag without moving it.
+- **Character-class range capacity overflow**: `add_range()` doubled a
+  `uint16_t` capacity, so once an entry held 32768 ranges the next doubling
+  wrapped the capacity to zero, `realloc(p, 0)` released the range array, and
+  the following range was written at index 32768 through the freed pointer.
+  Case-insensitive compilation reached that with a short pattern, because
+  every codepoint of a case-folded range above U+007F contributes up to three
+  extra ranges (`SPAN('\u0100-\u0FFF')` repeated a few dozen times). The
+  capacity is now computed in 32 bits, clamped to `UINT16_MAX` (the limit the
+  bytecode format stores for `range_count`) and only committed after a
+  successful reallocation; a class that would need more ranges, or whose
+  growth cannot be allocated, fails the compile with `character class
+  expansion exceeds 65535 ranges` (or an out-of-memory diagnostic) instead of
+  corrupting the heap.
 - **Template table-key length desync**: `compile_template_to_bytecode()` writes
   a literal `OP_EMIT_TABLE` key as `key_len:u16` followed by the inline key
   bytes, but the VM handler only advanced the instruction pointer when
@@ -46,7 +59,7 @@ tagged `php/vX.Y.Z`.
   than 65535 bytes, which the 16-bit `key_len` field cannot encode; it
   previously wrote a truncated length followed by the full key payload.
 
-C test suite: **412 cases / 74,409 assertions** (custom runner).
+C test suite: **413 cases / 74,427 assertions** (custom runner).
 
 ## [1.1.0] - 2026-11-13
 
