@@ -1454,14 +1454,20 @@ bool vm_run(VM *vm) {
     const char *value = nullptr;
 
     if (key_type == 0) {
-      /* Literal key: read key_len and key_bytes from bytecode */
+      /* Literal key: key_len is the encoded instruction length, so the
+       * payload is always skipped, whatever the lookup policy below decides.
+       * Advancing only inside the lookup branch leaves ip pointing at key
+       * data, which is then dispatched as opcodes. */
       uint16_t key_len = read_u16(vm->bc, vm->bc_len, &vm->ip);
+      size_t key_end = vm->ip + key_len; /* key_len <= UINT16_MAX */
+      if (key_end > vm->bc_len) {
+        goto fail_ret; /* truncated key payload */
+      }
       if (key_len > 0 && key_len < 1024) {
         char *key = (char *)snobol_malloc(key_len + 1);
         if (key) {
           memcpy(key, vm->bc + vm->ip, key_len);
           key[key_len] = '\0';
-          vm->ip += key_len;
 
           /* Lookup and emit */
           if (table) {
@@ -1470,6 +1476,7 @@ bool vm_run(VM *vm) {
           snobol_free(key);
         }
       }
+      vm->ip = key_end;
     } else if (key_type == 1) {
       /* Capture-derived key: read key_reg */
       uint8_t key_reg = read_u8(vm->bc, vm->bc_len, &vm->ip);
@@ -1492,6 +1499,11 @@ bool vm_run(VM *vm) {
           snobol_free(key);
         }
       }
+    } else {
+      /* Unknown key_type: the payload length is undefined, so the
+       * instruction cannot be consumed.  Stop instead of decoding payload
+       * bytes as opcodes. */
+      goto fail_ret;
     }
 
     /* Emit the value (or nothing if not found - graceful degradation) */

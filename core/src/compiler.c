@@ -691,7 +691,11 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc,
  * pointing at the opening '[' of the key and consumes: '[' then a quoted
  * literal key ("'sky'") or a capture-register key ("v0" / "$v0"), the
  * closing ']', and an optional outer ']'.  On malformed input, emits a
- * literal '$' (repositioning *ip to start_of_dollar + 1) and returns false.
+ * literal '$' (repositioning *ip to start_of_dollar + 1).
+ *
+ * Returns 0 when an OP_EMIT_TABLE instruction was emitted, 1 when the input
+ * fell back to a literal '$', and -1 when the key bytes cannot be encoded
+ * because key_len does not fit the 16-bit length field.
  *
  * Format (literal key): opcode u8, table_id u16 (0xFFFF=unbound),
  *   key_type u8 (0=literal), name_len u8, name_bytes[name_len],
@@ -699,10 +703,10 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc,
  * Format (capture key): opcode u8, table_id u16 (0xFFFF=unbound),
  *   key_type u8 (1=capture), name_len u8, name_bytes[name_len], key_reg u8
  */
-static bool template_emit_table_lookup(CodeBuf *cb, const char *tpl, size_t len,
-                                       size_t *ip, size_t start_of_dollar,
-                                       const char *table_name,
-                                       size_t table_name_len) {
+static int template_emit_table_lookup(CodeBuf *cb, const char *tpl, size_t len,
+                                      size_t *ip, size_t start_of_dollar,
+                                      const char *table_name,
+                                      size_t table_name_len) {
   bool quoted = (*ip < len && tpl[*ip] == '\'') != 0;
   if (quoted) {
     (*ip)++; /* skip opening quote */
@@ -723,6 +727,12 @@ static bool template_emit_table_lookup(CodeBuf *cb, const char *tpl, size_t len,
       (*ip)++; /* consume outer ']' if present */
     }
 
+    /* key_len is a 16-bit field; a longer key cannot be encoded without
+     * desynchronising the handler, which sizes the instruction by it. */
+    if (key_len > 0xFFFFu) {
+      return -1;
+    }
+
     cb_emit_u8(cb, OP_EMIT_TABLE);
     cb_emit_u16(cb, (uint16_t)SNBL_TABLE_ID_UNBOUND);
     cb_emit_u8(cb, 0); /* key_type: 0 = literal key */
@@ -730,7 +740,7 @@ static bool template_emit_table_lookup(CodeBuf *cb, const char *tpl, size_t len,
     cb_emit_bytes(cb, (const uint8_t *)table_name, table_name_len);
     cb_emit_u16(cb, (uint16_t)key_len);
     cb_emit_bytes(cb, (const uint8_t *)(tpl + key_start), key_len);
-    return true;
+    return 0;
   }
 
   /* Capture-derived key: accept vN, $vN (documented $TABLE[$v0] form), or
@@ -764,7 +774,7 @@ static bool template_emit_table_lookup(CodeBuf *cb, const char *tpl, size_t len,
   cb_emit_u8(cb, (uint8_t)table_name_len);
   cb_emit_bytes(cb, (const uint8_t *)table_name, table_name_len);
   cb_emit_u8(cb, (uint8_t)key_reg);
-  return true;
+  return 0;
 
 emit_literal:
   *ip = start_of_dollar + 1;
@@ -773,7 +783,7 @@ emit_literal:
   cb_emit_u32(cb, (uint32_t)off);
   cb_emit_u32(cb, 1);
   cb_emit_u8(cb, '$');
-  return false;
+  return 1;
 }
 
 int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
@@ -932,8 +942,11 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
 
           /* Skip '[' and parse key */
           i++; /* skip '[' */
-          template_emit_table_lookup(&cb, tpl, len, &i, start_of_dollar,
-                                     table_name, table_name_len);
+          if (template_emit_table_lookup(&cb, tpl, len, &i, start_of_dollar,
+                                         table_name, table_name_len) < 0) {
+            cb_free(&cb);
+            return -1;
+          }
           continue;
         } else {
           cb_emit_u8(&cb, OP_EMIT_CAPTURE);
@@ -957,8 +970,11 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
             return -1;
           }
           i++; /* skip '[' */
-          template_emit_table_lookup(&cb, tpl, len, &i, start_of_dollar,
-                                     table_name, table_name_len);
+          if (template_emit_table_lookup(&cb, tpl, len, &i, start_of_dollar,
+                                         table_name, table_name_len) < 0) {
+            cb_free(&cb);
+            return -1;
+          }
           continue;
         }
         i = start_of_dollar + 1;

@@ -17,6 +17,15 @@ core versions correspond 1:1.
 
 ### Fixed
 
+- **Security: a 1024+ byte template table key is no longer decoded as opcodes.**
+  `Pattern::subst()` compiles a `$v0[TABLE['…']]` reference into `OP_EMIT_TABLE`
+  with the literal key inlined as `key_len:u16` plus key bytes, but the core VM
+  advanced the instruction pointer only for keys shorter than 1024 bytes. A
+  longer key left the pointer on the first key byte, so key data was dispatched
+  as SNOBOL opcodes and out-of-range bytes indexed the computed-goto table out
+  of bounds. The core handler (shared with this binding through
+  `core_amalgam.c`) now skips the key payload unconditionally;
+  `TemplateOpsTest::testSubstLongTableKeyIsNotExecuted` covers the binding path.
 - **Security: the `PatternHelper` slot cache is now request-scoped.** The
   cache behind the string-pattern convenience methods (`matchOnce`,
   `matchAll`, `split`, `replace`, `formattedSubst`) is a file-scope static

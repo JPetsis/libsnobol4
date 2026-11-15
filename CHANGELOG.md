@@ -33,8 +33,20 @@ tagged `php/vX.Y.Z`.
   revision-suffixed names on both the releases and archives listings, and a
   manual backfill workflow can attach a missing Windows PIE asset to an
   existing release tag without moving it.
+- **Template table-key length desync**: `compile_template_to_bytecode()` writes
+  a literal `OP_EMIT_TABLE` key as `key_len:u16` followed by the inline key
+  bytes, but the VM handler only advanced the instruction pointer when
+  `key_len < 1024`. A quoted key of 1024 bytes or more therefore left `ip` on
+  the first key byte, and the decode loop dispatched key data as opcodes;
+  out-of-range opcode bytes indexed the computed-goto table out of bounds.
+  `OP_EMIT_TABLE` now skips `key_len` bytes unconditionally, so the 1024-byte
+  cutoff stays a lookup-size policy and never governs the instruction length,
+  and it fails the run when the key payload would extend past the bytecode
+  buffer or the key type is unknown. The compiler also rejects keys longer
+  than 65535 bytes, which the 16-bit `key_len` field cannot encode; it
+  previously wrote a truncated length followed by the full key payload.
 
-C test suite: **411 cases / 74,391 assertions** (custom runner).
+C test suite: **412 cases / 74,409 assertions** (custom runner).
 
 ## [1.1.0] - 2026-11-13
 

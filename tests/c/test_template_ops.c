@@ -717,6 +717,196 @@ static void test_e2e_table_capture_key(void) {
   table_release(table);
 }
 
+/* Compile a template, bind the table name "dict" to id 0, and run it with
+ * capture register 0 set to "cat".  Returns false when compilation or binding
+ * fails.  The caller owns @p out. */
+static bool run_dict_template(const char *tpl, size_t tpl_len,
+                              snobol_table_t *table, snobol_buf *out) {
+  uint8_t *bc = nullptr;
+  size_t bc_len = 0;
+  if (compile_template_to_bytecode(tpl, tpl_len, &bc, &bc_len) != 0) {
+    return false;
+  }
+  const char *names[] = {"dict"};
+  uint16_t ids[] = {0};
+  if (snobol_template_bind_tables(bc, bc_len, names, ids, 1) != 0) {
+    compiler_free(bc);
+    return false;
+  }
+
+  VM vm;
+  init_test_vm(&vm, "cat", out);
+  vm.bc = bc;
+  vm.bc_len = bc_len;
+  vm.cap_start[0] = 0;
+  vm.cap_end[0] = 3;
+  vm.max_cap_used = 1;
+  uint16_t assigned;
+  vm_register_table(&vm, table, &assigned);
+  (void)vm_run(&vm);
+  cleanup_test_vm(&vm);
+  compiler_free(bc);
+  return true;
+}
+
+/* Assemble prefix + key + suffix into a heap buffer of explicit length. */
+static char *assemble_template(const char *prefix, const char *key,
+                               size_t key_len, const char *suffix,
+                               size_t *out_len) {
+  size_t plen = strlen(prefix);
+  size_t slen = strlen(suffix);
+  char *tpl = (char *)malloc(plen + key_len + slen);
+  if (!tpl) {
+    return nullptr;
+  }
+  memcpy(tpl, prefix, plen);
+  memcpy(tpl + plen, key, key_len);
+  memcpy(tpl + plen + key_len, suffix, slen);
+  *out_len = plen + key_len + slen;
+  return tpl;
+}
+
+/* A literal key of 1024+ bytes is instruction payload, never code: the VM must
+ * skip key_len bytes even though such a key is not looked up.  The key below
+ * starts with a real OP_EMIT_CAPTURE instruction, so a desynchronised decode
+ * would emit the capture and show up as output. */
+static void test_long_table_key_not_dispatched(void) {
+  test_suite("Template Ops: 1024+ byte table key is skipped, not executed");
+
+  enum { KEY_LEN = 2048 };
+  char key[KEY_LEN];
+  key[0] = (char)OP_EMIT_CAPTURE;
+  key[1] = 0; /* capture register 0 */
+  memset(key + 2, OP_NOP, KEY_LEN - 2);
+
+  snobol_table_t *table = table_create("dict");
+  (void)table_set(table, "sky", "blue");
+
+  /* $v0[TABLE['...']] form. */
+  size_t tpl_len = 0;
+  char *tpl = assemble_template("$v0[dict['", key, KEY_LEN, "']]", &tpl_len);
+  snobol_buf out;
+  snobol_buf_init(&out);
+  bool ran = tpl && run_dict_template(tpl, tpl_len, table, &out);
+  test_assert(ran, "over-long literal key compiles, binds and runs");
+  test_assert(out.len == 0, "key bytes are not dispatched as opcodes");
+  snobol_buf_free(&out);
+  free(tpl);
+
+  /* $TABLE['...'] form reaches the same compiler path. */
+  tpl = assemble_template("$dict['", key, KEY_LEN, "']", &tpl_len);
+  snobol_buf_init(&out);
+  ran = tpl && run_dict_template(tpl, tpl_len, table, &out);
+  test_assert(ran, "bare $TABLE form with over-long key runs");
+  test_assert(out.len == 0, "bare $TABLE key bytes are not dispatched");
+  snobol_buf_free(&out);
+  free(tpl);
+
+  /* Paired control: a short key through the same boundary still resolves. */
+  tpl = assemble_template("$v0[dict['", "sky", 3, "']]", &tpl_len);
+  snobol_buf_init(&out);
+  ran = tpl && run_dict_template(tpl, tpl_len, table, &out);
+  test_assert(ran, "short-key template runs");
+  test_assert((out.len == 4 && memcmp(out.data, "blue", 4) == 0) != 0,
+              "short literal key still resolves");
+  snobol_buf_free(&out);
+  free(tpl);
+
+  /* 65535 bytes is the largest key the 16-bit length field can encode: it
+   * compiles and is skipped, not decoded. */
+  char *big = (char *)malloc(65536);
+  test_assert(big != nullptr, "64 KiB key buffer allocated");
+  if (big) {
+    big[0] = (char)OP_EMIT_CAPTURE;
+    big[1] = 0; /* capture register 0 */
+    memset(big + 2, OP_NOP, 65535 - 2);
+    big[65535] = 'k';
+
+    tpl = assemble_template("$v0[dict['", big, 65535, "']]", &tpl_len);
+    snobol_buf_init(&out);
+    ran = tpl && run_dict_template(tpl, tpl_len, table, &out);
+    test_assert(ran, "65535-byte key compiles, binds and runs");
+    test_assert(out.len == 0, "65535-byte key is skipped, not decoded");
+    snobol_buf_free(&out);
+    free(tpl);
+
+    /* 65536 bytes does not fit key_len: the compiler must reject it instead
+     * of emitting a truncated length for the full payload. */
+    tpl = assemble_template("$v0[dict['", big, 65536, "']]", &tpl_len);
+    uint8_t *rej_bc = nullptr;
+    size_t rej_len = 0;
+    int rc2 =
+        tpl ? compile_template_to_bytecode(tpl, tpl_len, &rej_bc, &rej_len) : 0;
+    test_assert(rc2 == -1, "65536-byte key fails to compile");
+    test_assert(rej_bc == nullptr, "no bytecode for an unencodable key");
+    free(tpl);
+    free(big);
+  }
+
+  /* Hand-built bytecode: exact policy boundary (key_len == 1024), so the
+   * check holds for bytecode that does not come from the template compiler. */
+  uint8_t *bc = (uint8_t *)malloc(7 + 1024 + 1);
+  test_assert(bc != nullptr, "hand-built bytecode allocated");
+  if (bc) {
+    size_t ip = 0;
+    bc[ip++] = OP_EMIT_TABLE;
+    bc[ip++] = 0;
+    bc[ip++] = 0; /* table_id 0 */
+    bc[ip++] = 0; /* key_type literal */
+    bc[ip++] = 0; /* name_len */
+    bc[ip++] = 0x04;
+    bc[ip++] = 0x00;            /* key_len 1024 */
+    bc[ip++] = OP_EMIT_CAPTURE; /* key data that would be decoded */
+    bc[ip++] = 0;
+    memset(bc + ip, OP_NOP, 1024 - 2);
+    ip += 1024 - 2;
+    bc[ip++] = OP_ACCEPT;
+
+    VM vm;
+    snobol_buf_init(&out);
+    init_test_vm(&vm, "cat", &out);
+    vm.bc = bc;
+    vm.bc_len = ip;
+    vm.cap_start[0] = 0;
+    vm.cap_end[0] = 3;
+    vm.max_cap_used = 1;
+    uint16_t assigned;
+    vm_register_table(&vm, table, &assigned);
+    test_assert(vm_run(&vm) != 0, "bytecode with a 1024-byte key completes");
+    test_assert(out.len == 0, "boundary-length key is skipped, not decoded");
+    cleanup_test_vm(&vm);
+    snobol_buf_free(&out);
+    free(bc);
+  }
+
+  /* Truncated key payload: the length guard fails the run instead of reading
+   * past the bytecode buffer (caller-supplied bytecode). */
+  static const uint8_t trunc_bc[] = {OP_EMIT_TABLE, 0,   0,   0,   0,  0x00,
+                                     0x10,          'a', 'b', 'c', 'd'};
+  VM vm;
+  init_test_vm(&vm, "cat", &out);
+  vm.bc = trunc_bc;
+  vm.bc_len = sizeof(trunc_bc);
+  test_assert(vm_run(&vm) == false, "truncated key payload fails the run");
+  test_assert(out.len == 0, "truncated key payload emits nothing");
+  cleanup_test_vm(&vm);
+  snobol_buf_free(&out);
+
+  /* Unknown key_type: the payload layout is undefined, so the handler must
+   * stop instead of decoding the bytes that follow as opcodes. */
+  static const uint8_t bad_type_bc[] = {OP_EMIT_TABLE,   0, 0,        2, 0,
+                                        OP_EMIT_CAPTURE, 0, OP_ACCEPT};
+  init_test_vm(&vm, "cat", &out);
+  vm.bc = bad_type_bc;
+  vm.bc_len = sizeof(bad_type_bc);
+  test_assert(vm_run(&vm) == false, "unknown key_type fails the run");
+  test_assert(out.len == 0, "unknown key_type emits nothing");
+  cleanup_test_vm(&vm);
+  snobol_buf_free(&out);
+
+  table_release(table);
+}
+
 #endif /* SNOBOL_DYNAMIC_PATTERN */
 
 /* legacy OP_EMIT_EXPR bytecode (discriminant 1=upper) still works */
@@ -1249,6 +1439,7 @@ void test_template_ops_suite(void) {
   test_bind_tables_unresolvable();
   test_e2e_table_literal_key();
   test_e2e_table_capture_key();
+  test_long_table_key_not_dispatched();
 #endif
   test_legacy_emit_expr();
   test_documented_table_syntax();

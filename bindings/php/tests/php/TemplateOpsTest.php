@@ -107,6 +107,35 @@ class TemplateOpsTest extends TestCase
         $pattern->subst('anything', $tpl, []);
     }
 
+    public function testSubstLongTableKeyIsNotExecuted(): void
+    {
+        $table = new Table();
+        $table->set('sky', 'blue');
+
+        // A literal key of 1024+ bytes is instruction payload, not code: the
+        // VM skipped it only for keys shorter than 1024, which left the
+        // instruction pointer on the first key byte and decoded the key as
+        // opcodes.  The key starts with OP_EMIT_CAPTURE (18) + register 0,
+        // which would emit the capture into the output if decoded.
+        $key = \chr(18) . \chr(0) . str_repeat(\chr(41), 2048 - 2);
+
+        $pattern = $this->makeCap0Pattern();
+        $result = $pattern->subst('anything', "\$v0[colors['" . $key . "']]", ['colors' => $table]);
+        $this->assertSame('', $result);
+    }
+
+    public function testSubstTableKeyTooLongToEncodeThrows(): void
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Failed to compile template');
+
+        $pattern = $this->makeCap0Pattern();
+        // key_len is a 16-bit field; a 65536-byte key cannot be encoded, and
+        // a truncated length would desynchronise the VM instruction pointer
+        $tpl = "\$v0[colors['" . str_repeat('k', 65536) . "']]";
+        $pattern->subst('anything', $tpl, []);
+    }
+
     public function testSubstLengthRegression(): void
     {
         $pattern = $this->makeCap0Pattern();
