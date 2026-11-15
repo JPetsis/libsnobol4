@@ -1755,6 +1755,147 @@ void snobol_fusion_free(snobol_fusion_t *fusion) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Required-literal pruning: does one SPLIT branch bypass the literal?
+ *
+ * The scan that looks for a required literal tracks the last OP_LIT it has
+ * seen and then asks whether either SPLIT branch can complete without
+ * executing that instruction.  Answering that by inspecting only the branch's
+ * first instruction is wrong: a branch that begins with a zero-width op
+ * (OP_ANCHOR, OP_POS, OP_LEN, OP_CAP_START, ...) puts the JMP one instruction
+ * further along, and a branch with a multi-instruction body hides it even
+ * more.  The prefilter built from such a "required" literal then rejects
+ * subjects the pattern matches.
+ *
+ * Walk the branch's control flow instead: follow the linear successor, both
+ * SPLIT edges and the JMP target until the branch either reaches the literal
+ * (this path executes it), reaches ACCEPT/SUCCEED (it accepts without the
+ * literal), or hits a dead end.  Anything the walk cannot decode is reported
+ * as a bypass, so a literal is never published as required on a guess.
+ *
+ * The walk is forward-only.  A REPEAT_STEP back edge re-enters the loop body,
+ * whose continuations are already explored from there (the body always
+ * reaches this step again before it can exit), so only the loop exit is
+ * followed; a raw backward JMP cannot be followed forwards and is reported as
+ * a bypass.  PRUNE_WALK_MAX bounds the work per branch.
+ * ---------------------------------------------------------------------------
+ */
+enum { PRUNE_WALK_MAX = 128, PRUNE_SPLIT_MAX = 64 };
+
+/* Queue one forward-only walk destination.  Returns false when the edge does
+ * not move forward or the stack is full; both mean the branch layout is not
+ * understood and the caller must treat the branch as a bypass. */
+static inline bool prune_push_forward(size_t *stack, size_t *sp, size_t from,
+                                      size_t to) {
+  if (to <= from || *sp >= PRUNE_WALK_MAX) {
+    return false;
+  }
+  stack[(*sp)++] = to;
+  return true;
+}
+
+static bool split_branch_bypasses_lit(const uint8_t *bc, size_t bc_len,
+                                      size_t start, size_t lit_off) {
+  size_t stack[PRUNE_WALK_MAX];
+  size_t sp = 0;
+  size_t steps = 0;
+
+  stack[sp++] = start;
+  while (sp > 0) {
+    size_t p = stack[--sp];
+    if (p == lit_off) {
+      continue; /* This path executes the literal. */
+    }
+    if (p >= bc_len || ++steps > PRUNE_WALK_MAX) {
+      return true;
+    }
+    uint8_t op = bc[p];
+    size_t len;
+    switch (op) {
+      case OP_ACCEPT:
+      case OP_SUCCEED: return true; /* Accepts without the literal. */
+      case OP_FAIL:
+      case OP_ABORT: continue; /* Dead end; cannot accept. */
+      case OP_JMP:
+        if (p + 5 > bc_len ||
+            (!prune_push_forward(stack, &sp, p,
+                                 (size_t)search_read_u32(bc, p + 1)))) {
+          return true;
+        }
+        continue;
+      case OP_SPLIT:
+        if (p + 9 > bc_len ||
+            (!prune_push_forward(stack, &sp, p,
+                                 (size_t)search_read_u32(bc, p + 5))) ||
+            (!prune_push_forward(stack, &sp, p,
+                                 (size_t)search_read_u32(bc, p + 1)))) {
+          return true;
+        }
+        continue;
+      case OP_REPEAT_INIT:
+        if (p + 14 > bc_len) {
+          return true;
+        }
+        /* min==0: the zero-iteration skip edge is a real path. */
+        if (search_read_u32(bc, p + 2) == 0 &&
+            (!prune_push_forward(stack, &sp, p,
+                                 (size_t)search_read_u32(bc, p + 10)))) {
+          return true;
+        }
+        if (!prune_push_forward(stack, &sp, p, p + 14)) {
+          return true;
+        }
+        continue;
+      case OP_REPEAT_STEP:
+        if (p + 6 > bc_len || (!prune_push_forward(stack, &sp, p, p + 6))) {
+          return true;
+        }
+        continue;
+      case OP_LIT:
+        if (p + 9 > bc_len) {
+          return true;
+        }
+        if (search_read_u32(bc, p + 1) != p + 9) {
+          return true; /* Payload not inline: layout not understood. */
+        }
+        len = 9 + (size_t)search_read_u32(bc, p + 5);
+        break;
+      /* Fixed-width instructions without control flow (vm_exec.c). */
+      case OP_CAP_START:
+      case OP_CAP_END:
+      case OP_ANCHOR:
+      case OP_EMIT_CAPTURE: len = 2; break;
+      case OP_ANY:
+      case OP_NOTANY:
+      case OP_SPAN:
+      case OP_BREAK:
+      case OP_BREAKX:
+      case OP_LABEL:
+      case OP_EMIT_EXPR: len = 3; break;
+      case OP_ASSIGN:
+      case OP_EVAL: len = 4; break;
+      case OP_LEN:
+      case OP_POS:
+      case OP_TAB:
+      case OP_RPOS:
+      case OP_RTAB: len = 5; break;
+      case OP_BAL: len = 9; break;
+      case OP_NOP:
+      case OP_REM:
+      case OP_FENCE: len = 1; break;
+      default:
+        /* OP_GOTO/OP_GOTO_F resolve through the label table and the table /
+         * emit ops have payloads this walk does not decode; never claim the
+         * literal is required when the branch cannot be followed. */
+        return true;
+    }
+    if (p + len > bc_len || (!prune_push_forward(stack, &sp, p, p + len))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* ---------------------------------------------------------------------------
  * snobol_search_derive_meta
  *
  * Scans the compiled bytecode to extract search-acceleration hints:
@@ -2296,9 +2437,15 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     /* A SPLIT seen before ANY literal (entry alternation or loop-body
      * SPLIT) makes every later literal a possible branch — sticky. */
     bool split_seen_before_lit = false;
-    /* A SPLIT branch that JMPs past the last literal makes it optional —
-     * sticky, like split_seen_before_lit. */
-    bool split_branch_bypass = false;
+    /* SPLIT offsets seen while scanning.  Whether their branches bypass the
+     * literal is decided AFTER the scan, against the literal that is finally
+     * published.  A branch can only be shown to skip that literal once it is
+     * known which literal it is; deciding it per-SPLIT against the literal
+     * recorded so far dropped the prefilter for prefix-alternation-suffix
+     * patterns whose suffix literal is on every accepting path. */
+    uint32_t split_offs[PRUNE_SPLIT_MAX];
+    size_t split_count = 0;
+    bool split_overflow = false;
     /* Bytecode offset just past a min==0 REPEAT_INIT body: literals inside
      * [init, skip_target) can be bypassed by the zero-iteration skip edge.
      * Evaluated per literal, so a literal AFTER the loop is unaffected. */
@@ -2322,12 +2469,12 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
                              : SNOBOL_SEARCH_MAX_PREFIX;
           memcpy(last_lit, bc + lit_off, last_lit_len);
           /* The newly recorded literal is bypassable when a SPLIT was seen
-           * before any literal, when a SPLIT branch provably bypasses the
-           * previous literal, or when it sits inside a min==0 loop body.
-           * An EMPTY literal does not replace last_lit, so it must not
-           * change the bypass state of the record it leaves in place. */
+           * before any literal or when it sits inside a min==0 loop body.
+           * SPLIT branches are evaluated once the scan has picked the final
+           * literal.  An EMPTY literal does not replace last_lit, so it must
+           * not change the bypass state of the record it leaves in place. */
           lit_bypassed =
-              ((split_seen_before_lit || split_branch_bypass ||
+              ((split_seen_before_lit ||
                 (skippable_loop_end > 0 && scan < skippable_loop_end)) != 0);
         }
         scan += 9 + (size_t)lit_len;
@@ -2347,41 +2494,14 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
           scan += 9;
           continue;
         }
-        /* Check if any SPLIT branch bypasses the last literal.  Read both
-         * branch targets.  If a branch's first instruction is LIT followed
-         * by a JMP that jumps PAST the last literal, that branch skips it.
-         * For 'a'|'b', branch A has LIT 'a' + JMP exit, and exit > last_lit
-         * (LIT 'b'), so LIT 'b' is not required.  For ('a'+)+ 'b', the
-         * SPLIT branches either go to the loop body (no JMP past 'b') or
-         * to the exit (which IS 'b'), so 'b' is required. */
-        uint32_t ta = search_read_u32(bc, scan + 1);
-        uint32_t tb = search_read_u32(bc, scan + 5);
-        if (last_lit_len > 0) {
-          uint32_t check[2] = {ta, tb};
-          for (int bi = 0; bi < 2; bi++) {
-            uint32_t b_off = check[bi];
-            /* Skip past the branch's first instruction (if LIT = 9+lit_len,
-             * if JMP = 5, otherwise assume 1) */
-            if (b_off >= bc_len) {
-              continue;
-            }
-            uint8_t b_op = bc[b_off];
-            size_t b_skip = 1;
-            if (b_op == OP_LIT && b_off + 9 <= bc_len) {
-              b_skip = 9 + (size_t)search_read_u32(bc, b_off + 5);
-            } else if (b_op == OP_JMP) {
-              b_skip = 5;
-            }
-            size_t jmp_off = b_off + b_skip;
-            if (jmp_off + 5 <= bc_len && bc[jmp_off] == OP_JMP) {
-              uint32_t jt = search_read_u32(bc, jmp_off + 1);
-              if (jt > last_lit_off) {
-                split_branch_bypass = true;
-                lit_bypassed = true;
-                break;
-              }
-            }
-          }
+        /* Remember the SPLIT and evaluate its branches after the scan, when
+         * the literal that will actually be published is known.  A branch
+         * bypasses when it reaches ACCEPT/SUCCEED without executing that
+         * literal. */
+        if (split_count < PRUNE_SPLIT_MAX) {
+          split_offs[split_count++] = (uint32_t)scan;
+        } else {
+          split_overflow = true;
         }
       }
       /* Advance by opcode size */
@@ -2444,6 +2564,30 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     /* Set required literal when it was found and is NOT bypassed by any
      * SPLIT branch (no alternative ending).  Also skip alt-literals
      * patterns (trie-based — the bytecode has no SPLIT). */
+    if (!lit_bypassed && !out->is_alt_literals && last_lit_len > 0) {
+      /* A branch of any SPLIT before the literal that reaches ACCEPT without
+       * executing it is an accepting path around the literal, so it is not
+       * required.  This runs after the scan because the literal it applies to
+       * is only known then; deciding per-SPLIT against the literal recorded
+       * so far dropped the prefilter for prefix-alternation-suffix patterns
+       * whose suffix literal is on every path. */
+      for (size_t i = 0; i < split_count && !lit_bypassed; i++) {
+        uint32_t s = split_offs[i];
+        if (s >= last_lit_off) {
+          continue; /* Split is past the literal and cannot skip it. */
+        }
+        lit_bypassed =
+            split_branch_bypasses_lit(bc, bc_len, search_read_u32(bc, s + 1),
+                                      last_lit_off) ||
+            split_branch_bypasses_lit(bc, bc_len, search_read_u32(bc, s + 5),
+                                      last_lit_off);
+      }
+      /* An unrecorded SPLIT could hide such a branch: never claim the
+       * literal then. */
+      if (split_overflow) {
+        lit_bypassed = true;
+      }
+    }
     if (!lit_bypassed && !out->is_alt_literals && last_lit_len > 0) {
       out->has_required_lit = true;
       snobol_meta_set_flag(out, META_HAS_REQUIRED_LIT);

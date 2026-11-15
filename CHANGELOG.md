@@ -15,6 +15,23 @@ tagged `php/vX.Y.Z`.
 
 ### Fixed
 
+- **Required-literal prefilter dropped valid matches**: `derive_meta` marks
+  the last literal in the bytecode as "required" unless it can prove that a
+  `SPLIT` branch bypasses it, and the bypass test assumed every branch's
+  first instruction was one byte unless it was `OP_LIT` or `OP_JMP`. A branch
+  that begins with a zero-width op (`$`/`OP_ANCHOR`, `POS`, `RPOS`, `TAB`,
+  `RTAB`, `LEN`, a capture) is 2 to 5 bytes long, so the `JMP` behind it was
+  never inspected and the literal was published as required; a branch body
+  with more than one instruction failed the same way. `snobol_pattern_search()`
+  and every search tier then ran `memchr`/`memmem` for that literal and
+  reported no match for subjects the VM matches, e.g. `'a' ($ | 'bb')` did
+  not match `"a"`. The bypass test now walks the branch's control flow
+  (linear successor, both `SPLIT` edges, `JMP`, and the `REPEAT` skip/exit
+  edges) and treats any branch it cannot decode as a bypass, so a literal is
+  never published as required on a guess. Branch bypasses are evaluated after
+  the scan, against the literal that is actually published, so a suffix
+  literal that both branches run into (e.g. `'v' (SPAN('0') | SPAN('1'))
+  'zz'`) keeps its prefilter.
 - **Bounded parser recursion and AST depth**: pattern source text is now
   limited to `SNOBOL_PARSER_MAX_DEPTH` (1000) structural levels, where a
   parenthesised group, label prefix, capture, function-call argument,
@@ -59,7 +76,7 @@ tagged `php/vX.Y.Z`.
   than 65535 bytes, which the 16-bit `key_len` field cannot encode; it
   previously wrote a truncated length followed by the full key payload.
 
-C test suite: **413 cases / 74,427 assertions** (custom runner).
+C test suite: **413 cases / 74,445 assertions** (custom runner).
 
 ## [1.1.0] - 2026-11-13
 

@@ -210,12 +210,104 @@ static void test_anchored_prefilter_no_shortcircuit(void) {
   snobol_search_vm_cleanup(&vm);
 }
 
+/* A SPLIT branch that starts with a zero-width op puts its JMP one
+ * instruction further along, and a branch with a multi-instruction body hides
+ * it even more.  The bypass test used to assume a one-byte first instruction,
+ * so the literal on the other branch was published as "required" and the
+ * prefilter rejected subjects the VM matches. */
+static void test_prefilter_zero_width_branch(void) {
+  struct {
+    const char *pattern;
+    const char *subject;
+    size_t expect_len;
+    const char *name;
+  } cases[] = {
+      {"'a' ($ | 'bb')", "a", 1, "zero-width branch: end anchor on 'a'"},
+      {"'a' ($ | 'bb')", "abb", 3, "zero-width branch: end anchor on 'abb'"},
+      {"'a' (POS(1) | 'bb')", "a", 1, "zero-width branch: POS(1)"},
+      {"'a' (LEN(0) | 'bb')", "a", 1, "zero-width branch: LEN(0)"},
+      {"'a' (('x' $ v0) | 'bb')", "ax", 2, "zero-width branch: capture"},
+      {"'a' (('x' 'y') | 'bb')", "axy", 3,
+       "zero-width branch: multi-instruction branch body"},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = nullptr;
+    snobol_pattern_t *p = snobol_pattern_compile(
+        ctx, cases[i].pattern, strlen(cases[i].pattern), &err);
+    if (!p) {
+      test_assert(false, cases[i].name);
+      free(err);
+      snobol_context_destroy(ctx);
+      continue;
+    }
+    /* The literal on the other branch is not on every accepting path, so no
+     * required literal may be derived for this shape. */
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+    test_assert((!meta->has_required_lit) != 0,
+                "zero-width branch: no required literal derived");
+    snobol_match_t *m =
+        snobol_pattern_search(p, cases[i].subject, strlen(cases[i].subject));
+    test_assert((m && snobol_match_success(m) &&
+                 snobol_match_get_length(m) == cases[i].expect_len) != 0,
+                cases[i].name);
+    snobol_match_free(m);
+    snobol_pattern_free(p);
+    snobol_context_destroy(ctx);
+  }
+}
+
+/* A literal that both alternation branches run into is still on every
+ * accepting path, so the prefilter must stay enabled for it (and the branch
+ * walk must actually prove the requirement instead of clearing everything). */
+static void test_prefilter_alternation_suffix_literal(void) {
+  struct {
+    const char *pattern;
+    const char *subject;
+    size_t expect_len;
+    const char *name;
+  } cases[] = {
+      {"'a' ($ | 'bb') 'zz'", "abbzz", 5,
+       "alternation suffix: anchor branch runs into the suffix"},
+      {"'v' (SPAN('0') | SPAN('1')) 'zz'", "v0zz", 4,
+       "alternation suffix: class branches run into the suffix"},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = nullptr;
+    snobol_pattern_t *p = snobol_pattern_compile(
+        ctx, cases[i].pattern, strlen(cases[i].pattern), &err);
+    if (!p) {
+      test_assert(false, cases[i].name);
+      free(err);
+      snobol_context_destroy(ctx);
+      continue;
+    }
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+    test_assert(meta->has_required_lit,
+                "alternation suffix: required literal derived");
+    test_assert((meta->required_lit_len == 2 &&
+                 memcmp(meta->required_lit, "zz", 2) == 0) != 0,
+                "alternation suffix: required literal is 'zz'");
+    snobol_match_t *m =
+        snobol_pattern_search(p, cases[i].subject, strlen(cases[i].subject));
+    test_assert((m && snobol_match_success(m) &&
+                 snobol_match_get_length(m) == cases[i].expect_len) != 0,
+                cases[i].name);
+    snobol_match_free(m);
+    snobol_pattern_free(p);
+    snobol_context_destroy(ctx);
+  }
+}
+
 void test_search_prefilter_suite(void) {
   test_suite("Search: Required-Byte Prefilter");
   test_prefilter_miss();
   test_prefilter_hit();
   test_prefilter_noop();
   test_prefilter_leading_alternation();
+  test_prefilter_zero_width_branch();
+  test_prefilter_alternation_suffix_literal();
   test_anchored_prefilter_miss();
   test_anchored_prefilter_no_shortcircuit();
 }

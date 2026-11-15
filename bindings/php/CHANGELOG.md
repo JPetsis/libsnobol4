@@ -17,6 +17,17 @@ core versions correspond 1:1.
 
 ### Fixed
 
+- **Security: `match()`/`searchAll()`/`searchSplit()` no longer report "no
+  match" for patterns whose literal sits behind a zero-width alternation
+  branch.** The core required-literal prefilter (shared with this binding
+  through `core_amalgam.c`) assumed a `SPLIT` branch began with a one-byte
+  instruction unless it was a literal or a `JMP`, so a branch led by `$`,
+  `POS`, `RPOS`, `TAB`, `RTAB`, `LEN` or a capture hid the `JMP` behind it
+  and the literal on the other branch was published as required. A subject
+  without that literal was rejected before any tier ran, so
+  `Pattern::fromString("'a' ($ | 'bb')")->match("a")` returned no match
+  although the pattern matches. The bypass test now walks the branch's
+  control flow and treats anything it cannot decode as a bypass.
 - **Security: a 1024+ byte template table key is no longer decoded as opcodes.**
   `Pattern::subst()` compiles a `$v0[TABLE['…']]` reference into `OP_EMIT_TABLE`
   with the literal key inlined as `key_len:u16` plus key bytes, but the core VM
