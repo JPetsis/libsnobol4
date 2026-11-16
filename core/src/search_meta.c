@@ -782,47 +782,13 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
  *
  * When true, the search runtime can use a trie-based multi-string matcher
  * (Tier 3a) instead of calling vm_exec at each candidate position.
+ *
+ * Sets *has_empty when any validated branch is a zero-length literal, so
+ * callers learn that the alternation matches empty without a second walk.
  * ---------------------------------------------------------------------------
  */
-/* True when the SPLIT/LIT alternation tree contains an empty (len 0)
- * literal branch. */
-static bool SNOBOL_PURE alt_has_empty_branch(const uint8_t *bc, size_t bc_len) {
-  size_t stack[64];
-  int sp = 0;
-  stack[sp++] = 0;
-  while (sp > 0) {
-    size_t ip = stack[--sp];
-    if (ip + 2 > bc_len) {
-      return false;
-    }
-    uint8_t op = bc[ip];
-    if (op == OP_LIT) {
-      if (ip + 10 > bc_len) {
-        return false;
-      }
-      if (search_read_u32(bc, ip + 5) == 0) {
-        return true;
-      }
-    } else if (op == OP_SPLIT) {
-      if (ip + 9 > bc_len) {
-        return false;
-      }
-      uint32_t a = search_read_u32(bc, ip + 1);
-      uint32_t b = search_read_u32(bc, ip + 5);
-      if (a >= bc_len || b >= bc_len) {
-        return false;
-      }
-      stack[sp++] = b;
-      stack[sp++] = a;
-    } else {
-      return false;
-    }
-  }
-  return false;
-}
-
-static bool SNOBOL_PURE check_alt_literals(const uint8_t *bc, size_t bc_len,
-                                           size_t ip, size_t *lit_bytes) {
+static bool check_alt_literals(const uint8_t *bc, size_t bc_len, size_t ip,
+                               size_t *lit_bytes, bool *has_empty) {
   if (ip + 2 > bc_len) {
     return false;
   }
@@ -840,6 +806,9 @@ static bool SNOBOL_PURE check_alt_literals(const uint8_t *bc, size_t bc_len,
     uint32_t lit_len = search_read_u32(bc, ip + 5);
     if (ip + 9 + lit_len > bc_len) {
       return false;
+    }
+    if (lit_len == 0) {
+      *has_empty = true;
     }
     /* Pool budget: the trie needs at most 1 + sum(len_i) nodes, so bound
      * the total literal bytes to keep every build inside the fixed pool.
@@ -873,8 +842,8 @@ static bool SNOBOL_PURE check_alt_literals(const uint8_t *bc, size_t bc_len,
     if (a >= bc_len || b >= bc_len) {
       return false;
     }
-    return (check_alt_literals(bc, bc_len, a, lit_bytes) &&
-            check_alt_literals(bc, bc_len, b, lit_bytes)) != 0;
+    return (check_alt_literals(bc, bc_len, a, lit_bytes, has_empty) &&
+            check_alt_literals(bc, bc_len, b, lit_bytes, has_empty)) != 0;
   }
 
   return false;
@@ -2205,10 +2174,12 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
   if (op0 == OP_SPLIT && bc_len >= 10) {
     size_t bc_remain = bc_len > 2048 ? 2048 : bc_len;
     size_t lit_bytes = 0;
-    out->is_alt_literals = ((check_alt_literals(bc, bc_remain, 0, &lit_bytes) &&
-                             lit_bytes <= SNOBOL_AUTO_MAX_LIT_BYTES) != 0);
+    bool has_empty_branch = false;
+    out->is_alt_literals =
+        ((check_alt_literals(bc, bc_remain, 0, &lit_bytes, &has_empty_branch) &&
+          lit_bytes <= SNOBOL_AUTO_MAX_LIT_BYTES) != 0);
     /* An empty branch makes the alternation match empty at any position. */
-    if (out->is_alt_literals && alt_has_empty_branch(bc, bc_remain)) {
+    if (out->is_alt_literals && has_empty_branch) {
       out->may_match_empty = true;
     }
     /* Flat vs bushy: flat alternatives share no prefix and gain nothing

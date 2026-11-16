@@ -96,8 +96,21 @@ tagged `php/vX.Y.Z`.
   buffer or the key type is unknown. The compiler also rejects keys longer
   than 65535 bytes, which the 16-bit `key_len` field cannot encode; it
   previously wrote a truncated length followed by the full key payload.
+- **Alt-literals metadata walk overflowed its fixed 64-entry stack**:
+  `alt_has_empty_branch()` walked the SPLIT tree with `size_t stack[64]` and
+  pushed both branch targets without a capacity check, so a left-nested
+  alternation of about 65 two-byte literals (inside the 250-byte literal
+  budget and the 2048-byte metadata walk bound) wrote past the array during
+  `snobol_search_derive_meta()`. Empty-branch detection now happens inside
+  the existing `check_alt_literals()` walk, which already visits every leaf
+  and bounds the literal budget, so the second traversal and its fixed stack
+  are gone. The trie builder's own stack-capacity failure now falls back to
+  the general VM like pool exhaustion instead of returning a false negative
+  for the same deep chains. Regression: a 70-branch chain with and without a
+  trailing empty branch through the parser and as hand-built bytecode, plus a
+  200-branch over-bound control.
 
-C test suite: **413 cases / 74,470 assertions** (custom runner).
+C test suite: **417 cases / 74,489 assertions** (custom runner).
 
 ## [1.1.0] - 2026-11-13
 

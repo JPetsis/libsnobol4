@@ -217,7 +217,7 @@ static bool SNOBOL_HOT search_alt_literals_try(
     local.nodes[0].end_order = 0;
 
     bool all_ok = true;
-    bool pool_overflow = false;
+    bool capacity_overflow = false;
     uint16_t leaf_order = 0; /* alternation branch order (visit order) */
     size_t bc_len = vm->bc_len;
     const uint8_t *bc = vm->bc;
@@ -247,7 +247,7 @@ static bool SNOBOL_HOT search_alt_literals_try(
         }
         if (!trie_insert(&local, bc + off, len, leaf_order++)) {
           all_ok = false;
-          pool_overflow = true;
+          capacity_overflow = true;
           break;
         }
       } else if (op == OP_SPLIT) {
@@ -262,6 +262,10 @@ static bool SNOBOL_HOT search_alt_literals_try(
           break;
         }
         if (sp + 2 > 64) {
+          /* Structurally valid tree deeper than the explicit-stack capacity:
+           * fall back to the general VM rather than reporting a false
+           * negative. */
+          capacity_overflow = true;
           all_ok = false;
           break;
         }
@@ -274,10 +278,11 @@ static bool SNOBOL_HOT search_alt_literals_try(
     }
 
     if (!all_ok) {
-      if (pool_overflow) {
-        /* Trie pool exhausted on structurally valid bytecode (e.g. a stale
-         * cache built before the derive_meta budget gate): fall back to the
-         * general VM instead of reporting a false negative. */
+      if (capacity_overflow) {
+        /* Trie build hit a fixed capacity (node pool or pending-branch
+         * stack) on structurally valid bytecode (e.g. a stale cache built
+         * before the derive_meta budget gate): fall back to the general VM
+         * instead of reporting a false negative. */
         return tier_general_fallback(vm, subject, subject_len, start_offset,
                                      meta, dfa, out_result, diag, anchored);
       }

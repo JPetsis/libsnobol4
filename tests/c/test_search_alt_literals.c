@@ -398,6 +398,187 @@ void test_alt_literals_large_chain(void) {
   snobol_context_destroy(ctx);
 }
 
+/* Build a source alternation of n literal branches plus a trailing empty
+ * branch.  Shares the literal layout of build_alt_source(). */
+static char *build_alt_source_with_empty(size_t n, const char *prefix) {
+  char *base = build_alt_source(n, prefix);
+  if (!base) {
+    return nullptr;
+  }
+  size_t len = strlen(base);
+  char *src = (char *)malloc(len + 8);
+  if (!src) {
+    free(base);
+    return nullptr;
+  }
+  memcpy(src, base, len);        /* keep the closing quote */
+  memcpy(src + len, " | ''", 6); /* append " | ''" and the terminator */
+  free(base);
+  return src;
+}
+
+/* A left-nested alternation chain makes the metadata walk visit one pending
+ * SPLIT branch per level.  Regression for a stack-buffer-overflow in the
+ * empty-branch detection, which used a fixed 64-entry stack: 70 two-byte
+ * alternatives overflow it while staying inside the 250-byte literal budget
+ * and the 2048-byte metadata walk bound.  ASan reports the overflow on the
+ * unfixed code. */
+void test_alt_literals_deep_chain(void) {
+  test_suite("Alt-literals: 70-branch chain stays in bounds");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *src = build_alt_source(70, "a");
+  snobol_pattern_t *p = snobol_pattern_compile(ctx, src, strlen(src), nullptr);
+  test_assert(p != NULL, "70-branch alternation compiles");
+  if (p) {
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+    test_assert(meta->is_alt_literals, "70-branch alternation detected");
+    test_assert((!meta->may_match_empty) != 0,
+                "no empty branch -> may_match_empty false");
+
+    snobol_match_t *m = snobol_pattern_search(p, "xx a42 yy", 9);
+    test_assert((m && snobol_match_success(m) &&
+                 snobol_match_get_position(m) == 3) != 0,
+                "middle branch matches at offset 3");
+    snobol_match_free(m);
+
+    m = snobol_pattern_search(p, "a69", 3);
+    test_assert((m && snobol_match_success(m) &&
+                 snobol_match_get_position(m) == 0) != 0,
+                "last branch matches at offset 0");
+    snobol_match_free(m);
+
+    m = snobol_pattern_search(p, "zz", 2);
+    test_assert((m && !snobol_match_success(m)) != 0, "no branch -> miss");
+    snobol_match_free(m);
+    snobol_pattern_free(p);
+  }
+  free(src);
+  snobol_context_destroy(ctx);
+}
+
+/* An empty branch at the deepest position of the same 70-branch chain must
+ * still set may_match_empty and match empty.  A fixed-capacity walk that
+ * fails closed on overflow would silently lose this branch. */
+void test_alt_literals_deep_empty_branch(void) {
+  test_suite("Alt-literals: deep empty branch sets may_match_empty");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *src = build_alt_source_with_empty(70, "a");
+  snobol_pattern_t *p = snobol_pattern_compile(ctx, src, strlen(src), nullptr);
+  test_assert(p != NULL, "alternation with empty tail compiles");
+  if (p) {
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+    test_assert(meta->is_alt_literals, "detected as alt-literals");
+    test_assert(meta->may_match_empty, "may_match_empty set");
+    test_assert(snobol_meta_may_match_empty(meta),
+                "META_MAY_MATCH_EMPTY flag packed");
+
+    snobol_match_t *m = snobol_pattern_search(p, "zz", 2);
+    test_assert((m && snobol_match_success(m) &&
+                 snobol_match_get_position(m) == 0 &&
+                 snobol_match_get_length(m) == 0) != 0,
+                "empty branch matches at offset 0 with length 0");
+    snobol_match_free(m);
+    snobol_pattern_free(p);
+  }
+  free(src);
+  snobol_context_destroy(ctx);
+}
+
+/* Over-bound chains are not alt-literals, but compiling and searching them
+ * must stay crash-free (the walker never runs beyond the 2048-byte bound). */
+void test_alt_literals_over_bound_no_crash(void) {
+  test_suite("Alt-literals: 200-branch chain is crash-free");
+
+  snobol_context_t *ctx = snobol_context_create();
+  char *src = build_alt_source(200, "a");
+  snobol_pattern_t *p = snobol_pattern_compile(ctx, src, strlen(src), nullptr);
+  test_assert(p != NULL, "200-branch alternation compiles");
+  if (p) {
+    const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+    test_assert((!meta->is_alt_literals) != 0,
+                "over-bound chain is not alt-literals");
+    snobol_match_t *m = snobol_pattern_search(p, "zz a199 zz", 10);
+    test_assert((m && snobol_match_success(m)) != 0,
+                "over-bound chain still matches a branch");
+    snobol_match_free(m);
+    snobol_pattern_free(p);
+  }
+  free(src);
+  snobol_context_destroy(ctx);
+}
+
+/* Hand-built left-nested SPLIT chain of n literal leaves.  Each leaf is
+ * LIT(off,len) followed by ACCEPT; every right branch is leaf i+1 and the
+ * deepest left branch is leaf 0.  This reaches derive_meta through the
+ * bytecode API without the parser. */
+static void store_u32_be(uint8_t *p, uint32_t v) {
+  p[0] = (uint8_t)((v >> 24) & 0xFF);
+  p[1] = (uint8_t)((v >> 16) & 0xFF);
+  p[2] = (uint8_t)((v >> 8) & 0xFF);
+  p[3] = (uint8_t)(v & 0xFF);
+}
+
+static size_t build_alt_bytecode(uint8_t *bc, size_t n, bool empty_last) {
+  if (n < 2 || n > 128) {
+    return 0;
+  }
+  size_t leaf_off[128];
+  uint8_t lit[128][2];
+  size_t splits = n - 1;
+  size_t cur = splits * 9;
+  for (size_t i = 0; i < n; i++) {
+    size_t len = (empty_last && i == n - 1) ? 0 : 2;
+    lit[i][0] = (uint8_t)('a' + (i % 26));
+    lit[i][1] = (uint8_t)('a' + ((i / 26) % 26));
+    leaf_off[i] = cur;
+    cur += 9 + len + 1;
+  }
+  for (size_t i = 0; i < splits; i++) {
+    size_t at = i * 9;
+    uint32_t a =
+        (i + 1 == splits) ? (uint32_t)leaf_off[0] : (uint32_t)((i + 1) * 9);
+    uint32_t b = (uint32_t)leaf_off[i + 1];
+    bc[at] = OP_SPLIT;
+    store_u32_be(bc + at + 1, a);
+    store_u32_be(bc + at + 5, b);
+  }
+  for (size_t i = 0; i < n; i++) {
+    size_t at = leaf_off[i];
+    size_t len = (empty_last && i == n - 1) ? 0 : 2;
+    bc[at] = OP_LIT;
+    store_u32_be(bc + at + 1, (uint32_t)(at + 9));
+    store_u32_be(bc + at + 5, (uint32_t)len);
+    memcpy(bc + at + 9, lit[i], len);
+    bc[at + 9 + len] = OP_ACCEPT;
+  }
+  return cur;
+}
+
+/* The same overflow shape supplied as bytecode, bypassing the parser: the
+ * metadata walk must stay in bounds and still report the empty branch. */
+void test_alt_literals_bytecode_deep_chain(void) {
+  test_suite("Alt-literals: hand-built 70-branch chain");
+
+  uint8_t bc[2048];
+  size_t bc_len = build_alt_bytecode(bc, 70, false);
+  test_assert(bc_len > 0, "70-leaf bytecode built");
+  snobol_search_meta_t meta;
+  snobol_search_derive_meta(bc, bc_len, &meta);
+  test_assert(meta.is_alt_literals, "bytecode chain detected as alt-literals");
+  test_assert((!meta.may_match_empty) != 0,
+              "no empty leaf -> may_match_empty false");
+  snobol_search_meta_free(&meta);
+
+  bc_len = build_alt_bytecode(bc, 70, true);
+  snobol_search_derive_meta(bc, bc_len, &meta);
+  test_assert(meta.is_alt_literals,
+              "empty-leaf chain detected as alt-literals");
+  test_assert(meta.may_match_empty, "empty leaf sets may_match_empty");
+  snobol_search_meta_free(&meta);
+}
+
 void test_search_alt_literals_suite(void) {
   test_alt_literals_flat_trie();
   test_alt_literals_bushy_trie();
@@ -405,4 +586,8 @@ void test_search_alt_literals_suite(void) {
   test_2byte_prefix_memchr();
   test_alt_literals_bmh_skip();
   test_alt_literals_large_chain();
+  test_alt_literals_deep_chain();
+  test_alt_literals_deep_empty_branch();
+  test_alt_literals_bytecode_deep_chain();
+  test_alt_literals_over_bound_no_crash();
 }
