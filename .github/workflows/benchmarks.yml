@@ -28,14 +28,16 @@ jobs:
           tools: composer
 
       - name: Install system dependencies
+        env:
+          PHP_VER: ${{ github.event.inputs.php-version || '8.4' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf software-properties-common
           sudo rm -f /etc/apt/sources.list.d/ondrej-php* /etc/apt/sources.list.d/*ondrej*
           sudo add-apt-repository --no-update -y ppa:ondrej/php
           sudo apt-get update
-          sudo apt-get install -y php${{ github.event.inputs.php-version || '8.4' }}-dev || \
-            echo "php${{ github.event.inputs.php-version || '8.4' }}-dev not available; relying on setup-php for phpize"
+          sudo apt-get install -y "php${PHP_VER}-dev" || \
+            echo "php${PHP_VER}-dev not available; relying on setup-php for phpize"
 
       - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist
@@ -78,11 +80,14 @@ jobs:
         run: php bench/run_all.php
 
       - name: Generate summary
+        env:
+          PHP_VER: ${{ github.event.inputs.php-version || '8.4' }}
+          BASE_REF: ${{ github.event.inputs.base_ref || 'main' }}
         run: |
           echo "## Benchmark Results Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**PHP Version:** ${{ github.event.inputs.php-version || '8.4' }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Base ref:** ${{ github.event.inputs.base_ref || 'main' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**PHP Version:** ${PHP_VER}" >> $GITHUB_STEP_SUMMARY
+          echo "**Base ref:** ${BASE_REF}" >> $GITHUB_STEP_SUMMARY
           echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Benchmark results have been uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
