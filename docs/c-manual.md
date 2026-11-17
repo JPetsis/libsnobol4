@@ -1,5 +1,9 @@
 # libsnobol4 C/C++ Manual
 
+> **Version:** 1.1.1 · **API:** 0x010101 · **ABI:** 1
+
+---
+
 A high-performance C library implementing SNOBOL4-style string pattern
 matching. This manual documents the C API (`core/include/snobol/snobol.h`)
 and how to use it from C and C++.

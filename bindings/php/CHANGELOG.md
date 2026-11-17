@@ -15,6 +15,8 @@ core versions correspond 1:1.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-17
+
 ### Fixed
 
 - **Security: deeply nested pattern text is rejected instead of crashing.** The

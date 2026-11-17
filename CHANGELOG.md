@@ -13,6 +13,8 @@ tagged `php/vX.Y.Z`.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-17
+
 ### Added
 
 - **Branch-walk coverage for the required-literal study**: the SPLIT branch
