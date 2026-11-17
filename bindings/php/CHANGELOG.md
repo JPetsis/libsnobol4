@@ -19,12 +19,11 @@ core versions correspond 1:1.
 
 - **Security: deeply nested pattern text is rejected instead of crashing.** The
   core parser, shared with this binding through `core_amalgam.c`, now bounds
-  recursive-descent nesting at 256 levels and 256 KiB of parser stack, and the
-  resulting tree at 1000 AST levels. Input such as `str_repeat('(', 20000)`, a
-  long label prefix chain, or a 255-deep `EVAL(...)` nest fails with a
-  `Pattern nesting too deep` parse error from `Pattern::fromString()`.
-  `ParserDepthTest` covers the rejected shapes and an under-limit pattern that
-  still compiles and matches.
+  recursive-descent nesting at 96 levels and the resulting tree at 1000 AST
+  levels. Input such as `str_repeat('(', 20000)`, a long label prefix chain,
+  or a 255-deep `EVAL(...)` nest fails with a `Pattern nesting too deep` parse
+  error from `Pattern::fromString()`. `ParserDepthTest` covers the rejected
+  shapes and an under-limit pattern that still compiles and matches.
 - **Security: `match()`/`searchAll()`/`searchSplit()` no longer report "no
   match" for patterns whose literal sits behind a zero-width alternation
   branch.** The core required-literal prefilter (shared with this binding

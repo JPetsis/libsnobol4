@@ -1531,7 +1531,6 @@ typedef struct {
   size_t len;
   bool compiled;
   bool saw_depth_error;
-  bool saw_stack_error;
 } depth_stack_job_t;
 
 static void *depth_stack_worker(void *arg) {
@@ -1544,8 +1543,6 @@ static void *depth_stack_worker(void *arg) {
   job->compiled = pattern != nullptr;
   job->saw_depth_error =
       err != nullptr && strstr(err, "nesting too deep") != nullptr;
-  job->saw_stack_error =
-      err != nullptr && strstr(err, "parser stack limit") != nullptr;
 
   if (pattern) {
     snobol_pattern_free(pattern);
@@ -1563,7 +1560,6 @@ static bool compile_on_stack(const char *src, size_t len, size_t stack_bytes,
   out->len = len;
   out->compiled = false;
   out->saw_depth_error = false;
-  out->saw_stack_error = false;
 
   pthread_attr_t attr;
   if (pthread_attr_init(&attr) != 0) {
@@ -1584,12 +1580,10 @@ static bool compile_on_stack(const char *src, size_t len, size_t stack_bytes,
 static void test_parser_depth_limit(void) {
   test_suite("Parser: structural depth limit");
 
-  /* The budget is sized to fit the smallest default secondary-thread stack,
-   * so it must not grow past what that stack can carry. */
-  test_assert(SNOBOL_PARSER_MAX_DEPTH <= 256,
+  /* The cap is sized against the most expensive production, so it must not
+   * grow past what the smallest default thread stack can carry. */
+  test_assert(SNOBOL_PARSER_MAX_DEPTH <= 96,
               "depth budget fits a default secondary-thread stack");
-  test_assert(SNOBOL_PARSER_MAX_STACK_BYTES <= 256 * 1024,
-              "stack budget fits a default secondary-thread stack");
 
   const size_t attack_n = 20000;
 #if defined(SNOBOL_SANITIZER)
@@ -1690,9 +1684,9 @@ static void test_parser_depth_limit(void) {
     free(src);
 
     /* Function-call and dynamic-eval productions re-enter the descent with
-     * much larger frames than a group; the byte budget must stop them.  The
-     * EVAL nest stays below the level cap in both build types, so it is
-     * rejected only when the byte budget is doing the work. */
+     * much larger frames than a group, so the cap must keep them inside the
+     * same small stack.  They are nested one level below the cap, which is
+     * where the previous 256-level budget overflowed. */
     src = build_depth_call("ARBNO(", SNOBOL_PARSER_MAX_DEPTH - 1, &len);
     if (compile_on_stack(src, len, depth_stack_bytes, &job)) {
       test_assert(job.compiled == false,
@@ -1706,8 +1700,8 @@ static void test_parser_depth_limit(void) {
     if (compile_on_stack(src, len, depth_stack_bytes, &job)) {
       test_assert(job.compiled == false,
                   "nested EVAL rejected on a small thread stack");
-      test_assert(job.saw_stack_error != 0,
-                  "EVAL rejection comes from the parser stack budget");
+      test_assert(job.saw_depth_error != 0,
+                  "EVAL rejection is a nesting error");
     }
     free(src);
   }

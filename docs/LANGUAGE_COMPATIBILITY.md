@@ -32,7 +32,7 @@ The engine now supports full SNOBOL language compatibility including:
 | Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                         |
 | Helper API: `DynamicPatternCache`             | ✅ Complete | Truthful runtime-backed cache interface           |
 | Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)        |
-| Test coverage                                 | ✅ Complete | 624 PHP tests, 74498 C assertions (custom runner) |
+| Test coverage                                 | ✅ Complete | 624 PHP tests, 74497 C assertions (custom runner) |
 
 ### ⚠️ Known Limitations
 
@@ -40,7 +40,7 @@ The engine now supports full SNOBOL language compatibility including:
 |--------------------|---------------------------------------------------------------------|----------------------------------------------------------------------------------|-------------------------------|
 | Table registration | (resolved) unbound `OP_EMIT_TABLE` entries are patched at bind time | `snobol_template_bind_tables()` resolves names to IDs before execution (v0.5.0+) | —                             |
 | Recursive EVAL     | `EVAL(EVAL(...))` parsed but not optimized                          | Avoid deep nesting                                                               | Optimize recursive evaluation |
-| Parser nesting     | Descent nesting over 256 levels or 256 KiB of parser stack, or an AST over 1000 levels, is rejected | Keep generated patterns inside `SNOBOL_PARSER_MAX_DEPTH`, `SNOBOL_PARSER_MAX_STACK_BYTES` / `SNOBOL_PARSER_MAX_AST_DEPTH` | —                          |
+| Parser nesting     | Descent nesting over 96 levels, or an AST over 1000 levels, is rejected | Keep generated patterns inside `SNOBOL_PARSER_MAX_DEPTH` / `SNOBOL_PARSER_MAX_AST_DEPTH` | —                          |
 
 > **Note:** The SLJIT method-JIT and tracing-JIT subsystems described in older
 > revisions of this document were **retired in v0.13.0**. The engine now executes

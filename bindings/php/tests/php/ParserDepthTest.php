@@ -37,19 +37,19 @@ final class ParserDepthTest extends TestCase
         Pattern::fromString($source);
     }
 
-    public function testDeepEvalNestingIsRejectedByTheStackBudget(): void
+    public function testDeepEvalNestingIsRejected(): void
     {
         $source = str_repeat('EVAL(', 255) . "'x'" . str_repeat(')', 255);
 
         $this->expectException(\Exception::class);
-        $this->expectExceptionMessage('parser stack limit');
+        $this->expectExceptionMessage('nesting too deep');
 
         Pattern::fromString($source);
     }
 
     public function testNestingUnderTheLimitStillMatches(): void
     {
-        $source = str_repeat('(', 100) . "'x'" . str_repeat(')', 100);
+        $source = str_repeat('(', 50) . "'x'" . str_repeat(')', 50);
         $pattern = Pattern::fromString($source);
 
         $result = $pattern->match('x');

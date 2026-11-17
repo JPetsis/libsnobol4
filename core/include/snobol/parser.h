@@ -28,34 +28,21 @@ extern "C" {
  *
  * Each parenthesised group, label prefix, capture and function-call argument
  * consumes one recursive-descent level.  The parser rejects patterns that
- * exceed this budget with a parse error instead of letting a few kilobytes
- * of repeated '(' exhaust the C stack.
+ * exceed this budget with a parse error instead of letting repeated '(' or
+ * a chain of nested calls exhaust the C stack.
  *
- * The level count is a secondary bound: the productions have frames of very
- * different sizes, so the stack budget below is what guarantees the descent
- * fits the smallest default thread stack.  256 is a backstop; the byte
- * budget rejects the larger productions first.
+ * The cap is sized against the most expensive production, not the cheapest:
+ * a table-update level costs about 3.5 KiB in a Debug build (ARBNO about
+ * 2.1 KiB, EVAL about 2.8 KiB, a group about 1.3 KiB), so 96 levels stay
+ * below 336 KiB and fit the smallest default thread stack (512 KiB on
+ * macOS) with room for the caller's frames above the parse entry.  Do not
+ * raise it without re-measuring the largest production; a level count is
+ * only a safe proxy for stack use when it is calibrated this way.
  *
  * Builder-composed ASTs (snobol_pattern_build_compile) bypass the parser and
  * are not subject to this limit.
  */
-enum { SNOBOL_PARSER_MAX_DEPTH = 256 };
-
-/**
- * Maximum parser stack the recursive descent may consume, in bytes.
- *
- * A level count alone cannot bound the stack: the productions re-enter the
- * descent with frames of very different sizes (a nested ARBNO call costs
- * about 1.5x a parenthesised group, EVAL and table updates up to 2.5x), so
- * the same level count can overflow a thread whose stack is large enough
- * for the cheapest shape.  depth_enter() measures the stack consumed since
- * snobol_parser_parse() was entered and rejects the pattern once this
- * budget is spent, whatever mixture of productions the input uses.
- *
- * 256 KiB leaves half of the smallest default thread stack (512 KiB on
- * macOS) for the caller and the frames above the parse entry.
- */
-enum { SNOBOL_PARSER_MAX_STACK_BYTES = 256 * 1024 };
+enum { SNOBOL_PARSER_MAX_DEPTH = 96 };
 
 /**
  * Maximum height of the AST the parser hands to the compiler.
