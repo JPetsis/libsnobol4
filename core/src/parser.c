@@ -40,6 +40,10 @@ struct snobol_parser {
    * both the recursive-descent stack and the depth of the AST handed to the
    * compiler's recursive walkers. */
   size_t depth;
+  /* Address of a local in the top-level parse call.  depth_enter() measures
+   * how much stack the descent has consumed relative to it, so productions
+   * with larger frames are bounded by bytes rather than by level count. */
+  uintptr_t stack_base;
 };
 
 /* Forward declarations for recursive descent */
@@ -118,11 +122,22 @@ static void set_error(snobol_parser_t *parser, const char *msg, size_t line,
   parser->error.message[len] = '\0';
 }
 
-/** Record the structural-depth error at the lexer's current position. */
-static void set_depth_error(snobol_parser_t *parser, snobol_lexer_t *lexer) {
+/** Record a structural-depth error at the lexer's current position. */
+static void set_depth_error(snobol_parser_t *parser, snobol_lexer_t *lexer,
+                            size_t limit) {
   char msg[96];
-  snprintf(msg, sizeof(msg), "Pattern nesting too deep (max %d levels)",
-           SNOBOL_PARSER_MAX_DEPTH);
+  snprintf(msg, sizeof(msg), "Pattern nesting too deep (max %zu levels)",
+           limit);
+  set_error(parser, msg, snobol_lexer_get_line(lexer),
+            snobol_lexer_get_pos(lexer));
+}
+
+/** Record a parser-stack-budget error at the lexer's current position. */
+static void set_stack_error(snobol_parser_t *parser, snobol_lexer_t *lexer) {
+  char msg[96];
+  snprintf(msg, sizeof(msg),
+           "Pattern nesting too deep (parser stack limit of %d KiB reached)",
+           SNOBOL_PARSER_MAX_STACK_BYTES / 1024);
   set_error(parser, msg, snobol_lexer_get_line(lexer),
             snobol_lexer_get_pos(lexer));
 }
@@ -135,11 +150,28 @@ static void set_depth_error(snobol_parser_t *parser, snobol_lexer_t *lexer) {
  * while it is being parsed.  Without this budget a few kilobytes of repeated
  * '(' would exhaust the C stack and kill the host process.
  *
- * Returns false, with a parse error recorded, once the budget is exhausted.
+ * The level count is checked first, then the stack consumed since the
+ * top-level parse entry: the productions have frames of very different
+ * sizes, so a level count alone can overflow a stack that fits the cheapest
+ * production (see SNOBOL_PARSER_MAX_STACK_BYTES).
+ *
+ * Returns false, with a parse error recorded, once a budget is exhausted.
  */
 static bool depth_enter(snobol_parser_t *parser, snobol_lexer_t *lexer) {
   if (parser->depth >= SNOBOL_PARSER_MAX_DEPTH) {
-    set_depth_error(parser, lexer);
+    set_depth_error(parser, lexer, SNOBOL_PARSER_MAX_DEPTH);
+    return false;
+  }
+
+  /* A zero anchor (the parse did not enter through snobol_parser_parse)
+   * measures as the whole address space and rejects the pattern: the guard
+   * fails closed. */
+  char here = 0;
+  uintptr_t stack = (uintptr_t)&here;
+  uintptr_t base = parser->stack_base;
+  uintptr_t used = base > stack ? base - stack : stack - base;
+  if (used >= SNOBOL_PARSER_MAX_STACK_BYTES) {
+    set_stack_error(parser, lexer);
     return false;
   }
 
@@ -153,7 +185,7 @@ static void depth_leave(snobol_parser_t *parser, size_t n) {
 }
 
 /**
- * Reject a subtree taller than the structural-depth budget.
+ * Reject a subtree taller than the AST-height budget.
  *
  * The AST factories record each subtree's height, so this costs O(1).  The
  * check runs at every node wrap that can repeat in a loop (alternation
@@ -164,11 +196,11 @@ static void depth_leave(snobol_parser_t *parser, size_t n) {
  */
 static bool ast_depth_ok(snobol_parser_t *parser, snobol_lexer_t *lexer,
                          const ast_node_t *node) {
-  if (snobol_ast_depth(node) <= SNOBOL_PARSER_MAX_DEPTH) {
+  if (snobol_ast_depth(node) <= SNOBOL_PARSER_MAX_AST_DEPTH) {
     return true;
   }
 
-  set_depth_error(parser, lexer);
+  set_depth_error(parser, lexer, SNOBOL_PARSER_MAX_AST_DEPTH);
   return false;
 }
 
@@ -442,6 +474,11 @@ ast_node_t *snobol_parser_parse(snobol_parser_t *parser,
 
   /* Release any budget still held by a previous, aborted parse. */
   parser->depth = 0;
+
+  /* Anchor the stack measurement for depth_enter(): the descent may not use
+   * more than SNOBOL_PARSER_MAX_STACK_BYTES below this frame. */
+  char stack_anchor = 0;
+  parser->stack_base = (uintptr_t)&stack_anchor;
 
   /* Parse the pattern */
   ast_node_t *ast = parse_pattern(parser, lexer);

@@ -54,19 +54,30 @@ tagged `php/vX.Y.Z`.
   literal that both branches run into (e.g. `'v' (SPAN('0') | SPAN('1'))
   'zz'`) keeps its prefilter.
 - **Bounded parser recursion and AST depth**: pattern source text is now
-  limited to `SNOBOL_PARSER_MAX_DEPTH` (1000) structural levels, where a
-  parenthesised group, label prefix, capture, function-call argument,
-  alternation branch and match-naming operator each consume one level.
-  Deeper input fails with a `Pattern nesting too deep` parse error instead
-  of recursing until the C stack overflows in the parser or in the
-  recursive AST walkers (`emit_node_c`/`emit_alt_c`, `ast_max_reg_c`,
-  `snobol_ast_free`). This covers nesting via `(`, label prefixes,
-  alternation chains, match-naming chains such as `'x'.v0.v0…`, and
-  alternation depth accumulated across nesting levels. AST nodes carry
-  their subtree height, so the check is O(1). Builder-composed ASTs
-  (`snobol_pattern_build_compile`) bypass the parser and keep their
-  existing behavior; `Pattern::compileFromAst` and the PHP array-to-AST
-  converter are unaffected.
+  bounded by three budgets. Recursive-descent nesting (a parenthesised
+  group, label prefix, capture or function-call argument) is limited to
+  `SNOBOL_PARSER_MAX_DEPTH` (256) and to `SNOBOL_PARSER_MAX_STACK_BYTES`
+  (256 KiB) of parser stack measured from the top-level parse call; the
+  height of the tree handed to the compiler (alternation branches and
+  match-naming operators extend the tree without recursing the descent) is
+  limited to `SNOBOL_PARSER_MAX_AST_DEPTH` (1000). Deeper input fails with a
+  `Pattern nesting too deep` parse error instead of recursing until the C
+  stack overflows in the parser or in the recursive AST walkers
+  (`emit_node_c`/`emit_alt_c`, `ast_max_reg_c`, `snobol_ast_free`). This
+  covers nesting via `(`, label prefixes, alternation chains, match-naming
+  chains such as `'x'.v0.v0…`, and alternation depth accumulated across
+  nesting levels. AST nodes carry their subtree height, so the check is
+  O(1). The stack budget is needed because a level count is shape-dependent:
+  `ARBNO(…)`, `EVAL(…)` and table-update nesting re-enter the descent with
+  1.5–2.5× the frame size of a group, so at a fixed level cap they overflowed
+  a 512 KiB thread stack before the guard fired, and at the previous
+  1000-level cap even plain parentheses overflowed a 1 MiB stack. The
+  1000-level AST budget keeps flat alternations working; their walkers use
+  under 128 bytes per level in a Release build (about 370 in Debug, which
+  fits a 512 KiB stack). Builder-composed ASTs
+  (`snobol_pattern_build_compile`) bypass the parser and keep their existing
+  behavior; `Pattern::compileFromAst` and the PHP array-to-AST converter are
+  unaffected.
 - **Windows release builds**: the PHP devel-pack lookup now handles
   revision-suffixed names on both the releases and archives listings, and a
   manual backfill workflow can attach a missing Windows PIE asset to an
@@ -110,7 +121,7 @@ tagged `php/vX.Y.Z`.
   trailing empty branch through the parser and as hand-built bytecode, plus a
   200-branch over-bound control.
 
-C test suite: **417 cases / 74,489 assertions** (custom runner).
+C test suite: **417 cases / 74,498 assertions** (custom runner).
 
 ## [1.1.0] - 2026-11-13
 

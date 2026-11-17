@@ -96,6 +96,9 @@ if(SNOBOL_SANITIZE)
     target_link_options(snobol4_tests PUBLIC
         -fsanitize=address,undefined
     )
+    # ASan inflates stack frames; tests that probe a small thread stack size
+    # their budget from this define.
+    target_compile_definitions(snobol4_tests PRIVATE SNOBOL_SANITIZER=1)
 endif()
 
 if(MSVC)

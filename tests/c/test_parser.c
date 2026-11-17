@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32)
+#include <pthread.h>
+#endif
 
 /* Test framework functions (from test_runner.c) */
 extern void test_suite(const char *name);
@@ -1428,6 +1431,29 @@ static char *build_depth_names(size_t n, size_t *out_len) {
   return src;
 }
 
+/* n nested calls of @p fn, e.g. ARBNO(ARBNO('x')). */
+static char *build_depth_call(const char *fn, size_t n, size_t *out_len) {
+  size_t fn_len = strlen(fn);
+  char *src = (char *)malloc(n * fn_len + n + 8);
+  if (!src) {
+    *out_len = 0;
+    return nullptr;
+  }
+  size_t k = 0;
+  for (size_t i = 0; i < n; i++) {
+    memcpy(src + k, fn, fn_len);
+    k += fn_len;
+  }
+  src[k++] = '\'';
+  src[k++] = 'x';
+  src[k++] = '\'';
+  for (size_t i = 0; i < n; i++)
+    src[k++] = ')';
+  src[k] = '\0';
+  *out_len = k;
+  return src;
+}
+
 /* levels nested alternations, each with `branches` additional branches and
  * the nested tree on the left spine. */
 static char *build_depth_alt_nest(size_t levels, size_t branches,
@@ -1499,11 +1525,78 @@ static void expect_depth_ok(const char *src, size_t len, const char *msg) {
   snobol_parser_destroy(parser);
 }
 
+#if !defined(_WIN32)
+typedef struct {
+  const char *src;
+  size_t len;
+  bool compiled;
+  bool saw_depth_error;
+  bool saw_stack_error;
+} depth_stack_job_t;
+
+static void *depth_stack_worker(void *arg) {
+  depth_stack_job_t *job = (depth_stack_job_t *)arg;
+  snobol_context_t *ctx = snobol_context_create();
+  char *err = nullptr;
+
+  snobol_pattern_t *pattern =
+      snobol_pattern_compile(ctx, job->src, job->len, &err);
+  job->compiled = pattern != nullptr;
+  job->saw_depth_error =
+      err != nullptr && strstr(err, "nesting too deep") != nullptr;
+  job->saw_stack_error =
+      err != nullptr && strstr(err, "parser stack limit") != nullptr;
+
+  if (pattern) {
+    snobol_pattern_free(pattern);
+  }
+  free(err);
+  snobol_context_destroy(ctx);
+  return nullptr;
+}
+
+/* Compile @p src on a thread with a deliberately small stack.  Returns false
+ * when the host refuses to create the thread. */
+static bool compile_on_stack(const char *src, size_t len, size_t stack_bytes,
+                             depth_stack_job_t *out) {
+  out->src = src;
+  out->len = len;
+  out->compiled = false;
+  out->saw_depth_error = false;
+  out->saw_stack_error = false;
+
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr) != 0) {
+    return false;
+  }
+  int set = pthread_attr_setstacksize(&attr, stack_bytes);
+  pthread_t thread;
+  bool started =
+      set == 0 && pthread_create(&thread, &attr, depth_stack_worker, out) == 0;
+  pthread_attr_destroy(&attr);
+  if (started) {
+    pthread_join(thread, nullptr);
+  }
+  return started;
+}
+#endif
+
 static void test_parser_depth_limit(void) {
   test_suite("Parser: structural depth limit");
 
+  /* The budget is sized to fit the smallest default secondary-thread stack,
+   * so it must not grow past what that stack can carry. */
+  test_assert(SNOBOL_PARSER_MAX_DEPTH <= 256,
+              "depth budget fits a default secondary-thread stack");
+  test_assert(SNOBOL_PARSER_MAX_STACK_BYTES <= 256 * 1024,
+              "stack budget fits a default secondary-thread stack");
+
   const size_t attack_n = 20000;
-  const size_t ok_n = SNOBOL_PARSER_MAX_DEPTH / 2;
+#if defined(SNOBOL_SANITIZER)
+  const size_t ok_n = 16;
+#else
+  const size_t ok_n = 64;
+#endif
   size_t len = 0;
   char *src = nullptr;
 
@@ -1566,6 +1659,59 @@ static void test_parser_depth_limit(void) {
     snobol_context_destroy(ctx);
     free(src);
   }
+
+#if !defined(_WIN32)
+  /* The guard must fire before the recursion overruns the stack, not after.
+   * 512 KiB is the macOS default for a secondary thread, the smallest stack
+   * a supported host hands out by default.  ASan inflates every frame, so it
+   * needs 2 MiB to reach the same depth. */
+#if defined(SNOBOL_SANITIZER)
+  const size_t depth_stack_bytes = 2 * 1024 * 1024;
+#else
+  const size_t depth_stack_bytes = 512 * 1024;
+#endif
+  {
+    depth_stack_job_t job;
+
+    src = build_depth_parens(attack_n, &len);
+    if (compile_on_stack(src, len, depth_stack_bytes, &job)) {
+      test_assert(job.compiled == false,
+                  "deep nesting rejected on a small thread stack");
+      test_assert(job.saw_depth_error != 0,
+                  "small-stack rejection is the depth error");
+    }
+    free(src);
+
+    src = build_depth_parens(ok_n, &len);
+    if (compile_on_stack(src, len, depth_stack_bytes, &job)) {
+      test_assert(job.compiled != 0,
+                  "under-limit nesting compiles on a small thread stack");
+    }
+    free(src);
+
+    /* Function-call and dynamic-eval productions re-enter the descent with
+     * much larger frames than a group; the byte budget must stop them.  The
+     * EVAL nest stays below the level cap in both build types, so it is
+     * rejected only when the byte budget is doing the work. */
+    src = build_depth_call("ARBNO(", SNOBOL_PARSER_MAX_DEPTH - 1, &len);
+    if (compile_on_stack(src, len, depth_stack_bytes, &job)) {
+      test_assert(job.compiled == false,
+                  "nested ARBNO rejected on a small thread stack");
+      test_assert(job.saw_depth_error != 0,
+                  "ARBNO rejection is a nesting error");
+    }
+    free(src);
+
+    src = build_depth_call("EVAL(", SNOBOL_PARSER_MAX_DEPTH - 1, &len);
+    if (compile_on_stack(src, len, depth_stack_bytes, &job)) {
+      test_assert(job.compiled == false,
+                  "nested EVAL rejected on a small thread stack");
+      test_assert(job.saw_stack_error != 0,
+                  "EVAL rejection comes from the parser stack budget");
+    }
+    free(src);
+  }
+#endif
 
   /* A depth-limit error leaves the parser reusable. */
   {

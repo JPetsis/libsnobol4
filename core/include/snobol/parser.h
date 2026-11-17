@@ -26,17 +26,49 @@ extern "C" {
 /**
  * Maximum structural nesting depth of a parsed pattern.
  *
- * Each parenthesised group, label prefix, capture, function-call argument,
- * alternation branch and match-naming wrapper consumes one level.  The
- * parser, the bytecode emitters (emit_node_c/emit_alt_c, ast_max_reg_c) and
- * snobol_ast_free all walk the parsed tree recursively, so the parser
- * rejects patterns that exceed this budget with a parse error instead of
- * letting a few kilobytes of repeated '(' or '|' exhaust the C stack.
+ * Each parenthesised group, label prefix, capture and function-call argument
+ * consumes one recursive-descent level.  The parser rejects patterns that
+ * exceed this budget with a parse error instead of letting a few kilobytes
+ * of repeated '(' exhaust the C stack.
+ *
+ * The level count is a secondary bound: the productions have frames of very
+ * different sizes, so the stack budget below is what guarantees the descent
+ * fits the smallest default thread stack.  256 is a backstop; the byte
+ * budget rejects the larger productions first.
  *
  * Builder-composed ASTs (snobol_pattern_build_compile) bypass the parser and
  * are not subject to this limit.
  */
-enum { SNOBOL_PARSER_MAX_DEPTH = 1000 };
+enum { SNOBOL_PARSER_MAX_DEPTH = 256 };
+
+/**
+ * Maximum parser stack the recursive descent may consume, in bytes.
+ *
+ * A level count alone cannot bound the stack: the productions re-enter the
+ * descent with frames of very different sizes (a nested ARBNO call costs
+ * about 1.5x a parenthesised group, EVAL and table updates up to 2.5x), so
+ * the same level count can overflow a thread whose stack is large enough
+ * for the cheapest shape.  depth_enter() measures the stack consumed since
+ * snobol_parser_parse() was entered and rejects the pattern once this
+ * budget is spent, whatever mixture of productions the input uses.
+ *
+ * 256 KiB leaves half of the smallest default thread stack (512 KiB on
+ * macOS) for the caller and the frames above the parse entry.
+ */
+enum { SNOBOL_PARSER_MAX_STACK_BYTES = 256 * 1024 };
+
+/**
+ * Maximum height of the AST the parser hands to the compiler.
+ *
+ * Flat alternation branches and match-naming operators extend the tree
+ * without recursing the descent, so they get a larger budget than
+ * SNOBOL_PARSER_MAX_DEPTH.  It still bounds the recursive walkers
+ * (emit_node_c/emit_alt_c, ast_max_reg_c, snobol_ast_free).  Those are
+ * cheaper per level than the descent: a 1000-branch alternation compiles
+ * inside a 128 KiB thread stack in a Release build and needs about 384 KiB
+ * in a Debug build, which still fits the 512 KiB target with margin.
+ */
+enum { SNOBOL_PARSER_MAX_AST_DEPTH = 1000 };
 
 /**
  * Parser error information
