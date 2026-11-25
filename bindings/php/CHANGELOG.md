@@ -17,6 +17,18 @@ core versions correspond 1:1.
 
 ### Fixed
 
+- **Security: `match()`/`searchAll()` no longer report "no match" for a
+  subject that lacks a literal inside nested min==0 loops.** The core
+  required-literal prefilter, shared with this binding through
+  `core_amalgam.c`, remembered a single loop skip target and let a nested
+  loop's nearer target replace the outer loop's wider one. `(('a')* 'b')*`
+  published `b` as required although the outer zero-iteration exit skips the
+  whole body, so `Pattern::fromString("(('a')* 'b')*")->match("")` returned
+  false instead of a zero-length match. The scan now keeps the widest skip
+  target, which can only widen the skippable region, so patterns that match
+  are never rejected while single-level loops keep their prefilter. Covered
+  by the C prefilter and oracle suites and a `SourceSyntaxTest` case through
+  `Pattern::fromString()`.
 - **Security: `Pattern::fromString()` no longer crashes on an `EMIT` inside a
   repetition.** The core nullability analysis, shared with this binding
   through `core_amalgam.c`, grouped emit nodes with capture nodes and read

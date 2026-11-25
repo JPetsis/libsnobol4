@@ -15,6 +15,22 @@ tagged `php/vX.Y.Z`.
 
 ### Fixed
 
+- **Required-literal prefilter rejected matches for nested loops**: the
+  derivation keeps one `skippable_loop_end` offset and every min==0
+  `OP_REPEAT_INIT` overwrote it, so a nested loop's nearer skip target
+  replaced the wider target of the loop around it. `(('a')* 'b')*` therefore
+  published `b` as the required literal although the outer zero-iteration
+  exit skips the whole body, and `snobol_pattern_search()` reported no match
+  for `""` and `xyz` while the VM matches both with length 0. The scan now
+  keeps the widest skip target seen, which can only widen the skippable
+  region: a literal every accepting path consumes is never published as
+  optional, and single-level loops keep their prefilter (`('a')* 'b'` and
+  `('a'+)+ 'b'` still derive `b`; the latter still short-circuits an
+  `a`-only subject). Regression: the nested pattern and its outer-suffix
+  control in `test_search_prefilter.c` (the nested case failed on the parent
+  commit), both forms in the oracle's loop-soundness table where the
+  must-set invariant agrees independently, and a PHP case through
+  `Pattern::fromString()`.
 - **`EMIT` under a repetition crashed the compiler**: `ast_node_nullable()`
   grouped `AST_EMIT` with `AST_CAP` and read `data.cap.sub`, but an emit node
   stores `{text, len, reg}`, so the read aliased `emit.len` as an
@@ -33,7 +49,7 @@ tagged `php/vX.Y.Z`.
   `EMIT('')`/`EMIT(@v0)`/plain-emit controls, and pins the analysis itself
   against a non-nullable literal and a non-nullable concat.
 
-C test suite: **418 cases / 74,524 assertions** (custom runner).
+C test suite: **418 cases / 74,540 assertions** (custom runner).
 
 ## [1.1.1] - 2026-11-17
 

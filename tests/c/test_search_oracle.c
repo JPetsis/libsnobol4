@@ -1046,6 +1046,11 @@ static void test_prefilter_loop_soundness(void) {
       {"loop-greedy-tail", "('a')* 'b'", true},
       {"loop-double-star", "('a'*)* 'b'", true},
       {"loop-plus-tail", "('a'+)+ 'b'", true},
+      /* Nested min==0 loops: the OUTER zero-iteration exit skips the inner
+       * body too, so 'b' is not required.  Keeping only the inner skip
+       * target published 'b' and rejected "" and "xyz". */
+      {"loop-nested-star", "(('a')* 'b')*", false},
+      {"loop-nested-star-tail", "(('a')* 'b')* 'c'", true},
   };
 
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {

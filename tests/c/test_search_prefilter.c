@@ -570,6 +570,58 @@ static void test_prefilter_split_after_literal(void) {
                       "split after literal: literal stays required");
 }
 
+/* A literal inside nested min==0 repetitions is skipped by the OUTER
+ * zero-iteration exit too.  The derivation used to keep only the latest skip
+ * target, so an inner loop's nearer target un-bypassed the literal:
+ * `(('a')* 'b')*` published 'b' as required and the prefilter rejected ""
+ * and "xyz" although the VM matches both with length 0. */
+static void test_prefilter_nested_loops(void) {
+  /* No required literal is published, so the empty match survives the
+   * prefilter on an empty subject and on one without 'b'. */
+  assert_required_lit("(('a')* 'b')*", "", 0, nullptr,
+                      "nested loops: no required literal, '' matches empty");
+  assert_required_lit("(('a')* 'b')*", "xyz", 0, nullptr,
+                      "nested loops: zero-length match on 'xyz'");
+
+  /* A literal after every loop's skip target is still on every accepting
+   * path, so it stays required and keeps short-circuiting subjects. */
+  assert_required_lit("(('a')* 'b')* 'c'", "abc", 3, "c",
+                      "nested loops: trailing 'c' stays required");
+  {
+    const char *src = "(('a')* 'b')* 'c'";
+    snobol_context_t *ctx = snobol_context_create();
+    char *err = nullptr;
+    snobol_pattern_t *p = snobol_pattern_compile(ctx, src, strlen(src), &err);
+    test_assert(p != NULL, "nested loops: outer-suffix pattern compiles");
+    if (p) {
+      free(err);
+      err = nullptr;
+      VM vm;
+      memset(&vm, 0, sizeof(vm));
+      vm.bc = (uint8_t *)snobol_pattern_get_bc(p);
+      vm.bc_len = snobol_pattern_get_bc_len(p);
+      const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+      snobol_search_result_t r;
+      bool ok = snobol_search_exec(&vm, "ab", 2, 0, meta, nullptr, &r, nullptr);
+      test_assert((!ok) != 0,
+                  "nested loops: subject without 'c' does not match");
+      test_assert(r.prefilter_skip,
+                  "nested loops: prefilter_skip set without 'c'");
+      snobol_search_vm_cleanup(&vm);
+    }
+    free(err);
+    snobol_pattern_free(p);
+    snobol_context_destroy(ctx);
+  }
+
+  /* Single-level controls: the loop is the outermost skippable region and
+   * its trailing literal is outside it, so the prefilter stays. */
+  assert_required_lit("('a')* 'b'", "ab", 2, "b",
+                      "single loop: trailing 'b' stays required");
+  assert_required_lit("('a'+)+ 'b'", "aaab", 4, "b",
+                      "single plus loop: trailing 'b' stays required");
+}
+
 void test_search_prefilter_suite(void) {
   test_suite("Search: Required-Byte Prefilter");
   test_prefilter_miss();
@@ -582,6 +634,7 @@ void test_search_prefilter_suite(void) {
   test_prefilter_walk_conservative_layouts();
   test_prefilter_split_overflow();
   test_prefilter_split_after_literal();
+  test_prefilter_nested_loops();
   test_anchored_prefilter_miss();
   test_anchored_prefilter_no_shortcircuit();
 }

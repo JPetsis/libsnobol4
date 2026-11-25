@@ -2417,9 +2417,13 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
     uint32_t split_offs[PRUNE_SPLIT_MAX];
     size_t split_count = 0;
     bool split_overflow = false;
-    /* Bytecode offset just past a min==0 REPEAT_INIT body: literals inside
-     * [init, skip_target) can be bypassed by the zero-iteration skip edge.
-     * Evaluated per literal, so a literal AFTER the loop is unaffected. */
+    /* Widest bytecode offset just past a min==0 REPEAT_INIT body seen so
+     * far: literals inside [init, skip_target) can be bypassed by the
+     * zero-iteration skip edge.  Keeping the WIDEST target (not the latest)
+     * matters when repetitions nest: the outer loop opens first with the
+     * largest skip target, and an inner loop's nearer target must not
+     * narrow the region the outer exit skips.  Evaluated per literal, so a
+     * literal after every enclosing loop's skip target stays required. */
     size_t skippable_loop_end = 0;
     while (scan < bc_len) {
       uint8_t op = bc[scan];
@@ -2440,7 +2444,8 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
                              : SNOBOL_SEARCH_MAX_PREFIX;
           memcpy(last_lit, bc + lit_off, last_lit_len);
           /* The newly recorded literal is bypassable when a SPLIT was seen
-           * before any literal or when it sits inside a min==0 loop body.
+           * before any literal or when it sits inside any enclosing min==0
+           * loop body (the widest skip target seen so far).
            * SPLIT branches are evaluated once the scan has picked the final
            * literal.  An EMPTY literal does not replace last_lit, so it must
            * not change the bypass state of the record it leaves in place. */
@@ -2489,7 +2494,14 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
           uint32_t min = search_read_u32(bc, scan + 2);
           uint32_t skip = search_read_u32(bc, scan + 10);
           if (min == 0 && skip < bc_len && skip > scan) {
-            skippable_loop_end = skip;
+            /* Keep the widest skip target: a nested loop's nearer target
+             * must not un-bypass literals the outer zero-iteration exit
+             * also skips (e.g. (('a')* 'b')*).  Widening can only drop the
+             * prefilter, never publish a literal every path consumes as
+             * optional. */
+            if (skip > skippable_loop_end) {
+              skippable_loop_end = skip;
+            }
           }
         }
       } else if (op == OP_REPEAT_STEP) {

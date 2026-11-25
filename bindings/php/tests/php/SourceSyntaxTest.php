@@ -64,6 +64,19 @@ final class SourceSyntaxTest extends TestCase
         $this->assertSame(3, $fn->match('aaa')['_match_len']);
     }
 
+    /**
+     * A literal inside nested min==0 loops must not be published as the
+     * required prefilter literal: the outer zero-iteration exit skips it, so
+     * the empty subject has to match with length 0 instead of being filtered.
+     */
+    public function testNestedLoopStarMatchesEmptySubject(): void
+    {
+        $r = Pattern::fromString("(('a')* 'b')*")->match('');
+
+        $this->assertIsArray($r);
+        $this->assertSame(0, $r['_match_len']);
+    }
+
     public function testBalNestedDelimiters(): void
     {
         $p = Pattern::fromString("BAL('(', ')')");
