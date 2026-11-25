@@ -15,6 +15,21 @@ core versions correspond 1:1.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Security: `Pattern::fromString()` no longer crashes on an `EMIT` inside a
+  repetition.** The core nullability analysis, shared with this binding
+  through `core_amalgam.c`, grouped emit nodes with capture nodes and read
+  `data.cap.sub`, which aliases the emit text length. A non-empty emit under
+  `*`, `+` or `ARBNO` therefore dereferenced that length as an AST pointer, so
+  pattern text such as `EMIT('x')*`, `EMIT('x')+` or `ARBNO(EMIT('x'))`
+  segfaulted the compiling process instead of returning bytecode. Emit nodes
+  are now analyzed through their own payload and reported as zero-width,
+  because emitting consumes no subject input; the zero-length forms
+  `EMIT('')` and `EMIT(@v0)` behave as before. `SourceSyntaxTest` covers
+  `EMIT('x')*`, `ARBNO(EMIT('x'))` and both zero-length forms through
+  `Pattern::fromString()`.
+
 ## [1.1.1] - 2026-11-17
 
 ### Fixed

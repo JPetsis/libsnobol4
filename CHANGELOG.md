@@ -13,6 +13,28 @@ tagged `php/vX.Y.Z`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`EMIT` under a repetition crashed the compiler**: `ast_node_nullable()`
+  grouped `AST_EMIT` with `AST_CAP` and read `data.cap.sub`, but an emit node
+  stores `{text, len, reg}`, so the read aliased `emit.len` as an
+  `ast_node_t *`. Any non-empty emit inside `*`, `+` or `ARBNO` therefore
+  dereferenced the text length as a node pointer and segfaulted while
+  compiling: `EMIT('x')*`, `EMIT('x')+`, `EMIT('ab')*` and
+  `ARBNO(EMIT('x'))`. `AST_EMIT` now returns true on its own, because
+  emitting produces output without consuming subject input, so the node is
+  zero-width and nullable; `AST_CAP` keeps `data.cap.sub`. The zero-length
+  forms `EMIT('')` and `EMIT(@vN)` compile as before and are now correctly
+  classified as nullable. The remaining cases of the analysis were audited
+  with no further mismatch, and no other analyzer reads a foreign union
+  member for `AST_EMIT`. Regression: `tests/c/test_compiler.c` compiles and
+  matches the four repetition forms, asserts the emitted output and its
+  determinism on a subject longer than one iteration, keeps the
+  `EMIT('')`/`EMIT(@v0)`/plain-emit controls, and pins the analysis itself
+  against a non-nullable literal and a non-nullable concat.
+
+C test suite: **418 cases / 74,524 assertions** (custom runner).
+
 ## [1.1.1] - 2026-11-17
 
 ### Added

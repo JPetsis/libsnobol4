@@ -147,6 +147,39 @@ final class SourceSyntaxTest extends TestCase
         $this->assertSame('ab', $r['v0']);
     }
 
+    /**
+     * EMIT under a repetition used to crash the compiler in ast_node_nullable(),
+     * which read the emit text length as an AST pointer.
+     */
+    public function testEmitRepeatedFromSource(): void
+    {
+        $r = Pattern::fromString("EMIT('x')*")->match('abcdefghij');
+
+        $this->assertIsArray($r);
+        $this->assertSame(0, $r['_match_len']);
+        $this->assertSame('x', $r['_output']);
+    }
+
+    public function testEmitArbnoFromSource(): void
+    {
+        $r = Pattern::fromString("ARBNO(EMIT('x'))")->match('abcdefghij');
+
+        $this->assertIsArray($r);
+        $this->assertSame(0, $r['_match_len']);
+        $this->assertSame('x', $r['_output']);
+    }
+
+    public function testEmitZeroLengthFormsFromSource(): void
+    {
+        foreach (["EMIT('')*", "EMIT(@v0)*"] as $source) {
+            $r = Pattern::fromString($source)->match('abcdefghij');
+
+            $this->assertIsArray($r, $source);
+            $this->assertSame(0, $r['_match_len'], $source);
+            $this->assertSame('', $r['_output'] ?? null, $source);
+        }
+    }
+
     public function testRegisterAssignment(): void
     {
         $p = Pattern::fromString("@x 'ab' v1 = 0");

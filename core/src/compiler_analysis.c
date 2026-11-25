@@ -97,11 +97,12 @@ bool compiler_case_insensitive = false;
  *
  * A subtree is nullable when it can complete a match without consuming
  * any subject bytes: literal nodes only when empty, concat only when every
- * part is nullable, alternation when either branch is nullable, and
- * zero-width structural nodes (ARBNO, repeat(0,…), SUCCEED, FAIL, FENCE,
- * REM, BREAKX, BAL) are always nullable.  The compiler uses this to warn
- * about (and bound) zero-width closures that could otherwise produce
- * exponential choice-point blowup.
+ * part is nullable, alternation when either branch is nullable, capture
+ * nodes when their sub-pattern is nullable, and zero-width structural nodes
+ * (ARBNO, repeat(0,…), SUCCEED, FAIL, FENCE, REM, BREAKX, BAL, EMIT) are
+ * always nullable.  The compiler uses this to warn about (and bound)
+ * zero-width closures that could otherwise produce exponential choice-point
+ * blowup.
  *
  * @param node AST subtree to analyse, or NULL
  * @return true if the subtree can match empty (NULL input → false)
@@ -130,8 +131,12 @@ bool ast_node_nullable(const ast_node_t *node) {
         }
       }
       return node->data.concat.count == 0;
-    case AST_CAP:
-    case AST_EMIT: return ast_node_nullable(node->data.cap.sub);
+    case AST_CAP: return ast_node_nullable(node->data.cap.sub);
+    case AST_EMIT:
+      /* Emitting produces output without consuming subject input, so it is
+       * zero-width.  AST_EMIT has its own {text, len, reg} union member:
+       * reading data.cap.sub here would alias emit.len as a node pointer. */
+      return true;
     case AST_LITERAL:
       /* A literal only matches empty if it is the empty string. */
       return node->data.literal.len == 0;

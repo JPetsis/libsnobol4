@@ -24,6 +24,7 @@ extern void test_assert(bool condition, const char *message);
 #include "../../core/include/snobol/compiler.h"
 #include "../../core/include/snobol/vm.h"
 #include "../../core/include/snobol/snobol.h"
+#include "../../core/src/compiler_internal.h" /* ast_node_nullable */
 
 
 /* Compile an AST; frees the AST and returns the bytecode buffer. */
@@ -987,6 +988,148 @@ static void test_cov_compiler_ci_range_capacity(void) {
   snobol_context_destroy(ctx);
 }
 
+/* Result of one compile + match round in the EMIT nullability suite. */
+typedef struct {
+  bool compiled;    /* The pattern source compiled */
+  bool matched;     /* The pattern matched the subject */
+  size_t match_len; /* Subject bytes consumed by the match */
+  size_t out_len;   /* Emitted output length */
+  char out[64];     /* Emitted output (NUL-terminated when it fits) */
+} emit_run_t;
+
+/* Compile @p src and match it once against @p subject, capturing the emitted
+ * output.  Public compile/match API only, so a crash is the compiler's. */
+static emit_run_t emit_compile_and_match(snobol_context_t *ctx, const char *src,
+                                         const char *subject) {
+  emit_run_t r = {0};
+  char *err = nullptr;
+  snobol_pattern_t *p =
+      snobol_pattern_compile_ex(ctx, src, strlen(src), 0, &err);
+  free(err);
+  if (!p) {
+    return r;
+  }
+  r.compiled = true;
+  snobol_match_t *m = snobol_pattern_match(p, subject, strlen(subject));
+  if (m) {
+    r.matched = m->success;
+    r.match_len = m->length;
+    r.out_len = m->output_len;
+    if (m->output && m->output_len < sizeof r.out) {
+      memcpy(r.out, m->output, m->output_len);
+      r.out[m->output_len] = '\0';
+    }
+    snobol_match_free(m);
+  }
+  snobol_pattern_free(p);
+  return r;
+}
+
+/* EMIT under a repetition: ast_node_nullable() must read AST_EMIT through its
+ * own {text, len, reg} union member.  The old shared case read data.cap.sub,
+ * which aliases emit.len, so a non-empty emit under *, + or ARBNO
+ * dereferenced the text length as an AST pointer and crashed the compile. */
+static void test_emit_nullable(void) {
+  test_suite("Compiler: EMIT nullability (zero-width under repetition)");
+
+  snobol_context_t *ctx = snobol_context_create();
+
+  /* The analysis itself, including the opposite control: an emit is nullable,
+   * a literal is not, and the emit must not make its concat nullable. */
+  {
+    ast_node_t *em = snobol_ast_create_emit("x", 1, -1);
+    test_assert((em != NULL && ast_node_nullable(em) == true) != 0,
+                "AST_EMIT('x') is nullable (zero-width)");
+    ast_node_t *lit = snobol_ast_create_lit("x", 1);
+    test_assert((lit != NULL && ast_node_nullable(lit) == false) != 0,
+                "AST_LITERAL('x') is not nullable");
+    ast_node_t **parts = (ast_node_t **)malloc(2 * sizeof(ast_node_t *));
+    parts[0] = em; /* ownership moves into the concat */
+    parts[1] = snobol_ast_create_lit("y", 1);
+    ast_node_t *concat = snobol_ast_create_concat(parts, 2);
+    test_assert((concat != NULL && ast_node_nullable(concat) == false) != 0,
+                "emit + literal concat is not nullable");
+    snobol_ast_free(concat);
+    snobol_ast_free(lit);
+  }
+
+  /* Each form below used to SIGSEGV while compiling.  The subjects are ten
+   * bytes so the zero-width loop guard, not the subject length, bounds the
+   * iteration count. */
+  {
+    emit_run_t a = emit_compile_and_match(ctx, "EMIT('x')*", "abcdefghij");
+    emit_run_t b = emit_compile_and_match(ctx, "EMIT('x')*", "abcdefghij");
+    test_assert(a.compiled, "EMIT('x')* compiles");
+    test_assert((a.matched && b.matched) != 0,
+                "EMIT('x')* matches a ten-byte subject");
+    test_assert(a.match_len == 0, "EMIT('x')* consumes no subject input");
+    test_assert((a.out_len == 1 && memcmp(a.out, "x", 1) == 0) != 0,
+                "EMIT('x')* emits 'x' and terminates");
+    test_assert(
+        (b.out_len == a.out_len && memcmp(a.out, b.out, a.out_len) == 0) != 0,
+        "EMIT('x')* output is deterministic");
+  }
+  {
+    emit_run_t a = emit_compile_and_match(ctx, "EMIT('x')+", "abcdefghij");
+    test_assert(a.compiled, "EMIT('x')+ compiles");
+    test_assert(a.matched && a.match_len == 0,
+                "EMIT('x')+ matches without consuming input");
+    test_assert((a.out_len == 2 && memcmp(a.out, "xx", 2) == 0) != 0,
+                "EMIT('x')+ emits two 'x' and terminates");
+  }
+  {
+    emit_run_t a = emit_compile_and_match(ctx, "EMIT('ab')*", "abcdefghij");
+    test_assert(a.compiled, "EMIT('ab')* compiles");
+    test_assert(a.matched && a.match_len == 0,
+                "EMIT('ab')* matches without consuming input");
+    test_assert((a.out_len == 2 && memcmp(a.out, "ab", 2) == 0) != 0,
+                "EMIT('ab')* emits 'ab' and terminates");
+  }
+  {
+    emit_run_t a =
+        emit_compile_and_match(ctx, "ARBNO(EMIT('x'))", "abcdefghij");
+    test_assert(a.compiled, "ARBNO(EMIT('x')) compiles");
+    test_assert(a.matched && a.match_len == 0,
+                "ARBNO(EMIT('x')) matches without consuming input");
+    test_assert((a.out_len == 1 && memcmp(a.out, "x", 1) == 0) != 0,
+                "ARBNO(EMIT('x')) emits 'x' and terminates");
+  }
+  {
+    /* Zero-width emit followed by a real match: the loop must not eat 'y'. */
+    emit_run_t a = emit_compile_and_match(ctx, "EMIT('x')* 'y'", "y");
+    test_assert(a.compiled, "EMIT('x')* 'y' compiles");
+    test_assert((a.matched && a.match_len == 1) != 0,
+                "EMIT('x')* 'y' matches 'y' with length 1");
+    test_assert((a.out_len == 1 && memcmp(a.out, "x", 1) == 0) != 0,
+                "EMIT('x')* 'y' emits 'x' for its zero-width prefix");
+  }
+
+  /* Controls: the zero-length forms and the plain emit keep their behavior. */
+  {
+    emit_run_t a = emit_compile_and_match(ctx, "EMIT('')*", "abcdefghij");
+    test_assert(a.compiled && a.matched,
+                "EMIT('')* still compiles and matches");
+    test_assert(a.out_len == 0, "EMIT('')* still emits nothing");
+  }
+  {
+    emit_run_t a = emit_compile_and_match(ctx, "EMIT(@v0)*", "abcdefghij");
+    test_assert(a.compiled && a.matched,
+                "EMIT(@v0)* still compiles and matches");
+    test_assert(a.out_len == 0,
+                "EMIT(@v0)* emits nothing for an unset register");
+  }
+  {
+    emit_run_t a = emit_compile_and_match(ctx, "EMIT('x')", "abcdefghij");
+    test_assert(a.compiled, "plain EMIT('x') still compiles");
+    test_assert(a.matched && a.match_len == 0,
+                "plain EMIT('x') matches without consuming input");
+    test_assert((a.out_len == 1 && memcmp(a.out, "x", 1) == 0) != 0,
+                "plain EMIT('x') emits 'x'");
+  }
+
+  snobol_context_destroy(ctx);
+}
+
 void test_compiler_suite(void) {
   test_suite("Compiler Tests");
 
@@ -1081,4 +1224,5 @@ void test_compiler_suite(void) {
   test_cov_source_emit_table_assign();
   test_cov_compiler_ci_unicode_classes();
   test_cov_compiler_ci_range_capacity();
+  test_emit_nullable();
 }
