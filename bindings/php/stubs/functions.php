@@ -1,52 +1,42 @@
 <?php
 
 /**
- * SNOBOL4 global functions (Native C Extension stubs).
+ * SNOBOL4 global function stubs (native C extension).
  *
- * This file serves as a type hint and documentation stub for IDEs and static
- * analysis tools. The actual implementations are provided by the native C
- * extension (bindings/php/src/php_snobol.c).
- *
- * Each declaration is guarded with function_exists() so that loading this
- * file when the C extension is already active does not cause redeclaration
- * errors.
+ * Type and documentation stubs for IDEs and static analysis. The real
+ * implementations are registered by the extension
+ * (bindings/php/src/php_snobol.c); this file documents exactly the functions
+ * it registers, and nothing else. Each declaration is guarded with
+ * function_exists() so loading it with the extension active does not
+ * redeclare anything. In a process without the extension a call throws
+ * through the shared guard instead of returning a neutral value.
  */
+
+require_once __DIR__ . '/_extension_guard.php';
 
 if (!function_exists('snobol_get_api_version')) {
     /**
-     * Return the libsnobol4 API version as a packed integer.
-     *
-     * Encoding: (MAJOR << 16) | (MINOR << 8) | PATCH
-     *
-     * For v0.11.0 this returns 0x00000B00 (2816).
-     * Extract components:
-     *   $major = ($v >> 16) & 0xFF;
-     *   $minor = ($v >>  8) & 0xFF;
-     *   $patch = $v & 0xFF;
+     * Return the libsnobol4 API version as a packed integer
+     * ((MAJOR << 16) | (MINOR << 8) | PATCH).
      *
      * @return int Packed version integer
      */
     function snobol_get_api_version(): int
     {
-        // Native implementation in C extension
-        return 0;
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
 if (!function_exists('snobol_get_abi_version')) {
     /**
-     * Return the libsnobol4 ABI version as an integer.
-     *
-     * The ABI version is a monotonically-increasing integer that is bumped
-     * whenever the public ABI changes in a breaking way.  The initial value
-     * is 1.
+     * Return the libsnobol4 ABI version, bumped whenever the public ABI
+     * changes in a breaking way.
      *
      * @return int ABI version
      */
     function snobol_get_abi_version(): int
     {
-        // Native implementation in C extension
-        return 0;
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
@@ -54,182 +44,365 @@ if (!function_exists('snobol_get_choice_stats')) {
     /**
      * Retrieve choice-point statistics from the VM.
      *
-     * Returns an associative array of metrics related to backtracking and
-     * memory usage of the choice-stack.
-     * Note: Global counters are currently best-effort; per-match metrics
-     * are available in the `_metrics` key of any match result.
-     *
-     * Available keys:
-     *   - choice_push_count         Total choice points pushed
-     *   - choice_allocated         Total choice points allocated
-     *   - choice_stack_depth       Current/maximum stack depth
-     *   - choice_stack_memory_usage Bytes currently used by the stack
+     * Keys: choice_push_count, choice_allocated, choice_stack_depth,
+     * choice_stack_memory_usage. Global counters are best-effort; per-match
+     * metrics are in the `_metrics` key of a match result.
      *
      * @return array<string, int>
      */
     function snobol_get_choice_stats(): array
     {
-        // Native implementation in C extension
-        return [];
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
-
-if (!function_exists('snobol_table_create')) {
+if (!function_exists('snobol_text_char')) {
     /**
-     * Create a new SNOBOL4 table resource.
+     * Character corresponding to a Unicode codepoint (SNOBOL CHAR).
      *
-     * @param  string  $name  Optional table name for debugging
-     * @return resource Table resource handle
+     * @param int $cp Codepoint
+     * @return string
      */
-    function snobol_table_create(string $name = '')
+    function snobol_text_char(int $cp)
     {
-        // Native implementation in C extension
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
-if (!function_exists('snobol_table_set')) {
+if (!function_exists('snobol_text_differ')) {
     /**
-     * Set a key-value pair in a table.
+     * True when the two strings differ.
      *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @param  string  $key
-     * @param  string  $value
-     * @return bool Success
-     */
-    function snobol_table_set($table, string $key, string $value): bool
-    {
-        // Native implementation in C extension
-        return false;
-    }
-}
-
-if (!function_exists('snobol_table_get')) {
-    /**
-     * Get a value by key from a table.
-     *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @param  string  $key
-     * @return string|null Value or null if not found
-     */
-    function snobol_table_get($table, string $key): ?string
-    {
-        // Native implementation in C extension
-        return null;
-    }
-}
-
-if (!function_exists('snobol_table_has')) {
-    /**
-     * Check if a key exists in a table.
-     *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @param  string  $key
+     * @param string $a @param string $b
      * @return bool
      */
-    function snobol_table_has($table, string $key): bool
+    function snobol_text_differ(string $a, string $b): bool
     {
-        // Native implementation in C extension
-        return false;
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
-if (!function_exists('snobol_table_delete')) {
+if (!function_exists('snobol_text_dupl')) {
     /**
-     * Delete a key from a table.
+     * Repeat a string N times (SNOBOL DUPL).
      *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @param  string  $key
-     * @return bool Success
+     * @param string $s @param int $n
+     * @return string
      */
-    function snobol_table_delete($table, string $key): bool
+    function snobol_text_dupl(string $s, int $n): string
     {
-        // Native implementation in C extension
-        return false;
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
-if (!function_exists('snobol_table_size')) {
+if (!function_exists('snobol_text_eq')) {
     /**
-     * Get the number of entries in a table.
+     * Equal comparison.
      *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @return int Number of entries
+     * @param string $a @param string $b
+     * @return bool
      */
-    function snobol_table_size($table): int
+    function snobol_text_eq(string $a, string $b): bool
     {
-        // Native implementation in C extension
-        return 0;
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
-if (!function_exists('snobol_table_name')) {
+if (!function_exists('snobol_text_ge')) {
     /**
-     * Get the name of a table.
+     * Greater-or-equal comparison.
      *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @return string Table name
+     * @param string $a @param string $b
+     * @return bool
      */
-    function snobol_table_name($table): string
+    function snobol_text_ge(string $a, string $b): bool
     {
-        // Native implementation in C extension
-        return '';
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
-if (!function_exists('snobol_table_clear')) {
+if (!function_exists('snobol_text_gt')) {
     /**
-     * Clear all entries from a table.
+     * Greater-than comparison.
      *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @return void
+     * @param string $a @param string $b
+     * @return bool
      */
-    function snobol_table_clear($table): void
+    function snobol_text_gt(string $a, string $b): bool
     {
-        // Native implementation in C extension
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
-if (!function_exists('snobol_table_keys')) {
+if (!function_exists('snobol_text_ident')) {
     /**
-     * Get all keys from a table.
+     * Identical comparison (SNOBOL IDENT).
      *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @return array List of keys
+     * @param string $a @param string $b
+     * @return bool
      */
-    function snobol_table_keys($table): array
+    function snobol_text_ident(string $a, string $b): bool
     {
-        // Native implementation in C extension
-        return [];
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
-if (!function_exists('snobol_table_values')) {
+if (!function_exists('snobol_text_integer')) {
     /**
-     * Get all values from a table.
+     * True when the string is an integer (SNOBOL INTEGER).
      *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @return array List of values
+     * @param string $s
+     * @return bool
      */
-    function snobol_table_values($table): array
+    function snobol_text_integer(string $s): bool
     {
-        // Native implementation in C extension
-        return [];
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
-if (!function_exists('snobol_table_to_array')) {
+if (!function_exists('snobol_text_le')) {
     /**
-     * Convert a table to an associative PHP array.
+     * Less-or-equal comparison.
      *
-     * @param  resource  $table  Table resource from snobol_table_create()
-     * @return array Associative array of key-value pairs
+     * @param string $a @param string $b
+     * @return bool
      */
-    function snobol_table_to_array($table): array
+    function snobol_text_le(string $a, string $b): bool
     {
-        // Native implementation in C extension
-        return [];
+        \Snobol\stub_extension_required(__FUNCTION__);
     }
 }
 
+if (!function_exists('snobol_text_lexeq')) {
+    /**
+     * Lexically equal comparison.
+     *
+     * @param string $a @param string $b
+     * @return bool
+     */
+    function snobol_text_lexeq(string $a, string $b): bool
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
 
+if (!function_exists('snobol_text_lexgt')) {
+    /**
+     * Lexically greater-than comparison.
+     *
+     * @param string $a @param string $b
+     * @return bool
+     */
+    function snobol_text_lexgt(string $a, string $b): bool
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_lexlt')) {
+    /**
+     * Lexically less-than comparison.
+     *
+     * @param string $a @param string $b
+     * @return bool
+     */
+    function snobol_text_lexlt(string $a, string $b): bool
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_lower')) {
+    /**
+     * Lowercase a string.
+     *
+     * @param string $s
+     * @return string
+     */
+    function snobol_text_lower(string $s): string
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_lpad')) {
+    /**
+     * Left-pad to a width (SNOBOL LPAD).
+     *
+     * @param string $s @param int $width @param string $pad Defaults to a single space
+     * @return string
+     */
+    function snobol_text_lpad(string $s, int $width, string $pad = ' '): string
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_lt')) {
+    /**
+     * Less-than comparison.
+     *
+     * @param string $a @param string $b
+     * @return bool
+     */
+    function snobol_text_lt(string $a, string $b): bool
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_ne')) {
+    /**
+     * Not-equal comparison.
+     *
+     * @param string $a @param string $b
+     * @return bool
+     */
+    function snobol_text_ne(string $a, string $b): bool
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_numeric')) {
+    /**
+     * True when the string is numeric (SNOBOL NUMERIC).
+     *
+     * @param string $s
+     * @return bool
+     */
+    function snobol_text_numeric(string $s): bool
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_ord')) {
+    /**
+     * Codepoint of the first character (SNOBOL ORD).
+     *
+     * @param string $s
+     * @return int
+     */
+    function snobol_text_ord(string $s)
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_real')) {
+    /**
+     * True when the string is a real number (SNOBOL REAL).
+     *
+     * @param string $s
+     * @return bool
+     */
+    function snobol_text_real(string $s): bool
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_replace')) {
+    /**
+     * Replace every occurrence of a substring.
+     *
+     * @param string $s @param string $from @param string $to
+     * @return string
+     */
+    function snobol_text_replace(string $s, string $from, string $to): string
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_replace_char')) {
+    /**
+     * Replace every occurrence of a single character.
+     *
+     * @param string $s @param string $from @param string $to
+     * @return string
+     */
+    function snobol_text_replace_char(string $s, string $from, string $to): string
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_reverse')) {
+    /**
+     * Reverse a string.
+     *
+     * @param string $s
+     * @return string
+     */
+    function snobol_text_reverse(string $s): string
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_rpad')) {
+    /**
+     * Right-pad to a width (SNOBOL RPAD).
+     *
+     * @param string $s @param int $width @param string $pad Defaults to a single space
+     * @return string
+     */
+    function snobol_text_rpad(string $s, int $width, string $pad = ' '): string
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_size')) {
+    /**
+     * Byte length of a string (SNOBOL SIZE).
+     *
+     * @param string $s
+     * @return int
+     */
+    function snobol_text_size(string $s): int
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_substr')) {
+    /**
+     * Substring by position and length (SNOBOL SUBSTR).
+     *
+     * @param string $s @param int $pos Zero-based byte offset @param int $len Byte length
+     * @return string
+     */
+    function snobol_text_substr(string $s, int $pos, int $len)
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_trim')) {
+    /**
+     * Trim whitespace from both ends (SNOBOL TRIM).
+     *
+     * @param string $s
+     * @return string
+     */
+    function snobol_text_trim(string $s): string
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}
+
+if (!function_exists('snobol_text_upper')) {
+    /**
+     * Uppercase a string.
+     *
+     * @param string $s
+     * @return string
+     */
+    function snobol_text_upper(string $s): string
+    {
+        \Snobol\stub_extension_required(__FUNCTION__);
+    }
+}

@@ -4,58 +4,62 @@
  * IDE stub for the Snobol\Pattern class.
  *
  * The real implementation is provided by the libsnobol4 PHP extension
- * (bindings/php/src/snobol_pattern.c). This file exists only so that IDEs
- * (PHPStorm, etc.) can resolve the class and its methods; it is never loaded
- * at runtime because the extension already registers the class at startup.
+ * (bindings/php/src/snobol_pattern.c). This file exists only so that IDEs can
+ * resolve the class and its methods. When the extension is missing, a call
+ * fails loudly through the shared guard instead of returning a value, so a
+ * stub call can never masquerade as a result.
  *
  * @generated from the extension method table — keep in sync with snobol_pattern.c
  */
 
 namespace Snobol;
 
+require_once __DIR__ . '/_extension_guard.php';
+
 class Pattern
 {
-    /** @param mixed $ast @return static */
-    public static function compileFromAst($ast, ?array $options = null): static { return new static(); }
+    /** @param array<string, mixed> $ast @param array<string, mixed>|null $options @return Pattern */
+    public static function compileFromAst(array $ast, ?array $options = null): Pattern { stub_extension_required(__METHOD__); }
 
-    /** @param string $source @return static */
-    public static function fromString(string $source, ?array $options = null): static { return new static(); }
+    /** @param string $source @param array<string, mixed>|null $options @return Pattern */
+    public static function fromString(string $source, ?array $options = null): Pattern { stub_extension_required(__METHOD__); }
 
-    /** @param string $subject @param array $options @return array */
-    public function match(string $subject, array $options = []): array|false { return []; }
+    /** @param string $input @param array<string, mixed>|null $options @return array|false Match result, false when nothing matched */
+    public function match(string $input, ?array $options = null): array|false { stub_extension_required(__METHOD__); }
 
-    /** @param string $subject @param string $replacement @return string */
-    public function subst(string $subject, string $replacement): string { return ''; }
+    /** @param string $subject @param string $template @param array<string, Table>|null $tables @return string|false */
+    public function subst(string $subject, string $template, ?array $tables = null): string|false { stub_extension_required(__METHOD__); }
 
-    /** @param mixed ...$callbacks @return static */
-    public function setEvalCallbacks(...$callbacks): static { return $this; }
+    /** @param array<string, mixed> $callbacks @return true */
+    public function setEvalCallbacks(array $callbacks): true { stub_extension_required(__METHOD__); }
 
-    /** @param bool $enabled @return static */
-    public function setJit(bool $enabled): static { return $this; }
+    /** @param bool $enabled @return true */
+    public function setJit(bool $enabled): true { stub_extension_required(__METHOD__); }
 
-    /** @param array<string, Table> $tables @return static */
-    public function bindTables(array $tables): static { return $this; }
+    /** @param array<string, Table> $tables name => Table; an empty array clears the binding @return static */
+    public function bindTables(array $tables): static { stub_extension_required(__METHOD__); }
 
-    /** @param string $subject @param array $options @return array */
-    public function searchAll(string $subject, array $options = []): array { return []; }
+    /** @param string $subject @param array<string, mixed>|null $options @return array|false */
+    public function searchAll(string $subject, ?array $options = null): array|false { stub_extension_required(__METHOD__); }
 
-    /** @param string $subject @return array|null */
-    public function matchLiteral(string $subject): ?array { return null; }
+    /** @param string $input @return array|false */
+    public function matchLiteral(string $input): array|false { stub_extension_required(__METHOD__); }
 
-    /** @param string $subject @param array $options @return array */
-    public function searchSplit(string $subject, array $options = []): array { return []; }
+    /** @param string $subject @param array<string, mixed>|null $options @return array|false */
+    public function searchSplit(string $subject, ?array $options = null): array|false { stub_extension_required(__METHOD__); }
 
-    /** @param string $subject @param array $options @return array */
-    public function searchSplitOffsets(string $subject, array $options = []): array { return []; }
+    /** @param string $subject @param array<string, mixed>|null $options @return array|false */
+    public function searchSplitOffsets(string $subject, ?array $options = null): array|false { stub_extension_required(__METHOD__); }
 
-    /** @param string $subject @return array */
-    public function searchSplitCuts(string $subject): array { return []; }
+    /** @param string $subject @return array|false */
+    public function searchSplitCuts(string $subject): array|false { stub_extension_required(__METHOD__); }
 
-    /** @param string $subject @param string $replacement @param array $options @return string */
-    public function searchReplace(string $subject, string $replacement, array $options = []): string { return ''; }
+    /** @param string $subject @param string $replacement @param array<string, mixed>|null $options @return string|false */
+    public function searchReplace(string $subject, string $replacement, ?array $options = null): string|false { stub_extension_required(__METHOD__); }
 
     /** @param string $subject @return SearchIterator */
-    public function searchAllGenerator(string $subject): SearchIterator {
-        return new SearchIterator($this, $subject);
-    }
+    public function searchAllGenerator(string $subject): SearchIterator { stub_extension_required(__METHOD__); }
+
+    /** @param string $subject @return SplitIterator */
+    public function searchSplitGenerator(string $subject): SplitIterator { stub_extension_required(__METHOD__); }
 }

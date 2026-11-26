@@ -5,127 +5,130 @@
  *
  * The real implementation is provided by the libsnobol4 PHP extension
  * (bindings/php/src/snobol_builder_php.c). This file exists only so that IDEs
- * can resolve the class and its methods; it is never loaded at runtime because
- * the extension already registers the class at startup.
+ * can resolve the class and its methods. When the extension is missing, a
+ * call fails loudly through the shared guard instead of returning a value, so
+ * a stub call can never masquerade as a result.
  *
- * Builder methods are static and fluent: each returns the builder node so calls
- * can be chained or passed into other builder methods.
+ * Every method is static and returns an AST node array that the Pattern and
+ * PatternHelper constructors accept.
  *
  * @generated from the extension method table — keep in sync with snobol_builder_php.c
  */
 
 namespace Snobol;
 
+require_once __DIR__ . '/_extension_guard.php';
+
 class Builder
 {
-    /** @param mixed $arg @return static */
-    public static function lit($arg): static { return new static(); }
+    /** @param string $s @return array<string, mixed> AST node */
+    public static function lit(string $s): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function span($arg): static { return new static(); }
+    /** @param string $set @return array<string, mixed> AST node */
+    public static function span(string $set): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function brk($arg): static { return new static(); }
+    /** @param string $set @return array<string, mixed> AST node */
+    public static function brk(string $set): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function any($arg): static { return new static(); }
+    /** @param string|null $set @return array<string, mixed> AST node */
+    public static function any(?string $set = null): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function notany($arg): static { return new static(); }
+    /** @param string $set @return array<string, mixed> AST node */
+    public static function notany(string $set): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function len($arg): static { return new static(); }
+    /** @param int $n @return array<string, mixed> AST node */
+    public static function len(int $n): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function arbno($arg): static { return new static(); }
+    /** @param array<string, mixed> $sub @return array<string, mixed> AST node */
+    public static function arbno(array $sub): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static Register in [0, 63]; ValueError outside */
-    public static function cap($arg): static { return new static(); }
+    /** @param int $reg Register in [0, 63]; ValueError outside @param array<string, mixed> $sub @return array<string, mixed> AST node */
+    public static function cap(int $reg, array $sub): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $node @param mixed $reg @return static Register in [0, 63]; ValueError outside */
-    public static function name($node, $reg): static { return new static(); }
+    /** @param int $reg Register in [0, 63]; ValueError outside @param array<string, mixed> $sub @return array<string, mixed> AST node */
+    public static function name(int $reg, array $sub): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $name @param mixed $value @return static Registers in [0, 63]; ValueError outside */
-    public static function assign($name, $value): static { return new static(); }
+    /** @param int $var @param int $reg Register in [0, 63]; ValueError outside @return array<string, mixed> AST node */
+    public static function assign(int $var, int $reg): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed ...$parts @return static */
-    public static function concat(...$parts): static { return new static(); }
+    /** @param array<int, array<string, mixed>> $parts @return array<string, mixed> AST node */
+    public static function concat(array $parts): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed ...$alts @return static */
-    public static function alt(...$alts): static { return new static(); }
+    /** @param array<string, mixed> $left @param array<string, mixed> $right @return array<string, mixed> AST node */
+    public static function alt($left, $right): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static Register in [0, 63]; ValueError outside */
-    public static function eval($arg): static { return new static(); }
+    /** SNOBOL EVAL node factory; not PHP's eval(). @param int $fn @param int $reg @return array<string, mixed> AST node */
+    public static function eval(int $fn, int $reg): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function anchor($arg): static { return new static(); }
+    /** @param string $atype @return array<string, mixed> AST node */
+    public static function anchor(string $atype): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $node @param int $min @param int|null $max @return static */
-    public static function repeat($node, $min = 0, $max = null): static { return new static(); }
+    /** @param array<string, mixed> $sub @param int $min @param int|null $max @return array<string, mixed> AST node */
+    public static function repeat(array $sub, int $min, ?int $max = null): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function emit($arg): static { return new static(); }
+    /** @param string $text @return array<string, mixed> AST node */
+    public static function emit(string $text): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static Register in [0, 63]; ValueError outside */
-    public static function emitRef($arg): static { return new static(); }
+    /** @param int $reg @return array<string, mixed> AST node */
+    public static function emitRef(int $reg): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function label($arg): static { return new static(); }
+    /** @param string $name @param array<string, mixed> $target @return array<string, mixed> AST node */
+    public static function label(string $name, array $target): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function goto($arg): static { return new static(); }
+    /** @param string $label @return array<string, mixed> AST node */
+    public static function goto(string $label): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function dynamicEval($arg): static { return new static(); }
+    /** @param array<string, mixed> $expr @return array<string, mixed> AST node */
+    public static function dynamicEval(array $expr): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function tableAccess($arg): static { return new static(); }
+    /** @param string $tableName @param array<string, mixed> $keyExpr @return array<string, mixed> AST node */
+    public static function tableAccess(string $tableName, array $keyExpr): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function tableUpdate($arg): static { return new static(); }
+    /** @param string $tableName @param array<string, mixed> $keyExpr @param array<string, mixed> $valueExpr @return array<string, mixed> AST node */
+    public static function tableUpdate(string $tableName, array $keyExpr, array $valueExpr): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function arrayAccess($arg): static { return new static(); }
+    /** @param string $arrayName @param array<string, mixed> $indexExpr @return array<string, mixed> AST node */
+    public static function arrayAccess(string $arrayName, array $indexExpr): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function arrayUpdate($arg): static { return new static(); }
+    /** @param string $arrayName @param array<string, mixed> $indexExpr @param array<string, mixed> $valueExpr @return array<string, mixed> AST node */
+    public static function arrayUpdate(string $arrayName, array $indexExpr, array $valueExpr): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function arrayCreate($arg): static { return new static(); }
+    /** @param string $arrayName @param int|null $size @return array<string, mixed> AST node */
+    public static function arrayCreate(string $arrayName, ?int $size = null): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function breakx($arg): static { return new static(); }
+    /** @param string $set @return array<string, mixed> AST node */
+    public static function breakx(string $set): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function bal($arg): static { return new static(); }
+    /** @param string|null $open @param string|null $close @return array<string, mixed> AST node */
+    public static function bal(?string $open = null, ?string $close = null): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function fence($arg): static { return new static(); }
+    /** @return array<string, mixed> AST node */
+    public static function fence(): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function rem($arg): static { return new static(); }
+    /** @return array<string, mixed> AST node */
+    public static function rem(): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function rpos($arg): static { return new static(); }
+    /** @param int $n @return array<string, mixed> AST node */
+    public static function rpos(int $n): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function rtab($arg): static { return new static(); }
+    /** @param int $n @return array<string, mixed> AST node */
+    public static function rtab(int $n): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function arb($arg): static { return new static(); }
+    /** @return array<string, mixed> AST node */
+    public static function arb(): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function pos($arg): static { return new static(); }
+    /** @param int $n @return array<string, mixed> AST node */
+    public static function pos(int $n): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function tab($arg): static { return new static(); }
+    /** @param int $n @return array<string, mixed> AST node */
+    public static function tab(int $n): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function abort($arg): static { return new static(); }
+    /** @return array<string, mixed> AST node */
+    public static function abort(): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function fail($arg): static { return new static(); }
+    /** @return array<string, mixed> AST node */
+    public static function fail(): array { stub_extension_required(__METHOD__); }
 
-    /** @param mixed $arg @return static */
-    public static function succeed($arg): static { return new static(); }
+    /** @return array<string, mixed> AST node */
+    public static function succeed(): array { stub_extension_required(__METHOD__); }
 }
