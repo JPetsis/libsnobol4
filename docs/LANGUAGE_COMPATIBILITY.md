@@ -32,7 +32,7 @@ The engine now supports full SNOBOL language compatibility including:
 | Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                         |
 | Helper API: `DynamicPatternCache`             | ✅ Complete | Truthful runtime-backed cache interface           |
 | Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)        |
-| Test coverage                                 | ✅ Complete | 628 PHP tests, 74553 C assertions (custom runner) |
+| Test coverage                                 | ✅ Complete | 629 PHP tests, 74572 C assertions (custom runner) |
 
 ### ⚠️ Known Limitations
 
@@ -240,6 +240,14 @@ name_bytes[name_len] — UTF-8 table name (resolved by snobol_template_bind_tabl
 
 Call `snobol_template_bind_tables(bc, bc_len, names, ids, n)` after compilation
 to patch all `0xFFFF` table_id entries to runtime-assigned IDs.
+
+A literal key is limited to 65535 bytes because `key_len` is a 16-bit field; the
+template compiler rejects a longer key with a compile error instead of emitting
+a truncated length. At every encoded length the VM consumes exactly `key_len`
+payload bytes (key bytes are never decoded as opcodes) and performs the lookup,
+so there is no length cutoff below the encoding limit. `key_len == 0` performs
+no lookup and emits nothing, and a key that is absent from the bound table emits
+nothing while execution continues with the next instruction.
 
 ### Template Expression Syntax
 

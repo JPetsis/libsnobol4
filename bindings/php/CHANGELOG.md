@@ -17,6 +17,16 @@ core versions correspond 1:1.
 
 ### Fixed
 
+- **`Pattern::subst()` resolves literal table keys of every encodable
+  length.** The table-emit handler shared with this binding through
+  `core_amalgam.c` performed the lookup only for keys shorter than 1024
+  bytes, so a valid template such as `$v0[colors['<a 2000-byte key>']]` silently
+  emitted the empty string even when the bound table held the key. Every
+  encoded length up to the 16-bit `key_len` limit now resolves; a key above
+  65535 bytes is still rejected by the template compiler, an absent key still
+  emits nothing, and key bytes are never decoded as opcodes.
+  `TemplateOpsTest` covers a 1024-byte and a 2000-byte key through `subst()`
+  and keeps the long-key desync and rejected-overflow cases.
 - **Security: `match()`/`searchAll()` no longer report "no match" for a
   subject that lacks a literal inside nested min==0 loops.** The core
   required-literal prefilter, shared with this binding through

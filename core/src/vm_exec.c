@@ -1463,7 +1463,11 @@ bool vm_run(VM *vm) {
       if (key_end > vm->bc_len) {
         goto fail_ret; /* truncated key payload */
       }
-      if (key_len > 0 && key_len < 1024) {
+      if (key_len > 0) {
+        /* Every encodable length is looked up: key_len is a 16-bit field, and
+         * the compiler rejects keys above it, so the allocation below is
+         * bounded by the bytecode buffer.  A shorter cutoff here made legal
+         * long-key templates emit the empty string. */
         char *key = (char *)snobol_malloc(key_len + 1);
         if (key) {
           memcpy(key, vm->bc + vm->ip, key_len);

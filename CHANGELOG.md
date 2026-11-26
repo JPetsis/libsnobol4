@@ -15,6 +15,22 @@ tagged `php/vX.Y.Z`.
 
 ### Fixed
 
+- **Long literal table keys were never looked up**: the `OP_EMIT_TABLE`
+  handler performed the lookup only when `key_len < 1024`, a cutoff that was
+  a lookup policy rather than an encoding limit. A legal template such as
+  `$v0[dict['<a 2000-byte key>']]` compiled, bound and silently emitted the
+  empty string even when the bound table held that key, so a valid template
+  produced output that looked like a missing entry. The handler now looks up
+  every encodable length (1 to 65535, the width of `key_len`) and keeps the
+  unconditional payload skip, so key bytes are still never decoded as
+  opcodes. `key_len == 0` still performs no lookup and emits nothing, and an
+  absent key still emits nothing while execution continues with the next
+  instruction. Cost is one `key_len + 1` allocation per match for templates
+  that contain such a key, bounded by the bytecode buffer. Regression:
+  2000-byte and 65535-byte keys that resolve, the 1023/1024/1025 boundary, an
+  absent long key followed by literal text, and the existing desync cases in
+  `tests/c/test_template_ops.c`, plus the `subst()` path in
+  `bindings/php/tests/php/TemplateOpsTest.php`.
 - **Alt-literals classification recursed without bound on caller bytecode**:
   `check_alt_literals()` walked both arms of every `OP_SPLIT` with no visited
   set and no depth bound. The walk is limited to the first 2048 bytecode
@@ -68,7 +84,7 @@ tagged `php/vX.Y.Z`.
   `EMIT('')`/`EMIT(@v0)`/plain-emit controls, and pins the analysis itself
   against a non-nullable literal and a non-nullable concat.
 
-C test suite: **419 cases / 74,553 assertions** (custom runner).
+C test suite: **420 cases / 74,572 assertions** (custom runner).
 
 ## [1.1.1] - 2026-11-17
 

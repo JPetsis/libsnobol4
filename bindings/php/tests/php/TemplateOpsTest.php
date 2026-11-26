@@ -112,16 +112,35 @@ class TemplateOpsTest extends TestCase
         $table = new Table();
         $table->set('sky', 'blue');
 
-        // A literal key of 1024+ bytes is instruction payload, not code: the
-        // VM skipped it only for keys shorter than 1024, which left the
-        // instruction pointer on the first key byte and decoded the key as
-        // opcodes.  The key starts with OP_EMIT_CAPTURE (18) + register 0,
-        // which would emit the capture into the output if decoded.
+        // A literal key of 1024+ bytes is instruction payload, never code: it
+        // must be skipped whatever the lookup does.  The key is absent from
+        // the table (so the lookup contributes nothing) and starts with
+        // OP_EMIT_CAPTURE (18) + register 0, which would emit the capture
+        // into the output if the key bytes were decoded as opcodes.
         $key = \chr(18) . \chr(0) . str_repeat(\chr(41), 2048 - 2);
 
         $pattern = $this->makeCap0Pattern();
         $result = $pattern->subst('anything', "\$v0[colors['" . $key . "']]", ['colors' => $table]);
         $this->assertSame('', $result);
+    }
+
+    /**
+     * Literal keys at and above the old 1024-byte lookup cutoff must resolve.
+     * The handler used to skip the lookup for those lengths, so a valid
+     * template silently emitted the empty string.
+     */
+    public function testSubstLongTableKeyResolves(): void
+    {
+        $pattern = $this->makeCap0Pattern();
+
+        foreach ([1024, 2000] as $len) {
+            $key = str_repeat('k', $len);
+            $table = new Table();
+            $table->set($key, 'hit-' . $len);
+
+            $result = $pattern->subst('anything', "\$v0[colors['" . $key . "']]", ['colors' => $table]);
+            $this->assertSame('hit-' . $len, $result, "{$len}-byte key resolves");
+        }
     }
 
     public function testSubstTableKeyTooLongToEncodeThrows(): void

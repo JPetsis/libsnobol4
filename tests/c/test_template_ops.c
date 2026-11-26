@@ -767,9 +767,10 @@ static char *assemble_template(const char *prefix, const char *key,
 }
 
 /* A literal key of 1024+ bytes is instruction payload, never code: the VM must
- * skip key_len bytes even though such a key is not looked up.  The key below
- * starts with a real OP_EMIT_CAPTURE instruction, so a desynchronised decode
- * would emit the capture and show up as output. */
+ * skip key_len bytes whatever the lookup does.  The key below is absent from
+ * the table, so the lookup contributes nothing, and it starts with a real
+ * OP_EMIT_CAPTURE instruction, so a desynchronised decode would emit the
+ * capture and show up as output. */
 static void test_long_table_key_not_dispatched(void) {
   test_suite("Template Ops: 1024+ byte table key is skipped, not executed");
 
@@ -841,8 +842,10 @@ static void test_long_table_key_not_dispatched(void) {
     free(big);
   }
 
-  /* Hand-built bytecode: exact policy boundary (key_len == 1024), so the
-   * check holds for bytecode that does not come from the template compiler. */
+  /* Hand-built bytecode at the former boundary (key_len == 1024): the payload
+   * is skipped, not decoded, and the key is absent so the lookup contributes
+   * nothing.  Holds for bytecode that does not come from the template
+   * compiler. */
   uint8_t *bc = (uint8_t *)malloc(7 + 1024 + 1);
   test_assert(bc != nullptr, "hand-built bytecode allocated");
   if (bc) {
@@ -900,6 +903,125 @@ static void test_long_table_key_not_dispatched(void) {
   test_assert(out.len == 0, "unknown key_type emits nothing");
   cleanup_test_vm(&vm);
   snobol_buf_free(&out);
+
+  table_release(table);
+}
+
+/* Every encodable literal key length is looked up.  The handler used to skip
+ * the lookup for keys of 1024 bytes and above, so a legal template with such
+ * a key emitted the empty string even when the bound table held it. */
+static void test_table_literal_key_lengths(void) {
+  test_suite("Template Ops: literal table key lengths are looked up");
+
+  snobol_table_t *table = table_create("dict");
+  test_assert(table != nullptr, "dict table created");
+
+  /* 2000-byte key present -> its value is emitted. */
+  {
+    enum { KEY_LEN = 2000 };
+    char *key = (char *)malloc(KEY_LEN + 1);
+    test_assert(key != nullptr, "2000-byte key buffer allocated");
+    if (key) {
+      memset(key, 'k', KEY_LEN);
+      key[KEY_LEN] = '\0';
+      (void)table_set(table, key, "hit");
+
+      size_t tpl_len = 0;
+      char *tpl =
+          assemble_template("$v0[dict['", key, KEY_LEN, "']]", &tpl_len);
+      snobol_buf out = {0};
+      bool ran = (tpl && run_dict_template(tpl, tpl_len, table, &out)) != 0;
+      test_assert(ran, "2000-byte key template compiles, binds and runs");
+      test_assert((out.len == 3 && memcmp(out.data, "hit", 3) == 0) != 0,
+                  "2000-byte key resolves to its value");
+      snobol_buf_free(&out);
+      free(tpl);
+      free(key);
+    }
+  }
+
+  /* The largest key the 16-bit length field encodes resolves too. */
+  {
+    enum { KEY_LEN = 65535 };
+    char *key = (char *)malloc(KEY_LEN + 1);
+    test_assert(key != nullptr, "65535-byte key buffer allocated");
+    if (key) {
+      memset(key, 'b', KEY_LEN);
+      key[KEY_LEN] = '\0';
+      (void)table_set(table, key, "big");
+
+      size_t tpl_len = 0;
+      char *tpl =
+          assemble_template("$v0[dict['", key, KEY_LEN, "']]", &tpl_len);
+      snobol_buf out = {0};
+      bool ran = (tpl && run_dict_template(tpl, tpl_len, table, &out)) != 0;
+      test_assert(ran, "65535-byte key template compiles, binds and runs");
+      test_assert((out.len == 3 && memcmp(out.data, "big", 3) == 0) != 0,
+                  "65535-byte key resolves to its value");
+      snobol_buf_free(&out);
+      free(tpl);
+      free(key);
+    }
+  }
+
+  /* The removed boundary: 1023, 1024 and 1025 bytes all resolve. */
+  {
+    static const size_t lens[] = {1023, 1024, 1025};
+    static const char *values[] = {"below", "boundary", "above"};
+    for (size_t i = 0; i < sizeof(lens) / sizeof(lens[0]); i++) {
+      size_t key_len = lens[i];
+      char *key = (char *)malloc(key_len + 1);
+      test_assert(key != nullptr, "boundary key buffer allocated");
+      if (!key) {
+        continue;
+      }
+      memset(key, (int)('a' + i), key_len);
+      key[key_len] = '\0';
+      (void)table_set(table, key, values[i]);
+
+      size_t tpl_len = 0;
+      char *tpl =
+          assemble_template("$v0[dict['", key, key_len, "']]", &tpl_len);
+      snobol_buf out = {0};
+      bool ran = (tpl && run_dict_template(tpl, tpl_len, table, &out)) != 0;
+      size_t want = strlen(values[i]);
+      char msg[96];
+      snprintf(msg, sizeof(msg), "%zu-byte key template runs", key_len);
+      test_assert(ran, msg);
+      snprintf(msg, sizeof(msg), "%zu-byte key resolves, no length cutoff",
+               key_len);
+      test_assert((out.len == want && memcmp(out.data, values[i], want) == 0) !=
+                      0,
+                  msg);
+      snobol_buf_free(&out);
+      free(tpl);
+      free(key);
+    }
+  }
+
+  /* An absent long key emits nothing and does not swallow the text that
+   * follows the instruction. */
+  {
+    enum { KEY_LEN = 2000 };
+    char *key = (char *)malloc(KEY_LEN + 1);
+    test_assert(key != nullptr, "absent key buffer allocated");
+    if (key) {
+      memset(key, 'z', KEY_LEN);
+      key[KEY_LEN] = '\0';
+
+      size_t tpl_len = 0;
+      char *tpl =
+          assemble_template("$v0[dict['", key, KEY_LEN, "']]tail", &tpl_len);
+      snobol_buf out = {0};
+      bool ran = (tpl && run_dict_template(tpl, tpl_len, table, &out)) != 0;
+      test_assert(ran, "absent long-key template compiles, binds and runs");
+      test_assert((out.len == 4 && memcmp(out.data, "tail", 4) == 0) != 0,
+                  "absent long key emits nothing and the tail still emits");
+      snobol_buf_free(&out);
+      free(tpl);
+      free(key);
+    }
+  }
 
   table_release(table);
 }
@@ -1437,6 +1559,7 @@ void test_template_ops_suite(void) {
   test_e2e_table_literal_key();
   test_e2e_table_capture_key();
   test_long_table_key_not_dispatched();
+  test_table_literal_key_lengths();
 #endif
   test_legacy_emit_expr();
   test_documented_table_syntax();
