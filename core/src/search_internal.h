@@ -118,6 +118,22 @@ enum { SNOBOL_AUTO_MAX_EDGES = 1024 };
  * fall back to the (correct) search-VM / general tiers. */
 enum { SNOBOL_AUTO_MAX_LIT_BYTES = 250 };
 
+/** Alt-literals SPLIT walk: the metadata derivation only walks this many
+ * leading bytecode bytes, so a fixed bitmap covers every offset the walk can
+ * visit (asserted by the offset check in the walker). */
+enum {
+  SNOBOL_ALT_WALK_WINDOW = 2048,
+  SNOBOL_ALT_WALK_BITMAP_BYTES = SNOBOL_ALT_WALK_WINDOW / 8
+};
+
+/** Depth cap for the alt-literals SPLIT walk.  Visiting each offset at most
+ * once already bounds the depth by the window's SPLIT count (a SPLIT is 9
+ * bytes, so at most ~227 frames), and this cap keeps the walk far below the
+ * C stack limit even if a decoding corner produces more branch offsets than
+ * that.  No acyclic compiler alternation comes close: the deepest chain the
+ * window holds is about 100 branches. */
+enum { SNOBOL_ALT_WALK_MAX_DEPTH = 256 };
+
 /** A single outgoing edge from a trie node. */
 typedef struct {
   uint8_t byte;     /**< Transition byte. */

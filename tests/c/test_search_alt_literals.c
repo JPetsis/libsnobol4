@@ -579,6 +579,103 @@ void test_alt_literals_bytecode_deep_chain(void) {
   snobol_search_meta_free(&meta);
 }
 
+/* Caller-supplied bytecode may contain SPLIT targets that cycle or share a
+ * subtree.  snobol_pattern_from_bytecode() derives metadata through the
+ * alt-literals walk, so an unbounded walk consumed the whole C stack (the
+ * unfixed code aborts under ASan with stack-overflow).  Each graph must
+ * instead be rejected and still yield a usable pattern. */
+void test_alt_literals_split_graph_guard(void) {
+  test_suite("Alt-literals: caller SPLIT graphs terminate");
+
+  /* Self-referential SPLIT(0, 0) followed by ACCEPT. */
+  {
+    uint8_t *bc = (uint8_t *)malloc(10);
+    test_assert(bc != nullptr, "self-cycle buffer allocated");
+    if (bc) {
+      bc[0] = OP_SPLIT;
+      store_u32_be(bc + 1, 0);
+      store_u32_be(bc + 5, 0);
+      bc[9] = OP_ACCEPT;
+      snobol_pattern_t *p = snobol_pattern_from_bytecode(bc, 10, 0, nullptr);
+      test_assert(p != nullptr, "self-cycle bytecode yields a pattern");
+      if (p) {
+        const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+        test_assert((!meta->is_alt_literals) != 0,
+                    "self-cycle is not alt-literals");
+        snobol_pattern_free(p);
+      }
+    }
+  }
+
+  /* Two-node cycle: SPLIT(0 -> 9), SPLIT(9 -> 0), ACCEPT at 18. */
+  {
+    uint8_t *bc = (uint8_t *)malloc(19);
+    test_assert(bc != nullptr, "two-node cycle buffer allocated");
+    if (bc) {
+      bc[0] = OP_SPLIT;
+      store_u32_be(bc + 1, 9);
+      store_u32_be(bc + 5, 0);
+      bc[9] = OP_SPLIT;
+      store_u32_be(bc + 10, 0);
+      store_u32_be(bc + 14, 9);
+      bc[18] = OP_ACCEPT;
+      snobol_pattern_t *p = snobol_pattern_from_bytecode(bc, 19, 0, nullptr);
+      test_assert(p != nullptr, "two-node cycle bytecode yields a pattern");
+      if (p) {
+        const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+        test_assert((!meta->is_alt_literals) != 0,
+                    "two-node cycle is not alt-literals");
+        snobol_pattern_free(p);
+      }
+    }
+  }
+
+  /* Shared subtree: SPLIT(9, 9) with a single two-byte LIT leaf at 9.
+   * Walking the same subtree once per path doubles at every level. */
+  {
+    uint8_t *bc = (uint8_t *)malloc(21);
+    test_assert(bc != nullptr, "shared-subtree buffer allocated");
+    if (bc) {
+      bc[0] = OP_SPLIT;
+      store_u32_be(bc + 1, 9);
+      store_u32_be(bc + 5, 9);
+      bc[9] = OP_LIT;
+      store_u32_be(bc + 10, 18);
+      store_u32_be(bc + 14, 2);
+      memcpy(bc + 18, "ab", 2);
+      bc[20] = OP_ACCEPT;
+      snobol_pattern_t *p = snobol_pattern_from_bytecode(bc, 21, 0, nullptr);
+      test_assert(p != nullptr, "shared-subtree bytecode yields a pattern");
+      if (p) {
+        const snobol_search_meta_t *meta = snobol_pattern_get_meta(p);
+        test_assert((!meta->is_alt_literals) != 0,
+                    "shared SPLIT subtree is not alt-literals");
+        snobol_pattern_free(p);
+      }
+    }
+  }
+
+  /* Acyclic control: a deep two-byte-literal chain (85 branches, ~1.7 KiB of
+   * the 2048-byte window) must stay classified. */
+  {
+    uint8_t *bc = (uint8_t *)malloc(2048);
+    test_assert(bc != nullptr, "85-branch buffer allocated");
+    if (bc) {
+      size_t bc_len = build_alt_bytecode(bc, 85, false);
+      test_assert((bc_len > 0 && bc_len <= 2048) != 0,
+                  "85-branch bytecode built inside the walk window");
+      snobol_search_meta_t meta;
+      snobol_search_derive_meta(bc, bc_len, &meta);
+      test_assert(meta.is_alt_literals,
+                  "85-branch acyclic chain stays alt-literals");
+      test_assert((!meta.may_match_empty) != 0,
+                  "85-branch chain reports no empty branch");
+      snobol_search_meta_free(&meta);
+      free(bc);
+    }
+  }
+}
+
 void test_search_alt_literals_suite(void) {
   test_alt_literals_flat_trie();
   test_alt_literals_bushy_trie();
@@ -589,5 +686,6 @@ void test_search_alt_literals_suite(void) {
   test_alt_literals_deep_chain();
   test_alt_literals_deep_empty_branch();
   test_alt_literals_bytecode_deep_chain();
+  test_alt_literals_split_graph_guard();
   test_alt_literals_over_bound_no_crash();
 }

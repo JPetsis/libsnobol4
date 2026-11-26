@@ -773,6 +773,18 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
   return true;
 }
 
+/* Mark @p ip in the alt-literals walk's visited bitmap.  Returns false when
+ * the offset was already visited, which means the SPLIT graph cycles or
+ * shares a subtree.  Callers keep ip < SNOBOL_ALT_WALK_WINDOW. */
+static inline bool alt_walk_visit(uint8_t *visited, size_t ip) {
+  uint8_t bit = (uint8_t)(1u << (ip & 7u));
+  if ((visited[ip >> 3] & bit) != 0) {
+    return false;
+  }
+  visited[ip >> 3] |= bit;
+  return true;
+}
+
 /* ---------------------------------------------------------------------------
  * Alternation-of-literals checker
  *
@@ -785,11 +797,25 @@ static bool check_automaton_eligible(const uint8_t *bc, size_t bc_len) {
  *
  * Sets *has_empty when any validated branch is a zero-length literal, so
  * callers learn that the alternation matches empty without a second walk.
+ *
+ * The walk is bounded twice, because the bytecode can come from
+ * snobol_pattern_from_bytecode() with caller-chosen SPLIT targets:
+ *   - every offset is visited at most once (`visited` bitmap).  A target that
+ *     reaches a walked offset means the graph cycles or shares a subtree;
+ *     both are rejected, which also stops the SPLIT(X, X) fan-out that would
+ *     otherwise be walked once per path.
+ *   - `depth` is capped, so a decoding corner that keeps producing fresh
+ *     branch offsets cannot approach the C stack limit either.
  * ---------------------------------------------------------------------------
  */
 static bool check_alt_literals(const uint8_t *bc, size_t bc_len, size_t ip,
-                               size_t *lit_bytes, bool *has_empty) {
-  if (ip + 2 > bc_len) {
+                               size_t *lit_bytes, bool *has_empty,
+                               uint8_t *visited, size_t depth) {
+  if (ip + 2 > bc_len || depth > SNOBOL_ALT_WALK_MAX_DEPTH ||
+      ip >= SNOBOL_ALT_WALK_WINDOW) {
+    return false;
+  }
+  if (!alt_walk_visit(visited, ip)) {
     return false;
   }
   uint8_t op = bc[ip];
@@ -842,8 +868,10 @@ static bool check_alt_literals(const uint8_t *bc, size_t bc_len, size_t ip,
     if (a >= bc_len || b >= bc_len) {
       return false;
     }
-    return (check_alt_literals(bc, bc_len, a, lit_bytes, has_empty) &&
-            check_alt_literals(bc, bc_len, b, lit_bytes, has_empty)) != 0;
+    return (check_alt_literals(bc, bc_len, a, lit_bytes, has_empty, visited,
+                               depth + 1) &&
+            check_alt_literals(bc, bc_len, b, lit_bytes, has_empty, visited,
+                               depth + 1)) != 0;
   }
 
   return false;
@@ -2167,16 +2195,21 @@ void SNOBOL_HOT snobol_search_derive_meta(const uint8_t *bc, size_t bc_len,
 
   /* ---- Alternation-of-literals detection ---- */
   /* Walk the SPLIT tree: every branch must be LIT(…) ACCEPT.  The walk is
-   * bounded to the first 2048 bytes of bytecode — enough for alternations
-   * with well over 100 literal branches while keeping derive_meta O(1)
-   * relative to pathological bytecode sizes.  Patterns beyond the bound
-   * fall through to the (correct) search-VM / general-VM tiers. */
+   * bounded to the first SNOBOL_ALT_WALK_WINDOW bytes of bytecode — enough
+   * for alternations with well over 100 literal branches while keeping
+   * derive_meta O(1) relative to pathological bytecode sizes.  Patterns
+   * beyond the bound fall through to the (correct) search-VM / general-VM
+   * tiers.  The walk itself is visit-once and depth-capped, so caller-
+   * supplied SPLIT graphs cannot cycle or fan out without end. */
   if (op0 == OP_SPLIT && bc_len >= 10) {
-    size_t bc_remain = bc_len > 2048 ? 2048 : bc_len;
+    size_t bc_remain =
+        bc_len > SNOBOL_ALT_WALK_WINDOW ? SNOBOL_ALT_WALK_WINDOW : bc_len;
     size_t lit_bytes = 0;
     bool has_empty_branch = false;
+    uint8_t visited[SNOBOL_ALT_WALK_BITMAP_BYTES] = {0};
     out->is_alt_literals =
-        ((check_alt_literals(bc, bc_remain, 0, &lit_bytes, &has_empty_branch) &&
+        ((check_alt_literals(bc, bc_remain, 0, &lit_bytes, &has_empty_branch,
+                             visited, 0) &&
           lit_bytes <= SNOBOL_AUTO_MAX_LIT_BYTES) != 0);
     /* An empty branch makes the alternation match empty at any position. */
     if (out->is_alt_literals && has_empty_branch) {

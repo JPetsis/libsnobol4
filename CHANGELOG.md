@@ -15,6 +15,25 @@ tagged `php/vX.Y.Z`.
 
 ### Fixed
 
+- **Alt-literals classification recursed without bound on caller bytecode**:
+  `check_alt_literals()` walked both arms of every `OP_SPLIT` with no visited
+  set and no depth bound. The walk is limited to the first 2048 bytecode
+  bytes, but that bounds the range, not the number of visits, so a buffer
+  passed to `snobol_pattern_from_bytecode()` holding `SPLIT(0,0)`, a two-node
+  cycle or a shared `SPLIT(X, X)` subtree recursed until the C stack was
+  gone: AddressSanitizer reports `stack-overflow` inside
+  `check_alt_literals()` and the embedding process dies. The walk now marks
+  each offset in a fixed bitmap covering the walk window and rejects a
+  revisit, and it stops at `SNOBOL_ALT_WALK_MAX_DEPTH`, so a cycle or shared
+  subtree fails the classification instead of recursing. A rejected buffer
+  keeps `is_alt_literals` false and takes the existing non-alt-literals
+  search path; the literal byte budget, the walk window and the empty-branch
+  result are unchanged, and acyclic chains stay classified (70-branch source
+  and bytecode chains, and an 85-branch two-byte chain well inside the
+  window). Cost is one 256-byte bitmap and a depth counter per SPLIT-led
+  metadata derivation, nothing on the search path. Regression: the
+  self-cycle, two-node cycle and shared-subtree cases plus the 85-branch
+  control in `tests/c/test_search_alt_literals.c`.
 - **Required-literal prefilter rejected matches for nested loops**: the
   derivation keeps one `skippable_loop_end` offset and every min==0
   `OP_REPEAT_INIT` overwrote it, so a nested loop's nearer skip target
@@ -49,7 +68,7 @@ tagged `php/vX.Y.Z`.
   `EMIT('')`/`EMIT(@v0)`/plain-emit controls, and pins the analysis itself
   against a non-nullable literal and a non-nullable concat.
 
-C test suite: **418 cases / 74,540 assertions** (custom runner).
+C test suite: **419 cases / 74,553 assertions** (custom runner).
 
 ## [1.1.1] - 2026-11-17
 
