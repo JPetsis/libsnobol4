@@ -17,6 +17,15 @@ core versions correspond 1:1.
 
 ### Fixed
 
+- **`Pattern::subst()` rejects out-of-range template operands.** A template
+  naming a capture register at or above 64 (`${v300}`, `$v256`,
+  `$TABLE[$v300]`) used to be truncated into the one-byte register field and
+  read an unrelated capture; an LPAD/RPAD width of 0 used to fall back to
+  literal output, and a width above the documented 1024 used to wrap into the
+  16-bit field and then be clamped at run time. All three now throw
+  `Failed to compile template`, and the exception contract is unchanged
+  for every in-range template. `TemplateOpsTest` covers the rejected forms and
+  the `v63` / `lpad(1024)` controls.
 - **`Pattern::subst()` resolves literal table keys of every encodable
   length.** The table-emit handler shared with this binding through
   `core_amalgam.c` performed the lookup only for keys shorter than 1024

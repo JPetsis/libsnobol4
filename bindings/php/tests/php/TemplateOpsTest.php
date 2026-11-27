@@ -162,6 +162,59 @@ class TemplateOpsTest extends TestCase
         $this->assertSame('5', $result);
     }
 
+    /**
+     * Operands that do not fit their bytecode field must fail compilation
+     * instead of silently selecting a different register or pad width.
+     */
+    public function testSubstRejectsOutOfRangeOperands(): void
+    {
+        $pattern = $this->makeCap0Pattern();
+        $table   = new Table();
+        $table->set('k', 'v');
+
+        $cases = [
+            '${v300}'                        => [],
+            '${v256}'                        => [],
+            '${v99999999999999999999999999}' => [],
+            '$T[$v300]'                      => ['T' => $table],
+            '${v0.lpad(70000)}'              => [],
+            '${v0.rpad(70000)}'              => [],
+            '${v0.lpad(1025)}'               => [],
+            '${v0.lpad(0)}'                  => [],
+            '${v0.rpad(0)}'                  => [],
+        ];
+
+        foreach ($cases as $tpl => $tables) {
+            try {
+                $pattern->subst('anything', $tpl, $tables);
+                $this->fail("{$tpl} should not compile");
+            } catch (\Exception $e) {
+                $this->assertStringContainsString(
+                    'Failed to compile template',
+                    $e->getMessage(),
+                    "{$tpl} reports the compile failure"
+                );
+            }
+        }
+    }
+
+    /** The last register in the file still compiles; it is simply unset here. */
+    public function testSubstAcceptsRegisterLimit(): void
+    {
+        $pattern = $this->makeCap0Pattern();
+        $this->assertSame('', $pattern->subst('hello', '${v63}'));
+    }
+
+    /** The documented pad ceiling still compiles and pads to exactly 1024. */
+    public function testSubstAcceptsPadLimit(): void
+    {
+        $pattern = $this->makeCap0Pattern();
+        $result  = $pattern->subst('42', '${v0.lpad(1024)}');
+
+        $this->assertSame(1024, strlen($result));
+        $this->assertSame(str_repeat(' ', 1022) . '42', $result);
+    }
+
     public function testSubstUpperRegression(): void
     {
         $pattern = $this->makeCap0Pattern();

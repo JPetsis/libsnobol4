@@ -317,7 +317,7 @@ class PatternTest extends TestCase
     {
         $pattern = Builder::lit("abc");
         $subject = "abc";
-        $template = "val:\${v99}"; // v99 is not captured
+        $template = "val:\${v5}"; // v5 is in the register file but never captured
 
         $result = PatternHelper::replace($pattern, $template, $subject);
         $this->assertEquals("val:", $result); // Should emit empty for non-existent capture

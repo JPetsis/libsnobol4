@@ -1537,6 +1537,163 @@ static void test_documented_table_syntax(void) {
   }
 }
 
+/* Register operands are one byte wide and the register file holds MAX_CAPS
+ * captures, so an index at or above the limit must fail compilation instead of
+ * selecting an unrelated capture. */
+static void test_capture_register_range(void) {
+  test_suite("Template Ops: capture-register operand range");
+
+  static const char *rejected[] = {
+      "${v300}",   "$v256",         "$v64",
+      "$T[$v300]", "$v0[T[$v300]]", "${v99999999999999999999999999}",
+  };
+  for (size_t k = 0; k < sizeof rejected / sizeof rejected[0]; k++) {
+    uint8_t *bc = nullptr;
+    size_t bc_len = 0;
+    int rc = compile_template_to_bytecode(rejected[k], strlen(rejected[k]), &bc,
+                                          &bc_len);
+    char msg[160];
+    snprintf(msg, sizeof msg, "%s fails to compile", rejected[k]);
+    test_assert(rc == -1, msg);
+    snprintf(msg, sizeof msg, "%s returns no bytecode", rejected[k]);
+    test_assert(bc == nullptr && bc_len == 0, msg);
+    if (bc) {
+      compiler_free(bc);
+    }
+  }
+
+  /* Every in-range register still compiles to its own index. */
+  for (size_t reg = 0; reg < MAX_CAPS; reg++) {
+    char tpl[32];
+    int n = snprintf(tpl, sizeof tpl, "${v%zu}", reg);
+    uint8_t *bc = nullptr;
+    size_t bc_len = 0;
+    int rc = compile_template_to_bytecode(tpl, (size_t)n, &bc, &bc_len);
+    char msg[96];
+    snprintf(msg, sizeof msg, "${v%zu} compiles", reg);
+    test_assert(rc == 0 && bc != nullptr && bc_len == 3, msg);
+    if (rc == 0 && bc && bc_len == 3) {
+      snprintf(msg, sizeof msg, "${v%zu} selects register %zu", reg, reg);
+      test_assert(bc[0] == OP_EMIT_CAPTURE && bc[1] == (uint8_t)reg, msg);
+    }
+    if (bc) {
+      compiler_free(bc);
+    }
+  }
+}
+
+/* LPAD/RPAD widths are 16-bit fields, but the documented contract caps them at
+ * 1024; a larger width used to wrap and then be capped at run time. */
+static void test_pad_width_range(void) {
+  test_suite("Template Ops: LPAD/RPAD width range");
+
+  static const char *rejected[] = {
+      "${v0.lpad(70000)}",
+      "${v0.rpad(70000)}",
+      "${v0.lpad(1025)}",
+      "${v0.rpad(1025)}",
+      "${v0.lpad(999999999999999999999)}",
+      "${v0.lpad(0)}",
+      "${v0.rpad(0)}",
+  };
+  for (size_t k = 0; k < sizeof rejected / sizeof rejected[0]; k++) {
+    uint8_t *bc = nullptr;
+    size_t bc_len = 0;
+    int rc = compile_template_to_bytecode(rejected[k], strlen(rejected[k]), &bc,
+                                          &bc_len);
+    char msg[160];
+    snprintf(msg, sizeof msg, "%s fails to compile", rejected[k]);
+    test_assert(rc == -1, msg);
+    snprintf(msg, sizeof msg, "%s returns no bytecode", rejected[k]);
+    test_assert(bc == nullptr && bc_len == 0, msg);
+    if (bc) {
+      compiler_free(bc);
+    }
+  }
+
+  /* The documented cap and the smallest width still compile, and the width is
+   * encoded big-endian in the instruction. */
+  struct {
+    const char *tpl;
+    uint16_t width;
+  } accepted[] = {
+      {"${v0.lpad(1)}", 1}, {"${v0.lpad(1024)}", 1024}, {"${v0.lpad(007)}", 7},
+      {"${v0.rpad(1)}", 1}, {"${v0.rpad(1024)}", 1024},
+  };
+  for (size_t k = 0; k < sizeof accepted / sizeof accepted[0]; k++) {
+    uint8_t *bc = nullptr;
+    size_t bc_len = 0;
+    int rc = compile_template_to_bytecode(
+        accepted[k].tpl, strlen(accepted[k].tpl), &bc, &bc_len);
+    char msg[160];
+    snprintf(msg, sizeof msg, "%s compiles", accepted[k].tpl);
+    test_assert(rc == 0 && bc != nullptr && bc_len == 7, msg);
+    if (rc == 0 && bc && bc_len == 7) {
+      uint16_t encoded = (uint16_t)((bc[3] << 8) | bc[4]);
+      snprintf(msg, sizeof msg, "%s encodes width %u", accepted[k].tpl,
+               (unsigned)accepted[k].width);
+      test_assert(bc[0] == OP_EMIT_FORMAT && bc[1] == 0 &&
+                      (bc[2] == SNBL_FMT_LPAD || bc[2] == SNBL_FMT_RPAD) &&
+                      encoded == accepted[k].width && bc[5] == ' ',
+                  msg);
+    }
+    if (bc) {
+      compiler_free(bc);
+    }
+  }
+
+  /* Runtime control: the largest accepted width pads to exactly 1024 bytes. */
+  snobol_buf out;
+  run_template("${v0.lpad(1024)}", "42", 0, 2, &out);
+  test_assert(out.len == 1024, "lpad(1024) pads to 1024 bytes");
+  test_assert((out.len == 1024 && out.data[1022] == '4' &&
+               out.data[1023] == '2' && out.data[0] == ' ') != 0,
+              "lpad(1024) leaves the capture at the right edge");
+  snobol_buf_free(&out);
+}
+
+/* Control for the OP_EMIT_LITERAL payload bounds: a multi-KB literal segment
+ * still compiles and substitutes byte-for-byte. */
+static void test_multikb_literal_segment(void) {
+  test_suite("Template Ops: multi-KB literal segment");
+
+  enum { SEG = 8192 };
+  char *tpl = (char *)malloc(SEG + 1);
+  test_assert(tpl != nullptr, "multi-KB template allocated");
+  if (!tpl) {
+    return;
+  }
+  memset(tpl, 'a', SEG);
+  tpl[SEG] = '\0';
+
+  uint8_t *bc = nullptr;
+  size_t bc_len = 0;
+  int rc = compile_template_to_bytecode(tpl, SEG, &bc, &bc_len);
+  test_assert(rc == 0 && bc != nullptr, "8 KiB literal segment compiles");
+  if (rc == 0 && bc && bc_len == 1 + 4 + 4 + SEG + 1) {
+    uint32_t enc_off = ((uint32_t)bc[1] << 24) | ((uint32_t)bc[2] << 16) |
+                       ((uint32_t)bc[3] << 8) | (uint32_t)bc[4];
+    uint32_t enc_len = ((uint32_t)bc[5] << 24) | ((uint32_t)bc[6] << 16) |
+                       ((uint32_t)bc[7] << 8) | (uint32_t)bc[8];
+    test_assert(bc[0] == OP_EMIT_LITERAL, "emits OP_EMIT_LITERAL");
+    test_assert(enc_len == SEG, "records the full segment length");
+    test_assert(enc_off == 9, "payload offset follows the two u32 fields");
+  } else {
+    test_assert(false, "8 KiB literal segment has the expected encoding");
+  }
+  if (bc) {
+    compiler_free(bc);
+  }
+
+  snobol_buf out;
+  run_template(tpl, "x", 0, 0, &out);
+  test_assert(out.len == SEG, "substituted output keeps the segment length");
+  test_assert((out.len == SEG && memcmp(out.data, tpl, SEG) == 0) != 0,
+              "substituted output is byte-identical");
+  snobol_buf_free(&out);
+  free(tpl);
+}
+
 void test_template_ops_suite(void) {
   test_format_upper();
   test_format_lower();
@@ -1561,6 +1718,9 @@ void test_template_ops_suite(void) {
   test_long_table_key_not_dispatched();
   test_table_literal_key_lengths();
 #endif
+  test_capture_register_range();
+  test_pad_width_range();
+  test_multikb_literal_segment();
   test_legacy_emit_expr();
   test_documented_table_syntax();
   test_cov_tpl_substitutions();

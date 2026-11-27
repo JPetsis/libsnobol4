@@ -15,6 +15,24 @@ tagged `php/vX.Y.Z`.
 
 ### Fixed
 
+- **Template operands are range-checked instead of silently narrowed**:
+  `compile_template_to_bytecode` parsed `$vN`, `${vN…}` and the
+  capture-derived table key `$TABLE[$vN]` into a `uint8_t`, so `${v300}`
+  compiled to register 44 and `$v256` to register 0, reading an unrelated
+  capture with no diagnostic. LPAD/RPAD widths were parsed into a `uint16_t`
+  before the 1024 cap applied, so `lpad(70000)` compiled with width 4464 and
+  was then clamped at run time. Both operands now parse into a bounded
+  `size_t` and are rejected at compile time (`-1`, surfaced as
+  `Failed to compile template` by the PHP binding) when the register index
+  reaches `MAX_CAPS` (64) or the width falls outside 1–1024 (zero and anything
+  above the cap). Digit runs
+  longer than `size_t` saturate instead of wrapping, so they are rejected by
+  the same check. `OP_EMIT_LITERAL` payload offsets and lengths are also
+  checked against `UINT32_MAX` before the field is written, removing the last
+  unchecked narrowing in the template compiler. In-range templates emit
+  byte-identical bytecode. Regression: `tests/c/test_template_ops.c` (six
+  rejected forms, all 64 register operands, the width boundaries 1 and 1024,
+  and an 8 KiB literal segment) plus `TemplateOpsTest` for the `subst()` path.
 - **Long literal table keys were never looked up**: the `OP_EMIT_TABLE`
   handler performed the lookup only when `key_len < 1024`, a cutoff that was
   a lookup policy rather than an encoding limit. A legal template such as
@@ -84,7 +102,7 @@ tagged `php/vX.Y.Z`.
   `EMIT('')`/`EMIT(@v0)`/plain-emit controls, and pins the analysis itself
   against a non-nullable literal and a non-nullable concat.
 
-C test suite: **420 cases / 74,572 assertions** (custom runner).
+C test suite: **423 cases / 74,745 assertions** (custom runner).
 
 ## [1.1.1] - 2026-11-17
 

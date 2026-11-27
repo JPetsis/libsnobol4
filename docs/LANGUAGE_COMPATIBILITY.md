@@ -32,7 +32,7 @@ The engine now supports full SNOBOL language compatibility including:
 | Helper API: `PatternHelper::formattedSubst()` | ✅ Complete | Formatted template helper                         |
 | Helper API: `DynamicPatternCache`             | ✅ Complete | Truthful runtime-backed cache interface           |
 | Compatibility fixtures                        | ✅ Complete | Use runtime-backed semantics (no fallback)        |
-| Test coverage                                 | ✅ Complete | 629 PHP tests, 74572 C assertions (custom runner) |
+| Test coverage                                 | ✅ Complete | 632 PHP tests, 74745 C assertions (custom runner) |
 
 ### ⚠️ Known Limitations
 
@@ -264,7 +264,18 @@ Inside `${vN.expr()}` braces the following expression forms are supported:
 | `${vN.rpad(W)}`     | `OP_EMIT_FORMAT reg SNBL_FMT_RPAD width 0x20` | Right-pad to width W with spaces                     |
 | `${vN.rpad(W,'c')}` | `OP_EMIT_FORMAT reg SNBL_FMT_RPAD width fill` | Right-pad to width W with char `c`                   |
 
-Width is a 1–1024 decimal integer; it is capped at 1024 in the VM dispatch.
+Width is a 1–1024 decimal integer. The compiler rejects a width of 0 or a
+width above 1024 with `Failed to compile template`: a larger width used to be
+truncated into the 16-bit field and clamped at run time, and 0 used to fall
+back to literal output. Leading zeros are read as their value, so `lpad(007)`
+is width 7, matching how `$v007` names register 7. The VM clamp remains as a
+last line of defence for hand-built bytecode.
+
+Register operands (`${vN}`, `$vN`, `$TABLE[$vN]`) address the 64-entry capture
+file, so `N` must be 0–63. An index at or above 64 is rejected at compile time
+rather than truncated into the one-byte register field, which would read an
+unrelated capture. A digit run too long for the index type is rejected by the
+same check.
 
 ### C API: snobol_template_bind_tables
 

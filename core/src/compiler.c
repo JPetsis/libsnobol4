@@ -687,6 +687,46 @@ int compile_ast_to_bytecode(zval *ast, zval *options, uint8_t **out_bc,
 
 #endif /* !STANDALONE_BUILD — PHP-specific AST compilation above only */
 
+/* Width cap for LPAD/RPAD, matching the documented template contract and the
+ * VM's own clamp.  A larger width used to be truncated into the 16-bit field
+ * and then silently capped at run time. */
+enum { TEMPLATE_MAX_PAD_WIDTH = 1024 };
+
+/* Emit an OP_EMIT_LITERAL carrying `seglen` payload bytes.  The payload offset
+ * and length are 32-bit fields while the buffer is sized with size_t, so a
+ * segment, or an offset reached by earlier segments, that does not fit would
+ * record a value that no longer identifies the payload.  Both are checked
+ * before anything is written.  Returns 0 on success, -1 when the fields cannot
+ * represent the segment. */
+static int template_emit_literal(CodeBuf *cb, const uint8_t *bytes,
+                                 size_t seglen) {
+  size_t off = cb_pos(cb) + 1 + 4 + 4; /* opcode, offset field, length field */
+  if (seglen > (size_t)UINT32_MAX || off > (size_t)UINT32_MAX) {
+    return -1;
+  }
+  cb_emit_u8(cb, OP_EMIT_LITERAL);
+  cb_emit_u32(cb, (uint32_t)off);
+  cb_emit_u32(cb, (uint32_t)seglen);
+  cb_emit_bytes(cb, bytes, seglen);
+  return 0;
+}
+
+/* Parse a decimal run into a bounded size_t.  Once the accumulator reaches
+ * `limit` the remaining digits are consumed without being folded in, so a run
+ * longer than the index type cannot wrap and every out-of-range run stays out
+ * of range.  Returns the accumulated value; *ip is left after the digits. */
+static size_t template_parse_bounded(const char *tpl, size_t len, size_t *ip,
+                                     size_t limit) {
+  size_t value = 0;
+  while (*ip < len && tpl[*ip] >= '0' && tpl[*ip] <= '9') {
+    if (value < limit) {
+      value = (value * 10) + (size_t)(tpl[*ip] - '0');
+    }
+    (*ip)++;
+  }
+  return value;
+}
+
 /* Emit OP_EMIT_TABLE for the key part following a table name.  Expects *ip
  * pointing at the opening '[' of the key and consumes: '[' then a quoted
  * literal key ("'sky'") or a capture-register key ("v0" / "$v0"), the
@@ -753,15 +793,14 @@ static int template_emit_table_lookup(CodeBuf *cb, const char *tpl, size_t len,
     (*ip)++; /* skip optional 'v' */
   }
   size_t key_reg_start = *ip;
-  while (*ip < len && tpl[*ip] >= '0' && tpl[*ip] <= '9') {
-    (*ip)++;
-  }
+  size_t key_reg = template_parse_bounded(tpl, len, ip, MAX_CAPS);
   if (*ip == key_reg_start || *ip >= len || tpl[*ip] != ']') {
     goto emit_literal;
   }
-  size_t key_reg = 0;
-  for (size_t ki = key_reg_start; ki < *ip; ki++) {
-    key_reg = (key_reg * 10) + (uint8_t)(tpl[ki] - '0');
+  /* key_reg is a one-byte register field: an index at or above the register
+   * file would alias an unrelated capture, so reject it at compile time. */
+  if (key_reg >= MAX_CAPS) {
+    return -1;
   }
   (*ip)++; /* skip inner ']' */
   if (*ip < len && tpl[*ip] == ']') {
@@ -778,11 +817,9 @@ static int template_emit_table_lookup(CodeBuf *cb, const char *tpl, size_t len,
 
 emit_literal:
   *ip = start_of_dollar + 1;
-  cb_emit_u8(cb, OP_EMIT_LITERAL);
-  size_t off = cb_pos(cb) + 4 + 4;
-  cb_emit_u32(cb, (uint32_t)off);
-  cb_emit_u32(cb, 1);
-  cb_emit_u8(cb, '$');
+  if (template_emit_literal(cb, (const uint8_t *)"$", 1) < 0) {
+    return -1;
+  }
   return 1;
 }
 
@@ -798,11 +835,10 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
       size_t start_of_dollar = i;
       i++;
       if (i >= len) {
-        cb_emit_u8(&cb, OP_EMIT_LITERAL);
-        size_t off = cb_pos(&cb) + 4 + 4;
-        cb_emit_u32(&cb, (uint32_t)off);
-        cb_emit_u32(&cb, 1);
-        cb_emit_u8(&cb, '$');
+        if (template_emit_literal(&cb, (const uint8_t *)"$", 1) < 0) {
+          cb_free(&cb);
+          return -1;
+        }
         break;
       }
 
@@ -813,23 +849,26 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
 
       if (i < len && tpl[i] == 'v') {
         i++;
-        uint8_t reg = 0;
-        bool has_digits = false;
-        while (i < len && tpl[i] >= '0' && tpl[i] <= '9') {
-          reg = (reg * 10) + (tpl[i] - '0');
-          i++;
-          has_digits = true;
-        }
+        size_t reg_start = i;
+        size_t reg_index = template_parse_bounded(tpl, len, &i, MAX_CAPS);
+        bool has_digits = i > reg_start;
 
         if (!has_digits) {
           i = start_of_dollar + 1;
-          cb_emit_u8(&cb, OP_EMIT_LITERAL);
-          size_t off = cb_pos(&cb) + 4 + 4;
-          cb_emit_u32(&cb, (uint32_t)off);
-          cb_emit_u32(&cb, 1);
-          cb_emit_u8(&cb, '$');
+          if (template_emit_literal(&cb, (const uint8_t *)"$", 1) < 0) {
+            cb_free(&cb);
+            return -1;
+          }
           continue;
         }
+
+        /* The register field is one byte and MAX_CAPS bounds the register
+         * file, so an index at or above it would read an unrelated capture. */
+        if (reg_index >= MAX_CAPS) {
+          cb_free(&cb);
+          return -1;
+        }
+        uint8_t reg = (uint8_t)reg_index;
 
         uint8_t fmt_type = 0;
         uint16_t fmt_width = 0;
@@ -855,11 +894,17 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
               if (i < len && tpl[i] == '(') {
                 i++;
                 /* parse mandatory width integer */
-                if (i < len && tpl[i] >= '1' && tpl[i] <= '9') {
-                  uint16_t w = 0;
-                  while (i < len && tpl[i] >= '0' && tpl[i] <= '9') {
-                    w = (uint16_t)((w * 10) + (tpl[i] - '0'));
-                    i++;
+                if (i < len && tpl[i] >= '0' && tpl[i] <= '9') {
+                  size_t w = template_parse_bounded(tpl, len, &i,
+                                                    TEMPLATE_MAX_PAD_WIDTH + 1);
+                  /* Width is 1..1024.  Zero is not a width: it used to be
+                   * treated as malformed syntax and fall back to literal
+                   * output.  A width above the cap used to wrap into the
+                   * 16-bit field and then be capped at run time.  Both are
+                   * compile errors now. */
+                  if (w == 0 || w > TEMPLATE_MAX_PAD_WIDTH) {
+                    cb_free(&cb);
+                    return -1;
                   }
                   /* optional fill char: ,'c' */
                   if (i < len && tpl[i] == ',') {
@@ -878,7 +923,7 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
                   if (i < len && tpl[i] == ')') {
                     i++;
                     fmt_type = pad_type;
-                    fmt_width = w;
+                    fmt_width = (uint16_t)w;
                     fmt_has_width = true;
                   }
                 }
@@ -901,11 +946,10 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
             }
           } else {
             i = start_of_dollar + 1;
-            cb_emit_u8(&cb, OP_EMIT_LITERAL);
-            size_t off = cb_pos(&cb) + 4 + 4;
-            cb_emit_u32(&cb, (uint32_t)off);
-            cb_emit_u32(&cb, 1);
-            cb_emit_u8(&cb, '$');
+            if (template_emit_literal(&cb, (const uint8_t *)"$", 1) < 0) {
+              cb_free(&cb);
+              return -1;
+            }
           }
         } else if (i < len && tpl[i] == '[') {
           /* Table-backed replacement: $v0[TABLE[key]]
@@ -922,11 +966,10 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
           if (table_name_len == 0 || i >= len || tpl[i] != '[') {
             /* Invalid syntax, emit as literal '$' */
             i = start_of_dollar + 1;
-            cb_emit_u8(&cb, OP_EMIT_LITERAL);
-            size_t off = cb_pos(&cb) + 4 + 4;
-            cb_emit_u32(&cb, (uint32_t)off);
-            cb_emit_u32(&cb, 1);
-            cb_emit_u8(&cb, '$');
+            if (template_emit_literal(&cb, (const uint8_t *)"$", 1) < 0) {
+              cb_free(&cb);
+              return -1;
+            }
             continue;
           }
 
@@ -978,11 +1021,10 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
           continue;
         }
         i = start_of_dollar + 1;
-        cb_emit_u8(&cb, OP_EMIT_LITERAL);
-        size_t off = cb_pos(&cb) + 4 + 4;
-        cb_emit_u32(&cb, (uint32_t)off);
-        cb_emit_u32(&cb, 1);
-        cb_emit_u8(&cb, '$');
+        if (template_emit_literal(&cb, (const uint8_t *)"$", 1) < 0) {
+          cb_free(&cb);
+          return -1;
+        }
       }
     } else {
       // scan literal segment
@@ -991,11 +1033,11 @@ int compile_template_to_bytecode(const char *tpl, size_t len, uint8_t **out_bc,
         i++;
       }
       size_t seglen = i - start;
-      cb_emit_u8(&cb, OP_EMIT_LITERAL);
-      size_t off = cb_pos(&cb) + 4 + 4;
-      cb_emit_u32(&cb, (uint32_t)off);
-      cb_emit_u32(&cb, (uint32_t)seglen);
-      cb_emit_bytes(&cb, (const uint8_t *)tpl + start, seglen);
+      if (template_emit_literal(&cb, (const uint8_t *)tpl + start, seglen) <
+          0) {
+        cb_free(&cb);
+        return -1;
+      }
     }
   }
 
